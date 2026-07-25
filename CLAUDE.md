@@ -3,6 +3,15 @@
 Operational memory for reaching and driving the MLSListings Pro system headlessly
 from Claude Code on the web, and for turning listings into "Property Review" leads.
 
+## 🚫 HARD RULE #0 — NEVER surface already-renovated properties
+
+Do **NOT** present, rank, comp, or recommend any home that is already
+**renovated / remodeled / updated / refreshed / move-in-ready / turnkey / a
+newer build**. We only want **genuine value-add fixers** (as-is, probate/estate,
+dated/original, needs work, below-market $/sqft). Drop renovated listings on
+sight — do not even include them in a list. This is non-negotiable, every market,
+every search. (Detection cues + the full method: `docs/investigation-playbook.md`.)
+
 ## 1. Browser access (do this first, every fresh session)
 
 Browsing only works after fixing the egress proxy + TLS. Run once:
