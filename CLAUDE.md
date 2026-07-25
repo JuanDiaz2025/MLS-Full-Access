@@ -72,7 +72,22 @@ COUNTY="San Francisco" STATUS=Active MAX_PRICE_K=1500 DAYS=45 \
 Screenshots land in `.mls-artifacts/`. Verified example: SF · Active · ≤$1.5M ·
 listed last 45 days → **228 matches**.
 
-## 5. Lead output → Google Sheet ("Property Review" / Layout B)
+## 5. Lead investigation (flip / value-add)
+
+- Full method: `docs/investigation-playbook.md` (renovated-vs-fixer rule, deal model,
+  size-matched comp ARV + the comp traps, disqualifiers, findings log).
+- **Buy box per area:** default **≤ $1.5M**; **Peninsula (San Mateo County) ≤ $2.0M**.
+  Always Active · SFR · listed ≤ 45 days.
+- **Rule #1: exclude already-renovated / turnkey / newer builds.** Keep genuine
+  fixers (as-is, probate/estate, dated, "potential", below-market $/sqft).
+- **ARV = size-matched LOCAL sold comps**, never a citywide/blended $/sqft. Watch the
+  large-home discount, location-pocket, and wrong-zip/property-type traps. If list
+  $/sqft ≈ local renovated comps → no spread → pass.
+- Model: Rehab Light $70/sqft · Heavy $145/sqft · Holding ≈3% of purchase.
+- **User-rejected (do not resurface):** 183 Victoria St, 1430 Shafter Ave (SF);
+  322 1st Ave (Redwood City) — plus the sheet's Rejected Redfin list.
+
+## 6. Lead output → Google Sheet ("Property Review" / Layout B)
 
 - Header order + value vocabulary: `docs/lead-format.md`.
 - Recommendation vocab: `Strong Deal` / `Marginal`. Flip Quality: `Good Flip` /
