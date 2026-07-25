@@ -105,11 +105,11 @@ listed last 45 days → **228 matches**.
 what binds every analysis (see also `docs/investigation-playbook.md` for the
 headless-scrape workflow):
 
-- **Buy box:** SF · full San Mateo/Peninsula · Sunnyvale · Oakland · Richmond ·
-  Berkeley · San Leandro · San Jose. **≤ $1.5M SFR, NO price floor** (a
-  `SANITY_MIN_PRICE` data floor only guards against garbled prices). **Peninsula
-  ≤ $2.0M** is Bryan's explicit override to the SOP's $1.5M. Never change the buy
-  box without Bryan's explicit instruction.
+- **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.0M max;
+  ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
+  data floor only guards against garbled prices). Areas: SF · full
+  San Mateo/Peninsula · Sunnyvale · Oakland · Richmond · Berkeley · San Leandro ·
+  San Jose. Never change the buy box without Bryan's explicit instruction.
 - **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
   **days-on-market > 45**, **tenant-occupied**, multi-unit, vacant lot.
 - **ARV = size-matched sold comps:** median $/sqft of comps within **±20%** of
