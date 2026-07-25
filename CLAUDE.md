@@ -12,6 +12,16 @@ dated/original, needs work, below-market $/sqft). Drop renovated listings on
 sight — do not even include them in a list. This is non-negotiable, every market,
 every search. (Detection cues + the full method: `docs/investigation-playbook.md`.)
 
+## 🔑 HARD RULE #1 — always be logged in before doing anything
+
+Session cookies expire mid-session. **Before any search/scrape/lookup, confirm
+the MLS session is alive; if logged out, LOG IN FIRST** (re-run login →
+`title = "MLSListings Pro Dashboard - <id>"`) and only then proceed. Never run a
+search on a dead session. Log in + run the task in the **same browser context**
+(the storageState can go stale), and re-save `.mls-state.json` right after the
+dashboard loads. Re-login may hit a **2FA step** (`/auth/PreTFA`) needing a code
+sent to the account owner — if so, stop and ask for the code.
+
 ## 1. Browser access (do this first, every fresh session)
 
 Browsing only works after fixing the egress proxy + TLS. Run once:
