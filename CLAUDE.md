@@ -30,6 +30,11 @@ bathrooms, flooring, and any interior shots — before making a call. The listin
 detail's first image is usually the exterior and hides the real condition. Click
 the **Photos** tab / gallery on each listing and review the full set every time.
 
+**If the photos show the property is already clean / finished / staged move-in
+ready, do NOT add it** — even if the profit math pencils. Clean-in-the-photos =
+drop, same as renovated (Rule #0). Only keep homes that look genuinely dated,
+distressed, worn, or vacant-original.
+
 ## 1. Browser access (do this first, every fresh session)
 
 Browsing only works after fixing the egress proxy + TLS. Run once:
