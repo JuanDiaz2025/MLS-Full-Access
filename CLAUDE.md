@@ -22,6 +22,14 @@ search on a dead session. Log in + run the task in the **same browser context**
 dashboard loads. Re-login may hit a **2FA step** (`/auth/PreTFA`) needing a code
 sent to the account owner — if so, stop and ask for the code.
 
+## 🖼️ HARD RULE #2 — review ALL photos before judging a property
+
+Do **NOT** decide fixer-vs-renovated (or recommend/drop) from the cover photo or
+remarks alone. **Open the full photo gallery and look at EVERY picture** — kitchen,
+bathrooms, flooring, and any interior shots — before making a call. The listing
+detail's first image is usually the exterior and hides the real condition. Click
+the **Photos** tab / gallery on each listing and review the full set every time.
+
 ## 1. Browser access (do this first, every fresh session)
 
 Browsing only works after fixing the egress proxy + TLS. Run once:
