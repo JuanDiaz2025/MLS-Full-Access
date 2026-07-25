@@ -99,18 +99,39 @@ COUNTY="San Francisco" STATUS=Active MAX_PRICE_K=1500 DAYS=45 \
 Screenshots land in `.mls-artifacts/`. Verified example: SF · Active · ≤$1.5M ·
 listed last 45 days → **228 matches**.
 
-## 5. Lead investigation (flip / value-add)
+## 5. Lead investigation — Flip Scout methodology (CANONICAL)
 
-- Full method: `docs/investigation-playbook.md` (renovated-vs-fixer rule, deal model,
-  size-matched comp ARV + the comp traps, disqualifiers, findings log).
-- **Buy box per area:** default **≤ $1.5M**; **Peninsula (San Mateo County) ≤ $2.0M**.
-  Always Active · SFR · listed ≤ 45 days.
-- **Rule #1: exclude already-renovated / turnkey / newer builds.** Keep genuine
-  fixers (as-is, probate/estate, dated, "potential", below-market $/sqft).
-- **ARV = size-matched LOCAL sold comps**, never a citywide/blended $/sqft. Watch the
-  large-home discount, location-pocket, and wrong-zip/property-type traps. If list
-  $/sqft ≈ local renovated comps → no spread → pass.
-- Model: Rehab Light $70/sqft · Heavy $145/sqft · Holding ≈3% of purchase.
+**`docs/flip-scout-SOP.md` is the governing SOP — follow it exactly.** Summary of
+what binds every analysis (see also `docs/investigation-playbook.md` for the
+headless-scrape workflow):
+
+- **Buy box:** SF · full San Mateo/Peninsula · Sunnyvale · Oakland · Richmond ·
+  Berkeley · San Leandro · San Jose. **≤ $1.5M SFR, NO price floor** (a
+  `SANITY_MIN_PRICE` data floor only guards against garbled prices). **Peninsula
+  ≤ $2.0M** is Bryan's explicit override to the SOP's $1.5M. Never change the buy
+  box without Bryan's explicit instruction.
+- **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
+  **days-on-market > 45**, **tenant-occupied**, multi-unit, vacant lot.
+- **ARV = size-matched sold comps:** median $/sqft of comps within **±20%** of
+  subject sqft (widen to ±40%, then ±60% only if <3 comps), × subject sqft. Never a
+  flat zip-wide median. Watch large-home / location-pocket / wrong-zip traps.
+- **Rehab (always both):** Light **$70/sqft** (cosmetic), Heavy **$140–150/sqft**
+  (full) + itemized add-ons for called-out issues (foundation, knob-and-tube, roof).
+- **Holding (3 mo):** 10%/yr financing prorated + insurance ($2,000 per $1M price) +
+  property tax (1.25%/yr prorated) + $400 flat utilities. (NOT a flat 3%.)
+- **Profit gate (dollars, under LIGHT):** ARV ≥ $1M → **$100k** min · $500k–$1M →
+  **$70k** · < $500k → **$50k**. Clears only under Light = **"Marginal"**; clears
+  under Heavy too = **"Strong Deal."** (Do not use an arbitrary $200k bar.)
+- **Equity ≠ profit.** The model's gross is a *screen* (step 1 of ~13), never the
+  decision — real profit must still absorb closing, commissions, permits, surprises.
+  Every surfaced lead carries a concrete "verify X before offering" next action.
+- **Loss profile to flag (from `DEAL_HISTORY.md`):** East Bay sub-$1M flips with
+  rehab < ~17% of purchase are the reliable engine; every historical loss was a
+  high-price **Peninsula/premium** buy with **heavy rehab (>25–30% of purchase, or
+  price > $1.5M** in Redwood City / Menlo Park / Foster City / San Carlos / Walnut
+  Creek). Flag any lead matching this even if it clears the dollar gate.
+- **Do NOT use:** ADU Potential, "Reno Budget" label, or seismic/pre-1940 wiring
+  risk flags (all removed per standing instruction).
 - **User-rejected (do not resurface):** 183 Victoria St, 1430 Shafter Ave (SF);
   322 1st Ave (Redwood City) — plus the sheet's Rejected Redfin list.
 
