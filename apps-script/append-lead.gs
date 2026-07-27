@@ -39,12 +39,28 @@ function appendLead(lead) {
   const sheet = getTargetSheet_();
   const h = findHeader_(sheet);
   const idx = h.colIndex;
+  const width = Math.max.apply(null, Object.values(idx)) + 1;
 
+  // Find where THIS table ends. The tab also holds a metrics summary, a
+  // dashboard, and a long "Rejected Redfin URL" list BELOW the leads table, so
+  // sheet.getLastRow() points past all of them (the old bug wrote rows there).
+  // Scan down a stable key column from the header until the first blank row to
+  // get the leads table's own end.
+  const keyIdx = (idx['Address'] != null) ? idx['Address']
+               : (idx['Redfin Link'] != null ? idx['Redfin Link'] : 0);
+  const scanHeight = Math.max(sheet.getMaxRows() - h.headerRow, 1);
+  const keyVals = sheet.getRange(h.headerRow + 1, keyIdx + 1, scanHeight, 1).getValues();
+  let tableRows = 0;
+  for (let i = 0; i < keyVals.length; i++) {
+    if (String(keyVals[i][0]).trim() === '') break;
+    tableRows++;
+  }
+
+  // De-dupe on Redfin Link, scanning ONLY this table's rows.
   const link = String(lead['Redfin Link'] || '').trim();
-  if (link && idx['Redfin Link'] != null) {
-    const col = idx['Redfin Link'] + 1;
-    const existing = sheet.getRange(h.headerRow + 1, col, Math.max(sheet.getLastRow() - h.headerRow, 1), 1).getValues();
-    if (existing.some(r => String(r[0]).trim() === link)) {
+  if (link && idx['Redfin Link'] != null && tableRows > 0) {
+    const linkVals = sheet.getRange(h.headerRow + 1, idx['Redfin Link'] + 1, tableRows, 1).getValues();
+    if (linkVals.some(r => String(r[0]).trim() === link)) {
       return { skipped: true, reason: 'duplicate Redfin Link', link: link };
     }
   }
@@ -53,7 +69,6 @@ function appendLead(lead) {
   computeDerived_(data);
   if (!data['First Added']) data['First Added'] = new Date().toString();
 
-  const width = Math.max.apply(null, Object.values(idx)) + 1;
   const row = new Array(width).fill('');
   Object.keys(idx).forEach(header => {
     if (data[header] != null && data[header] !== '') {
@@ -61,7 +76,12 @@ function appendLead(lead) {
     }
   });
 
-  const targetRow = sheet.getLastRow() + 1;
+  // Insert a fresh row at the END OF THE LEADS TABLE (pushing whatever is below
+  // it further down), so the lead lands inside the table — not beneath the
+  // dashboard / rejected-URL list.
+  const lastTableRow = h.headerRow + tableRows; // last data row, or header row if empty
+  sheet.insertRowAfter(lastTableRow);
+  const targetRow = lastTableRow + 1;
   sheet.getRange(targetRow, 1, 1, width).setValues([row]);
   MONEY_COLS.forEach(header => {
     if (idx[header] != null) sheet.getRange(targetRow, idx[header] + 1).setNumberFormat('$#,##0');
@@ -72,11 +92,14 @@ function appendLead(lead) {
 function getTargetSheet_() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const byGid = ss.getSheets().filter(s => s.getSheetId() === CONFIG.SHEET_GID)[0];
-  return byGid || ss.getSheets()[0];
+  // Do NOT silently fall back to the first tab — that would append to the wrong
+  // sheet. Fail loudly so the gid gets fixed.
+  if (!byGid) throw new Error('Tab with gid ' + CONFIG.SHEET_GID + ' not found in spreadsheet.');
+  return byGid;
 }
 
 function findHeader_(sheet) {
-  const values = sheet.getRange(1, 1, Math.min(sheet.getLastRow() || 1, 15), sheet.getLastColumn() || 1).getValues();
+  const values = sheet.getRange(1, 1, Math.min(sheet.getLastRow() || 1, 30), sheet.getLastColumn() || 1).getValues();
   for (let r = 0; r < values.length; r++) {
     const cells = values[r].map(v => String(v).trim());
     if (cells.indexOf('Score') >= 0 && cells.indexOf('Recommendation') >= 0 && cells.indexOf('Redfin Link') >= 0) {
@@ -110,7 +133,7 @@ function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).se
 function testAppend() {
   Logger.log(appendLead({
     'Score': 8, 'Recommendation': 'Strong Deal',
-    'Address': '123 Test St', 'City': 'Oakland', 'Zip': '94601',
+    'Address': '1234 Test St', 'City': 'Oakland', 'Zip': '94601',
     'Beds': 3, 'Baths': 2, 'SqFt': 1400, 'Lot SqFt': 4000, 'Year Built': 1950,
     'Purchase Price': 600000, 'Estimated ARV': 1000000,
     'Rehab Cost (Light)': 90000, 'Rehab Cost (Heavy)': 190000, 'Holding Costs (3mo)': 18000,
