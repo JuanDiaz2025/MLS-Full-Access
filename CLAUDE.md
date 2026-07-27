@@ -116,7 +116,9 @@ headless-scrape workflow):
   San Mateo/Peninsula · Sunnyvale · Oakland · Richmond · Berkeley · San Leandro ·
   San Jose. Never change the buy box without Bryan's explicit instruction.
 - **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
-  **days-on-market > 45**, **tenant-occupied**, multi-unit, vacant lot.
+  **days-on-market > 45**, **tenant-occupied**, multi-unit, vacant lot,
+  **fire-damaged** (any listing noting a past fire / fire damage / fire-gutted interior —
+  drop even if it reads as a genuine as-is fixer).
 - **ARV = size-matched sold comps:** median $/sqft of comps within **±20%** of
   subject sqft (widen to ±40%, then ±60% only if <3 comps), × subject sqft. Never a
   flat zip-wide median. Watch large-home / location-pocket / wrong-zip traps.
