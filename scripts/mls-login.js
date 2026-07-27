@@ -48,6 +48,15 @@ const PASS = process.env.MLS_PASS;
       await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
       title = await safeTitle();
       if (/MLSListings Pro Dashboard/i.test(title)) break;
+      // Session Limit page: the account allows only 5 concurrent sessions. End
+      // the oldest inactive one (our own stale headless logins) and continue.
+      if (/Session Limit/i.test(title) || await page.$('text=Session Limit Reached').catch(() => null)) {
+        console.log('Session Limit page — ending oldest inactive session.');
+        await page.locator('button:has-text("End Oldest Inactive Session"), input[value*="End Oldest" i]').first()
+          .click().catch(async () => { await page.getByText('End Oldest Inactive Session', { exact: false }).first().click().catch(() => {}); });
+        await page.waitForTimeout(3000);
+        continue;
+      }
       // Detect a manual 2FA code-entry prompt (not the auto-callback).
       const codeInput = await page.$('input[type=tel], input[name*=code i], input[id*=code i]').catch(() => null);
       if (codeInput && /PreTFA|TFA|verif|code/i.test(page.url() + title)) {
