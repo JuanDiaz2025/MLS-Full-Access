@@ -23,6 +23,19 @@ step-by-step operating procedure.
 ## 4. Photo-verify every candidate (HARD RULE #2)
 - Open the **full photo gallery** and look at EVERY photo — never judge from the
   cover photo or remarks alone.
+- **How to pull the full gallery (contact sheet):**
+  1. Search the listing by MLS# (`#Fm9_Ctrl75_TextBox`) → Results → check the row.
+  2. Set the display dropdown (`m_ucDisplayPicker_m_ddlDisplayFormats`) to
+     **"Client Full - All Photos."**
+  3. The page's inline script holds every photo URL *with its `exk` token*
+     (`MediaServer/GetMedia.ashx?Key=...&Number=i&...&exk=...`). Parse them all
+     (dedupe by `Number`) — do NOT rely on the ~5 that render inline, and do NOT
+     click the collapsed "Additional Photos" arrow (it navigates away).
+  4. Render every photo into an in-page grid and **screenshot it** — one reviewable
+     contact sheet per listing (header = address/price/sqft/$sf/age/DOM).
+  - `request.get` on GetMedia returns empty; the browser `<img>` render works.
+  - For many listings, fan the sheets out to review agents (each reads a batch,
+    returns KEEP/DROP with the deciding photo #).
 - DROP if renovated / remodeled / refreshed / clean / staged / move-in-ready.
 - KEEP only genuinely dated / distressed / original / needs-real-work.
 
