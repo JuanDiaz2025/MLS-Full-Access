@@ -223,3 +223,6 @@ node_modules/
 # MLS session + artifacts (never commit auth cookies)
 .mls-state.json
 .mls-artifacts/
+
+# Root-level MLS debug screenshots
+prodashboard.png
