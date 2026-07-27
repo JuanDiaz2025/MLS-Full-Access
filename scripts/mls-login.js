@@ -35,25 +35,33 @@ const PASS = process.env.MLS_PASS;
     await page.fill(passSel, PASS);
 
     const btn = page.locator('button:has-text("Sign in"), input[type="submit"], #next, button#continue').first();
-    await Promise.all([
-      page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}),
-      btn.click(),
-    ]);
-    await page.waitForTimeout(4000);
+    await btn.click();
 
-    // Confirm we reached the dashboard, then save session.
-    await page.goto('https://prodashboard.mlslistings.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
-    await page.waitForTimeout(4000);
-    const title = await page.title();
-    console.log('title:', title);
-    await page.screenshot({ path: OUT + '/dashboard.png' });
-    await ctx.storageState({ path: STATE });
+    // The post-login flow redirects B2C -> azureadloginresponder -> /auth/PreTFA
+    // (an AUTO device-trust callback, /Auth/PreTfaCallback) -> PostLogin -> dashboard.
+    // PreTFA usually auto-resolves; do NOT bail on it — wait the whole chain out until
+    // the dashboard title appears. Only a real code-entry field means manual 2FA.
+    const safeTitle = async () => { try { return await page.title(); } catch (_) { return ''; } };
+    let title = '';
+    for (let i = 0; i < 45; i++) {
+      await page.waitForTimeout(2000);
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+      title = await safeTitle();
+      if (/MLSListings Pro Dashboard/i.test(title)) break;
+      // Detect a manual 2FA code-entry prompt (not the auto-callback).
+      const codeInput = await page.$('input[type=tel], input[name*=code i], input[id*=code i]').catch(() => null);
+      if (codeInput && /PreTFA|TFA|verif|code/i.test(page.url() + title)) {
+        console.log('MANUAL 2FA REQUIRED — a code was sent to the account owner. Re-run with the code.');
+        break;
+      }
+    }
+    await page.screenshot({ path: OUT + '/dashboard.png' }).catch(() => {});
 
-    if (/Dashboard/i.test(title)) {
-      console.log('LOGIN OK — session saved to', STATE);
+    if (/MLSListings Pro Dashboard/i.test(title)) {
+      await ctx.storageState({ path: STATE });
+      console.log('LOGIN OK — session saved to', STATE, '| title:', title);
     } else {
-      console.log('WARNING: dashboard title not detected; check', OUT + '/dashboard.png');
+      console.log('WARNING: dashboard not reached; final title:', title, '| check', OUT + '/dashboard.png');
       process.exitCode = 1;
     }
   } catch (e) {
