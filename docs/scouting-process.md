@@ -1,71 +1,12 @@
-# Fixer-Scouting Process — end to end
+# Fixer-Scouting Process
 
-The repeatable workflow for turning MLS inventory into "Property Review" leads.
-Governed by the rules in `CLAUDE.md` and `docs/flip-scout-SOP.md`; this file is the
-step-by-step operating procedure.
+Rules live in `CLAUDE.md` / `docs/flip-scout-SOP.md`. This is the 8-step run order.
 
-## 1. Session setup
-- Run the browser setup (proxy/TLS fix): `bash scripts/setup-browser.sh`.
-- Log in to MLS: `node scripts/mls-login.js` — confirm the dashboard title
-  (`MLSListings Pro Dashboard - <id>`). Re-login any time the session dies
-  (cookies expire mid-session).
-
-## 2. Scan (per city)
-- Matrix search: **Active · Single Family · ≤ price cap · listed ≤ 45 days**.
-- Price cap: **$2.0M Peninsula / San Mateo County, $1.5M everywhere else.**
-- Scrape the results grid (address, price, sqft, beds, age, DOM).
-- Reusable: `scripts/mls-multi-scan.js` (set `CITIES="County:City;..."`).
-
-## 3. Filter to fixer candidates
-- Keep **below-market $/sf, older stock**.
-- Drop newer builds and large-home $/sf traps (low $/sf driven by size, not condition).
-
-## 4. Photo-verify every candidate (HARD RULE #2)
-- Open the **full photo gallery** and look at EVERY photo — never judge from the
-  cover photo or remarks alone.
-- **How to pull the full gallery (contact sheet):**
-  1. Search the listing by MLS# (`#Fm9_Ctrl75_TextBox`) → Results → check the row.
-  2. Set the display dropdown (`m_ucDisplayPicker_m_ddlDisplayFormats`) to
-     **"Client Full - All Photos."**
-  3. The page's inline script holds every photo URL *with its `exk` token*
-     (`MediaServer/GetMedia.ashx?Key=...&Number=i&...&exk=...`). Parse them all
-     (dedupe by `Number`) — do NOT rely on the ~5 that render inline, and do NOT
-     click the collapsed "Additional Photos" arrow (it navigates away).
-  4. Render every photo into an in-page grid and **screenshot it** — one reviewable
-     contact sheet per listing (header = address/price/sqft/$sf/age/DOM).
-  - `request.get` on GetMedia returns empty; the browser `<img>` render works.
-  - For many listings, fan the sheets out to review agents (each reads a batch,
-    returns KEEP/DROP with the deciding photo #).
-- DROP if renovated / remodeled / refreshed / clean / staged / move-in-ready.
-- KEEP only genuinely dated / distressed / original / needs-real-work.
-
-## 5. Profile-verify the keepers (full Agent Full detail)
-- Read the complete listing profile. DROP on any hard exclusion:
-  - already-renovated / turnkey · DOM > 45 · **tenant-occupied** ·
-    **multi-unit / 2-houses-on-lot / duplex / legal 2nd unit** · vacant lot ·
-    **fire-damaged**.
-- The profile catches exclusions photos can't (tenancy, land-use/duplex, unit count).
-
-## 6. Comp + Flip Scout math (per survivor)
-- **ARV** = median $/sf of size-matched SOLD comps (within ±20% of subject sqft;
-  widen to ±40%, then ±60% only if < 3 comps) × subject sqft. Never a flat zip-wide
-  median. Watch large-home / location-pocket / wrong-zip traps.
-- **Rehab (both)**: Light **$70/sf** (cosmetic), Heavy **$140–150/sf** (full) +
-  itemized add-ons for called-out issues (foundation, knob-and-tube, roof).
-- **Holding (3 mo)**: 10%/yr financing prorated + insurance ($2,000 per $1M price) +
-  property tax (1.25%/yr prorated) + $400 flat utilities.
-- **Profit gate (dollars, under LIGHT)**: ARV ≥ $1M → $100k · $500k–$1M → $70k ·
-  < $500k → $50k.
-
-## 7. Label + next action
-- Clears under Light = **Marginal**; clears under Heavy too = **Strong Deal**;
-  else drop.
-- Flip Quality: `Good Flip` / `Thin Flip` / `Flip W/ Caution` / `Negative`.
-- Flag loss-profile risks (premium-area + heavy rehab). Every lead carries a
-  concrete "**verify X before offering**."
-
-## 8. Output
-- Get the Redfin link for each qualifier (sheet de-dupes on Redfin Link).
-- Append to the Property Review sheet via the Apps Script web app
-  (`apps-script/append-lead.gs`): POST `{secret, lead}`. It auto-computes
-  Total Cost / Gross Profit, stamps First Added, and de-dupes.
+1. **Login** — `setup-browser.sh`, then `mls-login.js`. Re-login if the session dies.
+2. **Scan** — Matrix: Active · SFR · ≤ cap ($2.0M Peninsula, else $1.5M) · ≤45 DOM. (`mls-multi-scan.js`)
+3. **Filter** — keep below-market $/sf + old; drop new builds & large-home $/sf traps.
+4. **Photo-verify (Rule #2)** — MLS# → "Client Full - All Photos" → parse all GetMedia photo URLs (with `exk`) from the page script → grid → screenshot. Review EVERY photo. Drop renovated/clean/staged.
+5. **Profile-verify** — read full Agent profile. Drop: renovated · DOM>45 · tenant-occupied · multi-unit/duplex/2nd-unit · vacant lot · fire-damaged.
+6. **Comp/math** — ARV = median $/sf of ±20% sqft solds × sqft. Rehab: Light $70/sf, Heavy $140–150/sf + add-ons. Holding 3mo: financing + insurance + tax + $400. Gate (Light): ≥$1M→$100k, $500k–1M→$70k, <$500k→$50k.
+7. **Label** — clears Light = Marginal, clears Heavy too = Strong Deal. Add "verify X before offering." Flag loss-profile (premium + heavy rehab).
+8. **Output** — Redfin link → POST `{secret, lead}` to the Apps Script sheet.
