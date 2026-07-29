@@ -45,7 +45,10 @@ const scrapeGrid = page => page.evaluate(() => {
 });
 
 async function runCity(page, county, city) {
-  await page.goto('https://search.mlslistings.com/Matrix/Search/Residential/ResidentialSearch', { waitUntil: 'networkidle', timeout: 60000 });
+  // Matrix keeps long-lived connections open, so 'networkidle' never fires and
+  // the nav times out. Wait for the DOM instead, then let the form settle.
+  await page.goto('https://search.mlslistings.com/Matrix/Search/Residential/ResidentialSearch', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForSelector('#Fm9_Ctrl1161_LB', { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(2500);
   await page.selectOption('#Fm9_Ctrl1161_LB', { label: 'Active' }).catch(() => {}); await page.waitForTimeout(400);
   if (PTYPE) { await page.selectOption('#Fm9_Ctrl65_LB', { label: PTYPE }).catch(() => {}); await page.waitForTimeout(400); }
