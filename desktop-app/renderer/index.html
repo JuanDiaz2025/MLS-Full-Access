@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FlipScout</title>
+<style>
+  :root{
+    --bg:#0f1513; --panel:#161d19; --panel2:#1c2521; --ink:#e7efe9; --muted:#93a49b; --hair:#26302b;
+    --accent:#4fd1a5; --strong:#4fd1a5; --marginal:#e0ad52; --pass:#e08672;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.45}
+  .app{padding:18px;max-width:680px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 2px;letter-spacing:-.01em}
+  h1 .tag{color:var(--accent)}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 16px}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:16px;margin-bottom:14px}
+  .card h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px}
+  input[type=text],input[type=password]{width:100%;padding:9px 11px;border-radius:8px;border:1px solid var(--hair);background:var(--panel2);color:var(--ink);font-size:14px;margin-bottom:10px}
+  input:focus{outline:2px solid var(--accent);outline-offset:0}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>*{flex:1;min-width:120px}
+  button{appearance:none;border:1px solid var(--hair);background:var(--panel2);color:var(--ink);padding:9px 14px;border-radius:8px;font-size:13.5px;font-weight:600;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:var(--accent);color:#08130e;border-color:var(--accent)}
+  button.keep{background:var(--strong);color:#08130e;border-color:var(--strong)}
+  button.drop{background:transparent;color:var(--pass);border-color:var(--pass)}
+  .status{font-size:12.5px;padding:6px 10px;border-radius:6px;background:var(--panel2);color:var(--muted)}
+  .status.good{color:var(--strong)} .status.warn{color:var(--marginal)} .status.error{color:var(--pass)}
+  #log{background:#0a0f0d;border:1px solid var(--hair);border-radius:8px;padding:10px;height:150px;overflow:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}
+  #log .good{color:var(--strong)} #log .warn{color:var(--marginal)} #log .error{color:var(--pass)} #log .info{color:var(--muted)}
+  .review{display:none}
+  .review.on{display:block}
+  .review .addr{font-size:17px;font-weight:700}
+  .review .meta{color:var(--muted);font-size:12.5px;margin:2px 0 12px}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--panel2);color:var(--muted)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:6px}
+  th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--hair);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase}
+  tr.surface td{color:var(--strong)}
+  .mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Flip<span class="tag">Scout</span></h1>
+  <p class="sub">MLS fixer-flip scanner — log in, scan your buy box, photo-verify, get a deal report.</p>
+
+  <div class="card">
+    <h2>1 · Sign in to MLS</h2>
+    <label>MLS username</label>
+    <input id="user" type="text" autocomplete="off" placeholder="MLS agent ID">
+    <label>MLS password</label>
+    <input id="pass" type="password" autocomplete="off" placeholder="••••••••">
+    <div class="row">
+      <button id="openLogin" class="primary">Open MLS sign-in</button>
+      <button id="checkSession">Check session</button>
+    </div>
+    <div class="hint">The MLS window opens so you can finish sign-in and any 2FA yourself, then click “Check session”.</div>
+    <div id="loginStatus" class="status" style="margin-top:10px">Not signed in.</div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Scan the buy box</h2>
+    <div class="row">
+      <button id="start" class="primary" disabled>▶ Start scan</button>
+      <button id="pause" disabled>⏸ Pause</button>
+      <button id="resume" disabled>▶ Resume</button>
+      <button id="stop" disabled>⏹ Stop</button>
+    </div>
+    <div class="hint">Covers the full buy box: SF · whole Peninsula ($2M) · Sunnyvale · San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond. Active · SFR · ≤45 days.</div>
+    <div id="funnel" class="status" style="margin-top:10px">Idle.</div>
+  </div>
+
+  <div class="card review" id="review">
+    <h2>3 · Photo review — keep or drop</h2>
+    <div class="addr" id="rAddr">—</div>
+    <div class="meta" id="rMeta">—</div>
+    <div class="row">
+      <button id="keep" class="keep">✓ Keep (genuine fixer)</button>
+      <button id="dropBtn" class="drop">✕ Drop (renovated / multi-unit / clean)</button>
+    </div>
+    <div class="hint">Look at the gallery in the MLS window — every photo. Drop anything renovated, staged-clean, multi-unit, or exterior-only.</div>
+  </div>
+
+  <div class="card">
+    <h2>Activity</h2>
+    <div id="log"></div>
+  </div>
+
+  <div class="card" id="reportCard" style="display:none">
+    <h2>4 · Deal report</h2>
+    <div id="report"></div>
+    <div class="row" style="margin-top:12px"><button id="export" class="primary">Export CSV / JSON</button></div>
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const money = n => '$' + Math.round(n||0).toLocaleString();
+  let currentMls = null, lastLeads = [];
+
+  function setScanButtons(running){
+    $('start').disabled = running; $('pause').disabled = !running; $('resume').disabled = true; $('stop').disabled = !running;
+  }
+
+  $('openLogin').onclick = async () => {
+    await window.fs.login({ user: $('user').value, pass: $('pass').value });
+    $('loginStatus').textContent = 'Sign-in window opened — complete it, then Check session.';
+    $('loginStatus').className = 'status warn';
+  };
+  $('checkSession').onclick = async () => {
+    const r = await window.fs.checkSession();
+    $('loginStatus').textContent = r.loggedIn ? ('Signed in ✓ — ' + (r.title||'')) : ('Not signed in yet' + (r.title? ' ('+r.title+')':''));
+    $('loginStatus').className = 'status ' + (r.loggedIn ? 'good' : 'warn');
+    $('start').disabled = !r.loggedIn;
+  };
+  $('start').onclick = async () => { setScanButtons(true); $('reportCard').style.display='none'; await window.fs.startScan({}); setScanButtons(false); };
+  $('pause').onclick = () => { window.fs.pause(); $('pause').disabled=true; $('resume').disabled=false; };
+  $('resume').onclick = () => { window.fs.resume(); $('pause').disabled=false; $('resume').disabled=true; };
+  $('stop').onclick = () => { window.fs.stop(); setScanButtons(false); };
+  $('keep').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'keep'); hideReview(); } };
+  $('dropBtn').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'drop'); hideReview(); } };
+  $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
+
+  function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
+  function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
+
+  window.fs.on('log', p => log(p.msg, p.level));
+  window.fs.on('funnel', p => { $('funnel').textContent = `${p.scanned} scanned → ${p.candidates} fixer candidates`; $('funnel').className='status good'; });
+  window.fs.on('review', p => {
+    currentMls = p.mls;
+    $('rAddr').textContent = `${p.addr} — ${p.city}`;
+    $('rMeta').innerHTML = `<span class="pill">#${p.i} of ${p.total}</span> &nbsp; ${money(p.price)} · ${p.sqft} sqft · $${p.ppsf}/sf · ${p.photos} photos`;
+    $('review').classList.add('on');
+  });
+  window.fs.on('report', p => {
+    lastLeads = p.leads || [];
+    const surf = lastLeads.filter(l => l.surface);
+    let html = `<div class="hint">${surf.length} of ${lastLeads.length} kept leads clear the profit gate. Generated ${p.generatedAt}</div>`;
+    html += '<table><thead><tr><th>Property</th><th>Price</th><th>ARV</th><th>Gross (Light)</th><th>Rec</th><th>Score</th></tr></thead><tbody>';
+    for (const l of lastLeads) {
+      html += `<tr class="${l.surface?'surface':''}"><td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+        `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
+        `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td><td class="mono">${l.score}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    $('report').innerHTML = html; $('reportCard').style.display='block';
+  });
+</script>
+</body>
+</html>

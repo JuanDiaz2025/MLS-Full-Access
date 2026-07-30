@@ -1,0 +1,13 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('fs', {
+  login: (creds) => ipcRenderer.invoke('login', creds),
+  checkSession: () => ipcRenderer.invoke('check-session'),
+  startScan: (cfg) => ipcRenderer.invoke('start-scan', cfg),
+  pause: () => ipcRenderer.send('pause'),
+  resume: () => ipcRenderer.send('resume'),
+  stop: () => ipcRenderer.send('stop'),
+  decide: (mls, decision) => ipcRenderer.send('decide', { mls, decision }),
+  export: (leads) => ipcRenderer.invoke('export', { leads }),
+  on: (channel, fn) => ipcRenderer.on(channel, (_e, payload) => fn(payload)),
+});
