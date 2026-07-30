@@ -16,12 +16,26 @@
 const fs = require('fs');
 const { launchBrowser, STATE } = require('./mls-lib');
 
-const DEFAULT_CITIES = 'Alameda:Oakland;Contra Costa:Richmond;Alameda:Berkeley;Alameda:San Leandro;Alameda:Hayward';
+// Full buy box (flip-scout-SOP.md). Entry format: "County:City[:maxPriceK]".
+// City "*" (or empty) scans the WHOLE county. Peninsula/San Mateo caps at $2.0M;
+// everywhere else $1.5M. "San Francisco:*" = the whole city (county == city).
+const DEFAULT_CITIES = [
+  'San Francisco:*',            // SF county = the whole city, $1.5M
+  'San Mateo:*:2000',           // entire Peninsula, $2.0M cap
+  'Santa Clara:Sunnyvale',
+  'Santa Clara:San Jose',
+  'Alameda:Oakland',
+  'Alameda:Berkeley',
+  'Alameda:San Leandro',
+  'Alameda:Hayward',
+  'Contra Costa:Richmond',
+].join(';');
+const DEFAULT_MAXK = parseInt(process.env.MAX_PRICE_K || '1500', 10);
 const CITIES = (process.env.CITIES || DEFAULT_CITIES).split(';').map(s => {
-  const [county, city] = s.split(':').map(x => x.trim());
-  return { county, city };
-}).filter(c => c.county && c.city);
-const MAXK = parseInt(process.env.MAX_PRICE_K || '1500', 10);
+  const [county, city, capK] = s.split(':').map(x => x.trim());
+  return { county, city: (city && city !== '*') ? city : null, maxk: capK ? parseInt(capK, 10) : DEFAULT_MAXK };
+}).filter(c => c.county);
+const MAXK = DEFAULT_MAXK;
 const DAYS = parseInt(process.env.DAYS || '45', 10);
 const PTYPE = process.env.PROPERTY_TYPE || 'Single Family Home';
 const OUT_JSON = process.env.OUT_JSON || `${process.cwd()}/multi-scan.json`;
@@ -44,7 +58,8 @@ const scrapeGrid = page => page.evaluate(() => {
   return out;
 });
 
-async function runCity(page, county, city) {
+async function runCity(page, county, city, maxk) {
+  const label = city || `All ${county}`;
   // Matrix keeps long-lived connections open, so 'networkidle' never fires and
   // the nav times out. Wait for the DOM instead, then let the form settle.
   await page.goto('https://search.mlslistings.com/Matrix/Search/Residential/ResidentialSearch', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -53,15 +68,17 @@ async function runCity(page, county, city) {
   await page.selectOption('#Fm9_Ctrl1161_LB', { label: 'Active' }).catch(() => {}); await page.waitForTimeout(400);
   if (PTYPE) { await page.selectOption('#Fm9_Ctrl65_LB', { label: PTYPE }).catch(() => {}); await page.waitForTimeout(400); }
   await page.selectOption('#Fm9_Ctrl1738_LB', { label: county }).catch(() => {}); await page.waitForTimeout(1200);
-  try {
-    await page.fill('#Fm9_Ctrl1739_LB_TB', city); await page.waitForTimeout(700);
-    await page.selectOption('#Fm9_Ctrl1739_LB', { label: city }); await page.waitForTimeout(1000);
-  } catch (e) { console.log('  city select failed:', city, e.message.split('\n')[0]); }
-  await page.fill('#Fm9_Ctrl63_TB', `0-${MAXK}`); await page.locator('#Fm9_Ctrl63_TB').blur(); await page.waitForTimeout(500);
+  if (city) { // omit the city filter to scan the whole county (e.g. entire Peninsula)
+    try {
+      await page.fill('#Fm9_Ctrl1739_LB_TB', city); await page.waitForTimeout(700);
+      await page.selectOption('#Fm9_Ctrl1739_LB', { label: city }); await page.waitForTimeout(1000);
+    } catch (e) { console.log('  city select failed:', city, e.message.split('\n')[0]); }
+  }
+  await page.fill('#Fm9_Ctrl63_TB', `0-${maxk}`); await page.locator('#Fm9_Ctrl63_TB').blur(); await page.waitForTimeout(500);
   await page.fill('#Fm9_Ctrl1162_TB', dateRange); await page.locator('#Fm9_Ctrl1162_TB').blur(); await page.waitForTimeout(1800);
   const count = await page.evaluate(() => { const m = document.body.innerText.match(/([\d,]+\+?)\s*match/i); return m ? m[1] : '?'; });
-  console.log(`\n=== ${city} (${county}): ${count} matches ===`);
-  if (count === '0') return { city, county, count, rows: [] };
+  console.log(`\n=== ${label} (${county}) @ $${maxk}k: ${count} matches ===`);
+  if (count === '0') return { city: label, county, count, rows: [] };
   await Promise.all([
     page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}),
     page.locator('a:has-text("Results"), input[value="Results" i]').first().click().catch(() => {}),
@@ -81,7 +98,7 @@ async function runCity(page, county, city) {
   const seen = new Set();
   all = all.filter(r => { if (!r.mls || seen.has(r.mls)) return false; seen.add(r.mls); return true; });
   console.log(`  scraped ${all.length} rows`);
-  return { city, county, count, rows: all };
+  return { city: label, county, count, rows: all };
 }
 
 (async () => {
@@ -91,9 +108,10 @@ async function runCity(page, county, city) {
   const page = await ctx.newPage();
   const results = {};
   try {
-    for (const { county, city } of CITIES) {
-      try { results[city] = await runCity(page, county, city); }
-      catch (e) { console.log('CITY ERR', city, e.message.split('\n')[0]); results[city] = { city, county, count: 'ERR', rows: [] }; }
+    for (const { county, city, maxk } of CITIES) {
+      const label = city || `All ${county}`;
+      try { results[label] = await runCity(page, county, city, maxk); }
+      catch (e) { console.log('CITY ERR', label, e.message.split('\n')[0]); results[label] = { city: label, county, count: 'ERR', rows: [] }; }
     }
     fs.writeFileSync(OUT_JSON, JSON.stringify(results, null, 1));
     await ctx.storageState({ path: STATE });
