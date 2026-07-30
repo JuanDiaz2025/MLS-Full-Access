@@ -38,8 +38,15 @@ install (creates a desktop shortcut) or run the portable exe directly.
    · San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond; Active ·
    Single-Family · ≤ 45 days on market), then filters to below-market fixers.
 3. **Photo review** — for each candidate the MLS window shows the full photo
-   gallery; click **Keep** (genuine dated fixer) or **Drop** (renovated / staged /
-   multi-unit / exterior-only). **Pause/Resume** anytime.
+   gallery. Two ways to judge:
+   - **Manual (default):** click **Keep** (genuine dated fixer) or **Drop**
+     (renovated / staged / multi-unit / exterior-only). **Pause/Resume** anytime.
+   - **Auto-verify (AI):** tick the box in step 2 and paste an Anthropic API key.
+     Claude looks at each listing's photos, applies the buy-box rules (Rule #0
+     renovated / Rule #2 review-every-photo / multi-unit / exterior-only), and
+     decides Keep/Drop on its own — no clicking. Model defaults to
+     `claude-opus-5`; switch to `claude-sonnet-5` or `claude-haiku-4-5` for lower
+     cost. Your key and the listing photos are sent to Anthropic for this.
 4. **Report** — kept candidates get size-matched sold comps → ARV, Light/Heavy
    rehab, holding, and the dollar profit gate (Strong Deal / Marginal / Pass, with
    a Flip Quality label). **Export** to CSV or JSON.
@@ -56,7 +63,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
 Matrix uses dynamic field IDs (`Fm9_CtrlNNNN`). If they change, update `FIELDS` at
 the top of `scan-core.js` (see the field table in the repo's `CLAUDE.md`).
 
-## What it does NOT do
-The photo-verify Keep/Drop is intentionally manual — judging renovated-vs-fixer is
-your call (Rule #2). The app scans, filters, comps, scores, and reports; you make
-the keep/drop decision on the gallery.
+## Keep/Drop: manual or AI
+By default the Keep/Drop call is yours (Rule #2 is a judgment call). Turn on
+**Auto-verify** to have Claude make that call from the photos using your buy-box
+rules — useful for running the whole buy box hands-off. Either way, the app scans,
+filters, comps, scores, and reports; auto-verify just automates the gallery
+decision.

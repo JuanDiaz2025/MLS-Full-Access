@@ -65,7 +65,21 @@
   </div>
 
   <div class="card">
-    <h2>2 · Scan the buy box</h2>
+    <h2>2 · Auto-verify with AI (optional)</h2>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink)">
+      <input id="autoVerify" type="checkbox" style="width:auto"> Let Claude decide Keep/Drop from the photos (no manual clicking)
+    </label>
+    <div id="aiFields" style="display:none;margin-top:10px">
+      <label>Anthropic API key</label>
+      <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
+      <label>Model</label>
+      <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
+      <div class="hint">Your key + your photos go to Anthropic to apply the buy-box rules. Opus 5 is most accurate; switch to <code>claude-sonnet-5</code> or <code>claude-haiku-4-5</code> to cut cost. Leave the box unchecked to review photos yourself.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3 · Scan the buy box</h2>
     <div class="row">
       <button id="start" class="primary" disabled>▶ Start scan</button>
       <button id="pause" disabled>⏸ Pause</button>
@@ -77,14 +91,17 @@
   </div>
 
   <div class="card review" id="review">
-    <h2>3 · Photo review — keep or drop</h2>
+    <h2>4 · Photo review</h2>
     <div class="addr" id="rAddr">—</div>
     <div class="meta" id="rMeta">—</div>
-    <div class="row">
-      <button id="keep" class="keep">✓ Keep (genuine fixer)</button>
-      <button id="dropBtn" class="drop">✕ Drop (renovated / multi-unit / clean)</button>
+    <div id="manualControls">
+      <div class="row">
+        <button id="keep" class="keep">✓ Keep (genuine fixer)</button>
+        <button id="dropBtn" class="drop">✕ Drop (renovated / multi-unit / clean)</button>
+      </div>
+      <div class="hint">Look at the gallery in the MLS window — every photo. Drop anything renovated, staged-clean, multi-unit, or exterior-only.</div>
     </div>
-    <div class="hint">Look at the gallery in the MLS window — every photo. Drop anything renovated, staged-clean, multi-unit, or exterior-only.</div>
+    <div id="aiVerdict" class="status" style="display:none"></div>
   </div>
 
   <div class="card">
@@ -93,7 +110,7 @@
   </div>
 
   <div class="card" id="reportCard" style="display:none">
-    <h2>4 · Deal report</h2>
+    <h2>5 · Deal report</h2>
     <div id="report"></div>
     <div class="row" style="margin-top:12px"><button id="export" class="primary">Export CSV / JSON</button></div>
   </div>
@@ -127,6 +144,10 @@
   $('dropBtn').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'drop'); hideReview(); } };
   $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
 
+  function pushConfig(){ window.fs.setConfig({ autoVerify: $('autoVerify').checked, apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim() }); }
+  $('autoVerify').onchange = () => { $('aiFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
+  $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
+
   function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
   function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
 
@@ -137,6 +158,16 @@
     $('rAddr').textContent = `${p.addr} — ${p.city}`;
     $('rMeta').innerHTML = `<span class="pill">#${p.i} of ${p.total}</span> &nbsp; ${money(p.price)} · ${p.sqft} sqft · $${p.ppsf}/sf · ${p.photos} photos`;
     $('review').classList.add('on');
+    if (p.ai) {
+      $('manualControls').style.display = 'none';
+      const box = $('aiVerdict');
+      box.style.display = 'block';
+      box.className = 'status ' + (p.aiDecision === 'keep' ? 'good' : 'warn');
+      box.textContent = `AI verdict: ${p.aiDecision.toUpperCase()} — ${p.aiReason}`;
+    } else {
+      $('manualControls').style.display = 'block';
+      $('aiVerdict').style.display = 'none';
+    }
   });
   window.fs.on('report', p => {
     lastLeads = p.leads || [];

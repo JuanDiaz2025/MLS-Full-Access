@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('fs', {
   resume: () => ipcRenderer.send('resume'),
   stop: () => ipcRenderer.send('stop'),
   decide: (mls, decision) => ipcRenderer.send('decide', { mls, decision }),
+  setConfig: (c) => ipcRenderer.send('set-config', c),
   export: (leads) => ipcRenderer.invoke('export', { leads }),
   on: (channel, fn) => ipcRenderer.on(channel, (_e, payload) => fn(payload)),
 });

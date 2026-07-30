@@ -15,6 +15,8 @@ const core = require('./scan-core');
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
 const pendingDecision = {}; // mls -> resolve fn
+const cfg = { apiKey: '', model: 'claude-opus-5', autoVerify: false }; // AI auto-verify config
+ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const send = (ch, payload) => controlWin && !controlWin.isDestroyed() && controlWin.webContents.send(ch, payload);
@@ -167,6 +169,50 @@ async function compFor(mls, zip, sqft) {
   return core.arvFromComps(all, sqft);
 }
 
+// ---------- AI auto-verify (Claude vision applies the buy-box rules) ----------
+function rulesPrompt(c) {
+  return `You are screening a real-estate listing for a house-FLIPPING buy box. The image is a contact sheet of EVERY photo for this listing (${c.addr}, ${c._cityKey}; ${c._sqft} sqft; $${c._price.toLocaleString()}). Review every photo.
+
+KEEP only GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
+
+DROP if ANY of:
+- Renovated / remodeled / updated / refreshed / move-in-ready / turnkey / staged-clean (new shaker cabinets + quartz/stainless, modern tile backsplash, luxury vinyl plank, fresh designer finishes, freshly staged and clean throughout). If it already looks clean/finished, DROP even if partly dated.
+- Multi-unit: 2+ full kitchens, a separate in-law/second unit with its own kitchen, duplex/triplex, or a detached rear dwelling that's a living unit.
+- Fire damage / charring.
+- Newer build that looks modern.
+- Exterior-only / too few interior photos to judge condition (then DROP, reason "insufficient photos").
+
+Respond with ONLY a JSON object, no other text:
+{"decision":"KEEP"|"DROP","reason":"<8-15 words on what the photos actually show>"}`;
+}
+
+async function autoDecide(c) {
+  try {
+    const img = await mlsWin.webContents.capturePage();
+    const b64 = img.toPNG().toString('base64');
+    const body = {
+      model: cfg.model || 'claude-opus-5',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64 } },
+        { type: 'text', text: rulesPrompt(c) },
+      ] }],
+    };
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (j.type === 'error') return { decision: 'drop', reason: 'AI error: ' + (j.error && j.error.message || 'unknown') };
+    const text = (j.content || []).filter(b => b.type === 'text').map(b => b.text).join(' ');
+    let o = {}; const m = text.match(/\{[\s\S]*\}/);
+    try { o = JSON.parse(m ? m[0] : text); } catch (_) {}
+    const decision = /^keep$/i.test(String(o.decision || '').trim()) ? 'keep' : 'drop';
+    return { decision, reason: (o.reason || text || '').slice(0, 180) };
+  } catch (e) { return { decision: 'drop', reason: 'AI call failed: ' + e.message }; }
+}
+
 // ---------- full run ----------
 ipcMain.handle('start-scan', async (_e, { buybox }) => {
   if (control.running) return { ok: false, error: 'already running' };
@@ -190,10 +236,19 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       const c = candidates[i];
       log(`Photo-review ${i + 1}/${candidates.length}: ${c.addr} (${c._cityKey})`);
       const n = await showGallery(c.mls).catch(() => 0);
-      send('review', { i: i + 1, total: candidates.length, mls: c.mls, addr: c.addr, city: c._cityKey,
-        price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n });
-      const decision = await new Promise(res => { pendingDecision[c.mls] = res; });
-      delete pendingDecision[c.mls];
+      let decision;
+      if (cfg.autoVerify && cfg.apiKey) {
+        const v = await autoDecide({ ...c, _cityKey: c._cityKey, _sqft: c._sqft, _price: c._price });
+        decision = v.decision;
+        send('review', { i: i + 1, total: candidates.length, mls: c.mls, addr: c.addr, city: c._cityKey,
+          price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n, ai: true, aiDecision: v.decision, aiReason: v.reason });
+        log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
+      } else {
+        send('review', { i: i + 1, total: candidates.length, mls: c.mls, addr: c.addr, city: c._cityKey,
+          price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n });
+        decision = await new Promise(res => { pendingDecision[c.mls] = res; });
+        delete pendingDecision[c.mls];
+      }
       if (control.stopped) break;
       if (decision === 'keep') { kept.push(c); log(`  kept ${c.addr}`, 'good'); }
       else log(`  dropped ${c.addr}`);
