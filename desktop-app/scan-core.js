@@ -125,8 +125,27 @@ function arvFromComps(soldRows, subjectSqft) {
   return { medianPpsf: Math.round(mp), arv: Math.round(mp*subjectSqft), band: w, n: sel.length, totalComps: comps.length };
 }
 
+// ---- built-in buy-box rules (no API): decide KEEP/DROP from remarks + photo count ----
+// Encodes CLAUDE.md / flip-scout-SOP: drop renovated/turnkey (Rule #0), multi-unit,
+// fire, and exterior-only/no-access; keep genuine as-is / estate / fixer language.
+const DROP_KW = /(remodel|renovat|updated throughout|fully updated|turnkey|turn[- ]key|move[- ]?in ready|quartz|stainless|luxury vinyl|designer|reimagined|refreshed|newly built|new construction|fully renovated|beautifully updated|tastefully updated|gut renovat)/i;
+const KEEP_KW = /(fixer|as[- ]?is|\btlc\b|handyman|contractor special|probate|estate sale|trust sale|needs work|needs updating|bring your|first time on market|deferred maintenance|original condition|diamond in the rough|great potential|tear[- ]?down|sold as[- ]is|needs tlc)/i;
+const MULTI_KW = /(duplex|triplex|fourplex|two units|2 units|3 units|second unit|in[- ]?law|mother[- ]in[- ]law|\badu\b|multi[- ]?unit|separate unit|two homes|2 homes)/i;
+const FIRE_KW = /(fire damage|fire[- ]damaged|fire gutted|gutted by fire|burned|fire[- ]affected)/i;
+
+function rulesDecide(meta) {
+  const t = ((meta.remarks || '') + ' ' + (meta.condition || '')).toLowerCase();
+  const photos = meta.photos || 0;
+  if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
+  if (MULTI_KW.test(t)) return { decision: 'drop', reason: 'remarks indicate multi-unit / second unit' };
+  if (DROP_KW.test(t)) return { decision: 'drop', reason: 'remarks describe renovated / updated / turnkey (Rule #0)' };
+  if (photos > 0 && photos <= 4 && !KEEP_KW.test(t)) return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access (tenant?)` };
+  if (KEEP_KW.test(t)) return { decision: 'keep', reason: 'as-is / estate / fixer language + below-market $/sf' };
+  return { decision: 'keep', reason: 'below-market $/sf, no renovated / multi-unit signals in remarks' };
+}
+
 module.exports = {
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
-  num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate,
+  num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
 };

@@ -65,16 +65,22 @@
   </div>
 
   <div class="card">
-    <h2>2 · Auto-verify with AI (optional)</h2>
+    <h2>2 · Auto-verify (optional)</h2>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink)">
-      <input id="autoVerify" type="checkbox" style="width:auto"> Let Claude decide Keep/Drop from the photos (no manual clicking)
+      <input id="autoVerify" type="checkbox" style="width:auto"> Decide Keep/Drop automatically using the built-in flip rules (no API key, no cost)
     </label>
-    <div id="aiFields" style="display:none;margin-top:10px">
-      <label>Anthropic API key</label>
-      <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
-      <label>Model</label>
-      <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
-      <div class="hint">Your key + your photos go to Anthropic to apply the buy-box rules. Opus 5 is most accurate; switch to <code>claude-sonnet-5</code> or <code>claude-haiku-4-5</code> to cut cost. Leave the box unchecked to review photos yourself.</div>
+    <div id="autoFields" style="display:none;margin-top:10px">
+      <div class="hint">Applies your buy box to each listing's <b>agent remarks + condition + photo count</b>: drops renovated / turnkey wording (Rule #0), multi-unit / second-unit, fire damage, and exterior-only (likely tenant); keeps genuine as-is / estate / fixer language. Judges from the listing's <i>words</i>, not the pixels — so a renovated home with plain remarks can slip through. For pixel-level judgement, add AI vision below.</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:10px">
+        <input id="useAI" type="checkbox" style="width:auto"> Use AI vision instead (reads the actual photos — more accurate, needs an Anthropic API key)
+      </label>
+      <div id="aiFields" style="display:none;margin-top:10px">
+        <label>Anthropic API key</label>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
+        <label>Model</label>
+        <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
+        <div class="hint">Your key + photos go to Anthropic to apply the rules visually. <code>claude-opus-5</code> is most accurate; <code>claude-sonnet-5</code> / <code>claude-haiku-4-5</code> cost less.</div>
+      </div>
     </div>
   </div>
 
@@ -144,8 +150,9 @@
   $('dropBtn').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'drop'); hideReview(); } };
   $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
 
-  function pushConfig(){ window.fs.setConfig({ autoVerify: $('autoVerify').checked, apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim() }); }
-  $('autoVerify').onchange = () => { $('aiFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
+  function pushConfig(){ window.fs.setConfig({ autoVerify: $('autoVerify').checked, useAI: $('useAI').checked, apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim() }); }
+  $('autoVerify').onchange = () => { $('autoFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
+  $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
 
   function hideReview(){ $('review').classList.remove('on'); currentMls=null; }

@@ -15,7 +15,7 @@ const core = require('./scan-core');
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
 const pendingDecision = {}; // mls -> resolve fn
-const cfg = { apiKey: '', model: 'claude-opus-5', autoVerify: false }; // AI auto-verify config
+const cfg = { apiKey: '', model: 'claude-opus-5', autoVerify: false, useAI: false }; // auto-verify config
 ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -138,12 +138,25 @@ async function showGallery(mls) {
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
   await sleep(2600);
   const urls = await js(core.JS_PHOTOS).catch(() => []);
+  // Capture agent remarks + condition (for the no-API rules engine) via the Client Full report.
+  let meta = { remarks: '', condition: '' };
+  try {
+    await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); })()`);
+    await sleep(400);
+    const selId = await js(`(() => { const s=[...document.querySelectorAll('select')].find(se=>[...se.options].some(o=>/Client Full - All Photos/i.test(o.text))); return s?s.id:null; })()`);
+    if (selId) {
+      await js(`(() => { const s=document.getElementById(${JSON.stringify(selId)}); if(!s) return; const o=[...s.options].find(o=>/Client Full - All Photos/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
+      await sleep(2600);
+      meta = await js(`(() => { const t=document.body.innerText.replace(/\\r/g,''); const grab=re=>{const m=t.match(re);return m?m[1].replace(/\\s+/g,' ').trim():'';}; return { remarks: grab(/(?:Public Remarks?|Marketing Remarks?|Remarks?):?\\s*([\\s\\S]{0,600}?)(?:Agent|Directions|Showing|Compensation|Listing Office|\\u00a9|Presented|$)/i), condition: grab(/Prop(?:erty)? Condition:?\\s*([^\\n]{0,60})/i) }; })()`).catch(() => ({ remarks: '', condition: '' }));
+    }
+  } catch (_) {}
+  // Render the full gallery so the user can watch along.
   await js(`(() => {
     const urls = ${JSON.stringify(urls)};
     const cell = (u,i) => '<div style="width:32%"><img src="'+u+'" style="width:100%;height:220px;object-fit:cover"><div style="color:#fff;font:12px sans-serif">#'+i+'</div></div>';
     document.body.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:6px;background:#111;padding:8px;font-family:sans-serif">' + urls.map(cell).join('') + '</div>';
   })()`).catch(() => {});
-  return urls.length;
+  return { count: urls.length, remarks: meta.remarks, condition: meta.condition };
 }
 
 // ---------- comps for one kept candidate ----------
@@ -235,17 +248,22 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       await waitIfPaused();
       const c = candidates[i];
       log(`Photo-review ${i + 1}/${candidates.length}: ${c.addr} (${c._cityKey})`);
-      const n = await showGallery(c.mls).catch(() => 0);
+      const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '' }));
+      const n = gal.count;
+      const base = { i: i + 1, total: candidates.length, mls: c.mls, addr: c.addr, city: c._cityKey, price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n };
       let decision;
-      if (cfg.autoVerify && cfg.apiKey) {
+      if (cfg.autoVerify && cfg.useAI && cfg.apiKey) {
         const v = await autoDecide({ ...c, _cityKey: c._cityKey, _sqft: c._sqft, _price: c._price });
         decision = v.decision;
-        send('review', { i: i + 1, total: candidates.length, mls: c.mls, addr: c.addr, city: c._cityKey,
-          price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n, ai: true, aiDecision: v.decision, aiReason: v.reason });
+        send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'AI (vision): ' + v.reason });
         log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
+      } else if (cfg.autoVerify) {
+        const v = core.rulesDecide({ photos: n, remarks: gal.remarks, condition: gal.condition });
+        decision = v.decision;
+        send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'Rules: ' + v.reason });
+        log(`  RULES ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
       } else {
-        send('review', { i: i + 1, total: candidates.length, mls: c.mls, addr: c.addr, city: c._cityKey,
-          price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n });
+        send('review', base);
         decision = await new Promise(res => { pendingDecision[c.mls] = res; });
         delete pendingDecision[c.mls];
       }
