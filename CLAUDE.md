@@ -53,6 +53,34 @@ So: judge the *finishes*, not the housekeeping or the staging. When photos are
 genuinely ambiguous between "clean but dated" and "lightly updated," keep it and
 note the uncertainty on the lead rather than dropping it.
 
+### ⚠️ Calibration — ONE updated surface is not a flip (learned the hard way)
+
+The drop list above is a list of **cues, not triggers**. Spotting a single item
+from it does NOT end the analysis. The real question is always:
+**has the value already been extracted from this house?**
+
+- **KEEP — partially updated:** an older house where *one* element was redone at
+  some point (granite counters on 20-year-old cherry cabinets, a re-tiled tub
+  surround, a replaced water heater) while everything else is original — carpet
+  in the bedrooms, dated paint, original bath fittings, occupied and cluttered.
+  That is a **light-rehab line item**, not a completed flip. There is still a
+  full renovation's worth of value to add.
+- **DROP — actually flipped:** the *whole* kitchen is new (cabinets AND counters
+  AND appliances), the bathrooms are new end to end, flooring is new throughout,
+  and the place is professionally staged and empty. Several systems redone at
+  once, recently, together.
+
+Ask: *would a flipper still have a full job here?* If yes → KEEP.
+
+**Real miss to learn from:** 844 Brunswick St (ML82056071), $999k / 1,883 sqft /
+$531 per sqft = 65% of the SF median. Dropped as "granite counters, updated
+baths". Wrong. The house is a 1904 original with wall-to-wall carpet, dated
+paint, an old tiled tub surround, a cluttered occupied garage and a basic
+secondary kitchenette. One 2000s kitchen update on an otherwise untouched
+house. **Should have been a KEEP.** A below-market $/sqft on a large old house
+is strong evidence the value is still there — weigh that against the finish
+cues rather than dropping on the cue alone.
+
 ## 1. Browser access (do this first, every fresh session)
 
 Browsing only works after fixing the egress proxy + TLS. Run once:

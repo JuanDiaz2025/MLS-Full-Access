@@ -90,7 +90,10 @@ function filterCandidates(rowsByArea) {
   // "why isn't this on my list" has no answer for most of the buy box.
   const why = r => {
     const m = med[r._cityKey], ms = medSq[r._cityKey];
-    if (r._age < 25) return `too new — built ${2026 - r._age}, want 25+ years old`;
+    // A BLANK age field parses to 0, which used to read as "built this year" and
+    // silently discarded the listing as too new. Missing is not new: let an
+    // unknown age through to photo review, where the pictures settle it.
+    if (r._age > 0 && r._age < 25) return `too new — built ${2026 - r._age}, want 25+ years old`;
     if (r._sqft > ms * 1.5) return `much larger than the area norm (${r._sqft} sqft vs ${Math.round(ms)} median) — $/sqft comparison unreliable`;
     if (r._ppsf > m * 0.85) {
       const pct = Math.round(r._ppsf / m * 100);

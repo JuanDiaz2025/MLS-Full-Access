@@ -41,7 +41,7 @@ const CONFIG = {
   // colleague's Drive is invisible to it even when shared. An ID works for any
   // account that can open the file, which removes the whole "whose Drive is it
   // in" problem. Falls back to the name if this is blank or unreadable.
-  FEED_FILE_ID: '1STTZYf5_Kn5GvfwaHu2EsKGqeDYO9JN_',
+  FEED_FILE_ID: '1zmmSPNESZMPCKADpqwvR1GVqL8vC3n_y',
 };
 
 /** Canonical column order. Rows are written by header NAME, so reordering or

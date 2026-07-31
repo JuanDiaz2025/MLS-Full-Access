@@ -2,6 +2,13 @@
  "version": 1,
  "note": "Every MLS # ever scanned. Anything listed here is SKIPPED on future runs - never re-check it. Tracked in git on purpose: the container is ephemeral, so this must be committed after every scan or the next run re-checks everything. Managed by scripts/mls-ledger.js.",
  "entries": {
+  "ML82054088": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "2505 Newhall Street",
+   "city": "San Francisco"
+  },
   "ML82056071": {
    "first_seen": "2026-07-31",
    "last_seen": "2026-07-31",
@@ -23,11 +30,32 @@
    "addr": "1231 Silver Avenue",
    "city": "San Francisco"
   },
+  "SF426098082": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "420 Harkness Avenue",
+   "city": "San Francisco"
+  },
   "SF426106041": {
    "first_seen": "2026-07-31",
    "last_seen": "2026-07-31",
    "verdict": "checked",
    "addr": "1 Mccarthy Avenue",
+   "city": "San Francisco"
+  },
+  "SF426116121": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "750 Sweeny Street",
+   "city": "San Francisco"
+  },
+  "SF426120960": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "2937 Griffith Street",
    "city": "San Francisco"
   },
   "SF426122245": {
@@ -37,11 +65,39 @@
    "addr": "2877 Cesar Chavez Street",
    "city": "San Francisco"
   },
+  "SF426126629": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "1552 Palou Avenue",
+   "city": "San Francisco"
+  },
+  "SF426132158": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "2816 23rd Street",
+   "city": "San Francisco"
+  },
+  "SF426132576": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "106 Madrid Street",
+   "city": "San Francisco"
+  },
   "SF426135323": {
    "first_seen": "2026-07-31",
    "last_seen": "2026-07-31",
    "verdict": "checked",
    "addr": "2063 Carroll Avenue",
+   "city": "San Francisco"
+  },
+  "SF426146279": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "814 Potrero Avenue",
    "city": "San Francisco"
   },
   "SF426146559": {
@@ -58,6 +114,13 @@
    "addr": "422 Tehama Street",
    "city": "San Francisco"
   },
+  "SF426148193": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "263 Hale Street",
+   "city": "San Francisco"
+  },
   "SF426148584": {
    "first_seen": "2026-07-31",
    "last_seen": "2026-07-31",
@@ -70,6 +133,13 @@
    "last_seen": "2026-07-31",
    "verdict": "checked",
    "addr": "300 Burrows Street",
+   "city": "San Francisco"
+  },
+  "SF426149359": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "1712 Quesada Avenue",
    "city": "San Francisco"
   },
   "SF426150302": {
