@@ -1,5 +1,84 @@
 {
  "version": 1,
  "note": "Every MLS # ever scanned. Anything listed here is SKIPPED on future runs - never re-check it. Tracked in git on purpose: the container is ephemeral, so this must be committed after every scan or the next run re-checks everything. Managed by scripts/mls-ledger.js.",
- "entries": {}
+ "entries": {
+  "ML82056071": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "844 Brunswick Street",
+   "city": "San Francisco"
+  },
+  "SF425044773": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "2 Rey Street",
+   "city": "San Francisco"
+  },
+  "SF425089031": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "1231 Silver Avenue",
+   "city": "San Francisco"
+  },
+  "SF426106041": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "1 Mccarthy Avenue",
+   "city": "San Francisco"
+  },
+  "SF426122245": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "2877 Cesar Chavez Street",
+   "city": "San Francisco"
+  },
+  "SF426135323": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "2063 Carroll Avenue",
+   "city": "San Francisco"
+  },
+  "SF426146559": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "483 Ellington Avenue",
+   "city": "San Francisco"
+  },
+  "SF426146676": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "422 Tehama Street",
+   "city": "San Francisco"
+  },
+  "SF426148584": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "1055 Cayuga Avenue",
+   "city": "San Francisco"
+  },
+  "SF426149331": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "300 Burrows Street",
+   "city": "San Francisco"
+  },
+  "SF426150302": {
+   "first_seen": "2026-07-31",
+   "last_seen": "2026-07-31",
+   "verdict": "checked",
+   "addr": "1157 Cayuga Avenue",
+   "city": "San Francisco"
+  }
+ },
+ "updated": "2026-07-31"
 }
