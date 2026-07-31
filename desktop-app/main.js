@@ -668,7 +668,7 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         if (d.ok) {
           runKpi.pushed += cityWinners.length;
           log(`[${label}] wrote ${cityWinners.length} lead(s) + ${cityRejects.length} rejection(s) `
-            + `to Drive (${d.total} waiting) — refresh the sheet to see them`, 'good');
+            + `to Drive (${d.total} waiting) — the sheet picks these up within ~5 min, or hit Refresh now`, 'good');
         } else {
           log(`[${label}] could not write the Drive file: ${d.error}`, 'warn');
         }

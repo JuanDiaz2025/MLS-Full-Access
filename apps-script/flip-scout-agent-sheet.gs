@@ -631,8 +631,8 @@ function menuEnableAuto() {
   runMenu_('Enable auto update', () => {
     setupSheet(); kpiSheet_(); rejectedSheet_();
     const created = enableHourly_();
-    const r = pullAndRefresh_();
-    return (created ? 'Auto update is now ON — the sheet checks for new leads every hour.'
+    const r = pullAndRefresh_(true);
+    return (created ? 'Auto update is ON — the sheet checks for new leads every ' + AUTO_MINUTES + ' minutes.'
                     : 'Auto update was already ON.')
       + '\n\nJust ran one now:\n'
       + '  new leads added: ' + r.added + '\n'
@@ -698,7 +698,7 @@ function refreshLeads() {
 
 function menuRefresh() {
   runMenu_('Refresh', () => {
-    const r = pullAndRefresh_();
+    const r = pullAndRefresh_(true);
     return (r.added ? '✅ ' + r.added + ' new lead(s) added.\n' : 'No new leads.\n')
       + (r.skipped ? r.skipped + ' were already on the sheet.\n' : '')
       + (r.rejected ? '🚫 ' + r.rejected + ' logged on the Rejected tab with reasons.\n' : '')
@@ -707,7 +707,7 @@ function menuRefresh() {
       + (r.source ? 'Read from: ' + r.source + '\n' :
           'No ' + CONFIG.FEED_FILENAME + ' found in your Drive yet — run a scan in the app.\n')
       + (r.error ? '\n⚠ ' + r.error + '\n' : '')
-      + '\nAuto update: ' + (hourlyEnabled_() ? 'ON (hourly)' : 'OFF');
+      + '\nAuto update: ' + (hourlyEnabled_() ? 'ON — every ' + AUTO_MINUTES + ' minutes' : 'OFF');
   });
 }
 
@@ -718,9 +718,14 @@ function hourlyEnabled_() {
   return ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'hourlyRefresh');
 }
 
+/** Every 5 minutes, not hourly: a scan that finishes at 10:01 should not wait
+ *  until 11:00 to show up. The trigger is cheap because it does nothing unless
+ *  the Drive file has actually changed (see pullAndRefresh_). */
+const AUTO_MINUTES = 5;
+
 function enableHourly_() {
   if (hourlyEnabled_()) return false;
-  ScriptApp.newTrigger('hourlyRefresh').timeBased().everyHours(1).create();
+  ScriptApp.newTrigger('hourlyRefresh').timeBased().everyMinutes(AUTO_MINUTES).create();
   return true;
 }
 
@@ -752,6 +757,22 @@ function feedFile_() {
   return best;
 }
 
+/** Has the drop file changed since we last pulled it? Cheap enough to run
+ *  every few minutes; the marker lives in Script Properties. */
+function feedChanged_() {
+  try {
+    const f = feedFile_();
+    if (!f) return false;
+    const stamp = String(f.getLastUpdated().getTime());
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty('feedStamp') === stamp) return false;
+    props.setProperty('feedStamp', stamp);
+    return true;
+  } catch (err) {
+    return true;   // if we cannot tell, err on the side of pulling
+  }
+}
+
 /** Read the drop file and append anything new. Missing file is not an error —
  *  it just means no scan has run yet. */
 function pullFromDrive_() {
@@ -778,8 +799,16 @@ function pullFromDrive_() {
   };
 }
 
-/** Pull, then tidy. This is what both the menu and the hourly trigger call. */
-function pullAndRefresh_() {
+/** Pull, then tidy. This is what both the menu and the timed trigger call.
+ *
+ *  `force` is what the menu passes. The trigger does NOT force: it first checks
+ *  whether the Drive file changed since last time and returns immediately if
+ *  not, so running every 5 minutes costs almost nothing and does not churn the
+ *  sheet (or fight the reviewer for the cursor) when there is no new data. */
+function pullAndRefresh_(force) {
+  if (!force && !feedChanged_()) {
+    return { added: 0, skipped: 0, rejected: 0, source: '', rows: -1, unchanged: true, sortedBy: '' };
+  }
   let pulled = { added: 0, skipped: 0, rejected: 0, source: '' };
   let pullError = '';
   try { pulled = pullFromDrive_(); } catch (err) { pullError = String(err.message || err); }
