@@ -20,7 +20,13 @@ the MLS session is alive; if logged out, LOG IN FIRST** (re-run login →
 search on a dead session. Log in + run the task in the **same browser context**
 (the storageState can go stale), and re-save `.mls-state.json` right after the
 dashboard loads. Re-login may hit a **2FA step** (`/auth/PreTFA`) needing a code
-sent to the account owner — if so, stop and ask for the code.
+sent to the account owner. What to do then depends on the run:
+
+- **Interactive session** (Bryan is here): stop and ask for the code.
+- **Unattended hourly run** (§4b): **stop silently and retry next hour** — do not
+  notify, do not ask. The saved cookie often outlives the block, so a later run
+  usually reconnects on its own. Log the skip and exit cleanly; never leave a
+  half-finished scan or a partially-written ledger behind.
 
 ## 🖼️ HARD RULE #2 — review ALL photos before judging a property
 
@@ -128,7 +134,9 @@ Berkeley → San Leandro → Hayward → Richmond). `DEFAULT_CITIES` in
 `scripts/mls-multi-scan.js` is already in this order — keep SF at the top.
 
 **Cadence: hourly.** Each run looks for listings that are new *since the last
-run*. Runs are incremental, not full re-reviews.
+run*. Runs are incremental, not full re-reviews. Requires `MLS_USER` / `MLS_PASS`
+in the environment's variables. If login is blocked by 2FA, the run stops
+silently and retries the next hour (Rule #1) — no notification.
 
 **🧠 Never re-check a listing you have already checked.** A persistent ledger at
 `data/scanned-ledger.json` (tracked in git, so it survives the ephemeral
