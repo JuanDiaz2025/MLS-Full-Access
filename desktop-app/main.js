@@ -18,7 +18,12 @@ const pendingDecision = {}; // mls -> resolve fn
 const cfg = {
   apiKey: '', model: 'claude-opus-5', autoVerify: false, useAI: false, // auto-verify config
   readSeconds: 6,                                                      // dwell per listing
-  whenUnsure: 'ask',   // text-rules can't tell renovated from dated: ask | keep | drop
+  // What to do when the text rules can't tell renovated from dated: ask | keep | drop.
+  // Defaults to 'keep' so a run never stalls waiting for a click. It is a safe
+  // default here because the candidate already passed the buy-box filters (25+
+  // years old, below-market $/sqft) and because the sheet reviewer rejects
+  // anything wrong — with that rejection feeding straight back into the ledger.
+  whenUnsure: 'keep',
   sheetUrl: '', sheetSecret: '', autoPush: false,                      // Flip Scout Agent sheet
 };
 /** Apps Script hands out two URL shapes for the same deployment. The

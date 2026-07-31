@@ -67,25 +67,26 @@
   <div class="card">
     <h2>2 · Auto-verify (optional)</h2>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink)">
-      <input id="autoVerify" type="checkbox" style="width:auto"> Decide Keep/Drop automatically using the built-in flip rules (no API key, no cost)
+      <input id="autoVerify" type="checkbox" style="width:auto" checked> Decide Keep/Drop automatically using the built-in flip rules (no API key, no cost)
     </label>
-    <div id="autoFields" style="display:none;margin-top:10px">
+    <div id="autoFields" style="margin-top:10px">
       <div class="hint">Applies your buy box to each listing's <b>agent remarks + condition + photo count</b>: drops renovated / turnkey wording (Rule #0), multi-unit / second-unit, fire damage, and exterior-only (likely tenant); keeps genuine as-is / estate / fixer language. Judges from the listing's <i>words</i>, not the pixels — so a renovated home with plain remarks can slip through. For pixel-level judgement, add AI vision below.</div>
+      <label>When the rules can't tell from the remarks</label>
+      <select id="whenUnsure" style="width:100%;padding:6px">
+        <option value="keep">Keep it and carry on — never interrupt me (default)</option>
+        <option value="drop">Drop it and carry on (fast — some real fixers will be lost)</option>
+        <option value="ask">Ask me — pause and show the photos (most accurate, hands-on)</option>
+      </select>
+      <div class="hint">Only applies without AI vision. The text rules read the agent
+        remarks and never see a photo, so when the remarks say nothing about condition
+        they cannot tell a renovated kitchen from an original one. On <b>Keep</b> the run
+        never stops — your sheet reviewer is the backstop, and anything she rejects goes
+        into the ledger so it never returns. <b>Turn on AI auto-verify below and this
+        never comes up</b> — vision reads every photo and decides on its own.</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:10px">
         <input id="useAI" type="checkbox" style="width:auto"> Use AI vision instead (reads the actual photos — more accurate, needs an Anthropic API key)
       </label>
       <div id="aiFields" style="display:none;margin-top:10px">
-        <label>When the text rules can't tell (no API key)</label>
-        <select id="whenUnsure" style="width:100%;padding:6px">
-          <option value="ask">Ask me — show the photos and wait (accurate, hands-on)</option>
-          <option value="keep">Keep it automatically (fast — some renovated homes will slip through)</option>
-          <option value="drop">Drop it automatically (fast — some real fixers will be lost)</option>
-        </select>
-        <div class="hint">Only applies without AI vision. The text rules read the agent
-          remarks and never see a photo, so when the remarks say nothing about condition
-          they cannot tell a renovated kitchen from an original one. <b>Turn on AI
-          auto-verify below and this never comes up</b> — vision looks at every photo and
-          decides on its own.</div>
         <label>Anthropic API key</label>
         <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
         <label>Model</label>
@@ -126,9 +127,14 @@
     <div id="manualControls">
       <div class="row">
         <button id="keep" class="keep">✓ Keep (genuine fixer)</button>
-        <button id="dropBtn" class="drop">✕ Drop (renovated / multi-unit / clean)</button>
+        <button id="dropBtn" class="drop">✕ Drop (renovated / multi-unit)</button>
+        <button id="stopAsking">▶▶ Stop asking — keep going on its own</button>
       </div>
-      <div class="hint">Look at the gallery in the MLS window — every photo. Drop anything renovated, staged-clean, multi-unit, or exterior-only.</div>
+      <div class="hint">Look at the gallery in the MLS window — every photo. Drop anything
+        <b>renovated</b>, multi-unit, or exterior-only. <b>Clean but dated is a KEEP</b> —
+        judge the finishes, not the staging.<br>
+        <b>Stop asking</b> switches this run (and future ones) to deciding on its own; change
+        it back any time in section 2.</div>
     </div>
     <div id="aiVerdict" class="status" style="display:none"></div>
   </div>
@@ -209,6 +215,14 @@
   $('stop').onclick = () => { window.fs.stop(); setScanButtons(false); };
   $('keep').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'keep'); hideReview(); } };
   $('dropBtn').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'drop'); hideReview(); } };
+  // Flip to unattended mid-run without digging through settings.
+  $('stopAsking').onclick = () => {
+    $('whenUnsure').value = 'keep';
+    localStorage.setItem('fs.whenUnsure','keep');
+    pushConfig();
+    log('Won\'t ask again — undecidable listings are kept automatically. Your sheet reviewer is the backstop.','warn');
+    if(currentMls){ window.fs.decide(currentMls,'keep'); hideReview(); }
+  };
   $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
 
   function pushConfig(){ window.fs.setConfig({
