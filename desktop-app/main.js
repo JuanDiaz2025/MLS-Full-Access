@@ -7,7 +7,7 @@
  * detects the dashboard. Scanning navigates the MLS window through Matrix and
  * runs the same extraction used by the headless pipeline.
  */
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
@@ -624,14 +624,24 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       runKpi.gateCleared = leads.filter(l => l.surface).length;
       send('report', { leads, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
 
-      // Push this city's winners now, so finished work reaches the sheet even
-      // if a later city fails or you stop the run.
+      // Hand this city's winners to the sheet now, so finished work is visible
+      // even if a later city fails or you stop the run.
       const cityWinners = cityLeads.filter(l => l.surface);
-      if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret && cityWinners.length) {
-        const r = await pushLeads(cityWinners);
-        if (r.ok) { runKpi.pushed += r.added; runKpi.pushSkipped += r.skipped; }
-        log(`[${label}] sheet: ${r.ok ? `${r.added} added, ${r.skipped} already there` : 'push failed — ' + r.error}`,
-          r.ok ? 'good' : 'error');
+      if (cityWinners.length) {
+        // Primary path: write the Drive drop file. The sheet reads it on
+        // refresh — no deployment, no URL, nothing to connect.
+        const d = writeDropFile(cityWinners.map(toSheetRow));
+        if (d.ok) {
+          runKpi.pushed += cityWinners.length;
+          log(`[${label}] wrote ${cityWinners.length} lead(s) to Drive (${d.total} waiting) — refresh the sheet to see them`, 'good');
+        } else {
+          log(`[${label}] could not write the Drive file: ${d.error}`, 'warn');
+        }
+        // Optional legacy path, only if a web app was configured.
+        if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) {
+          const r = await pushLeads(cityWinners);
+          if (r.ok) log(`[${label}] web app: ${r.added} added, ${r.skipped} already there`, 'good');
+        }
       }
       log(`━━━ ${label} done: ${kept.length} kept, ${cityWinners.length} clear the gate ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'done',
@@ -719,6 +729,86 @@ function visibleText(html, max) {
   return s.slice(0, max || 240) || '(the page had no readable text)';
 }
 
+// ---------- Drive drop file ----------
+// The sheet reads this file out of Google Drive on refresh, which is why no
+// published web app is needed. We just write it into the synced Drive folder
+// and Drive for Desktop uploads it.
+
+/** Best guess at the local Google Drive folder, so this needs no setup. */
+function findDriveFolder() {
+  const home = app.getPath('home');
+  const guesses = [
+    path.join(home, 'My Drive'),
+    path.join(home, 'Google Drive', 'My Drive'),
+    path.join(home, 'Google Drive'),
+    'G:\\My Drive', 'H:\\My Drive',
+  ];
+  for (const g of guesses) {
+    try { if (fs.existsSync(g) && fs.statSync(g).isDirectory()) return g; } catch (_) {}
+  }
+  return '';
+}
+
+const DROP_NAME = 'flipscout-leads.json';
+function dropPath() {
+  const dir = cfg.driveFolder || findDriveFolder();
+  return dir ? path.join(dir, DROP_NAME) : '';
+}
+
+/**
+ * Merge this run's leads into the drop file. Merging (not overwriting) matters:
+ * the sheet may not have picked up the previous batch yet, and a scan that
+ * replaced the file would silently destroy leads that were never read.
+ */
+function writeDropFile(leads) {
+  const p = dropPath();
+  if (!p) return { ok: false, error: 'no Google Drive folder found — pick one in section 7' };
+  try {
+    let existing = [];
+    if (fs.existsSync(p)) {
+      try {
+        const prev = JSON.parse(fs.readFileSync(p, 'utf8'));
+        existing = Array.isArray(prev) ? prev : (prev.leads || []);
+      } catch (_) { existing = []; }   // unreadable → start clean rather than fail the scan
+    }
+    const byMls = {};
+    [...existing, ...leads].forEach(l => {
+      const k = String(l.mls || l['MLS #'] || l.address || '').trim().toUpperCase();
+      if (k) byMls[k] = l;
+    });
+    const merged = Object.keys(byMls).map(k => byMls[k]);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ updated: new Date().toISOString(), leads: merged }, null, 1));
+    return { ok: true, path: p, total: merged.length, added: merged.length - existing.length };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+ipcMain.handle('drive-status', () => {
+  const dir = cfg.driveFolder || findDriveFolder();
+  const p = dir ? path.join(dir, DROP_NAME) : '';
+  let count = 0, updated = '';
+  if (p && fs.existsSync(p)) {
+    try {
+      const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+      count = (Array.isArray(j) ? j : (j.leads || [])).length;
+      updated = j.updated || '';
+    } catch (_) {}
+  }
+  return { dir, path: p, exists: !!p && fs.existsSync(p), count, updated, autoDetected: !cfg.driveFolder };
+});
+
+ipcMain.on('show-file', (_e, p) => { try { shell.showItemInFolder(p); } catch (_) {} });
+
+ipcMain.handle('pick-drive-folder', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(controlWin, {
+    title: 'Pick your Google Drive folder', properties: ['openDirectory'],
+    defaultPath: findDriveFolder() || undefined,
+  });
+  if (canceled || !filePaths.length) return { ok: false };
+  cfg.driveFolder = filePaths[0];
+  return { ok: true, dir: cfg.driveFolder };
+});
+
 /** Say which half is missing — "not configured" tells you nothing. */
 function notConfiguredMsg() {
   if (!cfg.sheetUrl && !cfg.sheetSecret) return 'no web app URL or secret — see section 7';
@@ -728,6 +818,22 @@ function notConfiguredMsg() {
       + 'Anyone with the link), then paste the /exec URL into section 7.';
   }
   return 'no shared secret — paste it into section 7 (⚡ Flip Scout → Connect the app shows it).';
+}
+
+/** One lead in the shape the sheet expects. Shared by the Drive file and the
+ *  legacy web-app push so the two can never drift apart. */
+function toSheetRow(l) {
+  return {
+    status: l.recommendation || (l.needsComps ? 'Needs Comps' : ''),
+    mls: l.mls, address: l.address, city: l.city, zip: l.zip,
+    beds: l.beds, baths: l.baths || '', sqft: l.sqft, lotSqft: l.lotSqft || '',
+    yearBuilt: l.yearBuilt, dom: l.dom, price: l.price, ppsf: l.ppsf || '',
+    notes: l.risks || '', link: l.link || '',
+    arv: l.arv || '', arvBasis: l.arvBasis || '',
+    rehabLight: l.rehabLight || '', rehabHeavy: l.rehabHeavy || '',
+    holding: l.holding || '', maxOffer: l.recommendedMaxOffer || '',
+    score: l.score || '', recommendation: l.recommendation || '', flipQuality: l.flipQuality || '',
+  };
 }
 
 async function pushLeads(leads) {

@@ -178,21 +178,35 @@
   </div>
 
   <div class="card">
-    <h2>7 · Google Sheet (Flip Scout Agent)</h2>
-    <label>Apps Script web app URL</label>
-    <input id="sheetUrl" type="text" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
-    <label>Shared secret</label>
-    <input id="sheetSecret" type="password" autocomplete="off" placeholder="the SHARED_SECRET from the script">
+    <h2>7 · Google Drive hand-off</h2>
+    <div id="driveStatus" class="status">Looking for your Google Drive folder…</div>
     <div class="row" style="margin-top:10px">
-      <button id="testSheet">Test connection</button>
-      <label style="display:flex;align-items:center;gap:6px;margin:0">
-        <input id="autoPush" type="checkbox"> Auto-send leads when a scan finishes
-      </label>
+      <button id="pickDrive">Choose Drive folder</button>
+      <button id="openDrop">Show the file</button>
     </div>
-    <div id="sheetStatus" class="status" style="margin-top:10px">Not connected.</div>
-    <div class="hint">Deploy <code>apps-script/flip-scout-agent-sheet.gs</code> on the sheet
-      (run <code>setupSheet()</code> once, then Deploy → Web app → Execute as Me → Anyone with the link).
-      Only leads that clear the profit gate are sent; the sheet de-dupes on MLS #.</div>
+    <div class="hint">Finished leads are written to <code>flipscout-leads.json</code> in your
+      Google Drive folder. Drive syncs it up, and the sheet reads it — so in the
+      spreadsheet just hit <b>⚡ Flip Scout → Refresh now</b>, or turn on
+      <b>⏱ Enable auto update</b> and it pulls every hour on its own. Nothing to
+      connect, no URL, no deployment.
+      <br>Needs <b>Google Drive for Desktop</b> installed and signed in.</div>
+
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px">Legacy: push straight to a web app</summary>
+      <label style="margin-top:8px">Apps Script web app URL</label>
+      <input id="sheetUrl" type="text" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
+      <label>Shared secret</label>
+      <input id="sheetSecret" type="password" autocomplete="off">
+      <div class="row" style="margin-top:10px">
+        <button id="testSheet">Test connection</button>
+        <label style="display:flex;align-items:center;gap:6px;margin:0">
+          <input id="autoPush" type="checkbox"> Also POST on finish
+        </label>
+      </div>
+      <div id="sheetStatus" class="status" style="margin-top:10px">Not connected.</div>
+      <div class="hint">Only needed if you'd rather the app POST directly. Requires the
+        script deployed with access set to <b>Anyone</b>.</div>
+    </details>
   </div>
 </div>
 
@@ -278,6 +292,24 @@
     pushConfig();
   }
   $('sheetUrl').oninput = saveSheetCfg; $('sheetSecret').oninput = saveSheetCfg; $('autoPush').onchange = saveSheetCfg;
+
+  // --- Drive hand-off ---
+  async function refreshDrive(){
+    const s = await window.fs.driveStatus();
+    const box = $('driveStatus');
+    if (!s.dir) {
+      box.className='status warn';
+      box.textContent = 'No Google Drive folder found. Install Google Drive for Desktop, or click "Choose Drive folder".';
+      return;
+    }
+    box.className='status good';
+    box.innerHTML = `Writing to <b>${s.path}</b>${s.autoDetected?' <span class="pill">auto-detected</span>':''}`
+      + (s.exists ? `<br>${s.count} lead(s) waiting${s.updated?' · updated '+new Date(s.updated).toLocaleString():''} — refresh the sheet to pull them in.`
+                  : '<br>No file yet — it appears after your first scan.');
+  }
+  $('pickDrive').onclick = async () => { const r = await window.fs.pickDriveFolder(); if(r.ok){ log('Drive folder: '+r.dir,'good'); refreshDrive(); } };
+  $('openDrop').onclick = async () => { const s = await window.fs.driveStatus(); if(s.path) window.fs.showFile(s.path); };
+  refreshDrive();
 
   $('testSheet').onclick = async () => {
     const box = $('sheetStatus'); box.textContent = 'Testing…'; box.className = 'status';

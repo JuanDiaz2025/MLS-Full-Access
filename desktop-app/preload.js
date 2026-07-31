@@ -19,5 +19,8 @@ contextBridge.exposeInMainWorld('fs', {
   ledgerStats: () => ipcRenderer.invoke('ledger-stats'),
   ledgerClear: () => ipcRenderer.invoke('ledger-clear'),
   syncRejected: () => ipcRenderer.invoke('sync-rejected'),
+  driveStatus: () => ipcRenderer.invoke('drive-status'),
+  pickDriveFolder: () => ipcRenderer.invoke('pick-drive-folder'),
+  showFile: (p) => ipcRenderer.send('show-file', p),
   on: (channel, fn) => ipcRenderer.on(channel, (_e, payload) => fn(payload)),
 });

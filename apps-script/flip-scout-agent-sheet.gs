@@ -33,6 +33,9 @@ const CONFIG = {
   // Pre-generated so the script and the desktop app already agree — nothing to
   // type. Replace it (here AND in desktop-app/sheet-config.json) if it leaks.
   SHARED_SECRET: 'ZM85Wtbzf3lx7_412HVvII5_ifAVCzIA',
+  // The desktop app writes this file into your Google Drive; the sheet reads it
+  // on refresh. This is what removes the need for a published web app.
+  FEED_FILENAME: 'flipscout-leads.json',
 };
 
 /** Canonical column order. Rows are written by header NAME, so reordering or
@@ -557,10 +560,37 @@ function addRejected_(items, who) {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('⚡ Flip Scout')
     .addItem('🔄 Refresh now', 'menuRefresh')
+    .addItem('⏱ Enable auto update', 'menuEnableAuto')
+    .addItem('⏹ Disable auto update', 'menuDisableAuto')
     .addItem('❌ Reject selected lead(s)', 'menuRejectSelected')
     .addItem('📊 Today\'s numbers', 'menuReviewerToday')
-    .addItem('🔌 Connect the app', 'menuConnect')
     .addToUi();
+}
+
+function menuEnableAuto() {
+  runMenu_('Enable auto update', () => {
+    setupSheet(); kpiSheet_(); rejectedSheet_();
+    const created = enableHourly_();
+    const r = pullAndRefresh_();
+    return (created ? 'Auto update is now ON — the sheet checks for new leads every hour.'
+                    : 'Auto update was already ON.')
+      + '\n\nJust ran one now:\n'
+      + '  new leads added: ' + r.added + '\n'
+      + '  already on the sheet: ' + r.skipped + '\n'
+      + '  total leads: ' + r.rows + '\n\n'
+      + (r.source ? 'Read from: ' + r.source
+                  : 'No drop file found yet (' + CONFIG.FEED_FILENAME + ' in your Drive). '
+                    + 'Run a scan in the FlipScout app — it writes that file, and the next '
+                    + 'refresh picks it up.');
+  });
+}
+
+function menuDisableAuto() {
+  runMenu_('Disable auto update', () => {
+    const n = disableHourly_();
+    return n ? 'Auto update is OFF. Use "Refresh now" whenever you want to pull leads.'
+             : 'Auto update was already off.';
+  });
 }
 
 // ------------------------------------------------------------- refreshing ----
@@ -608,17 +638,20 @@ function refreshLeads() {
 
 function menuRefresh() {
   runMenu_('Refresh', () => {
-    const r = refreshLeads();
-    return r.rows + ' lead(s) on the sheet.\n'
-      + (r.deduped ? 'Removed ' + r.deduped + ' duplicate(s).\n' : '')
-      + (r.filled ? 'Filled ' + r.filled + ' blank cell(s).\n' : '')
-      + 'Sorted by ' + r.sortedBy + '.'
-      + '\n\nHourly auto-refresh: ' + (hourlyEnabled_() ? 'ON' : 'OFF — enable it from Connect the app.');
+    const r = pullAndRefresh_();
+    return (r.added ? '✅ ' + r.added + ' new lead(s) added.\n' : 'No new leads.\n')
+      + (r.skipped ? r.skipped + ' were already on the sheet.\n' : '')
+      + (r.deduped ? 'Removed ' + r.deduped + ' duplicate row(s).\n' : '')
+      + r.rows + ' lead(s) total, sorted by ' + r.sortedBy + '.\n\n'
+      + (r.source ? 'Read from: ' + r.source + '\n' :
+          'No ' + CONFIG.FEED_FILENAME + ' found in your Drive yet — run a scan in the app.\n')
+      + (r.error ? '\n⚠ ' + r.error + '\n' : '')
+      + '\nAuto update: ' + (hourlyEnabled_() ? 'ON (hourly)' : 'OFF');
   });
 }
 
 /** Called by the hourly trigger. Kept separate so the trigger has a stable name. */
-function hourlyRefresh() { refreshLeads(); }
+function hourlyRefresh() { pullAndRefresh_(); }
 
 function hourlyEnabled_() {
   return ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'hourlyRefresh');
@@ -630,40 +663,68 @@ function enableHourly_() {
   return true;
 }
 
-/**
- * One click: build/repair every tab, then show the two values the desktop app
- * needs. This replaces the old set-up / KPI-tab / connection-info items.
- */
-function menuConnect() {
-  runMenu_('Connect the app', () => {
-    setupSheet();       // Leads tab
-    kpiSheet_();        // KPI tab
-    rejectedSheet_();   // Rejected tab
-    const hourlyNew = enableHourly_();   // hourly auto-refresh
-
-    let url = '';
-    try { url = ScriptApp.getService().getUrl() || ''; } catch (e) {}
-    const secretOk = CONFIG.SHARED_SECRET && CONFIG.SHARED_SECRET !== 'CHANGE_ME_TO_A_LONG_RANDOM_STRING';
-
-    const hourlyLine = 'Hourly auto-refresh: ' + (hourlyNew ? 'just switched ON' : 'ON') + '.\n\n';
-    if (!url) {
-      return 'Tabs are ready (Leads, KPI, Rejected).\n' + hourlyLine
-        + 'The app is NOT connected yet — this script has not been deployed.\n\n'
-        + 'Deploy > New deployment > Web app\n'
-        + '   Execute as: Me\n'
-        + '   Who has access: Anyone with the link\n'
-        + 'Then run this again to get the link.';
-    }
-    return 'Tabs ready (Leads, KPI, Rejected).\n' + hourlyLine
-      + 'Paste these two into section 7 of the FlipScout app:\n\n'
-      + 'URL:\n' + url + '\n\n'
-      + 'Secret:\n' + (secretOk ? CONFIG.SHARED_SECRET : '⚠ still the placeholder — edit CONFIG.SHARED_SECRET at the top of this script')
-      + '\n\nThen click "Test connection" in the app.';
+function disableHourly_() {
+  let n = 0;
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'hourlyRefresh') { ScriptApp.deleteTrigger(t); n++; }
   });
+  return n;
 }
 
-/** Every menu action runs through here so a failure shows a readable dialog
- *  instead of a silent red toast that disappears. */
+// ------------------------------------------------------------- Drive feed ----
+// How leads get here without a published web app.
+//
+// The desktop app writes CONFIG.FEED_FILENAME into your Google Drive folder
+// (Drive for Desktop syncs it up). This script runs as YOU, so it can read that
+// file straight out of Drive — no deployment, no "Anyone with the link", no
+// sign-in wall. Refresh the sheet (or wait for the hourly trigger) and new
+// leads appear.
+
+/** Newest Drive file with the feed name, or null. */
+function feedFile_() {
+  const it = DriveApp.getFilesByName(CONFIG.FEED_FILENAME);
+  let best = null;
+  while (it.hasNext()) {
+    const f = it.next();
+    if (!best || f.getLastUpdated() > best.getLastUpdated()) best = f;
+  }
+  return best;
+}
+
+/** Read the drop file and append anything new. Missing file is not an error —
+ *  it just means no scan has run yet. */
+function pullFromDrive_() {
+  const f = feedFile_();
+  if (!f) return { added: 0, skipped: 0, source: '' };
+  let payload;
+  try {
+    payload = JSON.parse(f.getBlob().getDataAsString());
+  } catch (err) {
+    throw new Error('Could not read ' + CONFIG.FEED_FILENAME + ' — it is not valid JSON (' + err.message + ')');
+  }
+  const leads = Array.isArray(payload) ? payload : (payload.leads || []);
+  if (!leads.length) return { added: 0, skipped: 0, source: f.getName() };
+  const res = appendLeads(leads);
+  return {
+    added: res.filter(r => !r.skipped).length,
+    skipped: res.filter(r => r.skipped).length,
+    source: f.getName() + ' (updated ' + Utilities.formatDate(f.getLastUpdated(), Session.getScriptTimeZone(), 'MMM d, HH:mm') + ')',
+  };
+}
+
+/** Pull, then tidy. This is what both the menu and the hourly trigger call. */
+function pullAndRefresh_() {
+  let pulled = { added: 0, skipped: 0, source: '' };
+  let pullError = '';
+  try { pulled = pullFromDrive_(); } catch (err) { pullError = String(err.message || err); }
+  const tidied = refreshLeads();
+  return {
+    added: pulled.added, skipped: pulled.skipped, source: pulled.source,
+    rows: tidied.rows, deduped: tidied.deduped, sortedBy: tidied.sortedBy,
+    error: pullError,
+  };
+}
+
 function runMenu_(label, fn) {
   const ui = SpreadsheetApp.getUi();
   try {
