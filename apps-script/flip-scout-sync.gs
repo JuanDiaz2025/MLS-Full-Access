@@ -7,16 +7,6 @@
  * listing never repeats. New leads also trigger an email to NOTIFY_EMAIL.
  *
  * If the repo branch changes, update FEED_URL below.
- *
- * -------------------------------------------------------------------------
- * CHANGELOG 2026-07-30 — feed-side removal.
- * A lead in the feed with "disqualified": true is now (a) never added, and
- * (b) removed from the sheet if already present, with its Redfin URL recorded
- * on the Rejected tab so it can't come back. This lets the scout pull a lead
- * that turns out to violate the buy box (e.g. multi-unit found on photo review)
- * without anyone hand-deleting the row. To install: Extensions > Apps Script,
- * replace the file with this, Save. No redeploy needed (menu/trigger-run).
- * -------------------------------------------------------------------------
  */
 
 var FEED_URL = 'https://raw.githubusercontent.com/JuanDiaz2025/Juan-s-Autonomous-Real-Estate-Flip-Scout-Agent/claude/python-code-goal-nn6zec/flip_scout/leads_for_sheets.json';
@@ -87,6 +77,34 @@ var TOTAL_NONPROFIT_REMOVED_KEY = 'KPI_TOTAL_NONPROFIT_REMOVED';
 var OLD_TOTAL_ADDED_KEY = 'KPI_TOTAL_ADDED';
 var OLD_TOTAL_REJECTED_KEY = 'KPI_TOTAL_REJECTED';
 
+// ---- daily activity log -------------------------------------------------
+// One rolling record per calendar day (script timezone) so the KPI tab can
+// show, per day: how many new leads landed, how many the team rejected, and
+// how many were auto-removed. "Reviewed" (rejected + removed) is the day's
+// checked count - the number you're after for tracking who worked how many.
+var KPI_DAILY_LOG_KEY = 'KPI_DAILY_LOG';
+
+function todayKey_() {
+  var tz = Session.getScriptTimeZone() || 'America/Los_Angeles';
+  return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+}
+
+function getDailyLog_() {
+  var raw = PropertiesService.getScriptProperties().getProperty(KPI_DAILY_LOG_KEY);
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch (e) { return {}; }
+}
+
+/** Add `by` to today's `field` ('added' | 'rejected' | 'removed'). */
+function logDaily_(field, by) {
+  if (!by) return;
+  var log = getDailyLog_();
+  var day = todayKey_();
+  if (!log[day]) log[day] = { added: 0, rejected: 0, removed: 0 };
+  log[day][field] = (log[day][field] || 0) + by;
+  PropertiesService.getScriptProperties().setProperty(KPI_DAILY_LOG_KEY, JSON.stringify(log));
+}
+
 function incrementCounter_(key, by) {
   var props = PropertiesService.getScriptProperties();
   var current = parseInt(props.getProperty(key) || '0', 10);
@@ -121,7 +139,8 @@ function updateKpiTab_() {
   }
   kpiSheet.clear();
 
-  var rows = [
+  // ---- section 1: running totals ----
+  var summary = [
     ['Metric', 'Value'],
     ['Currently kept (in sheet now)', currentlyKept],
     ['Total ever added (kept + removed)', totalAdded],
@@ -130,9 +149,34 @@ function updateKpiTab_() {
     ['Total removed (all reasons)', totalRemoved],
     ['Last updated', new Date().toString()],
   ];
-  kpiSheet.getRange(1, 1, rows.length, 2).setValues(rows);
+  kpiSheet.getRange(1, 1, summary.length, 2).setValues(summary);
   kpiSheet.getRange(1, 1, 1, 2).setFontWeight('bold');
-  kpiSheet.autoResizeColumns(1, 2);
+
+  // ---- section 2: daily activity (how many leads worked each day) ----
+  var log = getDailyLog_();
+  var days = Object.keys(log).sort().reverse(); // newest day first
+
+  var titleRow = summary.length + 2; // one blank row gap
+  kpiSheet.getRange(titleRow, 1).setValue('Daily Activity');
+  kpiSheet.getRange(titleRow, 1).setFontWeight('bold');
+
+  var headerRow = titleRow + 1;
+  var dailyHeaders = ['Date', 'New Leads Added', 'Rejected', 'Auto-Removed', 'Reviewed (Rejected + Removed)'];
+  kpiSheet.getRange(headerRow, 1, 1, dailyHeaders.length).setValues([dailyHeaders]);
+  kpiSheet.getRange(headerRow, 1, 1, dailyHeaders.length).setFontWeight('bold');
+
+  if (days.length) {
+    var dailyRows = days.map(function (d) {
+      var e = log[d] || {};
+      var added = e.added || 0, rejected = e.rejected || 0, removed = e.removed || 0;
+      return [d, added, rejected, removed, rejected + removed];
+    });
+    kpiSheet.getRange(headerRow + 1, 1, dailyRows.length, dailyHeaders.length).setValues(dailyRows);
+  } else {
+    kpiSheet.getRange(headerRow + 1, 1).setValue('No activity logged yet - counts start from your next Refresh / Reject.');
+  }
+
+  kpiSheet.autoResizeColumns(1, dailyHeaders.length);
 }
 
 var REJECTED_SHEET_NAME = 'Rejected (do not edit)';
@@ -232,30 +276,9 @@ function rejectSelectedLeads() {
   rows.sort(function (a, b) { return b - a; });
   rows.forEach(function (r) { sheet.deleteRow(r); });
 
+  logDaily_('rejected', rows.length); // track how many were reviewed & rejected today
   updateKpiTab_();
   ui.alert(rows.length + ' lead(s) rejected and permanently excluded.');
-}
-
-/**
- * NEW (2026-07-30): remove rows the feed now marks "disqualified": true, and
- * record their URLs as rejected so a later refresh can't re-add them. Returns
- * the count removed. Called at the top of every Refresh.
- */
-function removeDisqualified_(sheet, feedByUrl) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return 0;
-  var urls = sheet.getRange(2, URL_COL_INDEX, lastRow - 1, 1).getValues();
-  var toDelete = [], rejectUrls = [];
-  for (var i = 0; i < urls.length; i++) {
-    var u = urls[i][0];
-    var lead = u && feedByUrl[u];
-    if (lead && lead.disqualified === true) { toDelete.push(i + 2); rejectUrls.push(u); }
-  }
-  if (!toDelete.length) return 0;
-  addRejectedUrls_(rejectUrls);
-  toDelete.sort(function (a, b) { return b - a; }); // delete bottom-up
-  toDelete.forEach(function (r) { sheet.deleteRow(r); });
-  return toDelete.length;
 }
 
 function refreshFlipScoutSheet() {
@@ -267,8 +290,6 @@ function refreshFlipScoutSheet() {
 
   var feed = JSON.parse(response.getContentText());
   var leads = feed.leads || [];
-  var feedByUrl = {};
-  leads.forEach(function (l) { if (l.url) feedByUrl[l.url] = l; });
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
@@ -294,9 +315,6 @@ function refreshFlipScoutSheet() {
     sheet.setFrozenRows(1);
   }
 
-  // NEW: pull any rows the feed now marks disqualified (e.g. multi-unit on review).
-  var removed = removeDisqualified_(sheet, feedByUrl);
-
   var existingUrls = {};
   var lastRow = sheet.getLastRow();
   if (lastRow > 1) {
@@ -308,19 +326,16 @@ function refreshFlipScoutSheet() {
 
   var rejectedUrls = getRejectedUrls_();
   var newLeads = leads.filter(function (lead) {
-    if (lead.disqualified === true) return false;   // NEW: never add a disqualified lead
     if (existingUrls[lead.url] || rejectedUrls[lead.url]) return false;
     if (lead.manual_include === true) return true;
     return lead.gross_profit_light > 0;
   });
 
-  ss.toast(newLeads.length + ' new lead(s) found, ' + Object.keys(existingUrls).length + ' already in sheet' +
-    (removed ? ', ' + removed + ' removed (disqualified)' : '') + '.', 'Flip Scout', 5);
+  ss.toast(newLeads.length + ' new lead(s) found, ' + Object.keys(existingUrls).length + ' already in sheet.', 'Flip Scout', 5);
 
   if (newLeads.length === 0) {
     sheet.getRange(1, 1).setNote('Last checked: ' + new Date().toString() +
-      '\nFeed generated: ' + feed.generated_at +
-      (removed ? '\n' + removed + ' disqualified lead(s) removed.' : '\nNo new leads this check.'));
+      '\nFeed generated: ' + feed.generated_at + '\nNo new leads this check.');
     updateKpiTab_();
     return;
   }
@@ -344,12 +359,12 @@ function refreshFlipScoutSheet() {
   sheet.autoResizeColumns(1, headers.length);
   sheet.getRange(1, 1).setNote('Last checked: ' + now +
     '\nFeed generated: ' + feed.generated_at +
-    '\n' + newLeads.length + ' new lead(s) added this check.' +
-    (removed ? '\n' + removed + ' disqualified lead(s) removed.' : ''));
+    '\n' + newLeads.length + ' new lead(s) added this check.');
 
   // Email a heads-up with the new leads.
   notifyNewLeads_(newLeads, feed);
 
+  logDaily_('added', newLeads.length); // track daily inflow
   updateKpiTab_();
 }
 
@@ -420,13 +435,9 @@ function resyncExistingLeads() {
     return;
   }
 
-  // NEW: honor disqualified removals here too, so a Resync also cleans them out.
-  var removed = removeDisqualified_(sheet, leadsByUrl);
-
   var lastRow = sheet.getLastRow();
   if (lastRow <= 1) {
-    SpreadsheetApp.getUi().alert('No leads to resync' + (removed ? ' (' + removed + ' disqualified removed).' : '.'));
-    updateKpiTab_();
+    SpreadsheetApp.getUi().alert('No leads to resync.');
     return;
   }
 
@@ -455,10 +466,8 @@ function resyncExistingLeads() {
     sheet.getRange(2, i + 1, rows.length, 1).setNumberFormat(c.format);
   });
 
-  updateKpiTab_();
   SpreadsheetApp.getUi().alert(updated + ' existing lead(s) refreshed with the latest feed data ' +
-    '(risks, financials, recommendation)' + (removed ? '; ' + removed + ' disqualified removed' : '') +
-    '. Rows no longer in the feed were left untouched.');
+    '(risks, financials, recommendation). Rows no longer in the feed were left untouched.');
 }
 
 function clearAllLeads() {
@@ -515,6 +524,7 @@ function removeNonProfitableLeads() {
   });
 
   incrementCounter_(TOTAL_NONPROFIT_REMOVED_KEY, rowsToDelete.length);
+  logDaily_('removed', rowsToDelete.length); // track daily auto-removals
   updateKpiTab_();
   SpreadsheetApp.getUi().alert(rowsToDelete.length + ' non-profitable lead(s) removed.');
 }
