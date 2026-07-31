@@ -10,21 +10,20 @@
  *   - "DOM"                          days on market (scraped straight from Matrix)
  *   - "Estimated ARV (After Repair)" what the property is worth once repaired
  *
- * SETUP (once):
- *   1. Open the sheet > Extensions > Apps Script, paste this file, Save.
- *   2. Deploy > New deployment > Web app
- *        Execute as: Me
- *        Who has access: Anyone with the link
- *   3. Back on the sheet: ⚡ Flip Scout > Connect the app. That builds every tab
- *      and shows the URL + secret to paste into section 7 of the desktop app.
+ * SETUP - ONCE, AND NEVER AGAIN:
+ *   1. Sheet > Extensions > Apps Script, paste this file, Save.
+ *   2. Reload the sheet, then ⚡ Flip Scout > Enable auto update.
  *
- * The secret below is pre-set and already matches the app, so there is nothing
- * to type. The menu is deliberately three items — everything else happens on
- * its own.
+ * That is the whole setup. No deployment, no web app, no URL, no secret to
+ * copy. The sheet READS new leads out of Google Drive as you, every 5 minutes.
  *
- * The "Anyone with the link" setting is what lets the app post without an OAuth
- * dance; the shared secret is what actually guards it. Treat the URL + secret as
- * credentials — anyone holding both can append rows.
+ * Crucially this script never needs re-pasting when new results arrive. It
+ * looks for the NEWEST file named FEED_FILENAME rather than one pinned ID, so
+ * each new batch is picked up automatically. Earlier versions hard-coded an ID
+ * and had to be re-pasted every single time - that was the bug, and it is gone.
+ *
+ * doPost/doGet below are legacy: they only matter if you ever deploy this as a
+ * web app so something can POST in. The Drive path needs none of it.
  */
 const CONFIG = {
   SPREADSHEET_ID: '1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4',
@@ -36,11 +35,9 @@ const CONFIG = {
   // The desktop app writes this file into your Google Drive; the sheet reads it
   // on refresh. This is what removes the need for a published web app.
   FEED_FILENAME: 'flipscout-leads.json',
-  // Preferred: look the drop file up by ID. getFilesByName() only searches the
-  // Drive of whichever account authorised this script, so a file sitting in a
-  // colleague's Drive is invisible to it even when shared. An ID works for any
-  // account that can open the file, which removes the whole "whose Drive is it
-  // in" problem. Falls back to the name if this is blank or unreadable.
+  // Optional hint only. The script always uses the NEWEST file named
+  // FEED_FILENAME, so a new batch of results is picked up without editing
+  // anything here. Safe to leave stale or blank - it never needs updating.
   FEED_FILE_ID: '1zmmSPNESZMPCKADpqwvR1GVqL8vC3n_y',
 };
 
@@ -752,23 +749,28 @@ function disableHourly_() {
 // sign-in wall. Refresh the sheet (or wait for the hourly trigger) and new
 // leads appear.
 
-/** The drop file: by ID when configured, else newest match by name. */
+/**
+ * The drop file — ALWAYS the most recently updated one.
+ *
+ * This deliberately does not trust a single hard-coded ID. Every new batch of
+ * results arrives as a fresh file with the same name (the Drive API creates
+ * rather than overwrites), so pinning one ID meant re-pasting this whole script
+ * every time new leads landed. Now the script finds the newest file called
+ * FEED_FILENAME and uses that. Paste this once; it keeps working forever.
+ *
+ * FEED_FILE_ID is only a hint: if it is set and still readable it joins the
+ * candidates, but it wins only if it is genuinely the newest.
+ */
 function feedFile_() {
+  let best = null;
+  const consider = f => {
+    try { if (f && (!best || f.getLastUpdated() > best.getLastUpdated())) best = f; } catch (e) {}
+  };
   if (CONFIG.FEED_FILE_ID) {
-    try {
-      const f = DriveApp.getFileById(CONFIG.FEED_FILE_ID);
-      if (f) return f;
-    } catch (err) {
-      // Wrong ID, deleted, or not shared with this account — fall through to
-      // the name search rather than failing the whole refresh.
-    }
+    try { consider(DriveApp.getFileById(CONFIG.FEED_FILE_ID)); } catch (err) { /* stale id is fine */ }
   }
   const it = DriveApp.getFilesByName(CONFIG.FEED_FILENAME);
-  let best = null;
-  while (it.hasNext()) {
-    const f = it.next();
-    if (!best || f.getLastUpdated() > best.getLastUpdated()) best = f;
-  }
+  while (it.hasNext()) consider(it.next());
   return best;
 }
 
