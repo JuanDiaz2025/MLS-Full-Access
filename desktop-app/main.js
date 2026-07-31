@@ -24,6 +24,7 @@ const cfg = {
   // years old, below-market $/sqft) and because the sheet reviewer rejects
   // anything wrong — with that rejection feeding straight back into the ledger.
   whenUnsure: 'keep',
+  runComps: false,     // OFF for now — qualify on CONDITION first, comp later
   sheetUrl: '', sheetSecret: '', autoPush: false,                      // Flip Scout Agent sheet
 };
 /** Apps Script hands out two URL shapes for the same deployment. The
@@ -544,19 +545,12 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
             //   drop — skip it (fast, loses some real fixers)
             // With an API key + AI vision this branch never runs, because
             // vision actually looks at the pictures.
-            const mode = cfg.whenUnsure || 'ask';
-            if (mode === 'ask') {
-              log(`  RULES: ${v.reason} — over to you`, 'warn');
-              send('review', { ...base, needsEye: true, aiReason: 'Rules: ' + v.reason });
-              decision = await new Promise(res => { pendingDecision[c.mls] = res; });
-              delete pendingDecision[c.mls];
-              dropReason = 'manual review';
-            } else {
-              decision = mode;
-              dropReason = v.reason + ' (auto-' + mode + ' per your setting)';
-              send('review', { ...base, ai: true, aiDecision: mode, aiReason: 'Rules (unsure → ' + mode + '): ' + v.reason });
-              log(`  RULES unsure → ${mode.toUpperCase()}: ${v.reason}`, mode === 'keep' ? 'info' : 'info');
-            }
+            // Never stop the run to ask. Auto-verify means unattended.
+            const mode = cfg.whenUnsure === 'drop' ? 'drop' : 'keep';
+            decision = mode;
+            dropReason = v.reason + ' (auto-' + mode + ')';
+            send('review', { ...base, ai: true, aiDecision: mode, aiReason: 'Rules (unsure → ' + mode + '): ' + v.reason });
+            log(`  RULES unsure → ${mode.toUpperCase()}: ${v.reason}`);
           } else {
             decision = v.decision; dropReason = v.reason;
             send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'Rules: ' + v.reason });
@@ -576,9 +570,32 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: label });
       }
 
-      // --- comp + score this city, before touching the next one ---
-      send('city', { label, index: ai + 1, total: areas.length, phase: 'comping', count: kept.length });
+      // --- comps: OFF by default for now ---
+      // Comping is the slow stage (a second Matrix search per kept listing).
+      // With it off the run stops at CONDITION-QUALIFIED: everything that
+      // survived photo review goes to the sheet with its listing facts, no ARV
+      // and no deal math. Turn it back on in section 3 to restore ARV, profit
+      // and the gate.
       const cityLeads = [];
+      if (!cfg.runComps) {
+        for (const c of kept) {
+          cityLeads.push({
+            mls: c.mls, address: c.addr, city: label, zip: c.zip || '',
+            beds: c.bds, baths: c.baths || '', sqft: c._sqft,
+            lotSqft: core.num(c.lotSqft || 0) || '',
+            yearBuilt: 2026 - c._age, dom: c._dom, price: c._price, ppsf: c._ppsf,
+            arv: 0, arvBasis: 'not comped yet',
+            recommendation: 'Needs Comps', flipQuality: '', score: '',
+            risks: 'Condition-qualified only — ARV and profit not yet calculated',
+            link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+            // Push these: with no ARV there is no gate to clear, and the point
+            // of this mode is to get the qualified list in front of you.
+            surface: true, needsComps: true,
+          });
+        }
+        log(`[${label}] comps skipped — ${cityLeads.length} condition-qualified listing(s)`, 'good');
+      } else {
+      send('city', { label, index: ai + 1, total: areas.length, phase: 'comping', count: kept.length });
       for (const c of kept) {
         await waitIfPaused();
         if (control.stopped) break;
@@ -595,9 +612,14 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
           link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
           ...deal });
       }
+      }
 
       leads.push(...cityLeads);
-      leads.sort((a, b) => b.grossLight - a.grossLight);
+      // Without comps there is no profit to rank by — fall back to the best
+      // value signal we do have, cheapest $/sqft first.
+      leads.sort(cfg.runComps
+        ? (a, b) => b.grossLight - a.grossLight
+        : (a, b) => (a.ppsf || Infinity) - (b.ppsf || Infinity));
       runKpi.leads = leads.length;
       runKpi.gateCleared = leads.filter(l => l.surface).length;
       send('report', { leads, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });

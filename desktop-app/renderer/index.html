@@ -73,16 +73,15 @@
       <div class="hint">Applies your buy box to each listing's <b>agent remarks + condition + photo count</b>: drops renovated / turnkey wording (Rule #0), multi-unit / second-unit, fire damage, and exterior-only (likely tenant); keeps genuine as-is / estate / fixer language. Judges from the listing's <i>words</i>, not the pixels — so a renovated home with plain remarks can slip through. For pixel-level judgement, add AI vision below.</div>
       <label>When the rules can't tell from the remarks</label>
       <select id="whenUnsure" style="width:100%;padding:6px">
-        <option value="keep">Keep it and carry on — never interrupt me (default)</option>
-        <option value="drop">Drop it and carry on (fast — some real fixers will be lost)</option>
-        <option value="ask">Ask me — pause and show the photos (most accurate, hands-on)</option>
+        <option value="keep">Keep it and carry on (default)</option>
+        <option value="drop">Drop it and carry on (some real fixers will be lost)</option>
       </select>
-      <div class="hint">Only applies without AI vision. The text rules read the agent
-        remarks and never see a photo, so when the remarks say nothing about condition
-        they cannot tell a renovated kitchen from an original one. On <b>Keep</b> the run
-        never stops — your sheet reviewer is the backstop, and anything she rejects goes
-        into the ledger so it never returns. <b>Turn on AI auto-verify below and this
-        never comes up</b> — vision reads every photo and decides on its own.</div>
+      <div class="hint">Only applies without AI vision. <b>The run never stops to ask you
+        anything.</b> The text rules read the agent remarks and never see a photo, so when
+        the remarks say nothing about condition they cannot tell a renovated kitchen from
+        an original one — your sheet reviewer is the backstop, and anything she rejects
+        goes into the ledger so it never returns. <b>Turn on AI vision below and this never
+        comes up</b> — it reads every photo and decides on its own.</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:10px">
         <input id="useAI" type="checkbox" style="width:auto"> Use AI vision instead (reads the actual photos — more accurate, needs an Anthropic API key)
       </label>
@@ -110,7 +109,15 @@
         <input id="readSeconds" type="number" min="0" max="60" value="6" style="width:70px">
         seconds
       </label>
+      <label style="display:flex;align-items:center;gap:6px;margin:0;color:var(--ink)">
+        <input id="runComps" type="checkbox" style="width:auto"> Also run comps (ARV + profit)
+      </label>
     </div>
+    <div class="hint"><b>Comps are off.</b> The run stops at condition-qualified: scan →
+      filter → photo review → sheet. Every listing that survives photo review goes to the
+      sheet with its facts (price, $/sqft, sqft, beds, DOM) and no ARV or profit — comping
+      means a second MLS search per listing and roughly triples the run. Tick the box when
+      you want ARV, rehab, profit and the gate back.</div>
     <div class="hint"><b>One city at a time, in order.</b> San Francisco is scanned,
       every new listing reviewed one by one, comped and pushed to the sheet — and only
       then does the next city start. Order: SF · whole Peninsula ($2M) · Sunnyvale ·
@@ -217,10 +224,13 @@
   $('dropBtn').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'drop'); hideReview(); } };
   // Flip to unattended mid-run without digging through settings.
   $('stopAsking').onclick = () => {
+    // Manual mode is the only remaining way to get prompted, so switch that off
+    // too — otherwise the button would not actually stop the asking.
+    $('autoVerify').checked = true; $('autoFields').style.display = 'block';
     $('whenUnsure').value = 'keep';
     localStorage.setItem('fs.whenUnsure','keep');
     pushConfig();
-    log('Won\'t ask again — undecidable listings are kept automatically. Your sheet reviewer is the backstop.','warn');
+    log('Won\'t ask again — the run decides on its own from here. Your sheet reviewer is the backstop.','warn');
     if(currentMls){ window.fs.decide(currentMls,'keep'); hideReview(); }
   };
   $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
@@ -230,12 +240,15 @@
     apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
     readSeconds: Number($('readSeconds').value||6),
     whenUnsure: $('whenUnsure').value,
+    runComps: $('runComps').checked,
     sheetUrl: $('sheetUrl').value.trim(), sheetSecret: $('sheetSecret').value, autoPush: $('autoPush').checked,
   }); }
   $('autoVerify').onchange = () => { $('autoFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
   $('readSeconds').oninput = pushConfig;
+  $('runComps').onchange = () => { localStorage.setItem('fs.runComps', $('runComps').checked?'1':'0'); pushConfig(); };
+  $('runComps').checked = localStorage.getItem('fs.runComps') === '1';
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
 
@@ -372,13 +385,22 @@
   window.fs.on('report', p => {
     lastLeads = p.leads || [];
     const surf = lastLeads.filter(l => l.surface);
-    let html = `<div class="hint">${surf.length} of ${lastLeads.length} kept leads clear the profit gate. Generated ${p.generatedAt}</div>`;
-    html += '<table><thead><tr><th>Property</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th><th>Score</th></tr></thead><tbody>';
+    const noComps = lastLeads.length && lastLeads.every(l => l.needsComps);
+    let html = `<div class="hint">${noComps
+      ? `${lastLeads.length} condition-qualified listing(s) — comps off, so no ARV or profit yet. Cheapest $/sqft first.`
+      : `${surf.length} of ${lastLeads.length} kept leads clear the profit gate.`} Generated ${p.generatedAt}</div>`;
+    html += noComps
+      ? '<table><thead><tr><th>Property</th><th>DOM</th><th>Beds</th><th>SqFt</th><th>Price</th><th>$/sqft</th></tr></thead><tbody>'
+      : '<table><thead><tr><th>Property</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th><th>Score</th></tr></thead><tbody>';
     for (const l of lastLeads) {
-      html += `<tr class="${l.surface?'surface':''}"><td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
-        `<td class="mono">${l.dom!=null&&l.dom!==''?l.dom:'—'}</td>`+
-        `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
-        `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td><td class="mono">${l.score}</td></tr>`;
+      const head = `<td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+        `<td class="mono">${l.dom!=null&&l.dom!==''?l.dom:'—'}</td>`;
+      html += noComps
+        ? `<tr class="surface">${head}<td class="mono">${l.beds||'—'}</td><td class="mono">${l.sqft||'—'}</td>`+
+          `<td class="mono">${money(l.price)}</td><td class="mono">$${l.ppsf||'—'}</td></tr>`
+        : `<tr class="${l.surface?'surface':''}">${head}`+
+          `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
+          `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td><td class="mono">${l.score}</td></tr>`;
     }
     html += '</tbody></table>';
     $('report').innerHTML = html; $('reportCard').style.display='block';
