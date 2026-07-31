@@ -40,7 +40,8 @@ install (creates a desktop shortcut) or run the portable exe directly.
 3. **Photo review** — for each candidate the MLS window shows the full photo
    gallery. Two ways to judge:
    - **Manual (default):** click **Keep** (genuine dated fixer) or **Drop**
-     (renovated / staged / multi-unit / exterior-only). **Pause/Resume** anytime.
+     (renovated / multi-unit / exterior-only). Clean-but-dated = **Keep**;
+     judge the finishes, not the staging. **Pause/Resume** anytime.
    - **Auto-verify (AI):** tick the box in step 2 and paste an Anthropic API key.
      Claude looks at each listing's photos, applies the buy-box rules (Rule #0
      renovated / Rule #2 review-every-photo / multi-unit / exterior-only), and

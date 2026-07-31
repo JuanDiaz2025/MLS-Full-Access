@@ -19,10 +19,14 @@ older listings are in scope. Long DOM is flagged on the lead, not excluded.
 Only keep genuine value-add fixers. Judge from photos + agent/public remarks:
 - **Exclude (renovated/turnkey):** "remodeled / renovated / updated throughout /
   move-in ready / turnkey / reimagined / refreshed / quartz / stainless / designer /
-  luxury vinyl", freshly staged, or **newer builds** (age < ~30).
+  luxury vinyl", or **newer builds** (age < ~30).
 - **Keep (fixer/value-add):** "fixer / as-is / TLC / contractor or handyman special /
   estate / probate / first time on market / potential / bring your vision / needs
   updating / no HVAC", dated/original interiors, below-market $/sqft.
+- **Keep (clean but dated):** tidy / empty / swept / **freshly staged** homes whose
+  finishes are still original — old cabinets, tile counters, dated bath, worn
+  flooring. Staging is presentation, not renovation. (Updated per Bryan; staging
+  used to be an exclusion. Only *work actually done to the house* excludes it.)
 
 ## Deal model (matches the Property Review sheet)
 

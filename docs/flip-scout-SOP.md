@@ -209,12 +209,16 @@ Procedure per new lead:
 1. `python3 flip_scout/fetch_photos.py <redfin_url> <scratch_dir> 6` —
    downloads the subject listing's own photos (the script excludes the
    "similar homes" carousel photos, which are other properties).
-2. Review each photo (homescout rubric): Keep = Yes only when the property
-   shows visible distress, dated finishes, deferred maintenance, vacancy,
-   or clear value-add potential. Keep = No when it looks renovated, staged-
-   clean, or luxury-finished — regardless of what the profit math says.
-   Also check the listing page for Redfin's "Hot Home" badge: hot + clean
-   = automatic No (bid-war teaser pricing makes list-price profit fake).
+2. Review each photo (homescout rubric): Keep = Yes when the property shows
+   visible distress, **dated finishes**, deferred maintenance, vacancy, or
+   clear value-add potential. Keep = No when it looks **renovated** or
+   luxury-finished — regardless of what the profit math says.
+   **"Staged-clean" is no longer a No** (updated per Bryan): a tidy, empty,
+   or staged house whose finishes are still original/dated is a KEEP. Judge
+   the finishes — cabinets, counters, bath, flooring — not the housekeeping.
+   Redfin's "Hot Home" badge on a genuinely *renovated* listing is still an
+   automatic No (bid-war teaser pricing makes list-price profit fake); on a
+   dated-but-clean listing it is a caution note, not a drop.
 3. "NO PHOTOS extractable" (exit code 2) is itself a signal — MLS-light /
    auction / off-market listing. Keep only with an explicit caution note.
 4. Note: the environment's browser cannot reach Google Maps/Street View;
@@ -261,6 +265,19 @@ offer:
 
 ## 9. Revision history (major changes, most recent first)
 
+- **"Clean" no longer drops a listing — only "renovated" does (per Bryan).** The
+  photo rule used to reject anything tidy/staged/move-in-ready alongside
+  genuinely renovated homes. Now the only question is *has work been done to the
+  house*: new cabinets/counters/appliances, redone baths, new flooring, recessed
+  lighting, newer build → drop; tidy, empty, swept, or staged with **original
+  dated finishes** → **keep and add to the sheet**. Judge finishes, not
+  housekeeping. Ambiguous cases are kept with a note rather than dropped.
+- **Hourly incremental scanning with a seen-ledger.** San Francisco is scanned
+  first, then the rest of the buy box. `data/scanned-ledger.json` (tracked in
+  git) records every MLS # ever checked; `scripts/mls-ledger.js filter` strips
+  them from each new scan before the expensive photo/comp stages, so a listing
+  checked yesterday or earlier is never re-checked. The ledger must be committed
+  after every run — the container is ephemeral.
 - **Removed the 45-day days-on-market rule (temporary, per Bryan).** Both halves
   are gone: the hard `DOM > 45` exclusion in the filter stage, and the 45-day
   List Date window the Matrix scan used to apply (`DAYS` now defaults to unset =

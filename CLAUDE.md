@@ -30,10 +30,22 @@ bathrooms, flooring, and any interior shots — before making a call. The listin
 detail's first image is usually the exterior and hides the real condition. Click
 the **Photos** tab / gallery on each listing and review the full set every time.
 
-**If the photos show the property is already clean / finished / staged move-in
-ready, do NOT add it** — even if the profit math pencils. Clean-in-the-photos =
-drop, same as renovated (Rule #0). Only keep homes that look genuinely dated,
-distressed, worn, or vacant-original.
+**"Clean" is NOT a drop — only "renovated" is.** (Updated per Bryan; this
+reverses the old rule.) The single question the photos must answer is: *has work
+been done to this house?*
+
+- **Drop — renovated:** new/refaced kitchen cabinets, quartz/granite counters,
+  new stainless appliances, redone bathrooms (new tile/vanity/fixtures), new
+  flooring throughout, recessed lighting, fresh whole-house paint over updated
+  finishes, or a newer build. Work has been done → no value left to add.
+- **KEEP — merely clean:** the house is tidy, empty, swept, staged, or
+  well-photographed, but the **finishes are still original/dated** — old cabinets,
+  tile counters, dated bath, worn or original flooring. Clean ≠ updated. **Add
+  these to the list.** A well-kept dated house is still a fixer.
+
+So: judge the *finishes*, not the housekeeping or the staging. When photos are
+genuinely ambiguous between "clean but dated" and "lightly updated," keep it and
+note the uncertainty on the lead rather than dropping it.
 
 ## 1. Browser access (do this first, every fresh session)
 
@@ -106,6 +118,40 @@ so the scan sees all Active listings regardless of age. Set `DAYS=45` to restore
 a rolling window. Screenshots land in `.mls-artifacts/`. Earlier verified example
 (SF · Active · ≤$1.5M · listed last 45 days) returned **228 matches**; with no
 date filter the count will be higher.
+
+## 4b. Recurring scan — order, cadence, and the seen-ledger
+
+**Scan order: San Francisco FIRST, always.** SF is the priority market — run it
+before anything else so its new listings reach the sheet first, then continue
+through the rest of the buy box (Peninsula → Sunnyvale → San Jose → Oakland →
+Berkeley → San Leandro → Hayward → Richmond). `DEFAULT_CITIES` in
+`scripts/mls-multi-scan.js` is already in this order — keep SF at the top.
+
+**Cadence: hourly.** Each run looks for listings that are new *since the last
+run*. Runs are incremental, not full re-reviews.
+
+**🧠 Never re-check a listing you have already checked.** A persistent ledger at
+`data/scanned-ledger.json` (tracked in git, so it survives the ephemeral
+container) records every MLS # ever scanned, with the date and the verdict.
+Anything already in the ledger — from yesterday or any earlier run — is **skipped
+outright**: no photo pull, no comps, no scoring. Only genuinely new MLS #s cost
+any time. This is the whole point: the expensive stages (photo review, comps)
+must never run twice on the same property.
+
+```bash
+node scripts/mls-ledger.js filter .mls-artifacts/candidates.json   # → new only
+node scripts/mls-ledger.js record .mls-artifacts/candidates.json kept
+node scripts/mls-ledger.js stats
+```
+
+Run `filter` immediately after the scan/filter stage and before photo review;
+run `record` after judging so the verdict is remembered. **Commit
+`data/scanned-ledger.json` at the end of every run** — an uncommitted ledger is
+lost when the container is reclaimed, and the next run re-checks everything.
+
+**Output goes to the spreadsheet first.** New qualifying leads are appended to
+the Property Review sheet (§6) as the primary deliverable — do that before
+writing up any summary.
 
 ## 5. Lead investigation — Flip Scout methodology (CANONICAL)
 

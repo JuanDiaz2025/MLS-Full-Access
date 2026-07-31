@@ -191,10 +191,12 @@ async function compFor(mls, zip, sqft) {
 function rulesPrompt(c) {
   return `You are screening a real-estate listing for a house-FLIPPING buy box. The image is a contact sheet of EVERY photo for this listing (${c.addr}, ${c._cityKey}; ${c._sqft} sqft; $${c._price.toLocaleString()}). Review every photo.
 
-KEEP only GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
+KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
+
+The ONLY question that matters is: HAS WORK BEEN DONE TO THIS HOUSE? Judge the FINISHES, not the housekeeping or the staging. A house that is tidy, empty, swept, or professionally staged but still has ORIGINAL DATED FINISHES is a KEEP — "clean" is not "renovated". When torn between "clean but dated" and "lightly updated", choose KEEP.
 
 DROP if ANY of:
-- Renovated / remodeled / updated / refreshed / move-in-ready / turnkey / staged-clean (new shaker cabinets + quartz/stainless, modern tile backsplash, luxury vinyl plank, fresh designer finishes, freshly staged and clean throughout). If it already looks clean/finished, DROP even if partly dated.
+- Renovated / remodeled / updated / refreshed / turnkey: new or refaced cabinets, quartz/granite counters, new stainless appliances, redone bathrooms (new tile/vanity/fixtures), new flooring throughout, recessed lighting, modern tile backsplash, luxury vinyl plank, fresh designer finishes. Actual work done = DROP. Merely clean or staged = KEEP.
 - Multi-unit: 2+ full kitchens, a separate in-law/second unit with its own kitchen, duplex/triplex, or a detached rear dwelling that's a living unit.
 - Fire damage / charring.
 - Newer build that looks modern.
