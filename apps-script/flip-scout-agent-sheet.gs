@@ -598,7 +598,7 @@ function addRejected_(items, who, stage) {
     put('SqFt', num_(it.sqft) || '');
     put('DOM', num_(it.dom) || '');
     put('Reason', it.reason || '(no reason recorded)');
-    put('Stage', stage || it.stage || 'Reviewer');
+    put('Stage', it.stage || stage || 'Reviewer');
     put('By', who || it.by || '');
     put('MLS Link', it.link || '');
     rows.push(row);

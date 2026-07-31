@@ -500,8 +500,20 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
 
       // Medians are per-city anyway, so filtering a city on its own gives the
       // same answer as filtering the whole batch — without the wait.
-      const { candidates: cityCands } = core.filterCandidates({ [label]: scanned });
+      const { candidates: cityCands, rejected: cityFiltered } = core.filterCandidates({ [label]: scanned });
       runKpi.candidates += cityCands.length;
+
+      // Log why listings failed the buy-box filter. Capped, near-misses first —
+      // a whole county's worth of "not below market" would drown the tab.
+      const FILTER_LOG_CAP = 25;
+      const filterRejects = (cityFiltered || []).slice(0, FILTER_LOG_CAP).map(r => ({
+        mls: r.mls, addr: r.addr, city: label, price: r._price, ppsf: r._ppsf,
+        sqft: r._sqft, dom: r._dom, reason: r._reason,
+        link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${r.mls}`,
+      }));
+      if (cityFiltered && cityFiltered.length > FILTER_LOG_CAP) {
+        log(`[${label}] ${cityFiltered.length} failed the buy-box filter; logging the ${FILTER_LOG_CAP} closest`);
+      }
 
       const seen = loadLedger();
       const fresh = cityCands.filter(c => !seen[String(c.mls || '').trim().toUpperCase()]);
@@ -514,12 +526,22 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         fresh: fresh.length, skipped: runKpi.skippedAlreadyChecked,
         byArea: Object.fromEntries(Object.entries(byArea).map(([k, v]) => [k, v.rows.length])) });
 
-      if (!fresh.length) { log(`${label}: nothing new — moving on.`); continue; }
+      if (!fresh.length) {
+        // Still record why the buy-box filter rejected things here, otherwise a
+        // city with no new candidates explains nothing.
+        if (filterRejects.length) {
+          writeDropFile([], filterRejects.map(r => ({ ...r, stage: 'Buy-box filter' })));
+        }
+        log(`${label}: nothing new — moving on.`);
+        continue;
+      }
 
       // --- review this city's listings, one by one ---
       send('city', { label, index: ai + 1, total: areas.length, phase: 'reviewing', count: fresh.length });
       const kept = [];
-      const cityRejects = [];   // dropped here, with the reason, for the Rejected tab
+      // Everything rejected in this city, with its reason, for the Rejected tab.
+      // Seeded with the buy-box filter failures so both stages are represented.
+      const cityRejects = filterRejects.map(r => ({ ...r, stage: 'Buy-box filter' }));
       for (let i = 0; i < fresh.length; i++) {
         await waitIfPaused();
         if (control.stopped) break;
@@ -572,7 +594,7 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
           cityRejects.push({
             mls: c.mls, addr: c.addr, city: label, price: c._price,
             ppsf: c._ppsf, sqft: c._sqft, dom: c._dom,
-            reason: dropReason || 'dropped at photo review',
+            reason: dropReason || 'dropped at photo review', stage: 'Photo review',
             link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
           });
         }

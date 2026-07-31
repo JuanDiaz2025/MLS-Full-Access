@@ -85,10 +85,31 @@ function filterCandidates(rowsByArea) {
   all.forEach(r => { (byCity[r._cityKey]=byCity[r._cityKey]||[]).push(r._ppsf); (bySq[r._cityKey]=bySq[r._cityKey]||[]).push(r._sqft); });
   const med = {}, medSq = {};
   Object.keys(byCity).forEach(c => { med[c]=median(byCity[c]); medSq[c]=median(bySq[c]); });
-  const cands = all.filter(r =>
-    r._age >= 25 && r._sqft <= medSq[r._cityKey]*1.5 && r._ppsf <= med[r._cityKey]*0.85
-  ).sort((a,b) => (a._ppsf/med[a._cityKey]) - (b._ppsf/med[b._cityKey]));
-  return { candidates: cands, medians: med };
+  // Say WHY each listing failed, not just that it did. This is the first place
+  // leads get rejected — long before photo review — so without a reason here
+  // "why isn't this on my list" has no answer for most of the buy box.
+  const why = r => {
+    const m = med[r._cityKey], ms = medSq[r._cityKey];
+    if (r._age < 25) return `too new — built ${2026 - r._age}, want 25+ years old`;
+    if (r._sqft > ms * 1.5) return `much larger than the area norm (${r._sqft} sqft vs ${Math.round(ms)} median) — $/sqft comparison unreliable`;
+    if (r._ppsf > m * 0.85) {
+      const pct = Math.round(r._ppsf / m * 100);
+      return `not below market — $${r._ppsf}/sqft is ${pct}% of the ${r._cityKey} median ($${Math.round(m)}), want 85% or less`;
+    }
+    return '';
+  };
+
+  const cands = [], rejected = [];
+  for (const r of all) {
+    const reason = why(r);
+    if (reason) rejected.push({ ...r, _reason: reason, _nearness: r._ppsf / (med[r._cityKey] || 1) });
+    else cands.push(r);
+  }
+  cands.sort((a, b) => (a._ppsf / med[a._cityKey]) - (b._ppsf / med[b._cityKey]));
+  // Near-misses first: those are the ones worth questioning. A full dump of
+  // every listing in the county would bury the tab in noise.
+  rejected.sort((a, b) => a._nearness - b._nearness);
+  return { candidates: cands, medians: med, rejected: rejected };
 }
 
 const LIGHT = 70, HEAVY = 145;
