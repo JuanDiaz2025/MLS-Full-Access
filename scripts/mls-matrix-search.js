@@ -10,7 +10,8 @@
  *   PROPERTY_TYPE  e.g. "Single Family Home" (default: all types)
  *   MAX_PRICE_K    default 1500  (thousands; the "(000s)" box is checked)
  *   MIN_PRICE_K    default 0
- *   DAYS           default 45    (List Date within the last N days)
+ *   DAYS           unset by default — no List Date filter (any days-on-market).
+ *                  Set DAYS=45 to restore the old rolling window.
  *   MLS_STATE / MLS_OUT  session + screenshot paths
  *
  * Field IDs are documented in CLAUDE.md; re-introspect if a <select> is empty.
@@ -24,7 +25,7 @@ const STATUS = process.env.STATUS || 'Active';
 const PTYPE = process.env.PROPERTY_TYPE || '';
 const MINK = process.env.MIN_PRICE_K || '0';
 const MAXK = process.env.MAX_PRICE_K || '1500';
-const DAYS = parseInt(process.env.DAYS || '45', 10);
+const DAYS = parseInt(process.env.DAYS || '0', 10);   // 0 / unset = no date filter
 
 const pad = (n) => String(n).padStart(2, '0');
 const fmt = (d) => `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`;
@@ -36,9 +37,9 @@ const fmt = (d) => `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear
     process.exit(2);
   }
 
-  const from = new Date(Date.now() - DAYS * 86400000);
-  const to = new Date();
-  const dateRange = `${fmt(from)}-${fmt(to)}`;
+  const dateRange = DAYS > 0
+    ? `${fmt(new Date(Date.now() - DAYS * 86400000))}-${fmt(new Date())}`
+    : '';
 
   const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, storageState: STATE });
@@ -56,15 +57,17 @@ const fmt = (d) => `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear
     await page.fill('#Fm9_Ctrl63_TB', `${MINK}-${MAXK}`);
     await page.locator('#Fm9_Ctrl63_TB').blur();
     await page.waitForTimeout(600);
-    await page.fill('#Fm9_Ctrl1162_TB', dateRange);
-    await page.locator('#Fm9_Ctrl1162_TB').blur();
+    if (dateRange) {
+      await page.fill('#Fm9_Ctrl1162_TB', dateRange);
+      await page.locator('#Fm9_Ctrl1162_TB').blur();
+    }
     await page.waitForTimeout(2000);
 
     const count = await page.evaluate(() => {
       const m = document.body.innerText.match(/([\d,]+\+?)\s*match/i);
       return m ? m[1] : '(count not found)';
     });
-    console.log(`criteria: ${STATUS} ${COUNTY || CITY} $${MINK}-${MAXK}k listed ${dateRange}`);
+    console.log(`criteria: ${STATUS} ${COUNTY || CITY} $${MINK}-${MAXK}k listed ${dateRange || 'any date'}`);
     console.log('MATCHES:', count);
     await page.screenshot({ path: OUT + '/search-criteria.png' });
 

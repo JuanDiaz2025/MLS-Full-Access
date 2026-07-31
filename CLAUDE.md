@@ -98,11 +98,14 @@ comes back empty — the form may have changed):
 
 Reusable runner:
 ```bash
-COUNTY="San Francisco" STATUS=Active MAX_PRICE_K=1500 DAYS=45 \
+COUNTY="San Francisco" STATUS=Active MAX_PRICE_K=1500 \
   node scripts/mls-matrix-search.js
 ```
-Screenshots land in `.mls-artifacts/`. Verified example: SF · Active · ≤$1.5M ·
-listed last 45 days → **228 matches**.
+`DAYS` is optional and now **unset by default** — no List Date filter is applied,
+so the scan sees all Active listings regardless of age. Set `DAYS=45` to restore
+a rolling window. Screenshots land in `.mls-artifacts/`. Earlier verified example
+(SF · Active · ≤$1.5M · listed last 45 days) returned **228 matches**; with no
+date filter the count will be higher.
 
 ## 5. Lead investigation — Flip Scout methodology (CANONICAL)
 
@@ -116,9 +119,14 @@ headless-scrape workflow):
   San Mateo/Peninsula · Sunnyvale · Oakland · Richmond · Berkeley · San Leandro ·
   San Jose. Never change the buy box without Bryan's explicit instruction.
 - **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
-  **days-on-market > 45**, **tenant-occupied**, multi-unit, vacant lot,
-  **fire-damaged** (any listing noting a past fire / fire damage / fire-gutted interior —
-  drop even if it reads as a genuine as-is fixer).
+  **tenant-occupied**, multi-unit, vacant lot, **fire-damaged** (any listing noting a
+  past fire / fire damage / fire-gutted interior — drop even if it reads as a genuine
+  as-is fixer).
+- **Days on market: no limit (removed, temporary).** The old 45-day cap — both the
+  hard DOM drop and the List Date scan window — is lifted for now, so stale listings
+  are eligible again. A long DOM / repeated price cuts still get *flagged* on the lead
+  (they hint at a soft submarket or an overpriced property), never dropped. Restore
+  the cap on Bryan's instruction.
 - **ARV = size-matched sold comps:** median $/sqft of comps within **±20%** of
   subject sqft (widen to ±40%, then ±60% only if <3 comps), × subject sqft. Never a
   flat zip-wide median. Watch large-home / location-pocket / wrong-zip traps.

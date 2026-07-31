@@ -36,7 +36,7 @@ install (creates a desktop shortcut) or run the portable exe directly.
    **Check session** (it confirms you reached the dashboard).
 2. **Start scan** — scans the full buy box (SF · whole Peninsula @ $2M · Sunnyvale
    · San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond; Active ·
-   Single-Family · ≤ 45 days on market), then filters to below-market fixers.
+   Single-Family · any days on market), then filters to below-market fixers.
 3. **Photo review** — for each candidate the MLS window shows the full photo
    gallery. Two ways to judge:
    - **Manual (default):** click **Keep** (genuine dated fixer) or **Drop**

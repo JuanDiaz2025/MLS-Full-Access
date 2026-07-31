@@ -127,7 +127,7 @@ the feed, so everything in the sheet has already passed step one.
 
 - **MLS full-buy-box scan** (this repo): logs into MLS hourly, scans SF · the whole
   San Mateo/Peninsula · Sunnyvale · San Jose · Oakland · Berkeley · San Leandro ·
-  Hayward · Richmond (Active · SFR · ≤ 45 days; Peninsula ≤ $2.0M, else ≤ $1.5M),
+  Hayward · Richmond (Active · SFR · any days on market; Peninsula ≤ $2.0M, else ≤ $1.5M),
   photo-verifies every candidate, comps + scores, and writes qualifiers to the feed.
 - **Redfin scan** (the Flip Scout Agent repo): independent scan across the same buy
   box, also writing to the feed.

@@ -6,7 +6,8 @@
  * Env (all optional):
  *   CITIES        "County:City;County:City;..."  (default: East Bay set below)
  *   MAX_PRICE_K   default 1500  (thousands; the "(000s)" box is checked)
- *   DAYS          default 45    (List Date within the last N days)
+ *   DAYS          unset by default — no List Date filter (any days-on-market).
+ *                 Set DAYS=45 to restore the old rolling window.
  *   PROPERTY_TYPE default "Single Family Home"
  *   OUT_JSON      default <scratch or cwd>/multi-scan.json
  *
@@ -36,13 +37,13 @@ const CITIES = (process.env.CITIES || DEFAULT_CITIES).split(';').map(s => {
   return { county, city: (city && city !== '*') ? city : null, maxk: capK ? parseInt(capK, 10) : DEFAULT_MAXK };
 }).filter(c => c.county);
 const MAXK = DEFAULT_MAXK;
-const DAYS = parseInt(process.env.DAYS || '45', 10);
+const DAYS = parseInt(process.env.DAYS || '0', 10);   // 0 / unset = no date filter
 const PTYPE = process.env.PROPERTY_TYPE || 'Single Family Home';
 const OUT_JSON = process.env.OUT_JSON || `${process.cwd()}/multi-scan.json`;
 
 const pad = n => String(n).padStart(2, '0');
 const fmt = d => `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`;
-const dateRange = `${fmt(new Date(Date.now() - DAYS * 86400000))}-${fmt(new Date())}`;
+const dateRange = DAYS > 0 ? `${fmt(new Date(Date.now() - DAYS * 86400000))}-${fmt(new Date())}` : '';
 
 const scrapeGrid = page => page.evaluate(() => {
   const clean = t => (t || '').replace(/\s+/g, ' ').trim();
@@ -75,7 +76,8 @@ async function runCity(page, county, city, maxk) {
     } catch (e) { console.log('  city select failed:', city, e.message.split('\n')[0]); }
   }
   await page.fill('#Fm9_Ctrl63_TB', `0-${maxk}`); await page.locator('#Fm9_Ctrl63_TB').blur(); await page.waitForTimeout(500);
-  await page.fill('#Fm9_Ctrl1162_TB', dateRange); await page.locator('#Fm9_Ctrl1162_TB').blur(); await page.waitForTimeout(1800);
+  if (dateRange) { await page.fill('#Fm9_Ctrl1162_TB', dateRange); await page.locator('#Fm9_Ctrl1162_TB').blur(); }
+  await page.waitForTimeout(1800);
   const count = await page.evaluate(() => { const m = document.body.innerText.match(/([\d,]+\+?)\s*match/i); return m ? m[1] : '?'; });
   console.log(`\n=== ${label} (${county}) @ $${maxk}k: ${count} matches ===`);
   if (count === '0') return { city: label, county, count, rows: [] };

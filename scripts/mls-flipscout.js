@@ -3,8 +3,8 @@
  *
  * Two modes:
  *   filter  — read .mls-artifacts/multi-scan.json (from mls-multi-scan.js) → rank
- *             below-market $/sqft + older SFR, drop large-home $/sqft traps &
- *             DOM>45 → .mls-artifacts/candidates.json  (Stage 3).
+ *             below-market $/sqft + older SFR, drop large-home $/sqft traps
+ *             → .mls-artifacts/candidates.json  (Stage 3). No DOM cap.
  *   score   — read .mls-artifacts/keepers.json (photo-verified survivors, each
  *             {mls,addr,city,price,sqft,bds,age,dom}) + comps-out.json + profiles-out.json
  *             → Light/Heavy rehab, holding, dollar profit gate, labels →
@@ -48,7 +48,8 @@ function filter() {
   const bySqft = {}; for (const r of all) (bySqft[r._cityKey] = bySqft[r._cityKey] || []).push(r._sqft);
   const medSqft = {}; for (const c of Object.keys(bySqft)) medSqft[c] = median(bySqft[c]);
   const candidates = all.filter(r => {
-    if (r._dom > 45) return false;                          // hard exclusion
+    // No days-on-market exclusion — the 45-day cap is lifted for now; DOM is
+    // reported on each candidate so a stale listing can be flagged, not dropped.
     if (r._sqft > medSqft[r._cityKey] * 1.5) return false;  // large-home $/sqft trap
     if (r._age < 25) return false;                          // too new to be a dated fixer
     return r._ppsf <= med[r._cityKey] * 0.85;               // below-market $/sqft

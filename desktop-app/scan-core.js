@@ -69,7 +69,8 @@ const JS_TITLE = `document.title`;
 const num = s => { const n = parseFloat(String(s||'').replace(/[^0-9.]/g,'')); return isFinite(n)?n:0; };
 const median = a => { const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length? (s.length%2? s[m] : Math.round((s[m-1]+s[m])/2)) : 0; };
 
-// Stage-3 filter: below-market $/sf + older SFR; drop DOM>45 and large-home traps.
+// Stage-3 filter: below-market $/sf + older SFR; drop large-home traps.
+// No days-on-market cap — the 45-day rule is lifted for now.
 function filterCandidates(rowsByArea) {
   let all = [];
   for (const key of Object.keys(rowsByArea)) {
@@ -85,7 +86,7 @@ function filterCandidates(rowsByArea) {
   const med = {}, medSq = {};
   Object.keys(byCity).forEach(c => { med[c]=median(byCity[c]); medSq[c]=median(bySq[c]); });
   const cands = all.filter(r =>
-    r._dom <= 45 && r._age >= 25 && r._sqft <= medSq[r._cityKey]*1.5 && r._ppsf <= med[r._cityKey]*0.85
+    r._age >= 25 && r._sqft <= medSq[r._cityKey]*1.5 && r._ppsf <= med[r._cityKey]*0.85
   ).sort((a,b) => (a._ppsf/med[a._cityKey]) - (b._ppsf/med[b._cityKey]));
   return { candidates: cands, medians: med };
 }

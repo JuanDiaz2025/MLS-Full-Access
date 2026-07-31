@@ -105,11 +105,16 @@ async function scanArea(area) {
     await js(setInput(core.FIELDS.cityBox, area.city)); await sleep(700);
     await js(selectByLabel(core.FIELDS.cityList, area.city)); await sleep(900);
   }
-  const days = 45;
-  const to = new Date(); const from = new Date(Date.now() - days * 86400000);
+  // No List Date filter — the 45-day window is lifted for now. Set DAYS to a
+  // positive number to restore a rolling window.
+  const days = parseInt(process.env.DAYS || '0', 10);
   const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   await js(setInput(core.FIELDS.price, `0-${area.maxk}`)); await sleep(500);
-  await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`)); await sleep(1600);
+  if (days > 0) {
+    const to = new Date(); const from = new Date(Date.now() - days * 86400000);
+    await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`));
+  }
+  await sleep(1600);
   const count = await js(core.JS_MATCH_COUNT).catch(() => '?');
   log(`  ${label}: ${count} matches`);
   if (count === '0') return { city: label, county: area.county, count, rows: [] };

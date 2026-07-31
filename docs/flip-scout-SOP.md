@@ -33,11 +33,13 @@ Full list: `CONFIG["target_zips"]` in `flip_scout_redfin.py`. Changes to the
 buy box only happen on Bryan's explicit instruction — never expand or shrink
 it unilaterally.
 
-**Max days on market: 45.** Anything with a confirmed days-on-market over 45
-is excluded outright (not just flagged) — `MAX_DAYS_ON_MARKET` in
-`flip_scout_redfin.py`. Listings with unverifiable DOM (no usable Sale
-History table) are not excluded on this basis, since there's nothing to
-compare against.
+**Max days on market: none (removed, temporary).** The former hard 45-day cap
+(`MAX_DAYS_ON_MARKET` in `flip_scout_redfin.py`) is lifted — no listing is
+excluded for being on the market too long, and the scan no longer applies a
+List Date window. Days-on-market is still *reported and flagged* (see the DOM /
+price-cut note in §4), because a stale listing or repeated cuts can signal a soft
+submarket or an overpriced property — but that is a flag to investigate, not a
+drop. Restore the cap only on Bryan's explicit instruction.
 
 **Tenant-occupied listings are excluded automatically**, same tier as
 already-renovated/multi-unit/vacant-lot — `TENANT_OCCUPIED_FLAGS` in
@@ -168,8 +170,8 @@ anything.
 run (and full-scan run) appends a record to `flip_scout/kpi_log.json` —
 how many new listings were checked, how many qualified (generated), and a
 breakdown of why the rest were excluded (multi-unit, already-renovated,
-vacant-land, tenant-occupied, stale >45 days, data-incomplete, below profit
-threshold). Manual corrections (a false positive caught after the fact, like
+vacant-land, tenant-occupied, data-incomplete, below profit threshold — the
+"stale >45 days" exclusion no longer fires, see §2). Manual corrections (a false positive caught after the fact, like
 an ARV contradicted by Redfin's own estimate) are logged separately as
 `manual_removal` events, distinct from the automated pre-feed exclusions.
 Run `python3 flip_scout/kpi_report.py` for a daily rollup (add `--days N` to
@@ -259,6 +261,14 @@ offer:
 
 ## 9. Revision history (major changes, most recent first)
 
+- **Removed the 45-day days-on-market rule (temporary, per Bryan).** Both halves
+  are gone: the hard `DOM > 45` exclusion in the filter stage, and the 45-day
+  List Date window the Matrix scan used to apply (`DAYS` now defaults to unset =
+  no date filter, in `mls-multi-scan.js`, `mls-matrix-search.js`, and the desktop
+  app). Older/stale listings are back in scope. A long DOM or repeated price cuts
+  are still *flagged* on the lead as a soft-submarket / overpricing signal — they
+  just no longer drop it. Restore with `DAYS=45` and by re-adding the filter
+  condition.
 - Added `MLS_ACQUISITION_TRAINING.md` — Twin Home Buyer's canonical playbook
   for the human acquisition process after a lead clears this pipeline
   (comp-analysis → MLS/Paragon remarks → ownership/liens → REI BlackBook →
