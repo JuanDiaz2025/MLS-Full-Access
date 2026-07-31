@@ -21,6 +21,28 @@ const cfg = {
 };
 ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
 
+// Shipped defaults for the sheet connection, so section 6 arrives pre-filled
+// instead of blank. Bundled next to main.js; missing/!valid JSON just means
+// "no defaults", never a crash on startup.
+function sheetDefaults() {
+  try {
+    const p = path.join(__dirname, 'sheet-config.json');
+    if (!fs.existsSync(p)) return {};
+    const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return { url: j.url || '', secret: j.secret || '', autoPush: !!j.autoPush };
+  } catch (_) { return {}; }
+}
+ipcMain.handle('sheet-defaults', () => sheetDefaults());
+
+// Seed the live config at startup so an auto-push works even if the renderer
+// never touches section 6.
+(() => {
+  const d = sheetDefaults();
+  if (d.url) cfg.sheetUrl = d.url;
+  if (d.secret) cfg.sheetSecret = d.secret;
+  if (d.autoPush) cfg.autoPush = true;
+})();
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const send = (ch, payload) => controlWin && !controlWin.isDestroyed() && controlWin.webContents.send(ch, payload);
 const log = (msg, level = 'info') => send('log', { msg, level, t: Date.now() });

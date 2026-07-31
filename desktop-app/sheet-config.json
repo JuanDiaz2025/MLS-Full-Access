@@ -1,0 +1,6 @@
+{
+  "_comment": "Defaults the app pre-fills into section 6 on first run. The secret must match CONFIG.SHARED_SECRET in apps-script/flip-scout-agent-sheet.gs. Leave url empty until the Apps Script web app is deployed - Google only mints the /exec URL at deploy time - then paste it once in the app (it is remembered) or fill it in here and rebuild.",
+  "url": "",
+  "secret": "ZM85Wtbzf3lx7_412HVvII5_ifAVCzIA",
+  "autoPush": true
+}

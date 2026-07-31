@@ -180,10 +180,26 @@
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
 
-  // --- sheet settings: remembered locally so they survive an app restart ---
+  // --- sheet settings: shipped defaults, then whatever was saved locally ---
   const SHEET_KEYS = ['sheetUrl','sheetSecret'];
-  SHEET_KEYS.forEach(k => { const v = localStorage.getItem('fs.'+k); if (v) $(k).value = v; });
-  $('autoPush').checked = localStorage.getItem('fs.autoPush') === '1';
+  (async () => {
+    const d = await window.fs.sheetDefaults();          // from sheet-config.json
+    if (d.url) $('sheetUrl').value = d.url;
+    if (d.secret) $('sheetSecret').value = d.secret;
+    if (d.autoPush) $('autoPush').checked = true;
+    // Anything the user saved wins over the shipped default.
+    SHEET_KEYS.forEach(k => { const v = localStorage.getItem('fs.'+k); if (v) $(k).value = v; });
+    const saved = localStorage.getItem('fs.autoPush');
+    if (saved !== null) $('autoPush').checked = saved === '1';
+    pushConfig();
+    const box = $('sheetStatus');
+    if ($('sheetUrl').value && $('sheetSecret').value) {
+      box.textContent = 'Pre-filled — click Test connection to verify.';
+    } else if ($('sheetSecret').value) {
+      box.textContent = 'Secret pre-filled. Paste the Apps Script /exec URL above (⚡ Flip Scout → Connection info in the sheet).';
+      box.className = 'status warn';
+    }
+  })();
   function saveSheetCfg(){
     SHEET_KEYS.forEach(k => localStorage.setItem('fs.'+k, $(k).value));
     localStorage.setItem('fs.autoPush', $('autoPush').checked ? '1' : '0');

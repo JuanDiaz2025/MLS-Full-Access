@@ -28,7 +28,9 @@ const CONFIG = {
   SPREADSHEET_ID: '1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4',
   SHEET_NAME: 'Leads',                 // created by setupSheet() if missing
   FALLBACK_GID: 0,                     // the starting Sheet1, used if SHEET_NAME is absent
-  SHARED_SECRET: 'CHANGE_ME_TO_A_LONG_RANDOM_STRING',
+  // Pre-generated so the script and the desktop app already agree — nothing to
+  // type. Replace it (here AND in desktop-app/sheet-config.json) if it leaks.
+  SHARED_SECRET: 'ZM85Wtbzf3lx7_412HVvII5_ifAVCzIA',
 };
 
 /** Canonical column order. Changing this is safe: rows are written by header

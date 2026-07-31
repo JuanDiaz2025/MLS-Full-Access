@@ -12,5 +12,6 @@ contextBridge.exposeInMainWorld('fs', {
   export: (leads) => ipcRenderer.invoke('export', { leads }),
   pushSheet: (leads, onlySurfacing) => ipcRenderer.invoke('push-sheet', { leads, onlySurfacing }),
   testSheet: () => ipcRenderer.invoke('test-sheet'),
+  sheetDefaults: () => ipcRenderer.invoke('sheet-defaults'),
   on: (channel, fn) => ipcRenderer.on(channel, (_e, payload) => fn(payload)),
 });
