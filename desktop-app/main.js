@@ -602,6 +602,8 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
     // and a day with three aborted runs should look different from a quiet one.
     const day = recordKpi(runKpi);
     send('kpi', { today: day, history: kpiReport() });
+    // Only attempt the KPI push when the sheet is actually connected — an
+    // unconfigured app must not log a failure after every single run.
     if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) pushKpi(day).catch(() => {});
   }
 });
@@ -615,8 +617,19 @@ ipcMain.on('decide', (_e, { mls, decision }) => { if (pendingDecision[mls]) pend
 // Posts to the Apps Script web app in apps-script/flip-scout-agent-sheet.gs.
 // The script owns de-duping (by MLS #) and the derived money columns, so the
 // app sends raw values and lets the sheet be the single source of truth.
+/** Say which half is missing — "not configured" tells you nothing. */
+function notConfiguredMsg() {
+  if (!cfg.sheetUrl && !cfg.sheetSecret) return 'no web app URL or secret — see section 7';
+  if (!cfg.sheetUrl) {
+    return 'no web app URL yet. In the sheet: ⚡ Flip Scout → Connect the app '
+      + '(deploy the script first: Deploy → New deployment → Web app, Execute as Me, '
+      + 'Anyone with the link), then paste the /exec URL into section 7.';
+  }
+  return 'no shared secret — paste it into section 7 (⚡ Flip Scout → Connect the app shows it).';
+}
+
 async function pushLeads(leads) {
-  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: 'sheet URL / secret not set' };
+  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: notConfiguredMsg(), unconfigured: true };
   if (!leads || !leads.length) return { ok: true, added: 0, skipped: 0 };
   try {
     const r = await fetch(cfg.sheetUrl, {
@@ -683,7 +696,7 @@ ipcMain.handle('test-sheet', async () => {
 // Those MLS #s come back here and go into the ledger, so a deleted lead is
 // never scanned, reviewed, or re-pushed again.
 async function syncRejectedIntoLedger() {
-  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: 'sheet not configured' };
+  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: notConfiguredMsg(), unconfigured: true };
   try {
     const u = cfg.sheetUrl + (cfg.sheetUrl.indexOf('?') >= 0 ? '&' : '?')
       + 'secret=' + encodeURIComponent(cfg.sheetSecret) + '&rejected=1';
@@ -749,7 +762,7 @@ ipcMain.handle('kpi-export', async (_e, { days }) => {
 
 /** Mirror the day's numbers onto the sheet's KPI tab (upserted by date). */
 async function pushKpi(day) {
-  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: 'sheet not configured' };
+  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: notConfiguredMsg(), unconfigured: true };
   try {
     const r = await fetch(cfg.sheetUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, redirect: 'follow',
@@ -763,7 +776,10 @@ async function pushKpi(day) {
 ipcMain.handle('kpi-push', async () => {
   const rep = kpiReport(1);
   const r = await pushKpi(rep.today);
-  log(r.ok ? 'KPI sent to the sheet.' : 'KPI push failed: ' + r.error, r.ok ? 'good' : 'warn');
+  // An unconfigured sheet is a setup step, not a failure — say it once, plainly.
+  log(r.ok ? 'KPI sent to the sheet.'
+    : (r.unconfigured ? 'Sheet not connected yet: ' + r.error : 'KPI push failed: ' + r.error),
+    r.ok ? 'good' : 'warn');
   return r;
 });
 

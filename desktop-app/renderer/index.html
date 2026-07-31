@@ -326,13 +326,18 @@
   async function refreshKpi(){ renderKpi(await window.fs.kpiReport(14)); refreshLedger(); }
   $('syncRejected').onclick = async () => {
     const r = await window.fs.syncRejected();
-    log(r.ok ? `Reviewer rejections synced: ${r.added} new of ${r.total} total.` : 'Sync failed: '+r.error, r.ok?'good':'warn');
+    log(r.ok ? `Reviewer rejections synced: ${r.added} new of ${r.total} total.`
+             : (r.unconfigured ? 'Sheet not connected yet: '+r.error : 'Sync failed: '+r.error),
+        r.ok?'good':'warn');
     refreshLedger();
   };
   $('ledgerClear').onclick = async () => { const r = await window.fs.ledgerClear(); if(r.ok){ log('Ledger cleared.','warn'); refreshLedger(); } };
   $('kpiRefresh').onclick = refreshKpi;
   $('kpiExport').onclick = async () => { const r = await window.fs.kpiExport(90); if(r.ok) log('KPI exported → '+r.filePath,'good'); };
-  $('kpiPush').onclick = async () => { const r = await window.fs.kpiPush(); log(r.ok?'KPI sent to the sheet.':'KPI push failed: '+r.error, r.ok?'good':'warn'); };
+  $('kpiPush').onclick = async () => {
+    const r = await window.fs.kpiPush();
+    if (!r.ok && r.unconfigured) { $('sheetStatus').textContent = r.error; $('sheetStatus').className='status warn'; }
+  };
   window.fs.on('kpi', p => renderKpi({ ...(p.history||{}), today: p.today }));
   refreshKpi();
 

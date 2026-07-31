@@ -12,13 +12,15 @@
  *
  * SETUP (once):
  *   1. Open the sheet > Extensions > Apps Script, paste this file, Save.
- *   2. Edit CONFIG.SHARED_SECRET below to a long random string.
- *   3. Run setupSheet() once (authorize when prompted) — writes + formats headers.
- *   4. Deploy > New deployment > Web app
+ *   2. Deploy > New deployment > Web app
  *        Execute as: Me
  *        Who has access: Anyone with the link
- *      Copy the /exec URL.
- *   5. Paste that URL + the same secret into the desktop app (section 6).
+ *   3. Back on the sheet: ⚡ Flip Scout > Connect the app. That builds every tab
+ *      and shows the URL + secret to paste into section 7 of the desktop app.
+ *
+ * The secret below is pre-set and already matches the app, so there is nothing
+ * to type. The menu is deliberately three items — everything else happens on
+ * its own.
  *
  * The "Anyone with the link" setting is what lets the app post without an OAuth
  * dance; the shared secret is what actually guards it. Treat the URL + secret as
@@ -504,27 +506,44 @@ function addRejected_(items, who) {
 // Adds a "Flip Scout" menu to the sheet's toolbar. Reload the sheet once after
 // saving the script for the menu to appear.
 
+// Three items, nothing else. Everything the old menu did that mattered either
+// happens automatically now or lives inside "Connect the app".
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('⚡ Flip Scout')
     .addItem('❌ Reject selected lead(s)', 'menuRejectSelected')
-    .addItem('✅ Mark selected as reviewed (keep)', 'menuApproveSelected')
-    .addItem('📊 My review numbers today', 'menuReviewerToday')
-    .addSeparator()
-    .addItem('Set up / repair sheet', 'menuSetup')
-    .addSeparator()
-    .addItem('Add a test lead', 'menuTestAppend')
-    .addItem('Remove test rows', 'menuRemoveTests')
-    .addSeparator()
-    .addItem('Sort by profit (Light)', 'menuSortByProfit')
-    .addItem('Remove duplicates', 'menuDedupe')
-    .addItem('Remove unprofitable leads', 'menuRemoveUnprofitable')
-    .addSeparator()
-    .addItem('Lead count', 'menuStats')
-    .addItem('Set up KPI tab', 'menuSetupKpi')
-    .addItem('Connection info', 'menuConnectionInfo')
-    .addSeparator()
-    .addItem('Clear ALL leads', 'menuClearAll')
+    .addItem('📊 Today\'s numbers', 'menuReviewerToday')
+    .addItem('🔌 Connect the app', 'menuConnect')
     .addToUi();
+}
+
+/**
+ * One click: build/repair every tab, then show the two values the desktop app
+ * needs. This replaces the old set-up / KPI-tab / connection-info items.
+ */
+function menuConnect() {
+  runMenu_('Connect the app', () => {
+    setupSheet();       // Leads tab
+    kpiSheet_();        // KPI tab
+    rejectedSheet_();   // Rejected tab
+
+    let url = '';
+    try { url = ScriptApp.getService().getUrl() || ''; } catch (e) {}
+    const secretOk = CONFIG.SHARED_SECRET && CONFIG.SHARED_SECRET !== 'CHANGE_ME_TO_A_LONG_RANDOM_STRING';
+
+    if (!url) {
+      return 'Tabs are ready (Leads, KPI, Rejected).\n\n'
+        + 'The app is NOT connected yet — this script has not been deployed.\n\n'
+        + 'Deploy > New deployment > Web app\n'
+        + '   Execute as: Me\n'
+        + '   Who has access: Anyone with the link\n'
+        + 'Then run this again to get the link.';
+    }
+    return 'Tabs ready (Leads, KPI, Rejected).\n\n'
+      + 'Paste these two into section 7 of the FlipScout app:\n\n'
+      + 'URL:\n' + url + '\n\n'
+      + 'Secret:\n' + (secretOk ? CONFIG.SHARED_SECRET : '⚠ still the placeholder — edit CONFIG.SHARED_SECRET at the top of this script')
+      + '\n\nThen click "Test connection" in the app.';
+  });
 }
 
 /** Every menu action runs through here so a failure shows a readable dialog
@@ -590,18 +609,6 @@ function menuRejectSelected() {
   });
 }
 
-function menuApproveSelected() {
-  let sel;
-  const ui = SpreadsheetApp.getUi();
-  try { sel = selectedLeadRows_(); }
-  catch (err) { ui.alert('Mark as reviewed', String(err.message || err), ui.ButtonSet.OK); return; }
-  runMenu_('Mark as reviewed', () => {
-    const k = bumpReviewerKpi_('Reviewer Kept', sel.rows.length, safeUser_());
-    return 'Marked ' + sel.rows.length + ' lead(s) as reviewed and kept.\n'
-      + 'Today\'s reviewed-kept count: ' + k.value;
-  });
-}
-
 function menuReviewerToday() {
   runMenu_('My review numbers today', () => {
     const sh = kpiSheet_();
@@ -626,141 +633,6 @@ function menuReviewerToday() {
 /** Effective user can be blank depending on how the script is authorized. */
 function safeUser_() {
   try { return Session.getActiveUser().getEmail() || ''; } catch (e) { return ''; }
-}
-
-function menuSetup() { runMenu_('Set up sheet', () => setupSheet()); }
-
-function menuTestAppend() {
-  runMenu_('Add a test lead', () => {
-    const r = appendLeads([{
-      score: 8, recommendation: 'Strong Deal', flipQuality: 'Good Flip',
-      mls: 'TEST' + Math.floor(Math.random() * 100000),
-      address: '1234 Test St', city: 'Oakland', zip: '94601',
-      beds: 3, baths: 2, sqft: 1400, lotSqft: 4000, yearBuilt: 1950, dom: 12,
-      price: 600000, arv: 1000000, rehabLight: 98000, rehabHeavy: 203000, holding: 18000,
-      arvBasis: '±20% band, 7 comps @ $714/sf', risks: 'Test row — safe to delete',
-      link: 'https://example.com/test-listing',
-    }]);
-    const added = r.filter(x => !x.skipped).length;
-    return added ? 'Added 1 test row. Use "Remove test rows" to clear it.'
-                 : 'Nothing added (duplicate): ' + JSON.stringify(r[0]);
-  });
-}
-
-function menuRemoveTests() {
-  runMenu_('Remove test rows', () => {
-    const n = deleteRowsWhere_((get) => String(get('MLS #')).indexOf('TEST') === 0);
-    return n ? 'Removed ' + n + ' test row(s).' : 'No test rows found.';
-  });
-}
-
-function menuSortByProfit() {
-  runMenu_('Sort by profit', () => {
-    const sheet = getSheet_(), h = header_(sheet);
-    const end = lastDataRow_(sheet, h);
-    if (end <= h.row) return 'No leads to sort.';
-    const col = h.idx['Gross Profit (Light)'];
-    if (col == null) return 'Column "Gross Profit (Light)" not found.';
-    sheet.getRange(h.row + 1, 1, end - h.row, sheet.getLastColumn())
-      .sort({ column: col + 1, ascending: false });
-    return 'Sorted ' + (end - h.row) + ' lead(s), highest profit first.';
-  });
-}
-
-function menuDedupe() {
-  runMenu_('Remove duplicates', () => {
-    const seen = {};
-    const n = deleteRowsWhere_((get) => {
-      const k = String(get('MLS #') || (get('Address') + '|' + get('City'))).trim().toUpperCase();
-      if (!k || k === '|') return false;
-      if (seen[k]) return true;
-      seen[k] = true; return false;
-    });
-    return n ? 'Removed ' + n + ' duplicate row(s).' : 'No duplicates found.';
-  });
-}
-
-function menuRemoveUnprofitable() {
-  const ui = SpreadsheetApp.getUi();
-  const ok = ui.alert('Remove unprofitable leads',
-    'Delete every lead whose Gross Profit (Light) is 0 or negative?', ui.ButtonSet.YES_NO);
-  if (ok !== ui.Button.YES) return;
-  runMenu_('Remove unprofitable leads', () => {
-    const n = deleteRowsWhere_((get) => num_(get('Gross Profit (Light)')) <= 0);
-    return n ? 'Removed ' + n + ' lead(s).' : 'Nothing to remove — all leads are profitable.';
-  });
-}
-
-function menuStats() {
-  runMenu_('Lead count', () => {
-    const sheet = getSheet_(), h = header_(sheet);
-    const end = lastDataRow_(sheet, h);
-    const n = Math.max(0, end - h.row);
-    if (!n) return 'No leads yet.';
-    const recCol = h.idx['Recommendation'];
-    const counts = {};
-    if (recCol != null) {
-      sheet.getRange(h.row + 1, recCol + 1, n, 1).getValues()
-        .forEach(r => { const k = String(r[0]).trim() || '(blank)'; counts[k] = (counts[k] || 0) + 1; });
-    }
-    return n + ' lead(s)\n' + Object.keys(counts).map(k => '  ' + k + ': ' + counts[k]).join('\n');
-  });
-}
-
-function menuSetupKpi() {
-  runMenu_('Set up KPI tab', () => {
-    const sh = kpiSheet_();
-    const n = Math.max(0, sh.getLastRow() - 1);
-    return 'KPI tab ready — ' + n + ' day(s) recorded. The app posts today\'s totals '
-      + 'after every scan (one row per day, updated in place).';
-  });
-}
-
-function menuConnectionInfo() {
-  runMenu_('Connection info', () => {
-    const secretSet = CONFIG.SHARED_SECRET && CONFIG.SHARED_SECRET !== 'CHANGE_ME_TO_A_LONG_RANDOM_STRING';
-    let url = '(not deployed yet)';
-    try { url = ScriptApp.getService().getUrl() || url; } catch (e) {}
-    return 'Web app URL:\n' + url +
-      '\n\nShared secret: ' + (secretSet ? 'set ✓' : '⚠ still the placeholder — edit CONFIG.SHARED_SECRET') +
-      '\n\nPaste both into section 6 of the FlipScout app.' +
-      '\n\nIf the URL says "not deployed yet": Deploy > New deployment > Web app,' +
-      ' Execute as Me, Access "Anyone with the link".';
-  });
-}
-
-function menuClearAll() {
-  const ui = SpreadsheetApp.getUi();
-  const sheet = getSheet_(), h = header_(sheet);
-  const n = Math.max(0, lastDataRow_(sheet, h) - h.row);
-  if (!n) { ui.alert('Clear ALL leads', 'The sheet is already empty.', ui.ButtonSet.OK); return; }
-  const ok = ui.alert('Clear ALL leads',
-    'Delete all ' + n + ' lead row(s)? The header and formatting are kept. This cannot be undone.',
-    ui.ButtonSet.YES_NO);
-  if (ok !== ui.Button.YES) return;
-  runMenu_('Clear ALL leads', () => {
-    sheet.deleteRows(h.row + 1, n);
-    return 'Deleted ' + n + ' lead row(s).';
-  });
-}
-
-/** Shared row-deleting helper. `pred(get)` receives a column accessor and
- *  returns true to delete. Walks bottom-up so indices stay valid. */
-function deleteRowsWhere_(pred) {
-  const sheet = getSheet_(), h = header_(sheet);
-  const end = lastDataRow_(sheet, h);
-  if (end <= h.row) return 0;
-  const n = end - h.row;
-  const width = sheet.getLastColumn();
-  const values = sheet.getRange(h.row + 1, 1, n, width).getValues();
-
-  const doomed = [];
-  for (let i = 0; i < n; i++) {
-    const get = col => (h.idx[col] == null ? '' : values[i][h.idx[col]]);
-    if (pred(get)) doomed.push(h.row + 1 + i);
-  }
-  for (let i = doomed.length - 1; i >= 0; i--) sheet.deleteRow(doomed[i]);
-  return doomed.length;
 }
 
 // ------------------------------------------------------------------ utils ----
