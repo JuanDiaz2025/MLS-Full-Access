@@ -20,7 +20,20 @@ const cfg = {
   readSeconds: 6,                                                      // dwell per listing
   sheetUrl: '', sheetSecret: '', autoPush: false,                      // Flip Scout Agent sheet
 };
-ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
+/** Apps Script hands out two URL shapes for the same deployment. The
+ *  /a/macros/<domain>/ one only works for signed-in Workspace users, so rewrite
+ *  it to the public form rather than letting it fail confusingly. */
+function normalizeExecUrl(u) {
+  const s = String(u || '').trim();
+  const m = s.match(/^https:\/\/script\.google\.com\/a\/macros\/[^/]+\/s\/([^/]+)\/exec/i);
+  return m ? `https://script.google.com/macros/s/${m[1]}/exec` : s;
+}
+
+ipcMain.on('set-config', (_e, c) => {
+  const next = Object.assign({}, c || {});
+  if (next.sheetUrl) next.sheetUrl = normalizeExecUrl(next.sheetUrl);
+  Object.assign(cfg, next);
+});
 
 // Shipped defaults for the sheet connection, so section 6 arrives pre-filled
 // instead of blank. Bundled next to main.js; missing/!valid JSON just means
@@ -30,7 +43,7 @@ function sheetDefaults() {
     const p = path.join(__dirname, 'sheet-config.json');
     if (!fs.existsSync(p)) return {};
     const j = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return { url: j.url || '', secret: j.secret || '', autoPush: !!j.autoPush };
+    return { url: normalizeExecUrl(j.url || ''), secret: j.secret || '', autoPush: !!j.autoPush };
   } catch (_) { return {}; }
 }
 ipcMain.handle('sheet-defaults', () => sheetDefaults());
@@ -617,6 +630,28 @@ ipcMain.on('decide', (_e, { mls, decision }) => { if (pendingDecision[mls]) pend
 // Posts to the Apps Script web app in apps-script/flip-scout-agent-sheet.gs.
 // The script owns de-duping (by MLS #) and the derived money columns, so the
 // app sends raw values and lets the sheet be the single source of truth.
+/**
+ * The endpoint answered with HTML instead of JSON. By far the most common
+ * cause is a deployment whose access is set to the Workspace domain rather
+ * than "Anyone" — Google then serves a sign-in page, which the app cannot get
+ * past because it posts without a Google login. Name that specifically.
+ */
+function describeHtmlReply(text) {
+  const t = String(text || '');
+  if (/accounts\.google\.com|AccountChooser|Sign in - Google/i.test(t)) {
+    return 'Google returned a SIGN-IN PAGE, so the deployment is not public. '
+      + 'In the Apps Script editor: Deploy → Manage deployments → edit (pencil) → '
+      + 'set "Who has access" to Anyone → Deploy. A URL containing '
+      + '/a/macros/<your-domain>/ is the domain-restricted form and will always '
+      + 'hit this wall.';
+  }
+  if (/Script function not found|not found/i.test(t)) {
+    return 'The deployment does not expose doGet/doPost — redeploy the current '
+      + 'version (Deploy → Manage deployments → edit → Version: New version).';
+  }
+  return 'Expected JSON but got an HTML page back from the web app URL.';
+}
+
 /** Say which half is missing — "not configured" tells you nothing. */
 function notConfiguredMsg() {
   if (!cfg.sheetUrl && !cfg.sheetSecret) return 'no web app URL or secret — see section 7';
@@ -653,10 +688,7 @@ async function pushLeads(leads) {
     });
     const text = await r.text();
     let j = {};
-    try { j = JSON.parse(text); } catch (_) {
-      // A login page instead of JSON means the deployment is not public.
-      return { ok: false, error: 'non-JSON reply — check the web app is deployed with access "Anyone with the link"' };
-    }
+    try { j = JSON.parse(text); } catch (_) { return { ok: false, error: describeHtmlReply(text) }; }
     if (!j.ok) return { ok: false, error: j.error || 'unknown error' };
     return { ok: true, added: j.added || 0, skipped: j.skipped || 0 };
   } catch (e) {
@@ -680,9 +712,7 @@ ipcMain.handle('test-sheet', async () => {
     const r = await fetch(u, { redirect: 'follow' });
     const text = await r.text();
     let j = {};
-    try { j = JSON.parse(text); } catch (_) {
-      return { ok: false, error: 'non-JSON reply — deploy the web app with access "Anyone with the link"' };
-    }
+    try { j = JSON.parse(text); } catch (_) { return { ok: false, error: describeHtmlReply(text) }; }
     if (!j.ok) return { ok: false, error: j.error || 'rejected' };
     if ((j.missingColumns || []).length) {
       return { ok: false, error: 'sheet is missing columns: ' + j.missingColumns.join(', ') + ' — run setupSheet()' };
