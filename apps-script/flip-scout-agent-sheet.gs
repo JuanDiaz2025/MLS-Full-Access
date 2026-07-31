@@ -1,3 +1,41 @@
+function applyConditionalFormatting_(sheet, idx, maxRows) {
+  const rules = [];
+  const at = c => (idx[c] == null ? null : sheet.getRange(2, idx[c] + 1, maxRows, 1));
+  const tint = (rng, text, bg, fg) => {
+    if (!rng) return;
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text)
+      .setBackground(bg).setFontColor(fg).setRanges([rng]).build());
+  };
+
+  // Status is the at-a-glance column now that the deal-math block is off sheet.
+  const st = at('Status');
+  tint(st, 'Needs Comps', '#e8eaf6', '#1a237e');
+  tint(st, 'Strong Deal', '#d9ead3', '#274e13');
+  tint(st, 'Marginal', '#fff2cc', '#7f6000');
+
+  // These only exist when comps are switched back on; guarded so their absence
+  // is a no-op rather than a crash.
+  const rec = at('Recommendation');
+  tint(rec, 'Strong Deal', '#d9ead3', '#274e13');
+  tint(rec, 'Marginal', '#fff2cc', '#7f6000');
+  const q = at('Flip Quality');
+  tint(q, 'Good Flip', '#d9ead3', '#274e13');
+  tint(q, 'Flip W/ Caution', '#fce5cd', '#783f04');
+  tint(q, 'Negative', '#f4cccc', '#990000');
+  ['Gross Profit (Light)', 'Gross Profit (Heavy)'].forEach(c => {
+    const r = at(c);
+    if (r) rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0)
+      .setFontColor('#990000').setRanges([r]).build());
+  });
+
+  // A long DOM is a flag, never a drop (the 45-day cap was removed).
+  const dom = at('DOM');
+  if (dom) rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(90)
+    .setBackground('#fce5cd').setRanges([dom]).build());
+
+  sheet.setConditionalFormatRules(rules);
+}
+
 /**
  * Twin Home Buyer — "Flip Scout Agent" sheet endpoint.
  *
@@ -49,12 +87,17 @@ const CONFIG = {
  *  sits at the far right and stays blank until comps are switched back on, so
  *  the sheet never shows an empty ARV where a real one should be. */
 const HEADERS = [
-  // --- what the scan actually knows ---
   'Status', 'MLS #', 'Address', 'City', 'Zip',
   'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
   'Purchase Price', '$/SqFt',
   'Notes', 'MLS Link', 'First Added',
-  // --- filled in only when comps run ---
+];
+
+// The deal-math columns are OFF the sheet while comping is off. They were
+// showing Total Cost = the purchase price (rehab and holding are zero with no
+// comps), which reads like a calculated figure and is not one. Re-add this
+// block to HEADERS when comps come back on.
+const COMP_ONLY_HEADERS = [
   'Estimated ARV (After Repair)', 'ARV Basis',
   'Rehab Cost (Light)', 'Rehab Cost (Heavy)', 'Holding Costs (3mo)',
   'Total Cost (Light)', 'Total Cost (Heavy)',
@@ -215,14 +258,18 @@ function compute_(d) {
   const rl = num_(d['Rehab Cost (Light)']);
   const rh = num_(d['Rehab Cost (Heavy)']);
   const hold = num_(d['Holding Costs (3mo)']);
-  if (blank_(d['Total Cost (Light)']) && p) d['Total Cost (Light)'] = p + rl + hold;
-  if (blank_(d['Total Cost (Heavy)']) && p) d['Total Cost (Heavy)'] = p + rh + hold;
-  if (blank_(d['Gross Profit (Light)']) && arv) d['Gross Profit (Light)'] = arv - num_(d['Total Cost (Light)']);
-  if (blank_(d['Gross Profit (Heavy)']) && arv) d['Gross Profit (Heavy)'] = arv - num_(d['Total Cost (Heavy)']);
-  // Max offer = ARV minus light rehab, holding, and the required profit margin.
-  if (blank_(d['Max Offer']) && arv) {
-    const gate = arv >= 1e6 ? 100000 : arv >= 500000 ? 70000 : 50000;
-    d['Max Offer'] = Math.round(arv - rl - hold - gate);
+  // Only derive the money columns when there is an ARV to derive them FROM.
+  // Without comps, price + 0 + 0 would write Total Cost = purchase price,
+  // which looks calculated and is meaningless.
+  if (arv) {
+    if (blank_(d['Total Cost (Light)'])) d['Total Cost (Light)'] = p + rl + hold;
+    if (blank_(d['Total Cost (Heavy)'])) d['Total Cost (Heavy)'] = p + rh + hold;
+    if (blank_(d['Gross Profit (Light)'])) d['Gross Profit (Light)'] = arv - num_(d['Total Cost (Light)']);
+    if (blank_(d['Gross Profit (Heavy)'])) d['Gross Profit (Heavy)'] = arv - num_(d['Total Cost (Heavy)']);
+    if (blank_(d['Max Offer'])) {
+      const gate = arv >= 1e6 ? 100000 : arv >= 500000 ? 70000 : 50000;
+      d['Max Offer'] = Math.round(arv - rl - hold - gate);
+    }
   }
 }
 
@@ -328,6 +375,11 @@ function setupSheet() {
     }
   }
   if (sheet.getMaxColumns() < HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), HEADERS.length - sheet.getMaxColumns());
+
+  // Clear stale headers from the previous, longer layout so removed comp
+  // columns do not linger to the right of the table.
+  const extra = sheet.getLastColumn() - HEADERS.length;
+  if (extra > 0) sheet.getRange(1, HEADERS.length + 1, 1, extra).clearContent();
 
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS])
     .setFontWeight('bold').setBackground('#1f3864').setFontColor('#ffffff')
