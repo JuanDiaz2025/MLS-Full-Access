@@ -61,6 +61,9 @@ function doPost(e) {
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (body.secret !== CONFIG.SHARED_SECRET) return json_({ ok: false, error: 'unauthorized' });
 
+    // A KPI post carries the day's counters instead of leads.
+    if (body.kpi) return json_({ ok: true, kpi: upsertKpi_(body.kpi) });
+
     // Accept a single lead or a batch — the app pushes a whole scan at once.
     const leads = body.leads || (body.lead ? [body.lead] : []);
     if (!leads.length) return json_({ ok: false, error: 'no lead(s) in request' });
@@ -81,6 +84,8 @@ function doPost(e) {
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.secret !== CONFIG.SHARED_SECRET) return json_({ ok: false, error: 'unauthorized' });
+  // The app asks for this before every scan so rejected leads stay buried.
+  if (p.rejected) return json_({ ok: true, rejected: rejectedList_() });
   const sheet = getSheet_();
   const h = header_(sheet);
   return json_({
@@ -336,12 +341,175 @@ function applyConditionalFormatting_(sheet, idx, maxRows) {
   sheet.setConditionalFormatRules(rules);
 }
 
+// -------------------------------------------------------------- KPI tab ----
+// One row per calendar day. The app posts the running totals for "today" after
+// every scan, so the row is UPSERTED by date rather than appended - three scans
+// in a day update one row instead of making three.
+
+const KPI_TAB = 'KPI';
+const REJECTED_TAB = 'Rejected';
+// Columns the APP owns (overwritten on each push) …
+const KPI_HEADERS = [
+  'Date', 'Runs', 'Scanned', 'Candidates', 'Already Checked (skipped)',
+  'Reviewed', 'Kept', 'Dropped',
+  'Dropped: Renovated', 'Dropped: Multi-unit', 'Dropped: Fire',
+  'Dropped: Few photos', 'Dropped: Other',
+  'Leads', 'Clear Gate', 'Sent to Sheet', 'Already There',
+  // … and columns the REVIEWER owns. The app must never clobber these.
+  'Reviewer Removed', 'Reviewer Kept', 'Reviewer',
+  'Keep Rate', 'Gate Rate', 'Last Run',
+];
+const KPI_KEYS = [
+  'date', 'runs', 'scanned', 'candidates', 'skippedAlreadyChecked',
+  'reviewed', 'kept', 'dropped',
+  'droppedRenovated', 'droppedMultiUnit', 'droppedFire',
+  'droppedFewPhotos', 'droppedOther',
+  'leads', 'gateCleared', 'pushed', 'pushSkipped',
+];
+const KPI_REVIEWER_COLS = ['Reviewer Removed', 'Reviewer Kept', 'Reviewer'];
+
+function kpiSheet_() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  let sh = ss.getSheetByName(KPI_TAB);
+  if (!sh) sh = ss.insertSheet(KPI_TAB);
+  const first = sh.getRange(1, 1).getValue();
+  if (String(first).trim() !== 'Date') {
+    if (sh.getMaxColumns() < KPI_HEADERS.length) sh.insertColumnsAfter(sh.getMaxColumns(), KPI_HEADERS.length - sh.getMaxColumns());
+    sh.getRange(1, 1, 1, KPI_HEADERS.length).setValues([KPI_HEADERS])
+      .setFontWeight('bold').setBackground('#1f3864').setFontColor('#ffffff').setWrap(true);
+    sh.setRowHeight(1, 42);
+    sh.setFrozenRows(1);
+    sh.setColumnWidth(1, 95);
+    for (let i = 2; i <= KPI_HEADERS.length; i++) sh.setColumnWidth(i, 90);
+  }
+  return sh;
+}
+
+function upsertKpi_(kpi) {
+  const sh = kpiSheet_();
+  const date = String(kpi.date || '').trim();
+  if (!date) throw new Error('kpi.date is required (YYYY-MM-DD)');
+
+  const n = Math.max(0, sh.getLastRow() - 1);
+  let target = 0;
+  if (n) {
+    const dates = sh.getRange(2, 1, n, 1).getValues();
+    for (let i = 0; i < n; i++) {
+      // Cell may come back as a Date object if Sheets auto-parsed it.
+      const v = dates[i][0];
+      const s = (v instanceof Date) ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(v).trim();
+      if (s === date) { target = i + 2; break; }
+    }
+  }
+  const num = k => Number(kpi[k] || 0);
+  const keepRate = num('reviewed') ? num('kept') / num('reviewed') : '';
+  const gateRate = num('leads') ? num('gateCleared') / num('leads') : '';
+
+  const isNew = !target;
+  if (isNew) target = sh.getLastRow() + 1;
+
+  // Write only the app-owned span, then the rate/timestamp columns. The
+  // reviewer's own columns sit between them and are left untouched, so a scan
+  // finishing never wipes what she logged that day.
+  const row = KPI_KEYS.map(k => (k === 'date' ? date : num(k)));
+  sh.getRange(target, 1, 1, row.length).setValues([row]);
+
+  const idx = kpiIdx_(sh);
+  if (isNew) {
+    KPI_REVIEWER_COLS.forEach(c => { if (idx[c] != null) sh.getRange(target, idx[c] + 1).setValue(c === 'Reviewer' ? '' : 0); });
+  }
+  if (idx['Keep Rate'] != null) sh.getRange(target, idx['Keep Rate'] + 1).setValue(keepRate).setNumberFormat('0%');
+  if (idx['Gate Rate'] != null) sh.getRange(target, idx['Gate Rate'] + 1).setValue(gateRate).setNumberFormat('0%');
+  if (idx['Last Run'] != null) sh.getRange(target, idx['Last Run'] + 1).setValue(kpi.lastRun || new Date().toISOString());
+  sh.getRange(target, 1).setNumberFormat('@');   // keep the date a plain string
+  return { date: date, row: target, created: isNew };
+}
+
+function kpiIdx_(sh) {
+  const cells = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), KPI_HEADERS.length)).getValues()[0];
+  const idx = {};
+  cells.forEach((c, i) => { const s = String(c).trim(); if (s) idx[s] = i; });
+  return idx;
+}
+
+/** Find (or create) today's KPI row and add `n` to a reviewer-owned counter. */
+function bumpReviewerKpi_(column, n, who) {
+  const sh = kpiSheet_();
+  const idx = kpiIdx_(sh);
+  if (idx[column] == null) throw new Error('KPI column not found: ' + column);
+  const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  let target = 0;
+  const rows = Math.max(0, sh.getLastRow() - 1);
+  if (rows) {
+    const dates = sh.getRange(2, 1, rows, 1).getValues();
+    for (let i = 0; i < rows; i++) {
+      const v = dates[i][0];
+      const s = (v instanceof Date) ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(v).trim();
+      if (s === date) { target = i + 2; break; }
+    }
+  }
+  if (!target) {                                  // reviewer acted on a day with no scan
+    target = sh.getLastRow() + 1;
+    sh.getRange(target, 1).setValue(date).setNumberFormat('@');
+  }
+  const cell = sh.getRange(target, idx[column] + 1);
+  cell.setValue(Number(cell.getValue() || 0) + n);
+  if (who && idx['Reviewer'] != null) sh.getRange(target, idx['Reviewer'] + 1).setValue(who);
+  if (idx['Last Run'] != null && !sh.getRange(target, idx['Last Run'] + 1).getValue()) {
+    sh.getRange(target, idx['Last Run'] + 1).setValue(new Date().toISOString());
+  }
+  return { date: date, row: target, column: column, value: cell.getValue() };
+}
+
+// --------------------------------------------------------- rejected list ----
+// Every lead the reviewer deletes is remembered here, and the desktop app pulls
+// this list before each scan so a rejected property is never surfaced again.
+
+function rejectedSheet_() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  let sh = ss.getSheetByName(REJECTED_TAB);
+  if (!sh) sh = ss.insertSheet(REJECTED_TAB);
+  if (String(sh.getRange(1, 1).getValue()).trim() !== 'MLS #') {
+    sh.getRange(1, 1, 1, 5).setValues([['MLS #', 'Address', 'City', 'Rejected On', 'By']])
+      .setFontWeight('bold').setBackground('#1f3864').setFontColor('#ffffff');
+    sh.setFrozenRows(1);
+    sh.setColumnWidth(1, 100); sh.setColumnWidth(2, 220); sh.setColumnWidth(3, 120);
+    sh.setColumnWidth(4, 110); sh.setColumnWidth(5, 160);
+  }
+  return sh;
+}
+
+function rejectedList_() {
+  const sh = rejectedSheet_();
+  const n = Math.max(0, sh.getLastRow() - 1);
+  if (!n) return [];
+  return sh.getRange(2, 1, n, 1).getValues()
+    .map(r => String(r[0]).trim()).filter(String);
+}
+
+function addRejected_(items, who) {
+  const sh = rejectedSheet_();
+  const have = {};
+  rejectedList_().forEach(m => { have[m.toUpperCase()] = true; });
+  const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const rows = items
+    .filter(it => it.mls && !have[String(it.mls).toUpperCase()])
+    .map(it => [it.mls, it.addr || '', it.city || '', date, who || '']);
+  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 5).setValues(rows);
+  return rows.length;
+}
+
 // ------------------------------------------------------- in-sheet buttons ----
 // Adds a "Flip Scout" menu to the sheet's toolbar. Reload the sheet once after
 // saving the script for the menu to appear.
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('⚡ Flip Scout')
+    .addItem('❌ Reject selected lead(s)', 'menuRejectSelected')
+    .addItem('✅ Mark selected as reviewed (keep)', 'menuApproveSelected')
+    .addItem('📊 My review numbers today', 'menuReviewerToday')
+    .addSeparator()
     .addItem('Set up / repair sheet', 'menuSetup')
     .addSeparator()
     .addItem('Add a test lead', 'menuTestAppend')
@@ -352,6 +520,7 @@ function onOpen() {
     .addItem('Remove unprofitable leads', 'menuRemoveUnprofitable')
     .addSeparator()
     .addItem('Lead count', 'menuStats')
+    .addItem('Set up KPI tab', 'menuSetupKpi')
     .addItem('Connection info', 'menuConnectionInfo')
     .addSeparator()
     .addItem('Clear ALL leads', 'menuClearAll')
@@ -368,6 +537,95 @@ function runMenu_(label, fn) {
   } catch (err) {
     ui.alert(label + ' — failed', String(err && err.message || err), ui.ButtonSet.OK);
   }
+}
+
+// ---- reviewer actions (the three items at the top of the menu) ----
+
+/** Rows the reviewer currently has selected, as {row, mls, addr, city}. */
+function selectedLeadRows_() {
+  const sheet = getSheet_();
+  const active = SpreadsheetApp.getActiveSheet();
+  if (active.getSheetId() !== sheet.getSheetId()) {
+    throw new Error('Select the row(s) on the "' + sheet.getName() + '" tab first.');
+  }
+  const h = header_(sheet);
+  const end = lastDataRow_(sheet, h);
+  const out = [];
+  const seen = {};
+  (SpreadsheetApp.getActiveRangeList()
+    ? SpreadsheetApp.getActiveRangeList().getRanges()
+    : [SpreadsheetApp.getActiveRange()]).forEach(rg => {
+    for (let r = rg.getRow(); r < rg.getRow() + rg.getNumRows(); r++) {
+      if (r <= h.row || r > end || seen[r]) continue;
+      seen[r] = true;
+      const get = c => (h.idx[c] == null ? '' : String(sheet.getRange(r, h.idx[c] + 1).getValue()).trim());
+      out.push({ row: r, mls: get('MLS #'), addr: get('Address'), city: get('City') });
+    }
+  });
+  if (!out.length) throw new Error('No lead rows selected. Click a row (or drag over several) and try again.');
+  return { sheet: sheet, rows: out.sort((a, b) => a.row - b.row) };
+}
+
+function menuRejectSelected() {
+  const ui = SpreadsheetApp.getUi();
+  let sel;
+  try { sel = selectedLeadRows_(); }
+  catch (err) { ui.alert('Reject lead(s)', String(err.message || err), ui.ButtonSet.OK); return; }
+
+  const list = sel.rows.map(r => '• ' + (r.addr || r.mls)).join('\n');
+  const ok = ui.alert('Reject ' + sel.rows.length + ' lead(s)?',
+    list + '\n\nThey are deleted from the list, remembered so they never come back, '
+    + 'and counted in today\'s KPI.', ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+
+  runMenu_('Reject lead(s)', () => {
+    const who = safeUser_();
+    addRejected_(sel.rows, who);
+    // Delete bottom-up so earlier row numbers stay valid.
+    for (let i = sel.rows.length - 1; i >= 0; i--) sel.sheet.deleteRow(sel.rows[i].row);
+    const k = bumpReviewerKpi_('Reviewer Removed', sel.rows.length, who);
+    return 'Rejected ' + sel.rows.length + ' lead(s).\n'
+      + 'Today\'s removed count: ' + k.value + '\n\n'
+      + 'They will not be scanned or re-added.';
+  });
+}
+
+function menuApproveSelected() {
+  let sel;
+  const ui = SpreadsheetApp.getUi();
+  try { sel = selectedLeadRows_(); }
+  catch (err) { ui.alert('Mark as reviewed', String(err.message || err), ui.ButtonSet.OK); return; }
+  runMenu_('Mark as reviewed', () => {
+    const k = bumpReviewerKpi_('Reviewer Kept', sel.rows.length, safeUser_());
+    return 'Marked ' + sel.rows.length + ' lead(s) as reviewed and kept.\n'
+      + 'Today\'s reviewed-kept count: ' + k.value;
+  });
+}
+
+function menuReviewerToday() {
+  runMenu_('My review numbers today', () => {
+    const sh = kpiSheet_();
+    const idx = kpiIdx_(sh);
+    const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    const rows = Math.max(0, sh.getLastRow() - 1);
+    for (let i = 0; i < rows; i++) {
+      const v = sh.getRange(i + 2, 1).getValue();
+      const s = (v instanceof Date) ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(v).trim();
+      if (s !== date) continue;
+      const g = c => (idx[c] == null ? 0 : sh.getRange(i + 2, idx[c] + 1).getValue() || 0);
+      return date + '\n\n'
+        + 'Leads added by the scan: ' + g('Sent to Sheet') + '\n'
+        + 'You removed: ' + g('Reviewer Removed') + '\n'
+        + 'You kept: ' + g('Reviewer Kept') + '\n\n'
+        + 'Total rejected all-time: ' + rejectedList_().length;
+    }
+    return 'Nothing recorded for ' + date + ' yet.';
+  });
+}
+
+/** Effective user can be blank depending on how the script is authorized. */
+function safeUser_() {
+  try { return Session.getActiveUser().getEmail() || ''; } catch (e) { return ''; }
 }
 
 function menuSetup() { runMenu_('Set up sheet', () => setupSheet()); }
@@ -446,6 +704,15 @@ function menuStats() {
         .forEach(r => { const k = String(r[0]).trim() || '(blank)'; counts[k] = (counts[k] || 0) + 1; });
     }
     return n + ' lead(s)\n' + Object.keys(counts).map(k => '  ' + k + ': ' + counts[k]).join('\n');
+  });
+}
+
+function menuSetupKpi() {
+  runMenu_('Set up KPI tab', () => {
+    const sh = kpiSheet_();
+    const n = Math.max(0, sh.getLastRow() - 1);
+    return 'KPI tab ready — ' + n + ' day(s) recorded. The app posts today\'s totals '
+      + 'after every scan (one row per day, updated in place).';
   });
 }
 

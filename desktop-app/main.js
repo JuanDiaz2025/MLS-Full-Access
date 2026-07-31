@@ -43,6 +43,113 @@ ipcMain.handle('sheet-defaults', () => sheetDefaults());
   if (d.autoPush) cfg.autoPush = true;
 })();
 
+// ---------- daily KPIs ----------
+// Every scan folds its funnel counts into a per-day record kept on disk, so the
+// numbers survive closing the app and "how did today go" is answerable without
+// re-running anything. One row per calendar day, accumulated across runs.
+const KPI_FILE = () => path.join(app.getPath('userData'), 'kpi-history.json');
+const KPI_FIELDS = ['runs', 'scanned', 'candidates', 'skippedAlreadyChecked', 'reviewed', 'kept',
+  'dropped', 'droppedRenovated', 'droppedMultiUnit', 'droppedFire',
+  'droppedFewPhotos', 'droppedOther', 'leads', 'gateCleared', 'pushed', 'pushSkipped'];
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+function loadKpi() {
+  try {
+    const p = KPI_FILE();
+    if (!fs.existsSync(p)) return {};
+    const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return (j && typeof j === 'object' && j.days) ? j.days : {};
+  } catch (_) { return {}; }   // a corrupt file must not block a scan
+}
+
+function saveKpi(days) {
+  try {
+    fs.mkdirSync(path.dirname(KPI_FILE()), { recursive: true });
+    fs.writeFileSync(KPI_FILE(), JSON.stringify({ version: 1, days }, null, 1));
+  } catch (e) { log('Could not save KPI history: ' + e.message, 'warn'); }
+}
+
+function blankKpi() { const o = {}; KPI_FIELDS.forEach(f => { o[f] = 0; }); return o; }
+
+/** Fold one finished run into today's totals and return the updated day. */
+function recordKpi(run) {
+  const days = loadKpi();
+  const k = todayKey();
+  const day = Object.assign(blankKpi(), days[k] || {});
+  KPI_FIELDS.forEach(f => { day[f] += (run[f] || 0); });
+  day.lastRun = new Date().toISOString();
+  days[k] = day;
+  saveKpi(days);
+  return { date: k, ...day };
+}
+
+/** Bucket a drop reason so the daily report can say WHY things were dropped.
+ *  The vision model usually names the FINISHES it saw ("quartz counters, new
+ *  stainless") rather than the word "renovated", so match those too — otherwise
+ *  the biggest drop category silently lands in "other". */
+const RENOVATED_RE = new RegExp([
+  'renovat', 'remodel', 'updated', 'turnkey', 'turn[- ]key', 'move[- ]?in',
+  'newer build', 'new construction', 'newly built', 'luxury', 'designer',
+  'quartz', 'granite', 'stainless', 'backsplash', 'recessed',
+  'new(?:ly)?[- ]?(?:refaced |painted |installed )?(?:cabinet|counter|floor|appliance|vanity|tile)',
+  'refaced', 'vinyl plank', 'lvp', 'modern kitchen', 'modern bath', 'upgraded',
+].join('|'), 'i');
+
+function dropBucket(reason) {
+  const t = String(reason || '');
+  if (/fire|charring|burned/i.test(t)) return 'droppedFire';
+  if (/multi[- ]?unit|duplex|triplex|second unit|in[- ]?law|two kitchens|2 kitchens/i.test(t)) return 'droppedMultiUnit';
+  if (RENOVATED_RE.test(t)) return 'droppedRenovated';
+  if (/photo|exterior[- ]only|no interior/i.test(t)) return 'droppedFewPhotos';
+  return 'droppedOther';
+}
+
+// ---------- seen-ledger: never photo-review the same listing twice ----------
+// Photo review is the expensive stage (a gallery load + a judgement per
+// listing). Every MLS # that reaches it is recorded here, so a later run skips
+// it outright — scanned yesterday or earlier means never looked at again.
+// Kept in userData so it survives app restarts and upgrades.
+const LEDGER_FILE = () => path.join(app.getPath('userData'), 'scanned-ledger.json');
+
+function loadLedger() {
+  try {
+    const p = LEDGER_FILE();
+    if (!fs.existsSync(p)) return {};
+    const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return (j && j.entries) || {};
+  } catch (_) { return {}; }
+}
+function saveLedger(entries) {
+  try {
+    fs.mkdirSync(path.dirname(LEDGER_FILE()), { recursive: true });
+    fs.writeFileSync(LEDGER_FILE(), JSON.stringify({ version: 1, updated: new Date().toISOString(), entries }, null, 1));
+  } catch (e) { log('Could not save the seen-ledger: ' + e.message, 'warn'); }
+}
+function ledgerRecord(mls, verdict, extra) {
+  if (!mls) return;
+  const e = loadLedger();
+  const d = todayKey();
+  e[String(mls).trim().toUpperCase()] = Object.assign(
+    { first_seen: (e[mls] && e[mls].first_seen) || d }, extra || {},
+    { last_seen: d, verdict: verdict || 'checked' });
+  saveLedger(e);
+}
+/** Bulk-mark, one write instead of N. */
+function ledgerRecordMany(items) {
+  const e = loadLedger();
+  const d = todayKey();
+  for (const it of items) {
+    const k = String(it.mls || '').trim().toUpperCase();
+    if (!k) continue;
+    e[k] = { first_seen: (e[k] && e[k].first_seen) || d, last_seen: d,
+      verdict: it.verdict || 'checked', addr: it.addr || '', city: it.city || '' };
+  }
+  saveLedger(e);
+}
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const send = (ch, payload) => controlWin && !controlWin.isDestroyed() && controlWin.webContents.send(ch, payload);
 const log = (msg, level = 'info') => send('log', { msg, level, t: Date.now() });
@@ -263,6 +370,7 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
   if (control.running) return { ok: false, error: 'already running' };
   control.running = true; control.stopped = false; control.paused = false;
   const areas = (buybox && buybox.length) ? buybox : core.DEFAULT_BUYBOX;
+  const runKpi = Object.assign(blankKpi(), { runs: 1 });
   try {
     const s = await js(core.JS_TITLE).catch(() => '');
     if (!/Dashboard|Matrix/i.test(s)) { log('Not logged in — sign in first.', 'error'); return { ok: false }; }
@@ -270,9 +378,29 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
     const byArea = {};
     for (const area of areas) { byArea[area.city && area.city !== '*' ? area.city : `All ${area.county}`] = await scanArea(area); }
     const totalScanned = Object.values(byArea).reduce((n, a) => n + a.rows.length, 0);
-    const { candidates } = core.filterCandidates(byArea);
-    log(`Filter: ${totalScanned} scanned → ${candidates.length} fixer candidates`, 'good');
-    send('funnel', { scanned: totalScanned, candidates: candidates.length, byArea: Object.fromEntries(Object.entries(byArea).map(([k, v]) => [k, v.rows.length])) });
+    const { candidates: allCandidates } = core.filterCandidates(byArea);
+    runKpi.scanned = totalScanned; runKpi.candidates = allCandidates.length;
+
+    // Pull the reviewer's rejections down first, so anything she deleted is
+    // treated as already-checked and never resurfaces.
+    await syncRejectedIntoLedger();
+
+    // Drop everything already checked on an earlier run — this is what keeps a
+    // daily run cheap. Nothing below here ever re-examines a known listing.
+    const seen = loadLedger();
+    const candidates = allCandidates.filter(c => !seen[String(c.mls || '').trim().toUpperCase()]);
+    runKpi.skippedAlreadyChecked = allCandidates.length - candidates.length;
+    log(`Filter: ${totalScanned} scanned → ${allCandidates.length} candidates → `
+      + `${candidates.length} NEW (${runKpi.skippedAlreadyChecked} already checked, skipped)`, 'good');
+    send('funnel', { scanned: totalScanned, candidates: allCandidates.length, fresh: candidates.length,
+      skipped: runKpi.skippedAlreadyChecked,
+      byArea: Object.fromEntries(Object.entries(byArea).map(([k, v]) => [k, v.rows.length])) });
+
+    if (!candidates.length) {
+      log('No new listings since the last run — nothing to review.', 'good');
+      send('report', { leads: [], generatedAt: new Date().toString(), noNew: true });
+      return { ok: true, leads: [] };
+    }
 
     // Photo-verify loop with pause/keep-drop.
     const kept = [];
@@ -283,15 +411,15 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '' }));
       const n = gal.count;
       const base = { i: i + 1, total: candidates.length, mls: c.mls, addr: c.addr, city: c._cityKey, price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n };
-      let decision;
+      let decision, dropReason = '';
       if (cfg.autoVerify && cfg.useAI && cfg.apiKey) {
         const v = await autoDecide({ ...c, _cityKey: c._cityKey, _sqft: c._sqft, _price: c._price });
-        decision = v.decision;
+        decision = v.decision; dropReason = v.reason;
         send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'AI (vision): ' + v.reason });
         log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
       } else if (cfg.autoVerify) {
         const v = core.rulesDecide({ photos: n, remarks: gal.remarks, condition: gal.condition });
-        decision = v.decision;
+        decision = v.decision; dropReason = v.reason;
         send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'Rules: ' + v.reason });
         log(`  RULES ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
       } else {
@@ -300,8 +428,13 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         delete pendingDecision[c.mls];
       }
       if (control.stopped) break;
-      if (decision === 'keep') { kept.push(c); log(`  kept ${c.addr}`, 'good'); }
-      else log(`  dropped ${c.addr}`);
+      runKpi.reviewed++;
+      if (decision === 'keep') { kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
+      else { runKpi.dropped++; runKpi[dropBucket(dropReason)]++; log(`  dropped ${c.addr}`); }
+      // Record as we go, not at the end — a crash or Stop mid-run must not cost
+      // us the listings already judged.
+      ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped',
+        { addr: c.addr, city: c._cityKey });
     }
 
     // Comp + score the kept set.
@@ -322,14 +455,17 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         ...deal });
     }
     leads.sort((a, b) => b.grossLight - a.grossLight);
+    runKpi.leads = leads.length;
+    runKpi.gateCleared = leads.filter(l => l.surface).length;
     send('report', { leads, generatedAt: new Date().toString() });
-    log(`Done. ${leads.filter(l => l.surface).length} of ${leads.length} kept leads clear the profit gate.`, 'good');
+    log(`Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate.`, 'good');
 
     // Push straight to the Flip Scout Agent sheet when configured.
     if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) {
       const surfacing = leads.filter(l => l.surface);
       log(`Pushing ${surfacing.length} lead(s) to the sheet…`);
       const r = await pushLeads(surfacing);
+      if (r.ok) { runKpi.pushed = r.added; runKpi.pushSkipped = r.skipped; }
       log(r.ok ? `Sheet updated: ${r.added} added, ${r.skipped} already there.`
                : `Sheet push failed: ${r.error}`, r.ok ? 'good' : 'error');
     }
@@ -337,7 +473,14 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
   } catch (e) {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
     log('Scan error: ' + e.message, 'error'); return { ok: false, error: e.message };
-  } finally { control.running = false; }
+  } finally {
+    control.running = false;
+    // Record even a stopped or failed run — partial work still consumed effort,
+    // and a day with three aborted runs should look different from a quiet one.
+    const day = recordKpi(runKpi);
+    send('kpi', { today: day, history: kpiReport() });
+    if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) pushKpi(day).catch(() => {});
+  }
 });
 
 ipcMain.on('pause', () => { control.paused = true; log('Paused.', 'warn'); });
@@ -410,6 +553,95 @@ ipcMain.handle('test-sheet', async () => {
     }
     return { ok: true, sheet: j.sheet, columns: (j.columns || []).length, rows: j.rows || 0 };
   } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// ---------- reviewer rejections ----------
+// The human reviewer works in the sheet and deletes leads she does not want.
+// Those MLS #s come back here and go into the ledger, so a deleted lead is
+// never scanned, reviewed, or re-pushed again.
+async function syncRejectedIntoLedger() {
+  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: 'sheet not configured' };
+  try {
+    const u = cfg.sheetUrl + (cfg.sheetUrl.indexOf('?') >= 0 ? '&' : '?')
+      + 'secret=' + encodeURIComponent(cfg.sheetSecret) + '&rejected=1';
+    const r = await fetch(u, { redirect: 'follow' });
+    const j = JSON.parse(await r.text());
+    if (!j.ok || !Array.isArray(j.rejected)) return { ok: false, error: j.error || 'no list returned' };
+    const seen = loadLedger();
+    const fresh = j.rejected.filter(m => m && !seen[String(m).trim().toUpperCase()]);
+    if (fresh.length) {
+      ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: 'reviewer-rejected' })));
+      log(`Reviewer rejections synced: ${fresh.length} new (won't be checked again).`);
+    }
+    return { ok: true, total: j.rejected.length, added: fresh.length };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+ipcMain.handle('sync-rejected', () => syncRejectedIntoLedger());
+
+ipcMain.handle('ledger-stats', () => {
+  const e = loadLedger();
+  const byVerdict = {};
+  Object.keys(e).forEach(k => { const v = e[k].verdict || '?'; byVerdict[v] = (byVerdict[v] || 0) + 1; });
+  return { total: Object.keys(e).length, byVerdict, file: LEDGER_FILE() };
+});
+
+ipcMain.handle('ledger-clear', async () => {
+  const { response } = await dialog.showMessageBox(controlWin, {
+    type: 'warning', buttons: ['Cancel', 'Clear ledger'], defaultId: 0, cancelId: 0,
+    message: 'Clear the seen-ledger?',
+    detail: 'Every listing becomes unchecked again, so the next scan will re-review the whole buy box from scratch. This can take hours.',
+  });
+  if (response !== 1) return { ok: false, cancelled: true };
+  saveLedger({});
+  log('Seen-ledger cleared — the next scan re-reviews everything.', 'warn');
+  return { ok: true };
+});
+
+// ---------- daily KPI report ----------
+/** Most recent `days` calendar days, newest first, plus a total row. */
+function kpiReport(days = 14) {
+  const all = loadKpi();
+  const keys = Object.keys(all).sort().reverse().slice(0, days);
+  const rows = keys.map(k => Object.assign({ date: k }, blankKpi(), all[k]));
+  const total = Object.assign(blankKpi(), { date: 'TOTAL (' + rows.length + 'd)' });
+  rows.forEach(r => KPI_FIELDS.forEach(f => { total[f] += (r[f] || 0); }));
+  return { rows, total, today: rows.find(r => r.date === todayKey()) || Object.assign({ date: todayKey() }, blankKpi()) };
+}
+
+ipcMain.handle('kpi-report', (_e, opts) => kpiReport((opts && opts.days) || 14));
+
+ipcMain.handle('kpi-export', async (_e, { days }) => {
+  const rep = kpiReport(days || 90);
+  const { canceled, filePath } = await dialog.showSaveDialog(controlWin, {
+    title: 'Export KPI history', defaultPath: 'flipscout-kpi.csv',
+    filters: [{ name: 'CSV', extensions: ['csv'] }, { name: 'JSON', extensions: ['json'] }],
+  });
+  if (canceled || !filePath) return { ok: false };
+  if (filePath.endsWith('.json')) { fs.writeFileSync(filePath, JSON.stringify(rep, null, 2)); return { ok: true, filePath }; }
+  const cols = ['date'].concat(KPI_FIELDS);
+  const csv = [cols.join(',')].concat(rep.rows.map(r => cols.map(c => r[c] == null ? '' : r[c]).join(','))).join('\n');
+  fs.writeFileSync(filePath, csv);
+  return { ok: true, filePath };
+});
+
+/** Mirror the day's numbers onto the sheet's KPI tab (upserted by date). */
+async function pushKpi(day) {
+  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: 'sheet not configured' };
+  try {
+    const r = await fetch(cfg.sheetUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, redirect: 'follow',
+      body: JSON.stringify({ secret: cfg.sheetSecret, kpi: day }),
+    });
+    const j = JSON.parse(await r.text());
+    return j.ok ? { ok: true } : { ok: false, error: j.error };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+ipcMain.handle('kpi-push', async () => {
+  const rep = kpiReport(1);
+  const r = await pushKpi(rep.today);
+  log(r.ok ? 'KPI sent to the sheet.' : 'KPI push failed: ' + r.error, r.ok ? 'good' : 'warn');
+  return r;
 });
 
 ipcMain.handle('export', async (_e, { leads }) => {

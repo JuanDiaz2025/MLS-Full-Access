@@ -125,7 +125,24 @@
   </div>
 
   <div class="card">
-    <h2>6 · Google Sheet (Flip Scout Agent)</h2>
+    <h2>6 · Daily KPI</h2>
+    <div id="kpiToday" class="status">No runs recorded yet.</div>
+    <div id="kpiHistory" style="margin-top:12px"></div>
+    <div id="ledgerStatus" class="status" style="margin-top:10px">Ledger: —</div>
+    <div class="row" style="margin-top:12px">
+      <button id="kpiRefresh">↻ Refresh</button>
+      <button id="kpiExport">Export CSV / JSON</button>
+      <button id="kpiPush">⇪ Send today to sheet</button>
+      <button id="syncRejected">⇩ Sync reviewer rejections</button>
+      <button id="ledgerClear" class="drop">Clear ledger</button>
+    </div>
+    <div class="hint">Counts accumulate per calendar day across every scan and survive
+      closing the app. Drop reasons are bucketed so you can see <em>why</em> listings
+      fell out, not just how many.</div>
+  </div>
+
+  <div class="card">
+    <h2>7 · Google Sheet (Flip Scout Agent)</h2>
     <label>Apps Script web app URL</label>
     <input id="sheetUrl" type="text" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
     <label>Shared secret</label>
@@ -242,6 +259,60 @@
       $('aiVerdict').style.display = 'none';
     }
   });
+  // ---------------- daily KPI ----------------
+  const KPI_COLS = [
+    ['scanned','Scanned'], ['candidates','Candidates'], ['reviewed','Reviewed'],
+    ['kept','Kept'], ['dropped','Dropped'], ['leads','Leads'],
+    ['gateCleared','Clear gate'], ['pushed','To sheet'],
+  ];
+  function renderKpi(rep){
+    if(!rep) return;
+    const t = rep.today || {};
+    const pct = (a,b) => b ? Math.round(100*a/b) + '%' : '—';
+    $('kpiToday').className = 'status ' + (t.runs ? 'good' : '');
+    $('kpiToday').innerHTML = t.runs
+      ? `<b>Today (${t.date})</b> — ${t.runs} run(s): `
+        + `${t.scanned} scanned → ${t.candidates} candidates → ${t.reviewed} reviewed → `
+        + `<b>${t.kept} kept</b> → ${t.gateCleared} clear the gate → ${t.pushed} sent to the sheet.`
+        + `<br><span class="pill">keep rate ${pct(t.kept,t.reviewed)}</span> `
+        + `<span class="pill">gate rate ${pct(t.gateCleared,t.leads)}</span>`
+        + (t.dropped ? `<br>Dropped ${t.dropped}: `
+            + `${t.droppedRenovated} renovated · ${t.droppedMultiUnit} multi-unit · `
+            + `${t.droppedFire} fire · ${t.droppedFewPhotos} too few photos · ${t.droppedOther} other` : '')
+      : `No runs recorded yet today (${t.date || ''}).`;
+
+    let html = '<table><thead><tr><th>Day</th>'
+      + KPI_COLS.map(c=>`<th>${c[1]}</th>`).join('') + '</tr></thead><tbody>';
+    for (const r of (rep.rows||[])) {
+      html += `<tr${r.date===t.date?' class="surface"':''}><td class="mono">${r.date}</td>`
+        + KPI_COLS.map(c=>`<td class="mono">${r[c[0]]||0}</td>`).join('') + '</tr>';
+    }
+    if (rep.total) {
+      html += `<tr><td class="mono"><b>${rep.total.date}</b></td>`
+        + KPI_COLS.map(c=>`<td class="mono"><b>${rep.total[c[0]]||0}</b></td>`).join('') + '</tr>';
+    }
+    $('kpiHistory').innerHTML = html + '</tbody></table>';
+  }
+  async function refreshLedger(){
+    const s = await window.fs.ledgerStats();
+    const parts = Object.entries(s.byVerdict||{}).map(([k,v])=>`${v} ${k}`).join(' · ');
+    $('ledgerStatus').textContent = s.total
+      ? `Ledger: ${s.total} listing(s) already checked — these are skipped on every future scan (${parts}).`
+      : 'Ledger: empty — the next scan reviews every candidate in the buy box.';
+  }
+  async function refreshKpi(){ renderKpi(await window.fs.kpiReport(14)); refreshLedger(); }
+  $('syncRejected').onclick = async () => {
+    const r = await window.fs.syncRejected();
+    log(r.ok ? `Reviewer rejections synced: ${r.added} new of ${r.total} total.` : 'Sync failed: '+r.error, r.ok?'good':'warn');
+    refreshLedger();
+  };
+  $('ledgerClear').onclick = async () => { const r = await window.fs.ledgerClear(); if(r.ok){ log('Ledger cleared.','warn'); refreshLedger(); } };
+  $('kpiRefresh').onclick = refreshKpi;
+  $('kpiExport').onclick = async () => { const r = await window.fs.kpiExport(90); if(r.ok) log('KPI exported → '+r.filePath,'good'); };
+  $('kpiPush').onclick = async () => { const r = await window.fs.kpiPush(); log(r.ok?'KPI sent to the sheet.':'KPI push failed: '+r.error, r.ok?'good':'warn'); };
+  window.fs.on('kpi', p => renderKpi({ ...(p.history||{}), today: p.today }));
+  refreshKpi();
+
   window.fs.on('report', p => {
     lastLeads = p.leads || [];
     const surf = lastLeads.filter(l => l.surface);

@@ -13,5 +13,11 @@ contextBridge.exposeInMainWorld('fs', {
   pushSheet: (leads, onlySurfacing) => ipcRenderer.invoke('push-sheet', { leads, onlySurfacing }),
   testSheet: () => ipcRenderer.invoke('test-sheet'),
   sheetDefaults: () => ipcRenderer.invoke('sheet-defaults'),
+  kpiReport: (days) => ipcRenderer.invoke('kpi-report', { days }),
+  kpiExport: (days) => ipcRenderer.invoke('kpi-export', { days }),
+  kpiPush: () => ipcRenderer.invoke('kpi-push'),
+  ledgerStats: () => ipcRenderer.invoke('ledger-stats'),
+  ledgerClear: () => ipcRenderer.invoke('ledger-clear'),
+  syncRejected: () => ipcRenderer.invoke('sync-rejected'),
   on: (channel, fn) => ipcRenderer.on(channel, (_e, payload) => fn(payload)),
 });
