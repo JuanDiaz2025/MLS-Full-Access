@@ -88,17 +88,32 @@ function filterCandidates(rowsByArea) {
   // Say WHY each listing failed, not just that it did. This is the first place
   // leads get rejected — long before photo review — so without a reason here
   // "why isn't this on my list" has no answer for most of the buy box.
+  // Only ONE screen left: age. Per Bryan, both price screens are removed.
+  //
+  //   - the "<=85% of city median $/sqft" cut is gone
+  //   - the oversized-for-the-area cut is gone
+  //
+  // The oversize rule was demonstrably wrong: 21 College Terrace was $455/sqft,
+  // 56% of the SF median — genuinely cheap — and it was discarded purely for
+  // being 2,185 sqft against a 1,333 median. The rule existed to avoid $/sqft
+  // traps on big houses, but it threw away real opportunities to do it.
+  //
+  // Consequence, stated plainly: with no price screen there is no value filter
+  // before photo review, so nearly every old SFR in the buy box now reaches
+  // that stage. $/sqft is still recorded and still sorts the output — it just
+  // no longer excludes anything.
+  // Addresses Bryan has already rejected. Removing the price screens brought
+  // 1430 Shafter Ave straight back as the cheapest candidate, so this list has
+  // to be enforced in code, not just remembered.
+  const REJECTED_ADDR = [/^1430\s+shafter/i, /^183\s+victoria/i, /^322\s+1st\s+ave/i];
+
   const why = r => {
-    const m = med[r._cityKey], ms = medSq[r._cityKey];
+    const a = String(r.addr || '').trim();
+    if (REJECTED_ADDR.some(re => re.test(a))) return 'previously rejected by Bryan — do not resurface';
     // A BLANK age field parses to 0, which used to read as "built this year" and
     // silently discarded the listing as too new. Missing is not new: let an
     // unknown age through to photo review, where the pictures settle it.
     if (r._age > 0 && r._age < 25) return `too new — built ${2026 - r._age}, want 25+ years old`;
-    if (r._sqft > ms * 1.5) return `much larger than the area norm (${r._sqft} sqft vs ${Math.round(ms)} median) — $/sqft comparison unreliable`;
-    if (r._ppsf > m * 0.85) {
-      const pct = Math.round(r._ppsf / m * 100);
-      return `not below market — $${r._ppsf}/sqft is ${pct}% of the ${r._cityKey} median ($${Math.round(m)}), want 85% or less`;
-    }
     return '';
   };
 

@@ -200,6 +200,20 @@ headless-scrape workflow):
   data floor only guards against garbled prices). Areas: SF · full
   San Mateo/Peninsula · Sunnyvale · Oakland · Richmond · Berkeley · San Leandro ·
   San Jose. Never change the buy box without Bryan's explicit instruction.
+- **🚫 REMOVED screens — do not reinstate without Bryan's say-so:**
+  - the **"≤85% of city median $/sqft"** cut, and
+  - the **"oversized for the area"** cut (sqft > 1.5× the city median).
+
+  Both are gone. The oversize rule was provably wrong: 21 College Terrace was
+  **$455/sqft — 56% of the SF median, genuinely cheap** — and was discarded only
+  for being 2,185 sqft against a 1,333 median. A big cheap house is an
+  opportunity, not a trap.
+
+  **The only pre-photo screen left is age (25+ years, when the MLS reports it).**
+  $/sqft is still computed, still shown, and still sorts the output — it just
+  never excludes anything. Consequence to expect: almost every old SFR in the
+  buy box now reaches photo review, so photo review is the real filter and the
+  volume is far higher.
 - **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
   **tenant-occupied**, multi-unit, vacant lot, **fire-damaged** (any listing noting a
   past fire / fire damage / fire-gutted interior — drop even if it reads as a genuine
