@@ -6,7 +6,9 @@ name: Build FlipScout desktop (.exe)
 on:
   workflow_dispatch: {}
   push:
-    branches: [claude/navigation-link-training-l0d5a3]
+    branches:
+      - claude/navigation-link-training-l0d5a3
+      - claude/memory-context-4u5cx1
     paths:
       - 'desktop-app/**'
       - '.github/workflows/build-desktop.yml'
