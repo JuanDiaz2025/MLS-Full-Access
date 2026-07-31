@@ -519,6 +519,7 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       // --- review this city's listings, one by one ---
       send('city', { label, index: ai + 1, total: areas.length, phase: 'reviewing', count: fresh.length });
       const kept = [];
+      const cityRejects = [];   // dropped here, with the reason, for the Rejected tab
       for (let i = 0; i < fresh.length; i++) {
         await waitIfPaused();
         if (control.stopped) break;
@@ -564,7 +565,17 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         if (control.stopped) break;
         runKpi.reviewed++;
         if (decision === 'keep') { kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
-        else { runKpi.dropped++; runKpi[dropBucket(dropReason)]++; log(`  dropped ${c.addr}`); }
+        else {
+          runKpi.dropped++; runKpi[dropBucket(dropReason)]++;
+          log(`  dropped ${c.addr} — ${dropReason || 'no reason given'}`);
+          // Record WHY, so the Rejected tab can answer "why isn't this on my list".
+          cityRejects.push({
+            mls: c.mls, addr: c.addr, city: label, price: c._price,
+            ppsf: c._ppsf, sqft: c._sqft, dom: c._dom,
+            reason: dropReason || 'dropped at photo review',
+            link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+          });
+        }
         // Record as we go, not at the end — a crash or Stop mid-run must not
         // cost us the listings already judged.
         ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: label });
@@ -627,13 +638,15 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       // Hand this city's winners to the sheet now, so finished work is visible
       // even if a later city fails or you stop the run.
       const cityWinners = cityLeads.filter(l => l.surface);
-      if (cityWinners.length) {
+      if (cityWinners.length || cityRejects.length) {
         // Primary path: write the Drive drop file. The sheet reads it on
-        // refresh — no deployment, no URL, nothing to connect.
-        const d = writeDropFile(cityWinners.map(toSheetRow));
+        // refresh — no deployment, no URL, nothing to connect. Rejections ride
+        // along so their reasons reach the Rejected tab.
+        const d = writeDropFile(cityWinners.map(toSheetRow), cityRejects);
         if (d.ok) {
           runKpi.pushed += cityWinners.length;
-          log(`[${label}] wrote ${cityWinners.length} lead(s) to Drive (${d.total} waiting) — refresh the sheet to see them`, 'good');
+          log(`[${label}] wrote ${cityWinners.length} lead(s) + ${cityRejects.length} rejection(s) `
+            + `to Drive (${d.total} waiting) — refresh the sheet to see them`, 'good');
         } else {
           log(`[${label}] could not write the Drive file: ${d.error}`, 'warn');
         }
@@ -760,26 +773,36 @@ function dropPath() {
  * the sheet may not have picked up the previous batch yet, and a scan that
  * replaced the file would silently destroy leads that were never read.
  */
-function writeDropFile(leads) {
+function writeDropFile(leads, rejects) {
   const p = dropPath();
   if (!p) return { ok: false, error: 'no Google Drive folder found — pick one in section 7' };
   try {
-    let existing = [];
+    let prevLeads = [], prevRejects = [];
     if (fs.existsSync(p)) {
       try {
         const prev = JSON.parse(fs.readFileSync(p, 'utf8'));
-        existing = Array.isArray(prev) ? prev : (prev.leads || []);
-      } catch (_) { existing = []; }   // unreadable → start clean rather than fail the scan
+        prevLeads = Array.isArray(prev) ? prev : (prev.leads || []);
+        prevRejects = Array.isArray(prev) ? [] : (prev.rejects || []);
+      } catch (_) { /* unreadable → rebuild rather than fail the scan */ }
     }
-    const byMls = {};
-    [...existing, ...leads].forEach(l => {
-      const k = String(l.mls || l['MLS #'] || l.address || '').trim().toUpperCase();
-      if (k) byMls[k] = l;
-    });
-    const merged = Object.keys(byMls).map(k => byMls[k]);
+    const dedupe = arr => {
+      const by = {};
+      arr.forEach(l => {
+        const k = String(l.mls || l['MLS #'] || l.address || '').trim().toUpperCase();
+        if (k) by[k] = l;
+      });
+      return Object.keys(by).map(k => by[k]);
+    };
+    const mergedLeads = dedupe([...prevLeads, ...(leads || [])]);
+    const mergedRejects = dedupe([...prevRejects, ...(rejects || [])]);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify({ updated: new Date().toISOString(), leads: merged }, null, 1));
-    return { ok: true, path: p, total: merged.length, added: merged.length - existing.length };
+    fs.writeFileSync(p, JSON.stringify({
+      updated: new Date().toISOString(),
+      leads: mergedLeads,
+      rejects: mergedRejects,
+    }, null, 1));
+    return { ok: true, path: p, total: mergedLeads.length,
+      added: mergedLeads.length - prevLeads.length, rejects: mergedRejects.length };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 

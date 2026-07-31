@@ -112,8 +112,8 @@ function doGet(e) {
     if (p.secret !== CONFIG.SHARED_SECRET) return json_({ ok: false, error: 'unauthorized — the secret in the app does not match CONFIG.SHARED_SECRET' });
     // The app asks for this before every scan so rejected leads stay buried.
     if (p.rejected) return json_({ ok: true, rejected: rejectedList_() });
-    const sheet = getSheet_();
-    const h = header_(sheet);
+    const h = header_(getSheet_());
+    const sheet = h.sheet;
     return json_({
       ok: true, sheet: sheet.getName(),
       columns: HEADERS.filter(c => h.idx[c] != null),
@@ -128,8 +128,11 @@ function doGet(e) {
 // ----------------------------------------------------------------- append ----
 
 function appendLeads(leads) {
-  const sheet = getSheet_();
-  const h = header_(sheet);
+  const h = header_(getSheet_());
+  // Use the tab header_ validated: setupSheet() may have created or renamed a
+  // tab underneath us, and writing to a stale handle puts leads on the wrong
+  // sheet with the right sheet's column positions.
+  const sheet = h.sheet;
   const seen = existingKeys_(sheet, h);
 
   const rows = [], results = [];
@@ -243,11 +246,14 @@ function header_(sheet, _retry) {
     if (cells.indexOf('Address') >= 0 && (cells.indexOf('MLS #') >= 0 || cells.indexOf('Score') >= 0)) {
       const idx = {};
       cells.forEach((c, i) => { if (c) idx[c] = i; });
-      return { row: r + 1, idx: idx };
+      return { row: r + 1, idx: idx, sheet: sheet };
     }
   }
   if (_retry) throw new Error('Header row still not found after setup — check that CONFIG.SPREADSHEET_ID points at the right file.');
   setupSheet();
+  // setupSheet may have RENAMED this tab or created a different one, so the
+  // caller's `sheet` handle can now be the wrong tab. Return the sheet the
+  // header was actually found on and make callers use that.
   return header_(getSheet_(), true);
 }
 
@@ -517,37 +523,91 @@ function bumpReviewerKpi_(column, n, who) {
 // Every lead the reviewer deletes is remembered here, and the desktop app pulls
 // this list before each scan so a rejected property is never surfaced again.
 
+const REJECTED_HEADERS = [
+  'Rejected On', 'MLS #', 'Address', 'City',
+  'Price', '$/SqFt', 'SqFt', 'DOM',
+  'Reason', 'Stage', 'By', 'MLS Link',
+];
+
 function rejectedSheet_() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   let sh = ss.getSheetByName(REJECTED_TAB);
   if (!sh) sh = ss.insertSheet(REJECTED_TAB);
-  if (String(sh.getRange(1, 1).getValue()).trim() !== 'MLS #') {
-    sh.getRange(1, 1, 1, 5).setValues([['MLS #', 'Address', 'City', 'Rejected On', 'By']])
-      .setFontWeight('bold').setBackground('#1f3864').setFontColor('#ffffff');
+  if (String(sh.getRange(1, 1).getValue()).trim() !== REJECTED_HEADERS[0]) {
+    if (sh.getMaxColumns() < REJECTED_HEADERS.length) {
+      sh.insertColumnsAfter(sh.getMaxColumns(), REJECTED_HEADERS.length - sh.getMaxColumns());
+    }
+    sh.getRange(1, 1, 1, REJECTED_HEADERS.length).setValues([REJECTED_HEADERS])
+      .setFontWeight('bold').setBackground('#7f1d1d').setFontColor('#ffffff').setWrap(true);
+    sh.setRowHeight(1, 36);
     sh.setFrozenRows(1);
-    sh.setColumnWidth(1, 100); sh.setColumnWidth(2, 220); sh.setColumnWidth(3, 120);
-    sh.setColumnWidth(4, 110); sh.setColumnWidth(5, 160);
+    const w = { 'Rejected On': 100, 'MLS #': 95, 'Address': 210, 'City': 115,
+      'Price': 100, '$/SqFt': 75, 'SqFt': 70, 'DOM': 55,
+      'Reason': 340, 'Stage': 110, 'By': 170, 'MLS Link': 190 };
+    REJECTED_HEADERS.forEach((c, i) => sh.setColumnWidth(i + 1, w[c] || 110));
+    if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), REJECTED_HEADERS.length).createFilter();
   }
   return sh;
 }
 
+/** Column index map for the Rejected tab. */
+function rejIdx_(sh) {
+  const cells = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), REJECTED_HEADERS.length)).getValues()[0];
+  const idx = {};
+  cells.forEach((c, i) => { const s = String(c).trim(); if (s) idx[s] = i; });
+  return idx;
+}
+
 function rejectedList_() {
   const sh = rejectedSheet_();
+  const idx = rejIdx_(sh);
+  const col = (idx['MLS #'] == null ? 1 : idx['MLS #'] + 1);
   const n = Math.max(0, sh.getLastRow() - 1);
   if (!n) return [];
-  return sh.getRange(2, 1, n, 1).getValues()
+  return sh.getRange(2, col, n, 1).getValues()
     .map(r => String(r[0]).trim()).filter(String);
 }
 
-function addRejected_(items, who) {
+/**
+ * Log rejections WITH THE REASON. Every drop lands here — the ones the app
+ * makes during photo review (renovated, multi-unit, fire, too few photos) and
+ * the ones the reviewer makes on the sheet — so "why did this not make the
+ * list" is always answerable.
+ */
+function addRejected_(items, who, stage) {
   const sh = rejectedSheet_();
+  const idx = rejIdx_(sh);
   const have = {};
   rejectedList_().forEach(m => { have[m.toUpperCase()] = true; });
-  const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const rows = items
-    .filter(it => it.mls && !have[String(it.mls).toUpperCase()])
-    .map(it => [it.mls, it.addr || '', it.city || '', date, who || '']);
-  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 5).setValues(rows);
+  const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  const width = Math.max(sh.getLastColumn(), REJECTED_HEADERS.length);
+
+  const rows = [];
+  for (const it of items) {
+    const key = String(it.mls || '').toUpperCase();
+    if (key && have[key]) continue;
+    if (key) have[key] = true;
+    const row = new Array(width).fill('');
+    const put = (c, v) => { if (idx[c] != null && v !== undefined && v !== null) row[idx[c]] = v; };
+    put('Rejected On', date);
+    put('MLS #', it.mls || '');
+    put('Address', it.addr || it.address || '');
+    put('City', it.city || '');
+    put('Price', num_(it.price) || '');
+    put('$/SqFt', num_(it.ppsf) || '');
+    put('SqFt', num_(it.sqft) || '');
+    put('DOM', num_(it.dom) || '');
+    put('Reason', it.reason || '(no reason recorded)');
+    put('Stage', stage || it.stage || 'Reviewer');
+    put('By', who || it.by || '');
+    put('MLS Link', it.link || '');
+    rows.push(row);
+  }
+  if (rows.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, width).setValues(rows);
+    if (idx['Price'] != null) sh.getRange(sh.getLastRow() - rows.length + 1, idx['Price'] + 1, rows.length, 1).setNumberFormat('$#,##0');
+    if (idx['$/SqFt'] != null) sh.getRange(sh.getLastRow() - rows.length + 1, idx['$/SqFt'] + 1, rows.length, 1).setNumberFormat('$#,##0');
+  }
   return rows.length;
 }
 
@@ -598,8 +658,8 @@ function menuDisableAuto() {
 /** Tidy the leads table: fill any missing Status / $ per sqft, drop duplicate
  *  MLS #s, and sort. Safe to run as often as you like. */
 function refreshLeads() {
-  const sheet = getSheet_();
-  const h = header_(sheet);
+  const h = header_(getSheet_());
+  const sheet = h.sheet;
   const end = lastDataRow_(sheet, h);
   if (end <= h.row) return { rows: 0, deduped: 0, filled: 0 };
 
@@ -641,6 +701,7 @@ function menuRefresh() {
     const r = pullAndRefresh_();
     return (r.added ? '✅ ' + r.added + ' new lead(s) added.\n' : 'No new leads.\n')
       + (r.skipped ? r.skipped + ' were already on the sheet.\n' : '')
+      + (r.rejected ? '🚫 ' + r.rejected + ' logged on the Rejected tab with reasons.\n' : '')
       + (r.deduped ? 'Removed ' + r.deduped + ' duplicate row(s).\n' : '')
       + r.rows + ' lead(s) total, sorted by ' + r.sortedBy + '.\n\n'
       + (r.source ? 'Read from: ' + r.source + '\n' :
@@ -703,23 +764,28 @@ function pullFromDrive_() {
     throw new Error('Could not read ' + CONFIG.FEED_FILENAME + ' — it is not valid JSON (' + err.message + ')');
   }
   const leads = Array.isArray(payload) ? payload : (payload.leads || []);
-  if (!leads.length) return { added: 0, skipped: 0, source: f.getName() };
+  // The app also reports what it DROPPED and why. Those never become leads, but
+  // they belong on the Rejected tab so the reasons are visible.
+  const rejects = Array.isArray(payload) ? [] : (payload.rejects || []);
+  const rejected = rejects.length ? addRejected_(rejects, 'FlipScout app', 'Photo review') : 0;
+  if (!leads.length) return { added: 0, skipped: 0, rejected: rejected, source: f.getName() };
   const res = appendLeads(leads);
   return {
     added: res.filter(r => !r.skipped).length,
     skipped: res.filter(r => r.skipped).length,
+    rejected: rejected,
     source: f.getName() + ' (updated ' + Utilities.formatDate(f.getLastUpdated(), Session.getScriptTimeZone(), 'MMM d, HH:mm') + ')',
   };
 }
 
 /** Pull, then tidy. This is what both the menu and the hourly trigger call. */
 function pullAndRefresh_() {
-  let pulled = { added: 0, skipped: 0, source: '' };
+  let pulled = { added: 0, skipped: 0, rejected: 0, source: '' };
   let pullError = '';
   try { pulled = pullFromDrive_(); } catch (err) { pullError = String(err.message || err); }
   const tidied = refreshLeads();
   return {
-    added: pulled.added, skipped: pulled.skipped, source: pulled.source,
+    added: pulled.added, skipped: pulled.skipped, rejected: pulled.rejected || 0, source: pulled.source,
     rows: tidied.rows, deduped: tidied.deduped, sortedBy: tidied.sortedBy,
     error: pullError,
   };
@@ -739,7 +805,7 @@ function runMenu_(label, fn) {
 
 /** Rows the reviewer currently has selected, as {row, mls, addr, city}. */
 function selectedLeadRows_() {
-  const sheet = getSheet_();
+  const sheet = header_(getSheet_()).sheet;
   const active = SpreadsheetApp.getActiveSheet();
   if (active.getSheetId() !== sheet.getSheetId()) {
     throw new Error('Select the row(s) on the "' + sheet.getName() + '" tab first.');
@@ -755,7 +821,9 @@ function selectedLeadRows_() {
       if (r <= h.row || r > end || seen[r]) continue;
       seen[r] = true;
       const get = c => (h.idx[c] == null ? '' : String(sheet.getRange(r, h.idx[c] + 1).getValue()).trim());
-      out.push({ row: r, mls: get('MLS #'), addr: get('Address'), city: get('City') });
+      out.push({ row: r, mls: get('MLS #'), addr: get('Address'), city: get('City'),
+        price: get('Purchase Price'), ppsf: get('$/SqFt'), sqft: get('SqFt'),
+        dom: get('DOM'), link: get('MLS Link') });
     }
   });
   if (!out.length) throw new Error('No lead rows selected. Click a row (or drag over several) and try again.');
@@ -769,20 +837,32 @@ function menuRejectSelected() {
   catch (err) { ui.alert('Reject lead(s)', String(err.message || err), ui.ButtonSet.OK); return; }
 
   const list = sel.rows.map(r => '• ' + (r.addr || r.mls)).join('\n');
-  const ok = ui.alert('Reject ' + sel.rows.length + ' lead(s)?',
-    list + '\n\nThey are deleted from the list, remembered so they never come back, '
-    + 'and counted in today\'s KPI.', ui.ButtonSet.YES_NO);
-  if (ok !== ui.Button.YES) return;
+  // Ask WHY. A rejection with no reason teaches nobody anything, and the whole
+  // point of the Rejected tab is being able to see the pattern later.
+  const resp = ui.prompt('Reject ' + sel.rows.length + ' lead(s)',
+    list + '\n\nWhy are you rejecting ' + (sel.rows.length > 1 ? 'these' : 'this') + '?\n'
+    + 'e.g. Already renovated · Bad street / location · Tenant occupied · '
+    + 'Too small · Overpriced · Structural / foundation · Not a fixer · Duplicate\n\n'
+    + 'Type a reason and press OK:', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  const reason = String(resp.getResponseText() || '').trim();
+  if (!reason) {
+    ui.alert('Reject lead(s)', 'No reason given — nothing was rejected. '
+      + 'The reason is what makes the Rejected tab useful.', ui.ButtonSet.OK);
+    return;
+  }
 
   runMenu_('Reject lead(s)', () => {
     const who = safeUser_();
-    addRejected_(sel.rows, who);
+    sel.rows.forEach(r => { r.reason = reason; });
+    addRejected_(sel.rows, who, 'Reviewer');
     // Delete bottom-up so earlier row numbers stay valid.
     for (let i = sel.rows.length - 1; i >= 0; i--) sel.sheet.deleteRow(sel.rows[i].row);
     const k = bumpReviewerKpi_('Reviewer Removed', sel.rows.length, who);
     return 'Rejected ' + sel.rows.length + ' lead(s).\n'
+      + 'Reason logged: "' + reason + '"\n'
       + 'Today\'s removed count: ' + k.value + '\n\n'
-      + 'They will not be scanned or re-added.';
+      + 'Logged on the Rejected tab; they will not be scanned or re-added.';
   });
 }
 
