@@ -92,7 +92,19 @@
       <button id="resume" disabled>▶ Resume</button>
       <button id="stop" disabled>⏹ Stop</button>
     </div>
-    <div class="hint">Covers the full buy box: SF · whole Peninsula ($2M) · Sunnyvale · San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond. Active · SFR · any days on market.</div>
+    <div class="row" style="margin-top:8px">
+      <label style="display:flex;align-items:center;gap:6px;margin:0">
+        Reading time per listing
+        <input id="readSeconds" type="number" min="0" max="60" value="6" style="width:70px">
+        seconds
+      </label>
+    </div>
+    <div class="hint"><b>One city at a time, in order.</b> San Francisco is scanned,
+      every new listing reviewed one by one, comped and pushed to the sheet — and only
+      then does the next city start. Order: SF · whole Peninsula ($2M) · Sunnyvale ·
+      San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond.
+      Active · SFR · any days on market. Reading time holds each gallery on screen so
+      the photos finish loading before anything judges them.</div>
     <div id="funnel" class="status" style="margin-top:10px">Idle.</div>
   </div>
 
@@ -191,11 +203,13 @@
   function pushConfig(){ window.fs.setConfig({
     autoVerify: $('autoVerify').checked, useAI: $('useAI').checked,
     apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
+    readSeconds: Number($('readSeconds').value||6),
     sheetUrl: $('sheetUrl').value.trim(), sheetSecret: $('sheetSecret').value, autoPush: $('autoPush').checked,
   }); }
   $('autoVerify').onchange = () => { $('autoFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
+  $('readSeconds').oninput = pushConfig;
 
   // --- sheet settings: shipped defaults, then whatever was saved locally ---
   const SHEET_KEYS = ['sheetUrl','sheetSecret'];
@@ -255,8 +269,17 @@
       box.className = 'status ' + (p.aiDecision === 'keep' ? 'good' : 'warn');
       box.textContent = `AI verdict: ${p.aiDecision.toUpperCase()} — ${p.aiReason}`;
     } else {
+      // needsEye = the text rules couldn't decide; a person must look.
       $('manualControls').style.display = 'block';
-      $('aiVerdict').style.display = 'none';
+      const box = $('aiVerdict');
+      if (p.needsEye) {
+        box.style.display = 'block'; box.className = 'status warn';
+        box.textContent = '👀 ' + (p.aiReason || 'Judge this one from the photos.');
+      } else { box.style.display = 'none'; }
+    }
+    if (p.remarks) {
+      $('rMeta').innerHTML += `<div class="hint" style="margin-top:6px">${
+        String(p.remarks).slice(0,400).replace(/[<>]/g,'')}</div>`;
     }
   });
   // ---------------- daily KPI ----------------

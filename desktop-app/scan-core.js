@@ -142,7 +142,11 @@ function rulesDecide(meta) {
   if (DROP_KW.test(t)) return { decision: 'drop', reason: 'remarks describe renovated / updated / turnkey (Rule #0)' };
   if (photos > 0 && photos <= 4 && !KEEP_KW.test(t)) return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access (tenant?)` };
   if (KEEP_KW.test(t)) return { decision: 'keep', reason: 'as-is / estate / fixer language + below-market $/sf' };
-  return { decision: 'keep', reason: 'below-market $/sf, no renovated / multi-unit signals in remarks' };
+  // Remarks say nothing either way. This engine reads TEXT only — it has not
+  // looked at a single photo — so "no renovated keyword" is not evidence the
+  // house is a fixer. Auto-keeping here is what let renovated listings through.
+  // Hand it to a human (or to AI vision, which does look) instead of guessing.
+  return { decision: 'manual', reason: 'remarks are silent on condition — photos must be judged by eye' };
 }
 
 module.exports = {

@@ -17,6 +17,7 @@ const control = { paused: false, stopped: false, running: false };
 const pendingDecision = {}; // mls -> resolve fn
 const cfg = {
   apiKey: '', model: 'claude-opus-5', autoVerify: false, useAI: false, // auto-verify config
+  readSeconds: 6,                                                      // dwell per listing
   sheetUrl: '', sheetSecret: '', autoPush: false,                      // Flip Scout Agent sheet
 };
 ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
@@ -274,7 +275,15 @@ async function showGallery(mls) {
   await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
   await sleep(2600);
-  const urls = await js(core.JS_PHOTOS).catch(() => []);
+  // The results grid lazy-loads; poll until the photo count stops growing
+  // instead of grabbing whatever happens to be there after a fixed sleep.
+  let urls = [];
+  for (let tries = 0; tries < 6; tries++) {
+    const got = await js(core.JS_PHOTOS).catch(() => []);
+    if (got.length && got.length === urls.length) break;   // settled
+    urls = got;
+    await sleep(900);
+  }
   // Capture agent remarks + condition (for the no-API rules engine) via the Client Full report.
   let meta = { remarks: '', condition: '' };
   try {
@@ -287,13 +296,27 @@ async function showGallery(mls) {
       meta = await js(`(() => { const t=document.body.innerText.replace(/\\r/g,''); const grab=re=>{const m=t.match(re);return m?m[1].replace(/\\s+/g,' ').trim():'';}; return { remarks: grab(/(?:Public Remarks?|Marketing Remarks?|Remarks?):?\\s*([\\s\\S]{0,600}?)(?:Agent|Directions|Showing|Compensation|Listing Office|\\u00a9|Presented|$)/i), condition: grab(/Prop(?:erty)? Condition:?\\s*([^\\n]{0,60})/i) }; })()`).catch(() => ({ remarks: '', condition: '' }));
     }
   } catch (_) {}
-  // Render the full gallery so the user can watch along.
+  // Render the full gallery so you can watch along, then WAIT for the images to
+  // actually decode before anything judges the listing.
   await js(`(() => {
     const urls = ${JSON.stringify(urls)};
     const cell = (u,i) => '<div style="width:32%"><img src="'+u+'" style="width:100%;height:220px;object-fit:cover"><div style="color:#fff;font:12px sans-serif">#'+i+'</div></div>';
     document.body.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:6px;background:#111;padding:8px;font-family:sans-serif">' + urls.map(cell).join('') + '</div>';
   })()`).catch(() => {});
-  return { count: urls.length, remarks: meta.remarks, condition: meta.condition };
+  await js(`(async () => {
+    const imgs = [...document.images];
+    await Promise.all(imgs.map(im => im.complete ? null : new Promise(r => {
+      im.onload = im.onerror = r; setTimeout(r, 8000);
+    })));
+    return imgs.filter(i => i.naturalWidth > 0).length;
+  })()`).catch(() => 0);
+
+  // Dwell, so a human watching can actually see the gallery and the run isn't
+  // blasting through listings faster than the pictures render.
+  const dwell = Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
+  if (dwell) await sleep(dwell);
+
+  return { count: urls.length, urls: urls, remarks: meta.remarks, condition: meta.condition, details: meta.details || {} };
 }
 
 // ---------- comps for one kept candidate ----------
@@ -320,8 +343,18 @@ async function compFor(mls, zip, sqft) {
 }
 
 // ---------- AI auto-verify (Claude vision applies the buy-box rules) ----------
-function rulesPrompt(c) {
-  return `You are screening a real-estate listing for a house-FLIPPING buy box. The image is a contact sheet of EVERY photo for this listing (${c.addr}, ${c._cityKey}; ${c._sqft} sqft; $${c._price.toLocaleString()}). Review every photo.
+function rulesPrompt(c, photoCount, gal) {
+  const remarks = ((gal && gal.remarks) || '').slice(0, 700);
+  return `You are screening a real-estate listing for a house-FLIPPING buy box.
+
+Listing: ${c.addr}, ${c._cityKey} — ${c._sqft} sqft, $${c._price.toLocaleString()}.
+You have been given ${photoCount} SEPARATE photos of this listing (every photo the MLS has, up to 20).
+${remarks ? `Agent remarks: "${remarks}"` : 'No agent remarks available.'}
+
+Work through the photos ONE BY ONE before answering. For each, note what room it is
+and the state of the finishes. Pay closest attention to the KITCHEN and BATHROOMS —
+that is where renovation shows first, and a listing is often photographed to hide it.
+Do not answer from the exterior shots alone.
 
 KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
 
@@ -334,22 +367,66 @@ DROP if ANY of:
 - Newer build that looks modern.
 - Exterior-only / too few interior photos to judge condition (then DROP, reason "insufficient photos").
 
+If you saw NO kitchen photo and NO bathroom photo, you cannot judge condition: DROP with
+reason "no kitchen/bath photos".
+
 Respond with ONLY a JSON object, no other text:
-{"decision":"KEEP"|"DROP","reason":"<8-15 words on what the photos actually show>"}`;
+{"kitchen":"<what the kitchen photos show, or 'none seen'>",
+ "bathroom":"<what the bathroom photos show, or 'none seen'>",
+ "decision":"KEEP"|"DROP",
+ "reason":"<8-15 words citing the specific finishes you saw>"}`;
+}
+
+/**
+ * Pull the listing's photos as individual base64 JPEGs.
+ *
+ * This replaces the old capturePage() screenshot, which was the reason
+ * renovated homes slipped through: capturePage grabs only the VISIBLE
+ * viewport, so the model saw the first row or two of the contact sheet —
+ * almost always exteriors — and never the kitchen or bathrooms where the
+ * renovation evidence actually is. Fetching each photo inside the MLS window
+ * (so the session cookies apply) and downscaling on a canvas gets every
+ * picture to the model at a sane payload size.
+ */
+async function collectPhotos(urls, max) {
+  const list = (urls || []).slice(0, max || 20);
+  if (!list.length) return [];
+  return await js(`(async () => {
+    const urls = ${JSON.stringify(list)};
+    const out = [];
+    for (const u of urls) {
+      try {
+        const r = await fetch(u, { credentials: 'include' });
+        if (!r.ok) continue;
+        const blob = await r.blob();
+        const bmp = await createImageBitmap(blob);
+        const scale = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(bmp.width * scale));
+        cv.height = Math.max(1, Math.round(bmp.height * scale));
+        cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+        const d = cv.toDataURL('image/jpeg', 0.72);
+        if (d && d.length > 2000) out.push(d.split(',')[1]);   // skip blank/failed decodes
+      } catch (e) { /* one bad photo must not sink the listing */ }
+    }
+    return out;
+  })()`).catch(() => []);
 }
 
 async function autoDecide(c) {
   try {
-    const img = await mlsWin.webContents.capturePage();
-    const b64 = img.toPNG().toString('base64');
-    const body = {
-      model: cfg.model || 'claude-opus-5',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: [
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64 } },
-        { type: 'text', text: rulesPrompt(c) },
-      ] }],
-    };
+    const gal = c._gal || {};
+    const photos = await collectPhotos(gal.urls, 20);
+    if (!photos.length) {
+      // Never guess with no pictures — Rule #2 says judge from the gallery.
+      return { decision: 'drop', reason: 'no photos could be loaded — insufficient photos to judge' };
+    }
+    log(`  analysing ${photos.length} photo(s)…`);
+    const content = photos.map(b64 => ({
+      type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 },
+    }));
+    content.push({ type: 'text', text: rulesPrompt(c, photos.length, gal) });
+    const body = { model: cfg.model || 'claude-opus-5', max_tokens: 1024, messages: [{ role: 'user', content }] };
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -361,7 +438,12 @@ async function autoDecide(c) {
     let o = {}; const m = text.match(/\{[\s\S]*\}/);
     try { o = JSON.parse(m ? m[0] : text); } catch (_) {}
     const decision = /^keep$/i.test(String(o.decision || '').trim()) ? 'keep' : 'drop';
-    return { decision, reason: (o.reason || text || '').slice(0, 180) };
+    // Surface what it actually saw, so a wrong call is diagnosable from the log
+    // instead of being a bare verdict.
+    const seen = [o.kitchen && ('kitchen: ' + o.kitchen), o.bathroom && ('bath: ' + o.bathroom)]
+      .filter(Boolean).join(' | ');
+    const reason = [(o.reason || text || '').trim(), seen].filter(Boolean).join(' — ');
+    return { decision, reason: reason.slice(0, 300), photos: photos.length };
   } catch (e) { return { decision: 'drop', reason: 'AI call failed: ' + e.message }; }
 }
 
@@ -375,100 +457,141 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
     const s = await js(core.JS_TITLE).catch(() => '');
     if (!/Dashboard|Matrix/i.test(s)) { log('Not logged in — sign in first.', 'error'); return { ok: false }; }
 
-    const byArea = {};
-    for (const area of areas) { byArea[area.city && area.city !== '*' ? area.city : `All ${area.county}`] = await scanArea(area); }
-    const totalScanned = Object.values(byArea).reduce((n, a) => n + a.rows.length, 0);
-    const { candidates: allCandidates } = core.filterCandidates(byArea);
-    runKpi.scanned = totalScanned; runKpi.candidates = allCandidates.length;
-
     // Pull the reviewer's rejections down first, so anything she deleted is
     // treated as already-checked and never resurfaces.
     await syncRejectedIntoLedger();
 
-    // Drop everything already checked on an earlier run — this is what keeps a
-    // daily run cheap. Nothing below here ever re-examines a known listing.
-    const seen = loadLedger();
-    const candidates = allCandidates.filter(c => !seen[String(c.mls || '').trim().toUpperCase()]);
-    runKpi.skippedAlreadyChecked = allCandidates.length - candidates.length;
-    log(`Filter: ${totalScanned} scanned → ${allCandidates.length} candidates → `
-      + `${candidates.length} NEW (${runKpi.skippedAlreadyChecked} already checked, skipped)`, 'good');
-    send('funnel', { scanned: totalScanned, candidates: allCandidates.length, fresh: candidates.length,
-      skipped: runKpi.skippedAlreadyChecked,
-      byArea: Object.fromEntries(Object.entries(byArea).map(([k, v]) => [k, v.rows.length])) });
+    // ONE CITY AT A TIME, START TO FINISH. San Francisco is first in
+    // DEFAULT_BUYBOX and is finished completely — scanned, every candidate
+    // reviewed one by one, comped, scored and pushed — before the next city is
+    // even searched. No jumping between cities mid-review.
+    const leads = [];
+    const byArea = {};
+    for (let ai = 0; ai < areas.length; ai++) {
+      if (control.stopped) break;
+      const area = areas[ai];
+      const label = area.city && area.city !== '*' ? area.city : `All ${area.county}`;
+      log(`━━━ ${label}  (city ${ai + 1} of ${areas.length}) ━━━`, 'good');
+      send('city', { label, index: ai + 1, total: areas.length, phase: 'scanning' });
 
-    if (!candidates.length) {
-      log('No new listings since the last run — nothing to review.', 'good');
+      const scanned = await scanArea(area);
+      byArea[label] = scanned;
+      runKpi.scanned += scanned.rows.length;
+
+      // Medians are per-city anyway, so filtering a city on its own gives the
+      // same answer as filtering the whole batch — without the wait.
+      const { candidates: cityCands } = core.filterCandidates({ [label]: scanned });
+      runKpi.candidates += cityCands.length;
+
+      const seen = loadLedger();
+      const fresh = cityCands.filter(c => !seen[String(c.mls || '').trim().toUpperCase()]);
+      const skipped = cityCands.length - fresh.length;
+      runKpi.skippedAlreadyChecked += skipped;
+
+      log(`${label}: ${scanned.rows.length} scanned → ${cityCands.length} candidates → `
+        + `${fresh.length} NEW (${skipped} already checked, skipped)`, 'good');
+      send('funnel', { city: label, scanned: runKpi.scanned, candidates: runKpi.candidates,
+        fresh: fresh.length, skipped: runKpi.skippedAlreadyChecked,
+        byArea: Object.fromEntries(Object.entries(byArea).map(([k, v]) => [k, v.rows.length])) });
+
+      if (!fresh.length) { log(`${label}: nothing new — moving on.`); continue; }
+
+      // --- review this city's listings, one by one ---
+      send('city', { label, index: ai + 1, total: areas.length, phase: 'reviewing', count: fresh.length });
+      const kept = [];
+      for (let i = 0; i < fresh.length; i++) {
+        await waitIfPaused();
+        if (control.stopped) break;
+        const c = fresh[i];
+        log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
+        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', details: {} }));
+        const n = gal.count;
+        const base = { i: i + 1, total: fresh.length, city: label, mls: c.mls, addr: c.addr,
+          price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n,
+          remarks: gal.remarks || '', details: gal.details || {} };
+        let decision, dropReason = '';
+        if (cfg.autoVerify && cfg.useAI && cfg.apiKey) {
+          const v = await autoDecide({ ...c, _cityKey: label, _sqft: c._sqft, _price: c._price, _gal: gal });
+          decision = v.decision; dropReason = v.reason;
+          send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'AI (vision): ' + v.reason });
+          log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
+        } else if (cfg.autoVerify) {
+          const v = core.rulesDecide({ photos: n, remarks: gal.remarks, condition: gal.condition });
+          if (v.decision === 'manual') {
+            // The text rules can't call it. Stop and let a human look rather
+            // than defaulting to keep — that default was surfacing renovated homes.
+            log(`  RULES: ${v.reason} — over to you`, 'warn');
+            send('review', { ...base, needsEye: true, aiReason: 'Rules: ' + v.reason });
+            decision = await new Promise(res => { pendingDecision[c.mls] = res; });
+            delete pendingDecision[c.mls];
+            dropReason = 'manual review';
+          } else {
+            decision = v.decision; dropReason = v.reason;
+            send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'Rules: ' + v.reason });
+            log(`  RULES ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
+          }
+        } else {
+          send('review', base);
+          decision = await new Promise(res => { pendingDecision[c.mls] = res; });
+          delete pendingDecision[c.mls];
+        }
+        if (control.stopped) break;
+        runKpi.reviewed++;
+        if (decision === 'keep') { kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
+        else { runKpi.dropped++; runKpi[dropBucket(dropReason)]++; log(`  dropped ${c.addr}`); }
+        // Record as we go, not at the end — a crash or Stop mid-run must not
+        // cost us the listings already judged.
+        ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: label });
+      }
+
+      // --- comp + score this city, before touching the next one ---
+      send('city', { label, index: ai + 1, total: areas.length, phase: 'comping', count: kept.length });
+      const cityLeads = [];
+      for (const c of kept) {
+        await waitIfPaused();
+        if (control.stopped) break;
+        log(`[${label}] Comping ${c.addr}…`);
+        const zip = (c.zip || '').match(/9\d{4}/) ? c.zip : await js(`(() => { const m=document.body.innerText.match(/\\b(9[45]\\d{3})\\b/); return m?m[1]:''; })()`).catch(() => '');
+        let comp = { arv: 0, medianPpsf: 0, band: 'n/a', n: 0 };
+        try { comp = await compFor(c.mls, zip || c.zip || '', c._sqft); } catch (e) { log(`  comp failed: ${e.message}`, 'warn'); }
+        const deal = core.scoreDeal({ price: c._price, sqft: c._sqft, arv: comp.arv });
+        cityLeads.push({ mls: c.mls, address: c.addr, city: label, zip, beds: c.bds, baths: c.baths || '',
+          sqft: c._sqft, lotSqft: core.num(c.lotSqft || 0) || '',
+          yearBuilt: 2026 - c._age, dom: c._dom, price: c._price,
+          arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
+          arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
+          link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+          ...deal });
+      }
+
+      leads.push(...cityLeads);
+      leads.sort((a, b) => b.grossLight - a.grossLight);
+      runKpi.leads = leads.length;
+      runKpi.gateCleared = leads.filter(l => l.surface).length;
+      send('report', { leads, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
+
+      // Push this city's winners now, so finished work reaches the sheet even
+      // if a later city fails or you stop the run.
+      const cityWinners = cityLeads.filter(l => l.surface);
+      if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret && cityWinners.length) {
+        const r = await pushLeads(cityWinners);
+        if (r.ok) { runKpi.pushed += r.added; runKpi.pushSkipped += r.skipped; }
+        log(`[${label}] sheet: ${r.ok ? `${r.added} added, ${r.skipped} already there` : 'push failed — ' + r.error}`,
+          r.ok ? 'good' : 'error');
+      }
+      log(`━━━ ${label} done: ${kept.length} kept, ${cityWinners.length} clear the gate ━━━`, 'good');
+      send('city', { label, index: ai + 1, total: areas.length, phase: 'done',
+        kept: kept.length, winners: cityWinners.length });
+    }
+
+    if (!leads.length) {
+      log('No new qualifying listings this run.', 'good');
       send('report', { leads: [], generatedAt: new Date().toString(), noNew: true });
       return { ok: true, leads: [] };
     }
-
-    // Photo-verify loop with pause/keep-drop.
-    const kept = [];
-    for (let i = 0; i < candidates.length; i++) {
-      await waitIfPaused();
-      const c = candidates[i];
-      log(`Photo-review ${i + 1}/${candidates.length}: ${c.addr} (${c._cityKey})`);
-      const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '' }));
-      const n = gal.count;
-      const base = { i: i + 1, total: candidates.length, mls: c.mls, addr: c.addr, city: c._cityKey, price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n };
-      let decision, dropReason = '';
-      if (cfg.autoVerify && cfg.useAI && cfg.apiKey) {
-        const v = await autoDecide({ ...c, _cityKey: c._cityKey, _sqft: c._sqft, _price: c._price });
-        decision = v.decision; dropReason = v.reason;
-        send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'AI (vision): ' + v.reason });
-        log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
-      } else if (cfg.autoVerify) {
-        const v = core.rulesDecide({ photos: n, remarks: gal.remarks, condition: gal.condition });
-        decision = v.decision; dropReason = v.reason;
-        send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'Rules: ' + v.reason });
-        log(`  RULES ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
-      } else {
-        send('review', base);
-        decision = await new Promise(res => { pendingDecision[c.mls] = res; });
-        delete pendingDecision[c.mls];
-      }
-      if (control.stopped) break;
-      runKpi.reviewed++;
-      if (decision === 'keep') { kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
-      else { runKpi.dropped++; runKpi[dropBucket(dropReason)]++; log(`  dropped ${c.addr}`); }
-      // Record as we go, not at the end — a crash or Stop mid-run must not cost
-      // us the listings already judged.
-      ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped',
-        { addr: c.addr, city: c._cityKey });
-    }
-
-    // Comp + score the kept set.
-    const leads = [];
-    for (const c of kept) {
-      await waitIfPaused();
-      log(`Comping ${c.addr}…`);
-      const zip = (c.zip || '').match(/9\d{4}/) ? c.zip : await js(`(() => { const m=document.body.innerText.match(/\\b(9[45]\\d{3})\\b/); return m?m[1]:''; })()`).catch(() => '');
-      let comp = { arv: 0, medianPpsf: 0, band: 'n/a', n: 0 };
-      try { comp = await compFor(c.mls, zip || c.zip || '', c._sqft); } catch (e) { log(`  comp failed: ${e.message}`, 'warn'); }
-      const deal = core.scoreDeal({ price: c._price, sqft: c._sqft, arv: comp.arv });
-      leads.push({ mls: c.mls, address: c.addr, city: c._cityKey, zip, beds: c.bds, sqft: c._sqft,
-        lotSqft: core.num(c.lotSqft || c['Lot SqFt'] || 0) || '',
-        yearBuilt: 2026 - c._age, dom: c._dom, price: c._price,
-        arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
-        arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
-        link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
-        ...deal });
-    }
-    leads.sort((a, b) => b.grossLight - a.grossLight);
-    runKpi.leads = leads.length;
-    runKpi.gateCleared = leads.filter(l => l.surface).length;
-    send('report', { leads, generatedAt: new Date().toString() });
-    log(`Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate.`, 'good');
-
-    // Push straight to the Flip Scout Agent sheet when configured.
-    if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) {
-      const surfacing = leads.filter(l => l.surface);
-      log(`Pushing ${surfacing.length} lead(s) to the sheet…`);
-      const r = await pushLeads(surfacing);
-      if (r.ok) { runKpi.pushed = r.added; runKpi.pushSkipped = r.skipped; }
-      log(r.ok ? `Sheet updated: ${r.added} added, ${r.skipped} already there.`
-               : `Sheet push failed: ${r.error}`, r.ok ? 'good' : 'error');
-    }
+    // Leads were already pushed city by city above — don't re-send them here.
+    log(`Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate`
+      + (cfg.autoPush ? `; ${runKpi.pushed} sent to the sheet.` : '.'), 'good');
     return { ok: true, leads };
   } catch (e) {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
