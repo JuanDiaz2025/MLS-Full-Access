@@ -32,7 +32,14 @@ a number can be audited without re-running comps).
 - **Accepts camelCase or literal header keys** — `dom`/`DOM`, `arv`/
   `Estimated ARV (After Repair)`, `price`/`Purchase Price`, etc. Money may be a
   string (`"$695,000"`); it is stored as a number.
-- Run `setupSheet()` once to create and format the tab.
+- Run `setupSheet()` once to create and format the tab. An append onto a tab that
+  has never been set up now builds the header automatically rather than failing.
+- **In-sheet menu** (`⚡ Flip Scout`, appears after saving the script and reloading
+  the sheet): Set up / repair sheet · Add a test lead · Remove test rows · Sort by
+  profit · Remove duplicates · Remove unprofitable leads · Lead count ·
+  Connection info (shows the deployed web app URL + whether the secret is still
+  the placeholder) · Clear ALL leads. Destructive items confirm first, and any
+  failure surfaces as a dialog with the real error text.
 
 ## B. "Property Review" (Layout B — legacy)
 

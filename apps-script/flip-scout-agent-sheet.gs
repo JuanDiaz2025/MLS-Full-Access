@@ -186,8 +186,10 @@ function getSheet_() {
   return ss.getSheets()[0];
 }
 
-/** Locate the header row by looking for our own column names. */
-function header_(sheet) {
+/** Locate the header row by looking for our own column names.
+ *  If the tab has never been set up, build it instead of failing — otherwise the
+ *  very first append (or testAppend) dies on a sheet that is simply still empty. */
+function header_(sheet, _retry) {
   const maxRow = Math.min(sheet.getLastRow() || 1, 20);
   const maxCol = Math.max(sheet.getLastColumn() || 1, 1);
   const values = sheet.getRange(1, 1, maxRow, maxCol).getValues();
@@ -199,7 +201,9 @@ function header_(sheet) {
       return { row: r + 1, idx: idx };
     }
   }
-  throw new Error('Header row not found — run setupSheet() first.');
+  if (_retry) throw new Error('Header row still not found after setup — check that CONFIG.SPREADSHEET_ID points at the right file.');
+  setupSheet();
+  return header_(getSheet_(), true);
 }
 
 /** Last row of the leads table (stops at the first blank key cell, so anything
@@ -328,6 +332,166 @@ function applyConditionalFormatting_(sheet, idx, maxRows) {
     .setBackground('#fce5cd').setRanges([dom]).build());
 
   sheet.setConditionalFormatRules(rules);
+}
+
+// ------------------------------------------------------- in-sheet buttons ----
+// Adds a "Flip Scout" menu to the sheet's toolbar. Reload the sheet once after
+// saving the script for the menu to appear.
+
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('⚡ Flip Scout')
+    .addItem('Set up / repair sheet', 'menuSetup')
+    .addSeparator()
+    .addItem('Add a test lead', 'menuTestAppend')
+    .addItem('Remove test rows', 'menuRemoveTests')
+    .addSeparator()
+    .addItem('Sort by profit (Light)', 'menuSortByProfit')
+    .addItem('Remove duplicates', 'menuDedupe')
+    .addItem('Remove unprofitable leads', 'menuRemoveUnprofitable')
+    .addSeparator()
+    .addItem('Lead count', 'menuStats')
+    .addItem('Connection info', 'menuConnectionInfo')
+    .addSeparator()
+    .addItem('Clear ALL leads', 'menuClearAll')
+    .addToUi();
+}
+
+/** Every menu action runs through here so a failure shows a readable dialog
+ *  instead of a silent red toast that disappears. */
+function runMenu_(label, fn) {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const msg = fn();
+    if (msg) ui.alert(label, String(msg), ui.ButtonSet.OK);
+  } catch (err) {
+    ui.alert(label + ' — failed', String(err && err.message || err), ui.ButtonSet.OK);
+  }
+}
+
+function menuSetup() { runMenu_('Set up sheet', () => setupSheet()); }
+
+function menuTestAppend() {
+  runMenu_('Add a test lead', () => {
+    const r = appendLeads([{
+      score: 8, recommendation: 'Strong Deal', flipQuality: 'Good Flip',
+      mls: 'TEST' + Math.floor(Math.random() * 100000),
+      address: '1234 Test St', city: 'Oakland', zip: '94601',
+      beds: 3, baths: 2, sqft: 1400, lotSqft: 4000, yearBuilt: 1950, dom: 12,
+      price: 600000, arv: 1000000, rehabLight: 98000, rehabHeavy: 203000, holding: 18000,
+      arvBasis: '±20% band, 7 comps @ $714/sf', risks: 'Test row — safe to delete',
+      link: 'https://example.com/test-listing',
+    }]);
+    const added = r.filter(x => !x.skipped).length;
+    return added ? 'Added 1 test row. Use "Remove test rows" to clear it.'
+                 : 'Nothing added (duplicate): ' + JSON.stringify(r[0]);
+  });
+}
+
+function menuRemoveTests() {
+  runMenu_('Remove test rows', () => {
+    const n = deleteRowsWhere_((get) => String(get('MLS #')).indexOf('TEST') === 0);
+    return n ? 'Removed ' + n + ' test row(s).' : 'No test rows found.';
+  });
+}
+
+function menuSortByProfit() {
+  runMenu_('Sort by profit', () => {
+    const sheet = getSheet_(), h = header_(sheet);
+    const end = lastDataRow_(sheet, h);
+    if (end <= h.row) return 'No leads to sort.';
+    const col = h.idx['Gross Profit (Light)'];
+    if (col == null) return 'Column "Gross Profit (Light)" not found.';
+    sheet.getRange(h.row + 1, 1, end - h.row, sheet.getLastColumn())
+      .sort({ column: col + 1, ascending: false });
+    return 'Sorted ' + (end - h.row) + ' lead(s), highest profit first.';
+  });
+}
+
+function menuDedupe() {
+  runMenu_('Remove duplicates', () => {
+    const seen = {};
+    const n = deleteRowsWhere_((get) => {
+      const k = String(get('MLS #') || (get('Address') + '|' + get('City'))).trim().toUpperCase();
+      if (!k || k === '|') return false;
+      if (seen[k]) return true;
+      seen[k] = true; return false;
+    });
+    return n ? 'Removed ' + n + ' duplicate row(s).' : 'No duplicates found.';
+  });
+}
+
+function menuRemoveUnprofitable() {
+  const ui = SpreadsheetApp.getUi();
+  const ok = ui.alert('Remove unprofitable leads',
+    'Delete every lead whose Gross Profit (Light) is 0 or negative?', ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+  runMenu_('Remove unprofitable leads', () => {
+    const n = deleteRowsWhere_((get) => num_(get('Gross Profit (Light)')) <= 0);
+    return n ? 'Removed ' + n + ' lead(s).' : 'Nothing to remove — all leads are profitable.';
+  });
+}
+
+function menuStats() {
+  runMenu_('Lead count', () => {
+    const sheet = getSheet_(), h = header_(sheet);
+    const end = lastDataRow_(sheet, h);
+    const n = Math.max(0, end - h.row);
+    if (!n) return 'No leads yet.';
+    const recCol = h.idx['Recommendation'];
+    const counts = {};
+    if (recCol != null) {
+      sheet.getRange(h.row + 1, recCol + 1, n, 1).getValues()
+        .forEach(r => { const k = String(r[0]).trim() || '(blank)'; counts[k] = (counts[k] || 0) + 1; });
+    }
+    return n + ' lead(s)\n' + Object.keys(counts).map(k => '  ' + k + ': ' + counts[k]).join('\n');
+  });
+}
+
+function menuConnectionInfo() {
+  runMenu_('Connection info', () => {
+    const secretSet = CONFIG.SHARED_SECRET && CONFIG.SHARED_SECRET !== 'CHANGE_ME_TO_A_LONG_RANDOM_STRING';
+    let url = '(not deployed yet)';
+    try { url = ScriptApp.getService().getUrl() || url; } catch (e) {}
+    return 'Web app URL:\n' + url +
+      '\n\nShared secret: ' + (secretSet ? 'set ✓' : '⚠ still the placeholder — edit CONFIG.SHARED_SECRET') +
+      '\n\nPaste both into section 6 of the FlipScout app.' +
+      '\n\nIf the URL says "not deployed yet": Deploy > New deployment > Web app,' +
+      ' Execute as Me, Access "Anyone with the link".';
+  });
+}
+
+function menuClearAll() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSheet_(), h = header_(sheet);
+  const n = Math.max(0, lastDataRow_(sheet, h) - h.row);
+  if (!n) { ui.alert('Clear ALL leads', 'The sheet is already empty.', ui.ButtonSet.OK); return; }
+  const ok = ui.alert('Clear ALL leads',
+    'Delete all ' + n + ' lead row(s)? The header and formatting are kept. This cannot be undone.',
+    ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+  runMenu_('Clear ALL leads', () => {
+    sheet.deleteRows(h.row + 1, n);
+    return 'Deleted ' + n + ' lead row(s).';
+  });
+}
+
+/** Shared row-deleting helper. `pred(get)` receives a column accessor and
+ *  returns true to delete. Walks bottom-up so indices stay valid. */
+function deleteRowsWhere_(pred) {
+  const sheet = getSheet_(), h = header_(sheet);
+  const end = lastDataRow_(sheet, h);
+  if (end <= h.row) return 0;
+  const n = end - h.row;
+  const width = sheet.getLastColumn();
+  const values = sheet.getRange(h.row + 1, 1, n, width).getValues();
+
+  const doomed = [];
+  for (let i = 0; i < n; i++) {
+    const get = col => (h.idx[col] == null ? '' : values[i][h.idx[col]]);
+    if (pred(get)) doomed.push(h.row + 1 + i);
+  }
+  for (let i = doomed.length - 1; i >= 0; i--) sheet.deleteRow(doomed[i]);
+  return doomed.length;
 }
 
 // ------------------------------------------------------------------ utils ----

@@ -216,6 +216,8 @@ Endpoint `apps-script/flip-scout-agent-sheet.gs`, POST `{secret, leads:[…]}`.
 Carries **`DOM`** and **`Estimated ARV (After Repair)`** on top of the old
 layout, plus `MLS #`, `Max Offer`, and `ARV Basis`. De-dupes on `MLS #`,
 auto-computes Total Cost / Gross Profit / Max Offer, stamps `First Added`.
+The sheet has an `⚡ Flip Scout` menu (setup, test lead, sort by profit, dedupe,
+purge unprofitable, lead count, connection info, clear all).
 
 **Legacy — "Property Review"** (`10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA`,
 gid `1510205894`) via `apps-script/append-lead.gs`, POST `{secret, lead}`.
