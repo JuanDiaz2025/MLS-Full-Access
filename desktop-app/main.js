@@ -746,7 +746,7 @@ async function pushLeads(leads) {
           mls: l.mls, address: l.address, city: l.city, zip: l.zip,
           beds: l.beds, baths: l.baths || '', sqft: l.sqft, lotSqft: l.lotSqft || '',
           yearBuilt: l.yearBuilt, dom: l.dom,
-          price: l.price, arv: l.arv,
+          price: l.price, ppsf: l.ppsf || '', arv: l.arv,
           rehabLight: l.rehabLight, rehabHeavy: l.rehabHeavy, holding: l.holding,
           maxOffer: l.recommendedMaxOffer, arvBasis: l.arvBasis || '',
           risks: l.risks || 'None', link: l.link || '',

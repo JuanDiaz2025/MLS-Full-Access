@@ -35,21 +35,38 @@ const CONFIG = {
   SHARED_SECRET: 'ZM85Wtbzf3lx7_412HVvII5_ifAVCzIA',
 };
 
-/** Canonical column order. Changing this is safe: rows are written by header
- *  name, so reordering or inserting a column in the sheet keeps working. */
+/** Canonical column order. Rows are written by header NAME, so reordering or
+ *  inserting a column in the sheet keeps working.
+ *
+ *  Condition-first: comping is off, so the facts that actually decide a lead --
+ *  price, $/sqft, size, age, days on market -- come first. The deal-math block
+ *  sits at the far right and stays blank until comps are switched back on, so
+ *  the sheet never shows an empty ARV where a real one should be. */
 const HEADERS = [
-  'Score', 'Recommendation', 'Flip Quality',
-  'MLS #', 'Address', 'City', 'Zip',
+  // --- what the scan actually knows ---
+  'Status', 'MLS #', 'Address', 'City', 'Zip',
   'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
-  'Purchase Price', 'Estimated ARV (After Repair)',
+  'Purchase Price', '$/SqFt',
+  'Notes', 'MLS Link', 'First Added',
+  // --- filled in only when comps run ---
+  'Estimated ARV (After Repair)', 'ARV Basis',
   'Rehab Cost (Light)', 'Rehab Cost (Heavy)', 'Holding Costs (3mo)',
   'Total Cost (Light)', 'Total Cost (Heavy)',
   'Gross Profit (Light)', 'Gross Profit (Heavy)', 'Max Offer',
-  'ARV Basis', 'Risks', 'MLS Link', 'First Added',
+  'Score', 'Recommendation', 'Flip Quality',
+];
+
+/** Columns that only mean anything once comping is on. */
+const COMP_COLS = [
+  'Estimated ARV (After Repair)', 'ARV Basis',
+  'Rehab Cost (Light)', 'Rehab Cost (Heavy)', 'Holding Costs (3mo)',
+  'Total Cost (Light)', 'Total Cost (Heavy)',
+  'Gross Profit (Light)', 'Gross Profit (Heavy)', 'Max Offer',
+  'Score', 'Recommendation', 'Flip Quality',
 ];
 
 const MONEY_COLS = [
-  'Purchase Price', 'Estimated ARV (After Repair)',
+  'Purchase Price', '$/SqFt', 'Estimated ARV (After Repair)',
   'Rehab Cost (Light)', 'Rehab Cost (Heavy)', 'Holding Costs (3mo)',
   'Total Cost (Light)', 'Total Cost (Heavy)',
   'Gross Profit (Light)', 'Gross Profit (Heavy)', 'Max Offer',
@@ -153,8 +170,10 @@ const ALIASES = {
   totalLight: 'Total Cost (Light)', totalHeavy: 'Total Cost (Heavy)',
   grossLight: 'Gross Profit (Light)', grossHeavy: 'Gross Profit (Heavy)',
   recommendedMaxOffer: 'Max Offer', maxOffer: 'Max Offer',
-  arvBasis: 'ARV Basis', risks: 'Risks', link: 'MLS Link', mlsLink: 'MLS Link',
+  arvBasis: 'ARV Basis', link: 'MLS Link', mlsLink: 'MLS Link',
   firstAdded: 'First Added',
+  ppsf: '$/SqFt', pricePerSqft: '$/SqFt',
+  risks: 'Notes', notes: 'Notes', status: 'Status',
 };
 
 function normalize_(raw) {
@@ -173,9 +192,16 @@ function valueFor_(lead, col) {
   return v;
 }
 
-/** Derived money columns — never ask the caller to compute what we can. */
+/** Derived columns — never ask the caller to compute what we can. */
 function compute_(d) {
   const p = num_(d['Purchase Price']);
+  const sf = num_(d['SqFt']);
+  if (blank_(d['$/SqFt']) && p && sf) d['$/SqFt'] = Math.round(p / sf);
+  // Status is what the row IS at a glance. With comps off there is no
+  // recommendation to show, so say so plainly rather than leaving it blank.
+  if (blank_(d['Status'])) {
+    d['Status'] = d['Recommendation'] ? d['Recommendation'] : 'Needs Comps';
+  }
   const arv = num_(d['Estimated ARV (After Repair)']);
   const rl = num_(d['Rehab Cost (Light)']);
   const rh = num_(d['Rehab Cost (Heavy)']);
@@ -300,10 +326,11 @@ function setupSheet() {
 
   const idx = {}; HEADERS.forEach((c, i) => { idx[c] = i; });
   const widths = {
-    'Score': 55, 'Recommendation': 110, 'Flip Quality': 115, 'MLS #': 95,
-    'Address': 210, 'City': 110, 'Zip': 65, 'Beds': 55, 'Baths': 60,
-    'SqFt': 70, 'Lot SqFt': 80, 'Year Built': 85, 'DOM': 60,
-    'ARV Basis': 150, 'Risks': 260, 'MLS Link': 200, 'First Added': 140,
+    'Status': 110, 'MLS #': 95, 'Address': 220, 'City': 110, 'Zip': 65,
+    'Beds': 55, 'Baths': 60, 'SqFt': 70, 'Lot SqFt': 80, 'Year Built': 85,
+    'DOM': 60, 'Purchase Price': 110, '$/SqFt': 80,
+    'Notes': 260, 'MLS Link': 190, 'First Added': 130,
+    'ARV Basis': 150, 'Score': 55, 'Recommendation': 110, 'Flip Quality': 115,
   };
   HEADERS.forEach((c, i) => sheet.setColumnWidth(i + 1, widths[c] || 125));
 
@@ -320,6 +347,18 @@ function setupSheet() {
 
 function applyConditionalFormatting_(sheet, idx, maxRows) {
   const rules = [];
+
+  // Status is the at-a-glance column now that comping is off.
+  if (idx['Status'] != null) {
+    const st = sheet.getRange(2, idx['Status'] + 1, maxRows, 1);
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Needs Comps')
+      .setBackground('#e8eaf6').setFontColor('#1a237e').setRanges([st]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Strong Deal')
+      .setBackground('#d9ead3').setFontColor('#274e13').setRanges([st]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Marginal')
+      .setBackground('#fff2cc').setFontColor('#7f6000').setRanges([st]).build());
+  }
+
   const rec = sheet.getRange(2, idx['Recommendation'] + 1, maxRows, 1);
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Strong Deal')
     .setBackground('#d9ead3').setFontColor('#274e13').setRanges([rec]).build());
@@ -517,10 +556,78 @@ function addRejected_(items, who) {
 // happens automatically now or lives inside "Connect the app".
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('⚡ Flip Scout')
+    .addItem('🔄 Refresh now', 'menuRefresh')
     .addItem('❌ Reject selected lead(s)', 'menuRejectSelected')
     .addItem('📊 Today\'s numbers', 'menuReviewerToday')
     .addItem('🔌 Connect the app', 'menuConnect')
     .addToUi();
+}
+
+// ------------------------------------------------------------- refreshing ----
+
+/** Tidy the leads table: fill any missing Status / $ per sqft, drop duplicate
+ *  MLS #s, and sort. Safe to run as often as you like. */
+function refreshLeads() {
+  const sheet = getSheet_();
+  const h = header_(sheet);
+  const end = lastDataRow_(sheet, h);
+  if (end <= h.row) return { rows: 0, deduped: 0, filled: 0 };
+
+  const n = end - h.row;
+  const width = sheet.getLastColumn();
+  const vals = sheet.getRange(h.row + 1, 1, n, width).getValues();
+  const get = (r, c) => (h.idx[c] == null ? '' : r[h.idx[c]]);
+  const set = (r, c, v) => { if (h.idx[c] != null) r[h.idx[c]] = v; };
+
+  const seen = {}, keepRows = [];
+  let deduped = 0, filled = 0;
+  for (const r of vals) {
+    if (String(get(r, 'Address')).trim() === '') continue;
+    const key = String(get(r, 'MLS #') || (get(r, 'Address') + '|' + get(r, 'City'))).trim().toUpperCase();
+    if (key && seen[key]) { deduped++; continue; }
+    if (key) seen[key] = true;
+    const p = num_(get(r, 'Purchase Price')), sf = num_(get(r, 'SqFt'));
+    if (!num_(get(r, '$/SqFt')) && p && sf) { set(r, '$/SqFt', Math.round(p / sf)); filled++; }
+    if (String(get(r, 'Status')).trim() === '') {
+      set(r, 'Status', String(get(r, 'Recommendation')).trim() || 'Needs Comps'); filled++;
+    }
+    keepRows.push(r);
+  }
+
+  // Cheapest $/sqft first while comps are off; by profit once they are on.
+  const anyProfit = keepRows.some(r => num_(get(r, 'Gross Profit (Light)')) !== 0);
+  keepRows.sort(anyProfit
+    ? (a, b) => num_(get(b, 'Gross Profit (Light)')) - num_(get(a, 'Gross Profit (Light)'))
+    : (a, b) => (num_(get(a, '$/SqFt')) || 1e9) - (num_(get(b, '$/SqFt')) || 1e9));
+
+  sheet.getRange(h.row + 1, 1, n, width).clearContent();
+  if (keepRows.length) sheet.getRange(h.row + 1, 1, keepRows.length, width).setValues(keepRows);
+  formatRange_(sheet, h, h.row + 1, Math.max(keepRows.length, 1));
+  return { rows: keepRows.length, deduped: deduped, filled: filled, sortedBy: anyProfit ? 'profit' : '$/sqft' };
+}
+
+function menuRefresh() {
+  runMenu_('Refresh', () => {
+    const r = refreshLeads();
+    return r.rows + ' lead(s) on the sheet.\n'
+      + (r.deduped ? 'Removed ' + r.deduped + ' duplicate(s).\n' : '')
+      + (r.filled ? 'Filled ' + r.filled + ' blank cell(s).\n' : '')
+      + 'Sorted by ' + r.sortedBy + '.'
+      + '\n\nHourly auto-refresh: ' + (hourlyEnabled_() ? 'ON' : 'OFF — enable it from Connect the app.');
+  });
+}
+
+/** Called by the hourly trigger. Kept separate so the trigger has a stable name. */
+function hourlyRefresh() { refreshLeads(); }
+
+function hourlyEnabled_() {
+  return ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'hourlyRefresh');
+}
+
+function enableHourly_() {
+  if (hourlyEnabled_()) return false;
+  ScriptApp.newTrigger('hourlyRefresh').timeBased().everyHours(1).create();
+  return true;
 }
 
 /**
@@ -532,20 +639,22 @@ function menuConnect() {
     setupSheet();       // Leads tab
     kpiSheet_();        // KPI tab
     rejectedSheet_();   // Rejected tab
+    const hourlyNew = enableHourly_();   // hourly auto-refresh
 
     let url = '';
     try { url = ScriptApp.getService().getUrl() || ''; } catch (e) {}
     const secretOk = CONFIG.SHARED_SECRET && CONFIG.SHARED_SECRET !== 'CHANGE_ME_TO_A_LONG_RANDOM_STRING';
 
+    const hourlyLine = 'Hourly auto-refresh: ' + (hourlyNew ? 'just switched ON' : 'ON') + '.\n\n';
     if (!url) {
-      return 'Tabs are ready (Leads, KPI, Rejected).\n\n'
+      return 'Tabs are ready (Leads, KPI, Rejected).\n' + hourlyLine
         + 'The app is NOT connected yet — this script has not been deployed.\n\n'
         + 'Deploy > New deployment > Web app\n'
         + '   Execute as: Me\n'
         + '   Who has access: Anyone with the link\n'
         + 'Then run this again to get the link.';
     }
-    return 'Tabs ready (Leads, KPI, Rejected).\n\n'
+    return 'Tabs ready (Leads, KPI, Rejected).\n' + hourlyLine
       + 'Paste these two into section 7 of the FlipScout app:\n\n'
       + 'URL:\n' + url + '\n\n'
       + 'Secret:\n' + (secretOk ? CONFIG.SHARED_SECRET : '⚠ still the placeholder — edit CONFIG.SHARED_SECRET at the top of this script')
