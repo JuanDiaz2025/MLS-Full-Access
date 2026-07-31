@@ -667,11 +667,29 @@ function describeHtmlReply(text) {
     return 'The deployed version predates doGet/doPost — Deploy → Manage '
       + 'deployments → pencil/edit → Version: New version → Deploy.';
   }
-  if (/authoriz/i.test(t)) {
-    return 'The script needs authorising — run any function once in the Apps '
-      + 'Script editor and accept the permission prompt, then redeploy.';
+  if (/authoriz|permission|consent/i.test(t)) {
+    return 'The script needs authorising — open the Apps Script editor, Run any '
+      + 'function once, accept the permission prompt, then redeploy.';
   }
-  return 'Expected JSON but got an HTML page back from the web app URL.';
+  if (/unable to open|does not exist|no longer exists|moved or deleted/i.test(t)) {
+    return 'Google says the script file cannot be opened — the deployment URL '
+      + 'points at a script that was deleted or is not shared with you.';
+  }
+  // Unknown page: quote it rather than shrugging, so the real cause is visible
+  // instead of guessed at.
+  return 'Expected JSON, got an HTML page. It says: "' + visibleText(t, 240) + '"';
+}
+
+/** Strip tags/scripts/styles and return the first meaningful text on a page. */
+function visibleText(html, max) {
+  const s = String(html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s.slice(0, max || 240) || '(the page had no readable text)';
 }
 
 /** Say which half is missing — "not configured" tells you nothing. */

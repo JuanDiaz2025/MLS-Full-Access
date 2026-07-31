@@ -82,20 +82,27 @@ function doPost(e) {
   }
 }
 
-/** Health check + header introspection, so the app can verify its config. */
+/** Health check + header introspection, so the app can verify its config.
+ *  Everything is inside try/catch: without it, any thrown error makes Apps
+ *  Script return an HTML error page, and the app can only report "expected
+ *  JSON, got HTML" — which says nothing about what actually went wrong. */
 function doGet(e) {
-  const p = (e && e.parameter) || {};
-  if (p.secret !== CONFIG.SHARED_SECRET) return json_({ ok: false, error: 'unauthorized' });
-  // The app asks for this before every scan so rejected leads stay buried.
-  if (p.rejected) return json_({ ok: true, rejected: rejectedList_() });
-  const sheet = getSheet_();
-  const h = header_(sheet);
-  return json_({
-    ok: true, sheet: sheet.getName(),
-    columns: HEADERS.filter(c => h.idx[c] != null),
-    missingColumns: HEADERS.filter(c => h.idx[c] == null),
-    rows: Math.max(0, lastDataRow_(sheet, h) - h.row),
-  });
+  try {
+    const p = (e && e.parameter) || {};
+    if (p.secret !== CONFIG.SHARED_SECRET) return json_({ ok: false, error: 'unauthorized — the secret in the app does not match CONFIG.SHARED_SECRET' });
+    // The app asks for this before every scan so rejected leads stay buried.
+    if (p.rejected) return json_({ ok: true, rejected: rejectedList_() });
+    const sheet = getSheet_();
+    const h = header_(sheet);
+    return json_({
+      ok: true, sheet: sheet.getName(),
+      columns: HEADERS.filter(c => h.idx[c] != null),
+      missingColumns: HEADERS.filter(c => h.idx[c] == null),
+      rows: Math.max(0, lastDataRow_(sheet, h) - h.row),
+    });
+  } catch (err) {
+    return json_({ ok: false, error: String(err && err.message || err) });
+  }
 }
 
 // ----------------------------------------------------------------- append ----
