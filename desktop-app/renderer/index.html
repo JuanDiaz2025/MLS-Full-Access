@@ -75,6 +75,17 @@
         <input id="useAI" type="checkbox" style="width:auto"> Use AI vision instead (reads the actual photos — more accurate, needs an Anthropic API key)
       </label>
       <div id="aiFields" style="display:none;margin-top:10px">
+        <label>When the text rules can't tell (no API key)</label>
+        <select id="whenUnsure" style="width:100%;padding:6px">
+          <option value="ask">Ask me — show the photos and wait (accurate, hands-on)</option>
+          <option value="keep">Keep it automatically (fast — some renovated homes will slip through)</option>
+          <option value="drop">Drop it automatically (fast — some real fixers will be lost)</option>
+        </select>
+        <div class="hint">Only applies without AI vision. The text rules read the agent
+          remarks and never see a photo, so when the remarks say nothing about condition
+          they cannot tell a renovated kitchen from an original one. <b>Turn on AI
+          auto-verify below and this never comes up</b> — vision looks at every photo and
+          decides on its own.</div>
         <label>Anthropic API key</label>
         <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
         <label>Model</label>
@@ -204,12 +215,15 @@
     autoVerify: $('autoVerify').checked, useAI: $('useAI').checked,
     apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
     readSeconds: Number($('readSeconds').value||6),
+    whenUnsure: $('whenUnsure').value,
     sheetUrl: $('sheetUrl').value.trim(), sheetSecret: $('sheetSecret').value, autoPush: $('autoPush').checked,
   }); }
   $('autoVerify').onchange = () => { $('autoFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
   $('readSeconds').oninput = pushConfig;
+  $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
+  { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
 
   // --- sheet settings: shipped defaults, then whatever was saved locally ---
   const SHEET_KEYS = ['sheetUrl','sheetSecret'];

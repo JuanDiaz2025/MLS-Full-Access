@@ -18,6 +18,7 @@ const pendingDecision = {}; // mls -> resolve fn
 const cfg = {
   apiKey: '', model: 'claude-opus-5', autoVerify: false, useAI: false, // auto-verify config
   readSeconds: 6,                                                      // dwell per listing
+  whenUnsure: 'ask',   // text-rules can't tell renovated from dated: ask | keep | drop
   sheetUrl: '', sheetSecret: '', autoPush: false,                      // Flip Scout Agent sheet
 };
 /** Apps Script hands out two URL shapes for the same deployment. The
@@ -531,13 +532,26 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         } else if (cfg.autoVerify) {
           const v = core.rulesDecide({ photos: n, remarks: gal.remarks, condition: gal.condition });
           if (v.decision === 'manual') {
-            // The text rules can't call it. Stop and let a human look rather
-            // than defaulting to keep — that default was surfacing renovated homes.
-            log(`  RULES: ${v.reason} — over to you`, 'warn');
-            send('review', { ...base, needsEye: true, aiReason: 'Rules: ' + v.reason });
-            decision = await new Promise(res => { pendingDecision[c.mls] = res; });
-            delete pendingDecision[c.mls];
-            dropReason = 'manual review';
+            // The text rules genuinely can't tell renovated from dated — they
+            // never see a photo. What happens next is your call (section 2):
+            //   ask  — stop and show it (accurate, but hands-on)
+            //   keep — let it through (fast, may surface renovated homes)
+            //   drop — skip it (fast, loses some real fixers)
+            // With an API key + AI vision this branch never runs, because
+            // vision actually looks at the pictures.
+            const mode = cfg.whenUnsure || 'ask';
+            if (mode === 'ask') {
+              log(`  RULES: ${v.reason} — over to you`, 'warn');
+              send('review', { ...base, needsEye: true, aiReason: 'Rules: ' + v.reason });
+              decision = await new Promise(res => { pendingDecision[c.mls] = res; });
+              delete pendingDecision[c.mls];
+              dropReason = 'manual review';
+            } else {
+              decision = mode;
+              dropReason = v.reason + ' (auto-' + mode + ' per your setting)';
+              send('review', { ...base, ai: true, aiDecision: mode, aiReason: 'Rules (unsure → ' + mode + '): ' + v.reason });
+              log(`  RULES unsure → ${mode.toUpperCase()}: ${v.reason}`, mode === 'keep' ? 'info' : 'info');
+            }
           } else {
             decision = v.decision; dropReason = v.reason;
             send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'Rules: ' + v.reason });
@@ -638,16 +652,24 @@ ipcMain.on('decide', (_e, { mls, decision }) => { if (pendingDecision[mls]) pend
  */
 function describeHtmlReply(text) {
   const t = String(text || '');
-  if (/accounts\.google\.com|AccountChooser|Sign in - Google/i.test(t)) {
-    return 'Google returned a SIGN-IN PAGE, so the deployment is not public. '
-      + 'In the Apps Script editor: Deploy → Manage deployments → edit (pencil) → '
-      + 'set "Who has access" to Anyone → Deploy. A URL containing '
-      + '/a/macros/<your-domain>/ is the domain-restricted form and will always '
-      + 'hit this wall.';
+  // Check sign-in FIRST and match it broadly: Google's login page is huge and
+  // contains plenty of incidental words. (An earlier version tested a bare
+  // /not found/ here, which matched inside that login page and reported a
+  // deployed-version problem when the real issue was access.)
+  if (/accounts\.google\.(com|[a-z.]+)|AccountChooser|signin|Sign in|ServiceLogin/i.test(t)) {
+    return 'Google returned a SIGN-IN PAGE, so the deployment is still not public. '
+      + 'Apps Script editor → Deploy → Manage deployments → pencil/edit → '
+      + '"Who has access" = Anyone (NOT "Anyone within <your domain>") → Deploy. '
+      + 'Domain-restricted deployments can never work here: the app has no Google '
+      + 'login to offer.';
   }
-  if (/Script function not found|not found/i.test(t)) {
-    return 'The deployment does not expose doGet/doPost — redeploy the current '
-      + 'version (Deploy → Manage deployments → edit → Version: New version).';
+  if (/Script function not found/i.test(t)) {
+    return 'The deployed version predates doGet/doPost — Deploy → Manage '
+      + 'deployments → pencil/edit → Version: New version → Deploy.';
+  }
+  if (/authoriz/i.test(t)) {
+    return 'The script needs authorising — run any function once in the Apps '
+      + 'Script editor and accept the permission prompt, then redeploy.';
   }
   return 'Expected JSON but got an HTML page back from the web app URL.';
 }
