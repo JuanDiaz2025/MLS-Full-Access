@@ -1,0 +1,55 @@
+name: Build FlipScout desktop (.exe)
+
+# Builds the Windows installer + portable .exe on a cloud Windows runner and
+# publishes them as a downloadable GitHub Release. No local setup needed.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [claude/navigation-link-training-l0d5a3]
+    paths:
+      - 'desktop-app/**'
+      - '.github/workflows/build-desktop.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: desktop-app
+        run: npm install
+
+      - name: Build Windows .exe (installer + portable)
+        working-directory: desktop-app
+        run: npm run dist -- --win nsis portable
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlipScout-Windows
+          path: desktop-app/dist/*.exe
+          if-no-files-found: error
+
+      - name: Publish downloadable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: flipscout-desktop
+          name: FlipScout Desktop (Windows)
+          body: |
+            Download **FlipScout** below and run it — no Node, no build, no setup.
+            - the `FlipScout-<version>.exe` — installer (creates a desktop shortcut)
+            - the `...portable.exe` — single-file, no install
+            Includes optional AI auto-verify (paste an Anthropic API key to have
+            Claude judge Keep/Drop from the photos).
+            Unsigned build, so Windows SmartScreen may say "unknown publisher" —
+            click More info → Run anyway.
+          files: desktop-app/dist/*.exe

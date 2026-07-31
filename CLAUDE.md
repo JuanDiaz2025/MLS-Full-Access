@@ -1,0 +1,159 @@
+# MLS Full Access — navigation memory
+
+Operational memory for reaching and driving the MLSListings Pro system headlessly
+from Claude Code on the web, and for turning listings into "Property Review" leads.
+
+## 🚫 HARD RULE #0 — NEVER surface already-renovated properties
+
+Do **NOT** present, rank, comp, or recommend any home that is already
+**renovated / remodeled / updated / refreshed / move-in-ready / turnkey / a
+newer build**. We only want **genuine value-add fixers** (as-is, probate/estate,
+dated/original, needs work, below-market $/sqft). Drop renovated listings on
+sight — do not even include them in a list. This is non-negotiable, every market,
+every search. (Detection cues + the full method: `docs/investigation-playbook.md`.)
+
+## 🔑 HARD RULE #1 — always be logged in before doing anything
+
+Session cookies expire mid-session. **Before any search/scrape/lookup, confirm
+the MLS session is alive; if logged out, LOG IN FIRST** (re-run login →
+`title = "MLSListings Pro Dashboard - <id>"`) and only then proceed. Never run a
+search on a dead session. Log in + run the task in the **same browser context**
+(the storageState can go stale), and re-save `.mls-state.json` right after the
+dashboard loads. Re-login may hit a **2FA step** (`/auth/PreTFA`) needing a code
+sent to the account owner — if so, stop and ask for the code.
+
+## 🖼️ HARD RULE #2 — review ALL photos before judging a property
+
+Do **NOT** decide fixer-vs-renovated (or recommend/drop) from the cover photo or
+remarks alone. **Open the full photo gallery and look at EVERY picture** — kitchen,
+bathrooms, flooring, and any interior shots — before making a call. The listing
+detail's first image is usually the exterior and hides the real condition. Click
+the **Photos** tab / gallery on each listing and review the full set every time.
+
+**If the photos show the property is already clean / finished / staged move-in
+ready, do NOT add it** — even if the profit math pencils. Clean-in-the-photos =
+drop, same as renovated (Rule #0). Only keep homes that look genuinely dated,
+distressed, worn, or vacant-original.
+
+## 1. Browser access (do this first, every fresh session)
+
+Browsing only works after fixing the egress proxy + TLS. Run once:
+
+```bash
+bash scripts/setup-browser.sh
+```
+
+It (a) installs the `playwright` npm package (browser binaries are pre-installed
+at `/opt/pw-browsers`), (b) trusts the proxy CA in the NSS store, and (c) installs
+a Chromium enterprise policy disabling the **post-quantum key share** and
+**Encrypted Client Hello**. Without (c), every HTTPS request dies with
+`ERR_CONNECTION_RESET` (the egress resets Chromium's oversized ClientHello) even
+though `curl` works. Full write-up: `docs/browser-access.md`.
+
+Always launch Chromium with:
+- `executablePath: /opt/pw-browsers/chromium-1194/chrome-linux/chrome`
+- `--no-sandbox` and `--proxy-server=$HTTPS_PROXY` (scheme stripped)
+
+Helper: `scripts/mls-lib.js` (`launch()` + state path).
+
+## 2. Login
+
+- Entry URL: `https://prodashboard.mlslistings.com/` → redirects to Azure AD B2C
+  sign-in at `mlslpro.b2clogin.com` (username/password; also Google/Facebook SSO).
+- **Credentials come from env vars `MLS_USER` / `MLS_PASS` — never commit them.**
+- `node scripts/mls-login.js` fills the form, signs in, and saves session cookies
+  to `.mls-state.json` (gitignored). Post-login flow: `mlsllogin.mlslistings.com/auth/PostLogin`
+  → dashboard. Success signal: page title `MLSListings Pro Dashboard - <agent id>`.
+- Reuse the session by loading `storageState: .mls-state.json` — skips re-login and
+  carries over to the Matrix domain.
+
+## 3. Dashboard
+
+- Top nav: Search · Listings · Products & Tools · Support · MLS Rules · Profile.
+- Blue toolbar: **Matrix Search** · Matrix Dashboard · My Listings · Realist II ·
+  Agent Search · Aculist · Pro Support.
+- **Matrix Search opens CoreLogic Matrix in a NEW TAB** →
+  `https://search.mlslistings.com/Matrix/Search/Residential/ResidentialSearch`.
+  With a saved `storageState` you can navigate there directly (no click needed).
+
+## 4. Matrix Residential Search — field IDs
+
+Matrix uses dynamic `Fm9_CtrlNNNN` ids. Observed (re-introspect if a `<select>`
+comes back empty — the form may have changed):
+
+| Field | Selector | Notes |
+|---|---|---|
+| Status (multi) | `#Fm9_Ctrl1161_LB` | Active, Contingent, Pending, Sold, … |
+| Property Type (multi) | `#Fm9_Ctrl65_LB` | Single Family Home, Condominium, Townhouse, … |
+| County (multi) | `#Fm9_Ctrl1738_LB` | **San Francisco = the whole city** |
+| City (multi) | `#Fm9_Ctrl1739_LB` | filter box `#Fm9_Ctrl1739_LB_TB` |
+| Area (multi) | `#Fm9_Ctrl1740_LB` | |
+| List Date | `#Fm9_Ctrl1162_TB` | range `MM/DD/YYYY-MM/DD/YYYY` |
+| List Price | `#Fm9_Ctrl63_TB` | "(000s)" box is checked → enter thousands; max = `0-1500` ($1.5M) |
+| Beds / SqFt / Age / Zip / MLS# | `#Fm9_Ctrl56_TB` / `#Fm9_Ctrl59_TB` / `#Fm9_Ctrl74_TB` / `#Fm9_Ctrl1780_TextBox` / `#Fm9_Ctrl75_TextBox` | |
+
+- Match count updates live on change (`"N matches"`). Click the **Results** tab/button
+  to load the grid (`Results.aspx`). Speed-bar shorthand for the SF example reads
+  `RESI A $0-1500 San Francisco`.
+
+Reusable runner:
+```bash
+COUNTY="San Francisco" STATUS=Active MAX_PRICE_K=1500 DAYS=45 \
+  node scripts/mls-matrix-search.js
+```
+Screenshots land in `.mls-artifacts/`. Verified example: SF · Active · ≤$1.5M ·
+listed last 45 days → **228 matches**.
+
+## 5. Lead investigation — Flip Scout methodology (CANONICAL)
+
+**`docs/flip-scout-SOP.md` is the governing SOP — follow it exactly.** Summary of
+what binds every analysis (see also `docs/investigation-playbook.md` for the
+headless-scrape workflow):
+
+- **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.0M max;
+  ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
+  data floor only guards against garbled prices). Areas: SF · full
+  San Mateo/Peninsula · Sunnyvale · Oakland · Richmond · Berkeley · San Leandro ·
+  San Jose. Never change the buy box without Bryan's explicit instruction.
+- **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
+  **days-on-market > 45**, **tenant-occupied**, multi-unit, vacant lot,
+  **fire-damaged** (any listing noting a past fire / fire damage / fire-gutted interior —
+  drop even if it reads as a genuine as-is fixer).
+- **ARV = size-matched sold comps:** median $/sqft of comps within **±20%** of
+  subject sqft (widen to ±40%, then ±60% only if <3 comps), × subject sqft. Never a
+  flat zip-wide median. Watch large-home / location-pocket / wrong-zip traps.
+- **Rehab (always both):** Light **$70/sqft** (cosmetic), Heavy **$140–150/sqft**
+  (full) + itemized add-ons for called-out issues (foundation, knob-and-tube, roof).
+- **Holding (3 mo):** 10%/yr financing prorated + insurance ($2,000 per $1M price) +
+  property tax (1.25%/yr prorated) + $400 flat utilities. (NOT a flat 3%.)
+- **Profit gate (dollars, under LIGHT):** ARV ≥ $1M → **$100k** min · $500k–$1M →
+  **$70k** · < $500k → **$50k**. Clears only under Light = **"Marginal"**; clears
+  under Heavy too = **"Strong Deal."** (Do not use an arbitrary $200k bar.)
+- **Equity ≠ profit.** The model's gross is a *screen* (step 1 of ~13), never the
+  decision — real profit must still absorb closing, commissions, permits, surprises.
+  Every surfaced lead carries a concrete "verify X before offering" next action.
+- **Loss profile to flag (from `DEAL_HISTORY.md`):** East Bay sub-$1M flips with
+  rehab < ~17% of purchase are the reliable engine; every historical loss was a
+  high-price **Peninsula/premium** buy with **heavy rehab (>25–30% of purchase, or
+  price > $1.5M** in Redwood City / Menlo Park / Foster City / San Carlos / Walnut
+  Creek). Flag any lead matching this even if it clears the dollar gate.
+- **Do NOT use:** ADU Potential, "Reno Budget" label, or seismic/pre-1940 wiring
+  risk flags (all removed per standing instruction).
+- **User-rejected (do not resurface):** 183 Victoria St, 1430 Shafter Ave (SF);
+  322 1st Ave (Redwood City) — plus the sheet's Rejected Redfin list.
+
+## 6. Lead output → Google Sheet ("Property Review" / Layout B)
+
+- Header order + value vocabulary: `docs/lead-format.md`.
+- Recommendation vocab: `Strong Deal` / `Marginal`. Flip Quality: `Good Flip` /
+  `Thin Flip` / `Flip W/ Caution` / `Negative`.
+- Append investigated leads to the sheet
+  (`10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA`, Property Review tab
+  gid `1510205894`) via the Apps Script web app in `apps-script/append-lead.gs`:
+  POST `{secret, lead}`. It auto-computes Total Cost / Gross Profit, stamps
+  `First Added`, and de-dupes on Redfin Link.
+
+## Notes
+
+- Environment is ephemeral — re-run `setup-browser.sh` and `mls-login.js` each session.
+- `.mls-state.json` holds live auth cookies; it is gitignored and must never be committed.

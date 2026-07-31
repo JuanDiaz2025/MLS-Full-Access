@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node
+node_modules/
+
+# MLS session + artifacts (never commit auth cookies)
+.mls-state.json
+.mls-artifacts/
+multi-scan.json
+
+# Root-level MLS debug screenshots
+prodashboard.png
