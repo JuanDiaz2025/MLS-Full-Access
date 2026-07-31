@@ -36,6 +36,12 @@ const CONFIG = {
   // The desktop app writes this file into your Google Drive; the sheet reads it
   // on refresh. This is what removes the need for a published web app.
   FEED_FILENAME: 'flipscout-leads.json',
+  // Preferred: look the drop file up by ID. getFilesByName() only searches the
+  // Drive of whichever account authorised this script, so a file sitting in a
+  // colleague's Drive is invisible to it even when shared. An ID works for any
+  // account that can open the file, which removes the whole "whose Drive is it
+  // in" problem. Falls back to the name if this is blank or unreadable.
+  FEED_FILE_ID: '1OpLf2wCkWp-TYlvqh2WKLODiboNcjgPv',
 };
 
 /** Canonical column order. Rows are written by header NAME, so reordering or
@@ -746,8 +752,17 @@ function disableHourly_() {
 // sign-in wall. Refresh the sheet (or wait for the hourly trigger) and new
 // leads appear.
 
-/** Newest Drive file with the feed name, or null. */
+/** The drop file: by ID when configured, else newest match by name. */
 function feedFile_() {
+  if (CONFIG.FEED_FILE_ID) {
+    try {
+      const f = DriveApp.getFileById(CONFIG.FEED_FILE_ID);
+      if (f) return f;
+    } catch (err) {
+      // Wrong ID, deleted, or not shared with this account — fall through to
+      // the name search rather than failing the whole refresh.
+    }
+  }
   const it = DriveApp.getFilesByName(CONFIG.FEED_FILENAME);
   let best = null;
   while (it.hasNext()) {
