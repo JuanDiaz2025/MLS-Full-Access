@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('fs', {
   decide: (mls, decision) => ipcRenderer.send('decide', { mls, decision }),
   setConfig: (c) => ipcRenderer.send('set-config', c),
   export: (leads) => ipcRenderer.invoke('export', { leads }),
+  pushSheet: (leads, onlySurfacing) => ipcRenderer.invoke('push-sheet', { leads, onlySurfacing }),
+  testSheet: () => ipcRenderer.invoke('test-sheet'),
   on: (channel, fn) => ipcRenderer.on(channel, (_e, payload) => fn(payload)),
 });

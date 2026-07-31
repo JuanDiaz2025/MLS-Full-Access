@@ -204,16 +204,32 @@ headless-scrape workflow):
 - **User-rejected (do not resurface):** 183 Victoria St, 1430 Shafter Ave (SF);
   322 1st Ave (Redwood City) — plus the sheet's Rejected Redfin list.
 
-## 6. Lead output → Google Sheet ("Property Review" / Layout B)
+## 6. Lead output → Google Sheets
 
-- Header order + value vocabulary: `docs/lead-format.md`.
-- Recommendation vocab: `Strong Deal` / `Marginal`. Flip Quality: `Good Flip` /
-  `Thin Flip` / `Flip W/ Caution` / `Negative`.
-- Append investigated leads to the sheet
-  (`10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA`, Property Review tab
-  gid `1510205894`) via the Apps Script web app in `apps-script/append-lead.gs`:
-  POST `{secret, lead}`. It auto-computes Total Cost / Gross Profit, stamps
-  `First Added`, and de-dupes on Redfin Link.
+Header order + value vocabulary for both sheets: `docs/lead-format.md`.
+Recommendation vocab: `Strong Deal` / `Marginal`. Flip Quality: `Good Flip` /
+`Thin Flip` / `Flip W/ Caution` / `Negative`.
+
+**Primary — "Flip Scout Agent"** (`1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4`,
+tab `Leads`). This is what the desktop app writes to; new leads go here.
+Endpoint `apps-script/flip-scout-agent-sheet.gs`, POST `{secret, leads:[…]}`.
+Carries **`DOM`** and **`Estimated ARV (After Repair)`** on top of the old
+layout, plus `MLS #`, `Max Offer`, and `ARV Basis`. De-dupes on `MLS #`,
+auto-computes Total Cost / Gross Profit / Max Offer, stamps `First Added`.
+
+**Legacy — "Property Review"** (`10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA`,
+gid `1510205894`) via `apps-script/append-lead.gs`, POST `{secret, lead}`.
+De-dupes on Redfin Link. Kept for the existing headless pipeline.
+
+## 7. FlipScout desktop app
+
+`desktop-app/` (Electron). Sign in → scan the buy box → photo-review with
+pause/resume → deal report → push to the Flip Scout Agent sheet. Sections in the
+control window: 1 login · 2 auto-verify (rules or AI vision) · 3 scan ·
+4 photo review · 5 report · 6 sheet connection. The sheet URL + secret are
+entered in section 6 and remembered locally; tick **Auto-send** to push every
+finished scan. Only leads clearing the profit gate are sent. Renovated
+properties never reach the sheet — they are dropped at photo review (Rule #0/#2).
 
 ## Notes
 

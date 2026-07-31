@@ -1,4 +1,40 @@
-# Lead output format — "Property Review" (Layout B)
+# Lead output formats
+
+Two sheets are in play. **The Flip Scout Agent sheet is the one the desktop app
+writes to** and is where new work goes; Property Review (Layout B) is the older
+sheet, kept for the existing headless pipeline.
+
+## A. "Flip Scout Agent" sheet (current — app target)
+
+Spreadsheet `1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4`, tab `Leads`.
+Endpoint: `apps-script/flip-scout-agent-sheet.gs` (Web App; POST `{secret, leads:[…]}`
+or `{secret, lead:{…}}`). Column order:
+
+```
+Score · Recommendation · Flip Quality · MLS # · Address · City · Zip ·
+Beds · Baths · SqFt · Lot SqFt · Year Built · DOM ·
+Purchase Price · Estimated ARV (After Repair) ·
+Rehab Cost (Light) · Rehab Cost (Heavy) · Holding Costs (3mo) ·
+Total Cost (Light) · Total Cost (Heavy) ·
+Gross Profit (Light) · Gross Profit (Heavy) · Max Offer ·
+ARV Basis · Risks · MLS Link · First Added
+```
+
+New vs Layout B: **`DOM`** (days on market — a flag now, never a drop) and
+**`Estimated ARV (After Repair)`** (what the property is worth once repaired),
+plus `MLS #`, `Max Offer`, and `ARV Basis` (which comp band produced the ARV, so
+a number can be audited without re-running comps).
+
+- **De-dupes on `MLS #`**, falling back to Address+City. Safe to re-send a scan.
+- **Auto-computed:** Total Cost (Light/Heavy), Gross Profit (Light/Heavy),
+  Max Offer (`ARV − light rehab − holding − profit gate`), First Added. Send them
+  only to override.
+- **Accepts camelCase or literal header keys** — `dom`/`DOM`, `arv`/
+  `Estimated ARV (After Repair)`, `price`/`Purchase Price`, etc. Money may be a
+  string (`"$695,000"`); it is stored as a number.
+- Run `setupSheet()` once to create and format the tab.
+
+## B. "Property Review" (Layout B — legacy)
 
 Investigated leads are written to the Google Sheet
 `10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA` (Property Review tab, gid `1510205894`)

@@ -118,7 +118,28 @@
   <div class="card" id="reportCard" style="display:none">
     <h2>5 · Deal report</h2>
     <div id="report"></div>
-    <div class="row" style="margin-top:12px"><button id="export" class="primary">Export CSV / JSON</button></div>
+    <div class="row" style="margin-top:12px">
+      <button id="export" class="primary">Export CSV / JSON</button>
+      <button id="push">⇪ Send to Google Sheet</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>6 · Google Sheet (Flip Scout Agent)</h2>
+    <label>Apps Script web app URL</label>
+    <input id="sheetUrl" type="text" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
+    <label>Shared secret</label>
+    <input id="sheetSecret" type="password" autocomplete="off" placeholder="the SHARED_SECRET from the script">
+    <div class="row" style="margin-top:10px">
+      <button id="testSheet">Test connection</button>
+      <label style="display:flex;align-items:center;gap:6px;margin:0">
+        <input id="autoPush" type="checkbox"> Auto-send leads when a scan finishes
+      </label>
+    </div>
+    <div id="sheetStatus" class="status" style="margin-top:10px">Not connected.</div>
+    <div class="hint">Deploy <code>apps-script/flip-scout-agent-sheet.gs</code> on the sheet
+      (run <code>setupSheet()</code> once, then Deploy → Web app → Execute as Me → Anyone with the link).
+      Only leads that clear the profit gate are sent; the sheet de-dupes on MLS #.</div>
   </div>
 </div>
 
@@ -150,10 +171,39 @@
   $('dropBtn').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'drop'); hideReview(); } };
   $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
 
-  function pushConfig(){ window.fs.setConfig({ autoVerify: $('autoVerify').checked, useAI: $('useAI').checked, apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim() }); }
+  function pushConfig(){ window.fs.setConfig({
+    autoVerify: $('autoVerify').checked, useAI: $('useAI').checked,
+    apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
+    sheetUrl: $('sheetUrl').value.trim(), sheetSecret: $('sheetSecret').value, autoPush: $('autoPush').checked,
+  }); }
   $('autoVerify').onchange = () => { $('autoFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
+
+  // --- sheet settings: remembered locally so they survive an app restart ---
+  const SHEET_KEYS = ['sheetUrl','sheetSecret'];
+  SHEET_KEYS.forEach(k => { const v = localStorage.getItem('fs.'+k); if (v) $(k).value = v; });
+  $('autoPush').checked = localStorage.getItem('fs.autoPush') === '1';
+  function saveSheetCfg(){
+    SHEET_KEYS.forEach(k => localStorage.setItem('fs.'+k, $(k).value));
+    localStorage.setItem('fs.autoPush', $('autoPush').checked ? '1' : '0');
+    pushConfig();
+  }
+  $('sheetUrl').oninput = saveSheetCfg; $('sheetSecret').oninput = saveSheetCfg; $('autoPush').onchange = saveSheetCfg;
+
+  $('testSheet').onclick = async () => {
+    const box = $('sheetStatus'); box.textContent = 'Testing…'; box.className = 'status';
+    const r = await window.fs.testSheet();
+    box.textContent = r.ok ? `Connected ✓ — tab "${r.sheet}", ${r.columns} columns, ${r.rows} lead row(s).`
+                           : `Not connected: ${r.error}`;
+    box.className = 'status ' + (r.ok ? 'good' : 'warn');
+  };
+  $('push').onclick = async () => {
+    const r = await window.fs.pushSheet(lastLeads, true);
+    const box = $('sheetStatus');
+    box.textContent = r.ok ? `Sent ✓ — ${r.added} added, ${r.skipped} already there.` : `Send failed: ${r.error}`;
+    box.className = 'status ' + (r.ok ? 'good' : 'warn');
+  };
 
   function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
   function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
@@ -180,9 +230,10 @@
     lastLeads = p.leads || [];
     const surf = lastLeads.filter(l => l.surface);
     let html = `<div class="hint">${surf.length} of ${lastLeads.length} kept leads clear the profit gate. Generated ${p.generatedAt}</div>`;
-    html += '<table><thead><tr><th>Property</th><th>Price</th><th>ARV</th><th>Gross (Light)</th><th>Rec</th><th>Score</th></tr></thead><tbody>';
+    html += '<table><thead><tr><th>Property</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th><th>Score</th></tr></thead><tbody>';
     for (const l of lastLeads) {
       html += `<tr class="${l.surface?'surface':''}"><td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+        `<td class="mono">${l.dom!=null&&l.dom!==''?l.dom:'—'}</td>`+
         `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
         `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td><td class="mono">${l.score}</td></tr>`;
     }

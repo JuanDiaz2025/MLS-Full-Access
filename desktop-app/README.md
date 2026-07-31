@@ -48,9 +48,21 @@ install (creates a desktop shortcut) or run the portable exe directly.
      decides Keep/Drop on its own — no clicking. Model defaults to
      `claude-opus-5`; switch to `claude-sonnet-5` or `claude-haiku-4-5` for lower
      cost. Your key and the listing photos are sent to Anthropic for this.
-4. **Report** — kept candidates get size-matched sold comps → ARV, Light/Heavy
-   rehab, holding, and the dollar profit gate (Strong Deal / Marginal / Pass, with
-   a Flip Quality label). **Export** to CSV or JSON.
+4. **Report** — kept candidates get size-matched sold comps → ARV (what it's worth
+   after repair), Light/Heavy rehab, holding, days on market, and the dollar profit
+   gate (Strong Deal / Marginal / Pass, with a Flip Quality label). **Export** to
+   CSV or JSON.
+5. **Google Sheet** — section 6 connects the app to the "Flip Scout Agent" sheet.
+   Paste the Apps Script web app URL + shared secret, hit **Test connection**, then
+   either **Send to Google Sheet** manually or tick **Auto-send** to push every
+   finished scan. Only leads that clear the profit gate are sent, and the sheet
+   de-dupes on MLS # so re-sending a scan is harmless. The URL and secret are
+   remembered between runs.
+
+   One-time sheet setup: open the sheet → Extensions → Apps Script → paste
+   `apps-script/flip-scout-agent-sheet.gs` → set `SHARED_SECRET` → run
+   `setupSheet()` → Deploy → New deployment → Web app (Execute as: **Me**, Access:
+   **Anyone with the link**) → copy the `/exec` URL.
 
 ## The deal model (matches flip-scout-SOP.md)
 - Rehab: Light $70/sf, Heavy $145/sf. Holding (3mo) = 10%/yr financing prorated +

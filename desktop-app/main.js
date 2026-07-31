@@ -15,7 +15,10 @@ const core = require('./scan-core');
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
 const pendingDecision = {}; // mls -> resolve fn
-const cfg = { apiKey: '', model: 'claude-opus-5', autoVerify: false, useAI: false }; // auto-verify config
+const cfg = {
+  apiKey: '', model: 'claude-opus-5', autoVerify: false, useAI: false, // auto-verify config
+  sheetUrl: '', sheetSecret: '', autoPush: false,                      // Flip Scout Agent sheet
+};
 ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -289,11 +292,25 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       try { comp = await compFor(c.mls, zip || c.zip || '', c._sqft); } catch (e) { log(`  comp failed: ${e.message}`, 'warn'); }
       const deal = core.scoreDeal({ price: c._price, sqft: c._sqft, arv: comp.arv });
       leads.push({ mls: c.mls, address: c.addr, city: c._cityKey, zip, beds: c.bds, sqft: c._sqft,
-        yearBuilt: 2026 - c._age, price: c._price, arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n, ...deal });
+        lotSqft: core.num(c.lotSqft || c['Lot SqFt'] || 0) || '',
+        yearBuilt: 2026 - c._age, dom: c._dom, price: c._price,
+        arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
+        arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
+        link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+        ...deal });
     }
     leads.sort((a, b) => b.grossLight - a.grossLight);
     send('report', { leads, generatedAt: new Date().toString() });
     log(`Done. ${leads.filter(l => l.surface).length} of ${leads.length} kept leads clear the profit gate.`, 'good');
+
+    // Push straight to the Flip Scout Agent sheet when configured.
+    if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) {
+      const surfacing = leads.filter(l => l.surface);
+      log(`Pushing ${surfacing.length} lead(s) to the sheet…`);
+      const r = await pushLeads(surfacing);
+      log(r.ok ? `Sheet updated: ${r.added} added, ${r.skipped} already there.`
+               : `Sheet push failed: ${r.error}`, r.ok ? 'good' : 'error');
+    }
     return { ok: true, leads };
   } catch (e) {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
@@ -306,13 +323,80 @@ ipcMain.on('resume', () => { control.paused = false; log('Resumed.', 'good'); })
 ipcMain.on('stop', () => { control.stopped = true; control.paused = false; Object.values(pendingDecision).forEach(r => r('drop')); });
 ipcMain.on('decide', (_e, { mls, decision }) => { if (pendingDecision[mls]) pendingDecision[mls](decision); });
 
+// ---------- Flip Scout Agent sheet ----------
+// Posts to the Apps Script web app in apps-script/flip-scout-agent-sheet.gs.
+// The script owns de-duping (by MLS #) and the derived money columns, so the
+// app sends raw values and lets the sheet be the single source of truth.
+async function pushLeads(leads) {
+  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: 'sheet URL / secret not set' };
+  if (!leads || !leads.length) return { ok: true, added: 0, skipped: 0 };
+  try {
+    const r = await fetch(cfg.sheetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // Apps Script /exec answers with a 302 to googleusercontent; follow it.
+      redirect: 'follow',
+      body: JSON.stringify({
+        secret: cfg.sheetSecret,
+        leads: leads.map(l => ({
+          score: l.score, recommendation: l.recommendation, flipQuality: l.flipQuality,
+          mls: l.mls, address: l.address, city: l.city, zip: l.zip,
+          beds: l.beds, baths: l.baths || '', sqft: l.sqft, lotSqft: l.lotSqft || '',
+          yearBuilt: l.yearBuilt, dom: l.dom,
+          price: l.price, arv: l.arv,
+          rehabLight: l.rehabLight, rehabHeavy: l.rehabHeavy, holding: l.holding,
+          maxOffer: l.recommendedMaxOffer, arvBasis: l.arvBasis || '',
+          risks: l.risks || 'None', link: l.link || '',
+        })),
+      }),
+    });
+    const text = await r.text();
+    let j = {};
+    try { j = JSON.parse(text); } catch (_) {
+      // A login page instead of JSON means the deployment is not public.
+      return { ok: false, error: 'non-JSON reply — check the web app is deployed with access "Anyone with the link"' };
+    }
+    if (!j.ok) return { ok: false, error: j.error || 'unknown error' };
+    return { ok: true, added: j.added || 0, skipped: j.skipped || 0 };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+ipcMain.handle('push-sheet', async (_e, { leads, onlySurfacing }) => {
+  const set = onlySurfacing === false ? (leads || []) : (leads || []).filter(l => l.surface);
+  log(`Pushing ${set.length} lead(s) to the sheet…`);
+  const r = await pushLeads(set);
+  log(r.ok ? `Sheet updated: ${r.added} added, ${r.skipped} already there.`
+           : `Sheet push failed: ${r.error}`, r.ok ? 'good' : 'error');
+  return r;
+});
+
+ipcMain.handle('test-sheet', async () => {
+  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: 'enter the web app URL and secret first' };
+  try {
+    const u = cfg.sheetUrl + (cfg.sheetUrl.indexOf('?') >= 0 ? '&' : '?') + 'secret=' + encodeURIComponent(cfg.sheetSecret);
+    const r = await fetch(u, { redirect: 'follow' });
+    const text = await r.text();
+    let j = {};
+    try { j = JSON.parse(text); } catch (_) {
+      return { ok: false, error: 'non-JSON reply — deploy the web app with access "Anyone with the link"' };
+    }
+    if (!j.ok) return { ok: false, error: j.error || 'rejected' };
+    if ((j.missingColumns || []).length) {
+      return { ok: false, error: 'sheet is missing columns: ' + j.missingColumns.join(', ') + ' — run setupSheet()' };
+    }
+    return { ok: true, sheet: j.sheet, columns: (j.columns || []).length, rows: j.rows || 0 };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
 ipcMain.handle('export', async (_e, { leads }) => {
   const { canceled, filePath } = await dialog.showSaveDialog(controlWin, {
     title: 'Export FlipScout leads', defaultPath: 'flipscout-leads.csv', filters: [{ name: 'CSV', extensions: ['csv'] }, { name: 'JSON', extensions: ['json'] }],
   });
   if (canceled || !filePath) return { ok: false };
   if (filePath.endsWith('.json')) { fs.writeFileSync(filePath, JSON.stringify(leads, null, 2)); return { ok: true, filePath }; }
-  const cols = ['score', 'recommendation', 'flipQuality', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer'];
+  const cols = ['score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
   const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
   const csv = [cols.join(',')].concat(leads.map(l => cols.map(c => esc(l[c])).join(','))).join('\n');
   fs.writeFileSync(filePath, csv);
