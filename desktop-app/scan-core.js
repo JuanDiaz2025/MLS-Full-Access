@@ -69,8 +69,8 @@ const JS_TITLE = `document.title`;
 const num = s => { const n = parseFloat(String(s||'').replace(/[^0-9.]/g,'')); return isFinite(n)?n:0; };
 const median = a => { const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length? (s.length%2? s[m] : Math.round((s[m-1]+s[m])/2)) : 0; };
 
-// Stage-3 filter: below-market $/sf + older SFR; drop large-home traps.
-// No days-on-market cap — the 45-day rule is lifted for now.
+// Stage-3 filter: older SFR, on the market 45 days or less. The price screens
+// are gone; $/sqft is recorded and sorts the output but excludes nothing.
 function filterCandidates(rowsByArea) {
   let all = [];
   for (const key of Object.keys(rowsByArea)) {
@@ -198,7 +198,26 @@ function rulesDecide(meta) {
   return { decision: 'manual', reason: 'remarks are silent on condition — photos must be judged by eye' };
 }
 
+/**
+ * "1326 Palou Avenue, San Francisco, CA 94124" from the pieces the MLS gives
+ * back separately. Each part is only appended if it isn't already in the street
+ * line — some listings carry the city in the address field, and "San Francisco,
+ * San Francisco" would be the result of appending blindly.
+ */
+function fullAddress(street, city, zip) {
+  let out = String(street || '').trim().replace(/[\s,]+$/, '');
+  const has = t => new RegExp('(^|[\\s,])' + String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[\\s,])', 'i').test(out);
+  const c = String(city || '').trim();
+  if (c && !has(c)) out += (out ? ', ' : '') + c;
+  if (out && !/\bCA\b/i.test(out)) out += ', CA';
+  const z = String(zip || '').trim();
+  if (z && !has(z)) out += ' ' + z;
+  return out;
+}
+const mlsLink = mls => `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${mls}`;
+
 module.exports = {
+  fullAddress,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,

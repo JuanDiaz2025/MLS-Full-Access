@@ -26,16 +26,19 @@ const LEADS_TAB = 'Leads';
 const REJECTED_TAB = 'Rejected';
 const SNAPSHOT_TAB = '_FlipScout snapshot';   // hidden; how deletions are noticed
 
+// One Address column holding the whole thing — street, city, state, zip — the
+// same shape the app writes to Leads.
 const REJECTED_HEADERS = [
-  'Rejected On', 'MLS #', 'Address', 'City', 'Zip',
+  'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM',
   'Reason', 'Stage', 'By', 'MLS Link',
 ];
 
 // Columns copied off a Leads row when it is rejected, so the Rejected tab shows
-// the property rather than just an MLS number.
+// the property rather than just an MLS number. Keys are Rejected-tab columns,
+// values the Leads column each one is read from.
 const CARRY = {
-  'MLS #': 'MLS #', 'Address': 'Address', 'City': 'City', 'Zip': 'Zip',
+  'MLS #': 'MLS #', 'Address': 'Address',
   'Price': 'Purchase Price', '$/SqFt': '$/SqFt', 'SqFt': 'SqFt', 'DOM': 'DOM',
   'MLS Link': 'MLS Link',
 };
@@ -181,7 +184,7 @@ function snapshot_() {
   const sh = snapshotSheet_();
   sh.clear();
   const cols = Object.keys(CARRY);
-  const out = [cols].concat(rows.map(r => cols.map(c => (r[c] == null ? '' : r[c]))));
+  const out = [cols].concat(rows.map(carry_).map(r => cols.map(c => (r[c] == null ? '' : r[c]))));
   sh.getRange(1, 1, out.length, cols.length).setValues(out);
   return rows.length;
 }
@@ -229,6 +232,14 @@ function leadsSheet_() {
   return sh;
 }
 
+/** A Leads row rewritten with Rejected-tab column names, so everything
+ *  downstream (snapshot, addRejected_) speaks one vocabulary. */
+function carry_(leadRow) {
+  const o = { _row: leadRow._row };
+  Object.keys(CARRY).forEach(c => { o[c] = leadRow[CARRY[c]]; });
+  return o;
+}
+
 /** The rows the reviewer currently has selected on the Leads tab. */
 function selectedLeadRows_() {
   const sheet = leadsSheet_();
@@ -246,7 +257,7 @@ function selectedLeadRows_() {
     for (let r = rg.getRow(); r < rg.getRow() + rg.getNumRows(); r++) {
       if (seen[r] || !byRow[r]) continue;
       seen[r] = true;
-      out.push(byRow[r]);
+      out.push(carry_(byRow[r]));
     }
   });
   if (!out.length) throw new Error('No lead rows selected. Click a row (or drag over several) and try again.');
@@ -267,7 +278,7 @@ function rejectedSheet_() {
       .setFontWeight('bold').setBackground('#7f1d1d').setFontColor('#ffffff').setWrap(true);
     sh.setRowHeight(1, 36);
     sh.setFrozenRows(1);
-    const w = { 'Rejected On': 130, 'MLS #': 95, 'Address': 210, 'City': 115, 'Zip': 65,
+    const w = { 'Rejected On': 130, 'MLS #': 95, 'Address': 320,
       'Price': 100, '$/SqFt': 75, 'SqFt': 70, 'DOM': 55,
       'Reason': 340, 'Stage': 130, 'By': 170, 'MLS Link': 190 };
     REJECTED_HEADERS.forEach((c, i) => sh.setColumnWidth(i + 1, w[c] || 110));

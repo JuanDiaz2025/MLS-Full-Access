@@ -12,10 +12,8 @@ contextBridge.exposeInMainWorld('fs', {
   export: (leads) => ipcRenderer.invoke('export', { leads }),
   kpiReport: (days) => ipcRenderer.invoke('kpi-report', { days }),
   kpiExport: (days) => ipcRenderer.invoke('kpi-export', { days }),
-  kpiPush: () => ipcRenderer.invoke('kpi-push'),
   ledgerStats: () => ipcRenderer.invoke('ledger-stats'),
   ledgerClear: () => ipcRenderer.invoke('ledger-clear'),
-  syncRejected: () => ipcRenderer.invoke('sync-rejected'),
   // Direct Google Sheets connection
   googleStatus: () => ipcRenderer.invoke('google-status'),
   googleSave: (patch) => ipcRenderer.invoke('google-save', patch),

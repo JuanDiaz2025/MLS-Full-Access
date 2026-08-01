@@ -121,6 +121,23 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     .then(() => { fails++; console.error('FAIL a missing key column should throw'); })
     .catch(() => console.log('ok   a missing key column throws'));
 
+  // 6. One address column, assembled from the pieces the MLS returns separately.
+  const { fullAddress: fa, filterCandidates } = require('./scan-core');
+  eq(fa('1326 Palou Avenue', 'San Francisco', '94124'), '1326 Palou Avenue, San Francisco, CA 94124', 'full address');
+  eq(fa('844 Brunswick St', 'San Francisco', ''), '844 Brunswick St, San Francisco, CA', 'no zip yet');
+  eq(fa('21 College Terrace, San Francisco', 'San Francisco', '94112'), '21 College Terrace, San Francisco, CA 94112', 'city not doubled');
+  eq(fa('100 Main St, Oakland, CA 94601', 'Oakland', '94601'), '100 Main St, Oakland, CA 94601', 'already complete');
+  eq(fa('', '', ''), '', 'nothing in, nothing out');
+
+  // 7. The 45-day cap, and the blank-DOM case that must NOT be read as stale.
+  const row = (mls, dom, age) => ({ mls: mls, addr: mls + ' Test St', price: '900000', sqft: '1000', age: String(age), dom: String(dom) });
+  const f = filterCandidates({ SF: { rows: [
+    row('A', 12, 60), row('B', 45, 60), row('C', 46, 60), row('D', 400, 60), row('E', '', 60),
+  ] } });
+  eq(f.candidates.map(c => c.mls).sort(), ['A', 'B', 'E'], '<=45 days kept, blank DOM kept');
+  eq(f.rejected.map(c => c.mls).sort(), ['C', 'D'], '46 and 400 days dropped');
+  eq(/over the 45-day limit/.test(f.rejected[0]._reason), true, 'the DOM drop says why');
+
   console.log(fails ? `\n${fails} failure(s)` : '\nall good');
   process.exit(fails ? 1 : 0);
 })();

@@ -260,12 +260,19 @@ Recommendation vocab: `Strong Deal` / `Marginal`. Flip Quality: `Good Flip` /
 The desktop app writes here **directly over the Sheets API** (§7) — there is no
 web app, no deployment and no shared secret any more. Three tabs:
 
-- **`Leads`** — `Status · MLS # · Address · City · Zip · Beds · Baths · SqFt ·
-  Lot SqFt · Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link ·
-  First Added`. Keyed on `MLS #`; rows are append-or-backfill.
-- **`Rejected`** — `Rejected On · MLS # · Address · City · Zip · Price · $/SqFt ·
-  SqFt · DOM · Reason · Stage · By · MLS Link`. Everything dropped lands here
-  with the reason and the stage it fell out at.
+- **`Leads`** — `Status · MLS # · Address · Beds · Baths · SqFt · Lot SqFt ·
+  Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added`.
+  Keyed on `MLS #`; rows are append-or-backfill.
+- **`Rejected`** — `Rejected On · MLS # · Address · Price · $/SqFt · SqFt · DOM ·
+  Reason · Stage · By · MLS Link`. Everything dropped lands here with the reason
+  and the stage it fell out at.
+
+  **`Address` is ONE column holding the whole thing** — `1326 Palou Avenue, San
+  Francisco, CA 94124`. Separate City/Zip columns are gone. `core.fullAddress()`
+  composes it and skips any part the street line already carries, so no
+  "San Francisco, San Francisco". The **zip comes off the Client Full report**
+  during photo review — the results grid has no zip column, which is why it used
+  to land blank.
 - **`KPI`** — one upserted row per day.
 
 The only Apps Script left is **`apps-script/flip-scout-reject.gs`**, and it does

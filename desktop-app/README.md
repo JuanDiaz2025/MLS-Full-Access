@@ -58,7 +58,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,
    nothing to refresh. Three tabs are created if they don't exist:
-   - **Leads** — the qualifying properties
+   - **Leads** — the qualifying properties. **Address is one column with the whole
+     thing** — `1326 Palou Avenue, San Francisco, CA 94124` — not split across
+     City and Zip.
    - **Rejected** — everything dropped, with the reason and the stage it fell out at
    - **KPI** — one row per day, upserted
 

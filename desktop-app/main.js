@@ -279,7 +279,11 @@ async function showGallery(mls) {
     if (selId) {
       await js(`(() => { const s=document.getElementById(${JSON.stringify(selId)}); if(!s) return; const o=[...s.options].find(o=>/Client Full - All Photos/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
       await sleep(2600);
-      meta = await js(`(() => { const t=document.body.innerText.replace(/\\r/g,''); const grab=re=>{const m=t.match(re);return m?m[1].replace(/\\s+/g,' ').trim():'';}; return { remarks: grab(/(?:Public Remarks?|Marketing Remarks?|Remarks?):?\\s*([\\s\\S]{0,600}?)(?:Agent|Directions|Showing|Compensation|Listing Office|\\u00a9|Presented|$)/i), condition: grab(/Prop(?:erty)? Condition:?\\s*([^\\n]{0,60})/i) }; })()`).catch(() => ({ remarks: '', condition: '' }));
+      // The zip only exists on this report — the results grid has no zip column,
+      // which is why the sheet used to show a blank one. Three patterns, most
+      // specific first; California zips all start with 9, so the last fallback
+      // is safe enough for a buy box that never leaves the Bay Area.
+      meta = await js(`(() => { const t=document.body.innerText.replace(/\\r/g,''); const grab=re=>{const m=t.match(re);return m?m[1].replace(/\\s+/g,' ').trim():'';}; return { remarks: grab(/(?:Public Remarks?|Marketing Remarks?|Remarks?):?\\s*([\\s\\S]{0,600}?)(?:Agent|Directions|Showing|Compensation|Listing Office|\\u00a9|Presented|$)/i), condition: grab(/Prop(?:erty)? Condition:?\\s*([^\\n]{0,60})/i), zip: grab(/(?:Zip(?:\\s*Code)?|Postal\\s*Code)\\s*:?\\s*(9\\d{4})\\b/i) || grab(/,\\s*CA\\s+(9\\d{4})\\b/) || grab(/\\b(9[0-5]\\d{3})\\b/) }; })()`).catch(() => ({ remarks: '', condition: '', zip: '' }));
     }
   } catch (_) {}
   // Render the full gallery so you can watch along, then WAIT for the images to
@@ -302,7 +306,8 @@ async function showGallery(mls) {
   const dwell = Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
   if (dwell) await sleep(dwell);
 
-  return { count: urls.length, urls: urls, remarks: meta.remarks, condition: meta.condition, details: meta.details || {} };
+  return { count: urls.length, urls: urls, remarks: meta.remarks, condition: meta.condition,
+    zip: meta.zip || '', details: meta.details || {} };
 }
 
 // ---------- comps for one kept candidate ----------
@@ -515,8 +520,11 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         if (control.stopped) break;
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
-        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', details: {} }));
+        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', details: {} }));
         const n = gal.count;
+        // The zip comes off the detail report, so carry it back onto the
+        // candidate — it is needed whichever way the decision goes.
+        if (gal.zip) c.zip = gal.zip;
         const base = { i: i + 1, total: fresh.length, city: label, mls: c.mls, addr: c.addr,
           price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n,
           remarks: gal.remarks || '', details: gal.details || {} };
@@ -790,13 +798,16 @@ const googleReady = () => { const g = googleCfg(); return !!(g.refreshToken && g
 
 // Same columns the Apps Script builds, so a sheet already set up by the script
 // keeps working unchanged and the two paths can't drift.
+// ONE address column, holding the whole thing — street, city, state, zip —
+// the way it reads on the listing. Split City/Zip columns are gone: they made
+// the row hard to scan and left two more cells to arrive blank.
 const LEAD_HEADERS = [
-  'Status', 'MLS #', 'Address', 'City', 'Zip',
+  'Status', 'MLS #', 'Address',
   'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
   'Purchase Price', '$/SqFt', 'Notes', 'MLS Link', 'First Added',
 ];
 const REJECT_HEADERS = [
-  'Rejected On', 'MLS #', 'Address', 'City', 'Zip',
+  'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
 ];
 const KPI_SHEET_HEADERS = [
@@ -814,19 +825,20 @@ const KPI_APP_COLS = KPI_SHEET_HEADERS.slice(0, KPI_SHEET_HEADERS.indexOf('Revie
   .concat(['Keep Rate', 'Gate Rate', 'Last Run']);
 
 const today = () => new Date().toISOString().slice(0, 10);
-const mlsLink = mls => `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${mls}`;
+const fullAddress = core.fullAddress;
 
 /** A finished lead (already through toSheetRow) as a sheet record. */
 const leadRecord = r => ({
-  'Status': r.status || '', 'MLS #': r.mls, 'Address': r.address, 'City': r.city, 'Zip': r.zip,
+  'Status': r.status || '', 'MLS #': r.mls, 'Address': fullAddress(r.address, r.city, r.zip),
   'Beds': r.beds, 'Baths': r.baths, 'SqFt': r.sqft, 'Lot SqFt': r.lotSqft,
   'Year Built': r.yearBuilt, 'DOM': r.dom, 'Purchase Price': r.price, '$/SqFt': r.ppsf,
   'Notes': r.notes, 'MLS Link': r.link || mlsLink(r.mls), 'First Added': today(),
 });
 
 const rejectRecord = r => ({
-  'Rejected On': today(), 'MLS #': r.mls, 'Address': r.addr || r.address || '',
-  'City': r.city || '', 'Zip': r.zip || '', 'Price': r.price, '$/SqFt': r.ppsf,
+  'Rejected On': today(), 'MLS #': r.mls,
+  'Address': fullAddress(r.addr || r.address, r.city, r.zip),
+  'Price': r.price, '$/SqFt': r.ppsf,
   'SqFt': r.sqft, 'DOM': r.dom, 'Reason': r.reason || '', 'Stage': r.stage || '',
   'By': 'FlipScout', 'MLS Link': r.link || mlsLink(r.mls),
 });
@@ -1035,7 +1047,6 @@ async function syncRejectedIntoLedger() {
   return { ok: false, unconfigured: true, error: 'connect your Google Sheet in section 7 first' };
 }
 
-ipcMain.handle('sync-rejected', () => syncRejectedIntoLedger());
 
 ipcMain.handle('ledger-stats', () => {
   const e = loadLedger();
@@ -1081,16 +1092,6 @@ ipcMain.handle('kpi-export', async (_e, { days }) => {
   const csv = [cols.join(',')].concat(rep.rows.map(r => cols.map(c => r[c] == null ? '' : r[c]).join(','))).join('\n');
   fs.writeFileSync(filePath, csv);
   return { ok: true, filePath };
-});
-
-ipcMain.handle('kpi-push', async () => {
-  const rep = kpiReport(1);
-  const r = await googleSyncKpi(rep.today);
-  // An unconfigured sheet is a setup step, not a failure — say it once, plainly.
-  log(r.ok ? 'KPI sent to the sheet.'
-    : (r.unconfigured ? 'Sheet not connected yet: ' + r.error : 'KPI push failed: ' + r.error),
-    r.ok ? 'good' : 'warn');
-  return r;
 });
 
 ipcMain.handle('export', async (_e, { leads }) => {

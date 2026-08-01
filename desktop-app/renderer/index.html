@@ -70,28 +70,23 @@
       <input id="autoVerify" type="checkbox" style="width:auto" checked> Decide Keep/Drop automatically using the built-in flip rules (no API key, no cost)
     </label>
     <div id="autoFields" style="margin-top:10px">
-      <div class="hint">Applies your buy box to each listing's <b>agent remarks + condition + photo count</b>: drops renovated / turnkey wording (Rule #0), multi-unit / second-unit, fire damage, and exterior-only (likely tenant); keeps genuine as-is / estate / fixer language. Judges from the listing's <i>words</i>, not the pixels — so a renovated home with plain remarks can slip through. For pixel-level judgement, add AI vision below.</div>
-      <label>When the rules can't tell from the remarks</label>
+      <label>When the remarks don't say either way</label>
       <select id="whenUnsure" style="width:100%;padding:6px">
         <option value="keep">Keep it and carry on (default)</option>
-        <option value="drop">Drop it and carry on (some real fixers will be lost)</option>
+        <option value="drop">Drop it and carry on</option>
       </select>
-      <div class="hint">Only applies without AI vision. <b>The run never stops to ask you
-        anything.</b> The text rules read the agent remarks and never see a photo, so when
-        the remarks say nothing about condition they cannot tell a renovated kitchen from
-        an original one — your sheet reviewer is the backstop, and anything she rejects
-        goes into the ledger so it never returns. <b>Turn on AI vision below and this never
-        comes up</b> — it reads every photo and decides on its own.</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:10px">
-        <input id="useAI" type="checkbox" style="width:auto"> Use AI vision instead (reads the actual photos — more accurate, needs an Anthropic API key)
+        <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — reads the actual photos (needs an Anthropic API key)
       </label>
       <div id="aiFields" style="display:none;margin-top:10px">
         <label>Anthropic API key</label>
         <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
         <label>Model</label>
         <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
-        <div class="hint">Your key + photos go to Anthropic to apply the rules visually. <code>claude-opus-5</code> is most accurate; <code>claude-sonnet-5</code> / <code>claude-haiku-4-5</code> cost less.</div>
       </div>
+      <div class="hint">Rules read the agent remarks only, so a renovated home with plain
+        remarks can slip through — AI vision looks at every photo instead. Either way the
+        run never stops to ask you anything.</div>
     </div>
   </div>
 
@@ -109,21 +104,13 @@
         <input id="readSeconds" type="number" min="0" max="60" value="6" style="width:70px">
         seconds
       </label>
-      <label style="display:flex;align-items:center;gap:6px;margin:0;color:var(--ink)">
-        <input id="runComps" type="checkbox" style="width:auto"> Also run comps (ARV + profit)
-      </label>
     </div>
-    <div class="hint"><b>Comps are off.</b> The run stops at condition-qualified: scan →
-      filter → photo review → sheet. Every listing that survives photo review goes to the
-      sheet with its facts (price, $/sqft, sqft, beds, DOM) and no ARV or profit — comping
-      means a second MLS search per listing and roughly triples the run. Tick the box when
-      you want ARV, rehab, profit and the gate back.</div>
-    <div class="hint"><b>One city at a time, in order.</b> San Francisco is scanned,
-      every new listing reviewed one by one, comped and pushed to the sheet — and only
-      then does the next city start. Order: SF · whole Peninsula ($2M) · Sunnyvale ·
-      San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond.
-      Active · SFR · any days on market. Reading time holds each gallery on screen so
-      the photos finish loading before anything judges them.</div>
+    <div class="hint"><b>One city at a time, in order</b> — San Francisco is scanned, every
+      new listing reviewed one by one and written to the sheet, and only then does the next
+      city start. SF · Peninsula ($2M) · Sunnyvale · San Jose · Oakland · Berkeley ·
+      San Leandro · Hayward · Richmond.
+      <br>Active · single-family · <b>45 days on market or less</b> · 25+ years old.
+      Anything checked on an earlier run is skipped, so day two only costs you the new ones.</div>
     <div id="funnel" class="status" style="margin-top:10px">Idle.</div>
   </div>
 
@@ -156,7 +143,6 @@
     <div id="report"></div>
     <div class="row" style="margin-top:12px">
       <button id="export" class="primary">Export CSV / JSON</button>
-      <button id="push">⇪ Send to Google Sheet</button>
     </div>
   </div>
 
@@ -168,13 +154,11 @@
     <div class="row" style="margin-top:12px">
       <button id="kpiRefresh">↻ Refresh</button>
       <button id="kpiExport">Export CSV / JSON</button>
-      <button id="kpiPush">⇪ Send today to sheet</button>
-      <button id="syncRejected">⇩ Sync reviewer rejections</button>
       <button id="ledgerClear" class="drop">Clear ledger</button>
     </div>
-    <div class="hint">Counts accumulate per calendar day across every scan and survive
-      closing the app. Drop reasons are bucketed so you can see <em>why</em> listings
-      fell out, not just how many.</div>
+    <div class="hint">Counts accumulate per calendar day and survive closing the app. They
+      go to the sheet's KPI tab automatically at the end of each run, and the reviewer's
+      rejections come back into the ledger at the start of the next one.</div>
   </div>
 
   <div class="card">
@@ -276,14 +260,12 @@
     apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
     readSeconds: Number($('readSeconds').value||6),
     whenUnsure: $('whenUnsure').value,
-    runComps: $('runComps').checked,
+    runComps: false,   // comping is off; see CLAUDE.md §5
   }); }
   $('autoVerify').onchange = () => { $('autoFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
   $('readSeconds').oninput = pushConfig;
-  $('runComps').onchange = () => { localStorage.setItem('fs.runComps', $('runComps').checked?'1':'0'); pushConfig(); };
-  $('runComps').checked = localStorage.getItem('fs.runComps') === '1';
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
 
@@ -371,9 +353,6 @@
   $('openBackup').onclick = async () => { const s = await window.fs.backupStatus(); if(s.path) window.fs.showFile(s.path); };
   refreshBackup();
 
-  // The report's own send button and section 7's are the same action.
-  $('push').onclick = () => $('gSend').click();
-
   function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
   function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
 
@@ -446,20 +425,9 @@
       : 'Ledger: empty — the next scan reviews every candidate in the buy box.';
   }
   async function refreshKpi(){ renderKpi(await window.fs.kpiReport(14)); refreshLedger(); }
-  $('syncRejected').onclick = async () => {
-    const r = await window.fs.syncRejected();
-    log(r.ok ? `Reviewer rejections synced: ${r.added} new of ${r.total} total.`
-             : (r.unconfigured ? 'Sheet not connected yet: '+r.error : 'Sync failed: '+r.error),
-        r.ok?'good':'warn');
-    refreshLedger();
-  };
   $('ledgerClear').onclick = async () => { const r = await window.fs.ledgerClear(); if(r.ok){ log('Ledger cleared.','warn'); refreshLedger(); } };
   $('kpiRefresh').onclick = refreshKpi;
   $('kpiExport').onclick = async () => { const r = await window.fs.kpiExport(90); if(r.ok) log('KPI exported → '+r.filePath,'good'); };
-  $('kpiPush').onclick = async () => {
-    const r = await window.fs.kpiPush();
-    if (!r.ok) { $('gStatus').textContent = r.error; $('gStatus').className='status warn'; }
-  };
   window.fs.on('kpi', p => renderKpi({ ...(p.history||{}), today: p.today }));
   refreshKpi();
 
