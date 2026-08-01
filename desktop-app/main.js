@@ -271,7 +271,7 @@ async function showGallery(mls) {
     await sleep(900);
   }
   // Capture agent remarks + condition (for the no-API rules engine) via the Client Full report.
-  let meta = { remarks: '', condition: '' };
+  let meta = { remarks: '', condition: '', zip: '', address: '', yearBuilt: '', mismatch: false };
   try {
     await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); })()`);
     await sleep(400);
@@ -279,11 +279,8 @@ async function showGallery(mls) {
     if (selId) {
       await js(`(() => { const s=document.getElementById(${JSON.stringify(selId)}); if(!s) return; const o=[...s.options].find(o=>/Client Full - All Photos/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
       await sleep(2600);
-      // The zip only exists on this report — the results grid has no zip column,
-      // which is why the sheet used to show a blank one. Three patterns, most
-      // specific first; California zips all start with 9, so the last fallback
-      // is safe enough for a buy box that never leaves the Bay Area.
-      meta = await js(`(() => { const t=document.body.innerText.replace(/\\r/g,''); const grab=re=>{const m=t.match(re);return m?m[1].replace(/\\s+/g,' ').trim():'';}; return { remarks: grab(/(?:Public Remarks?|Marketing Remarks?|Remarks?):?\\s*([\\s\\S]{0,600}?)(?:Agent|Directions|Showing|Compensation|Listing Office|\\u00a9|Presented|$)/i), condition: grab(/Prop(?:erty)? Condition:?\\s*([^\\n]{0,60})/i), zip: grab(/(?:Zip(?:\\s*Code)?|Postal\\s*Code)\\s*:?\\s*(9\\d{4})\\b/i) || grab(/,\\s*CA\\s+(9\\d{4})\\b/) || grab(/\\b(9[0-5]\\d{3})\\b/) }; })()`).catch(() => ({ remarks: '', condition: '', zip: '' }));
+          const raw = await js('document.body.innerText').catch(() => '');
+      meta = core.parseDetail(raw, mls);
     }
   } catch (_) {}
   // Render the full gallery so you can watch along, then WAIT for the images to
@@ -306,8 +303,10 @@ async function showGallery(mls) {
   const dwell = Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
   if (dwell) await sleep(dwell);
 
-  return { count: urls.length, urls: urls, remarks: meta.remarks, condition: meta.condition,
-    zip: meta.zip || '', details: meta.details || {} };
+  return { count: urls.length, urls: urls,
+    remarks: meta.remarks || '', condition: meta.condition || '',
+    zip: meta.zip || '', address: meta.address || '', yearBuilt: meta.yearBuilt || '',
+    mismatch: !!meta.mismatch, showing: meta.showing || '' };
 }
 
 // ---------- comps for one kept candidate ----------
@@ -462,6 +461,12 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       if (control.stopped) break;
       const area = areas[ai];
       const label = area.city && area.city !== '*' ? area.city : `All ${area.county}`;
+      // "All San Francisco" is a heading for the log, never a city name. Data
+      // rows use the listing's OWN Postal City — which is also the only right
+      // answer on a county-wide scan, where the rows are not all one city —
+      // and fall back to the area name with the "All " stripped off.
+      const areaCity = label.replace(/^All\s+/i, '');
+      const cityOf = r => String(r.city || '').trim() || areaCity;
       log(`━━━ ${label}  (city ${ai + 1} of ${areas.length}) ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'scanning' });
 
@@ -478,8 +483,8 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       // a whole county's worth of "not below market" would drown the tab.
       const FILTER_LOG_CAP = 25;
       const filterRejects = (cityFiltered || []).slice(0, FILTER_LOG_CAP).map(r => ({
-        mls: r.mls, addr: r.addr, city: label, price: r._price, ppsf: r._ppsf,
-        sqft: r._sqft, dom: r._dom, reason: r._reason,
+        mls: r.mls, addr: r.addr, city: cityOf(r), zip: r.zip || '',
+        price: r._price, ppsf: r._ppsf, sqft: r._sqft, dom: r._dom, reason: r._reason,
         link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${r.mls}`,
       }));
       if (cityFiltered && cityFiltered.length > FILTER_LOG_CAP) {
@@ -520,12 +525,22 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         if (control.stopped) break;
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
-        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', details: {} }));
+        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false }));
+        // Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT
+        // listing on screen. Judging that would put another property's photos,
+        // remarks and address onto this lead, so skip it — deliberately without
+        // a ledger entry, so the next run tries again instead of writing it off.
+        if (gal.mismatch) {
+          log(`  SKIPPED ${c.addr} — the MLS showed ${gal.showing || 'another listing'} instead of ${c.mls}; will retry next run`, 'warn');
+          continue;
+        }
         const n = gal.count;
-        // The zip comes off the detail report, so carry it back onto the
-        // candidate — it is needed whichever way the decision goes.
+        // Address, zip and year built all come off the detail report; the grid
+        // carries none of them reliably.
         if (gal.zip) c.zip = gal.zip;
-        const base = { i: i + 1, total: fresh.length, city: label, mls: c.mls, addr: c.addr,
+        if (gal.address) c.fullAddr = gal.address;
+        if (gal.yearBuilt) c._yearBuilt = Number(gal.yearBuilt);
+        const base = { i: i + 1, total: fresh.length, city: cityOf(c), mls: c.mls, addr: c.addr,
           price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n,
           remarks: gal.remarks || '', details: gal.details || {} };
         let decision, dropReason = '';
@@ -568,15 +583,15 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
           log(`  dropped ${c.addr} — ${dropReason || 'no reason given'}`);
           // Record WHY, so the Rejected tab can answer "why isn't this on my list".
           cityRejects.push({
-            mls: c.mls, addr: c.addr, city: label, price: c._price,
-            ppsf: c._ppsf, sqft: c._sqft, dom: c._dom,
+            mls: c.mls, addr: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
+            price: c._price, ppsf: c._ppsf, sqft: c._sqft, dom: c._dom,
             reason: dropReason || 'dropped at photo review', stage: 'Photo review',
             link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
           });
         }
         // Record as we go, not at the end — a crash or Stop mid-run must not
         // cost us the listings already judged.
-        ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: label });
+        ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: cityOf(c) });
       }
 
       // --- comps: OFF by default for now ---
@@ -589,10 +604,13 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       if (!cfg.runComps) {
         for (const c of kept) {
           cityLeads.push({
-            mls: c.mls, address: c.addr, city: label, zip: c.zip || '',
+            mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
             beds: c.bds, baths: c.baths || '', sqft: c._sqft,
             lotSqft: core.num(c.lotSqft || 0) || '',
-            yearBuilt: 2026 - c._age, dom: c._dom, price: c._price, ppsf: c._ppsf,
+            // The report's own year beats 2026 - Age, which reads "2026" when
+            // the grid's Age column is blank.
+            yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
+            dom: c._dom, price: c._price, ppsf: c._ppsf,
             arv: 0, arvBasis: 'not comped yet',
             recommendation: 'Needs Comps', flipQuality: '', score: '',
             risks: 'Condition-qualified only — ARV and profit not yet calculated',
@@ -613,9 +631,9 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         let comp = { arv: 0, medianPpsf: 0, band: 'n/a', n: 0 };
         try { comp = await compFor(c.mls, zip || c.zip || '', c._sqft); } catch (e) { log(`  comp failed: ${e.message}`, 'warn'); }
         const deal = core.scoreDeal({ price: c._price, sqft: c._sqft, arv: comp.arv });
-        cityLeads.push({ mls: c.mls, address: c.addr, city: label, zip, beds: c.bds, baths: c.baths || '',
+        cityLeads.push({ mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip, beds: c.bds, baths: c.baths || '',
           sqft: c._sqft, lotSqft: core.num(c.lotSqft || 0) || '',
-          yearBuilt: 2026 - c._age, dom: c._dom, price: c._price,
+          yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''), dom: c._dom, price: c._price,
           arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
           arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
           link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,

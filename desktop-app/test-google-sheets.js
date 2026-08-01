@@ -138,6 +138,36 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(f.rejected.map(c => c.mls).sort(), ['C', 'D'], '46 and 400 days dropped');
   eq(/over the 45-day limit/.test(f.rejected[0]._reason), true, 'the DOM drop says why');
 
+  // 8. Reading a listing's facts off its Client Full report. The fixtures are
+  //    real report text saved from Matrix, so a layout change breaks a test
+  //    here instead of quietly writing blanks to the sheet.
+  const { parseDetail } = require('./scan-core');
+  const fixture = n => require('fs').readFileSync(require('path').join(__dirname, 'fixtures', n + '.txt'), 'utf8');
+
+  const d1 = parseDetail(fixture('ML82056071'), 'ML82056071');
+  eq(d1.address, '844 Brunswick Street, San Francisco 94112', 'full address off the report');
+  eq(d1.zip, '94112', 'zip — the grid has no zip column at all');
+  eq(d1.yearBuilt, '1904', 'year built, even though the grid Age cell is blank');
+  eq(/^Welcome to this bright and versatile 4-bedroom/.test(d1.remarks), true,
+    'the real Public: remarks, not the Open House teaser');
+
+  const d2 = parseDetail(fixture('SF426150277'), 'SF426150277');
+  eq(d2.address, '21 College Terrace, San Francisco 94112', 'second listing parses too');
+  eq(d2.yearBuilt, '1914', 'second year built');
+
+  // The one that matters: this page was served while the app had asked for
+  // SF426146279, and it is showing a house in Lincoln instead. Reading "the
+  // first address on the page" would have put that address on the lead.
+  const d3 = parseDetail(fixture('SF426146279'), 'SF426146279');
+  eq(d3.mismatch, true, 'a wrong-listing page is refused, not parsed');
+  eq(d3.showing, 'CRPW26161101', 'and it names what was actually on screen');
+  eq(parseDetail(fixture('SF426146279'), 'CRPW26161101').address,
+    '220 Saddlehorn Loop, Lincoln 95648', 'the same page parses fine for its own MLS #');
+
+  // 9. The composed sheet value, end to end.
+  eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
+    'report address + zip compose without doubling the city');
+
   console.log(fails ? `\n${fails} failure(s)` : '\nall good');
   process.exit(fails ? 1 : 0);
 })();

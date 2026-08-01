@@ -268,11 +268,40 @@ web app, no deployment and no shared secret any more. Three tabs:
   and the stage it fell out at.
 
   **`Address` is ONE column holding the whole thing** — `1326 Palou Avenue, San
-  Francisco, CA 94124`. Separate City/Zip columns are gone. `core.fullAddress()`
-  composes it and skips any part the street line already carries, so no
-  "San Francisco, San Francisco". The **zip comes off the Client Full report**
-  during photo review — the results grid has no zip column, which is why it used
-  to land blank.
+  Francisco, CA 94124`. Separate City/Zip columns are gone.
+
+### Where the listing facts actually come from
+
+Verified against live Matrix, not assumed. The **results grid has no zip column
+at all** (headers are `MLS # · Street Address · Price · DOM · Bds · Bths · SqFt ·
+Lot Size · Postal City · Class · Age`) and its `Street Address` is street-only.
+So the full address, the zip, the year built and the real remarks are read off
+the **Client Full report** during photo review, by `core.parseDetail(text, mls)`:
+
+- Address line — `844 Brunswick Street, San Francisco 94112`
+- `Age/Yr Blt: 122/1904` → year built. Beats `2026 - Age`, which reads **2026**
+  whenever the grid's Age cell is blank.
+- Remarks are labelled **`Public:`**, not "Public Remarks:". A bare `/Remarks:/`
+  matched the *truncated Open House teaser* instead — so the rules engine was
+  judging condition on the wrong text.
+
+**🚨 Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT listing on
+screen.** Caught in testing: asking for `SF426146279` served `CRPW26161101`
+(220 Saddlehorn Loop, **Lincoln**). `parseDetail` is therefore anchored to the
+MLS # asked for and returns `{mismatch:true, showing:'<other id>'}` rather than
+reading whatever is displayed; the app skips that listing **without a ledger
+entry**, so the next run retries instead of writing it off. Never read "the
+first address on the page."
+
+`core.fullAddress()` composes the sheet value, stripping a trailing zip/state
+off the street line before recomposing — appending blindly gave
+"…San Francisco 94112, CA". Fixtures of real report text live in
+`desktop-app/fixtures/`; `node desktop-app/test-google-sheets.js` covers all of
+the above.
+
+Also: **"All San Francisco" is a log heading, never a city.** Data rows use the
+listing's own `Postal City` (the only right answer on a county-wide scan), with
+the `All ` prefix stripped as the fallback.
 - **`KPI`** — one upserted row per day.
 
 The only Apps Script left is **`apps-script/flip-scout-reject.gs`**, and it does

@@ -41,12 +41,20 @@ const JS_SCRAPE_GRID = `(() => {
   const h = document.querySelector('.singleLineTableHeader');
   const hc = h ? Array.from(h.children).map(c => clean(c.innerText)) : [];
   const idx = {}; hc.forEach((c,i)=>{ if(c) idx[c]=i; });
+  // Zip is not a standard column in this grid view and the header wording varies
+  // by display, so find it by pattern rather than by exact name. Anchored so
+  // "Postal City" cannot match it.
+  const zipKey = Object.keys(idx).find(h => /^(zip|zip code|postal code|postal)$/i.test(h));
   const out = [];
   document.querySelectorAll('tr.DisplayRegRow, tr.DisplayAltRow').forEach(tr => {
     const cells = Array.from(tr.children).map(c => clean(c.innerText));
     const pick = k => idx[k]!=null ? cells[idx[k]] : '';
+    const zipCell = zipKey ? (cells[idx[zipKey]]||'') : '';
+    // Failing a column of its own, the street line often carries it.
+    const inAddr = (pick('Street Address').match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '';
     out.push({ mls: pick('MLS #'), addr: pick('Street Address'), price: pick('Price'),
-      sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM') });
+      sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'),
+      zip: (zipCell.match(/9[0-5]\\d{3}/)||[''])[0] || inAddr });
   });
   return out;
 })()`;
@@ -78,7 +86,10 @@ function filterCandidates(rowsByArea) {
       const price = num(r.price), sqft = num(r.sqft);
       if (!price || !sqft) continue;
       all.push({ ...r, _price: price, _sqft: sqft, _age: num(r.age), _dom: num(r.dom),
-        _ppsf: Math.round(price/sqft), _cityKey: r.city || key });
+        _ppsf: Math.round(price/sqft),
+        // "All San Francisco" is a log heading, not a city — never let it reach
+        // a lead, a median key, or the vision prompt.
+        _cityKey: r.city || String(key).replace(/^All\s+/i, '') });
     }
   }
   const byCity = {}, bySq = {};
@@ -199,25 +210,85 @@ function rulesDecide(meta) {
 }
 
 /**
- * "1326 Palou Avenue, San Francisco, CA 94124" from the pieces the MLS gives
- * back separately. Each part is only appended if it isn't already in the street
- * line — some listings carry the city in the address field, and "San Francisco,
- * San Francisco" would be the result of appending blindly.
+ * "1326 Palou Avenue, San Francisco, CA 94124" — one column, whatever shape the
+ * pieces arrive in.
+ *
+ * The street line is not always just a street: the Client Full report gives
+ * "844 Brunswick Street, San Francisco 94112" complete with city and zip. So
+ * take any trailing zip and state OFF the street line first and recompose from
+ * the parts — appending blindly produced "…San Francisco 94112, CA".
  */
 function fullAddress(street, city, zip) {
-  let out = String(street || '').trim().replace(/[\s,]+$/, '');
-  const has = t => new RegExp('(^|[\\s,])' + String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[\\s,])', 'i').test(out);
+  const esc = t => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let s = String(street || '').trim();
+  let z = String(zip || '').trim();
+
+  const mz = s.match(/\b(9[0-5]\d{3})(?:-\d{4})?[\s,]*$/);
+  if (mz) { z = z || mz[1]; s = s.slice(0, mz.index); }
+  const tidy = () => { s = s.replace(/[\s,]+$/, ''); };
+  tidy();
+  s = s.replace(/,?\s*\bCA\b\.?$/i, '');
+  tidy();
+
   const c = String(city || '').trim();
-  if (c && !has(c)) out += (out ? ', ' : '') + c;
-  if (out && !/\bCA\b/i.test(out)) out += ', CA';
-  const z = String(zip || '').trim();
-  if (z && !has(z)) out += ' ' + z;
+  // Don't repeat a city the street line already ends with.
+  if (c) { s = s.replace(new RegExp(',?\\s*' + esc(c) + '$', 'i'), ''); tidy(); }
+
+  let out = [s, c].filter(Boolean).join(', ');
+  if (out) out += ', CA';
+  if (z) out += (out ? ' ' : '') + z;
   return out;
 }
-const mlsLink = mls => `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${mls}`;
+
+/**
+ * Read the facts off a listing's Client Full report text.
+ *
+ * Anchored to the MLS # we asked for, and that is not defensive padding: the
+ * Matrix search sometimes does not apply the MLS # filter, and the report then
+ * shows a DIFFERENT property. Reading "the first address on the page" put a
+ * house in Lincoln onto a San Francisco lead during testing. So find the block
+ * belonging to the requested listing and read only that; if it is not on the
+ * page, say so and let the caller skip rather than invent.
+ *
+ * The full address lives here and nowhere else — the results grid has no zip
+ * column at all, which is why zip used to reach the sheet blank.
+ */
+function parseDetail(text, wantMls) {
+  const t = String(text || '').replace(/\r/g, '');
+  const want = String(wantMls || '').trim().toUpperCase();
+  const marks = [...t.matchAll(/MLS\s*#:?\s*([A-Z0-9]{6,})/gi)];
+  const seen = marks.map(m => m[1].toUpperCase());
+
+  let block = '';
+  for (let i = 0; i < marks.length; i++) {
+    if (seen[i] !== want) continue;
+    const from = marks[i].index;
+    const to = i + 1 < marks.length ? marks[i + 1].index : t.length;
+    block = t.slice(from, to);
+    break;
+  }
+  if (!block) return { mismatch: true, showing: seen[0] || '', want: want };
+
+  const grab = re => { const m = block.match(re); return m ? m[1].replace(/\s+/g, ' ').trim() : ''; };
+  // "814 Potrero Avenue, San Francisco 94110" — street, city and zip on one
+  // line, exactly as the listing presents it.
+  const address = grab(/^([0-9][^\n\t]*?,[^\n\t]*?\b9[0-5]\d{3})\b/m);
+  return {
+    mismatch: false,
+    address: address,
+    zip: (address.match(/9[0-5]\d{3}/) || [''])[0],
+    // The grid's Age column is often blank; the report always carries the year.
+    yearBuilt: grab(/Age\/Yr\s*Blt:?\s*\d*\s*\/\s*(\d{4})/i),
+    // The remarks are labelled "Public:", not "Public Remarks:". Matching a bare
+    // /Remarks:/ picked up the truncated Open House teaser instead of the real
+    // description — which is what the rules engine was judging condition on.
+    remarks: grab(/(?:^|\n)\s*(?:Public|Public Remarks?|Marketing Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i),
+    condition: grab(/Prop(?:erty)? Condition:?\s*([^\n]{0,60})/i),
+  };
+}
 
 module.exports = {
-  fullAddress,
+  fullAddress, parseDetail,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
