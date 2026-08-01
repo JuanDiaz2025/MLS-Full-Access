@@ -2,6 +2,13 @@
  "version": 1,
  "note": "Every MLS # ever scanned. Anything listed here is SKIPPED on future runs - never re-check it. Tracked in git on purpose: the container is ephemeral, so this must be committed after every scan or the next run re-checks everything. Managed by scripts/mls-ledger.js.",
  "entries": {
+  "ML82045113": {
+   "first_seen": "2026-08-01",
+   "last_seen": "2026-08-01",
+   "verdict": "kept",
+   "addr": "1326 Palou Avenue",
+   "city": "San Francisco"
+  },
   "ML82054088": {
    "first_seen": "2026-07-31",
    "last_seen": "2026-07-31",
@@ -157,5 +164,5 @@
    "city": "San Francisco"
   }
  },
- "updated": "2026-07-31"
+ "updated": "2026-08-01"
 }
