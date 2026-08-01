@@ -1,159 +1,26 @@
 {
  "version": 1,
- "note": "Every MLS # ever scanned. Anything listed here is SKIPPED on future runs - never re-check it. Tracked in git on purpose: the container is ephemeral, so this must be committed after every scan or the next run re-checks everything. Managed by scripts/mls-ledger.js.",
+ "note": "Every MLS # ever scanned. Anything listed here is SKIPPED on future runs - never re-check it. Tracked in git on purpose: the container is ephemeral, so this must be committed after every scan or the next run re-checks everything. Managed by scripts/mls-ledger.js. Cleared 2026-08-01 at Bryan's request: everything before that was judged with the truncated-remarks bug, the bare /renovat/ drop, and before the tenant and quick-flip screens existed, so those verdicts were not trustworthy.",
  "entries": {
-  "ML82045113": {
+  "SF426146559": {
    "first_seen": "2026-08-01",
    "last_seen": "2026-08-01",
    "verdict": "kept",
-   "addr": "1326 Palou Avenue",
+   "addr": "483 Ellington Avenue, San Francisco, CA 94112",
    "city": "San Francisco"
   },
-  "ML82054088": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "2505 Newhall Street",
+  "SF426150277": {
+   "first_seen": "2026-08-01",
+   "last_seen": "2026-08-01",
+   "verdict": "kept",
+   "addr": "21 College Terrace, San Francisco, CA 94112",
    "city": "San Francisco"
   },
-  "ML82056071": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "844 Brunswick Street",
-   "city": "San Francisco"
-  },
-  "SF425044773": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "2 Rey Street",
-   "city": "San Francisco"
-  },
-  "SF425089031": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "1231 Silver Avenue",
-   "city": "San Francisco"
-  },
-  "SF426098082": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "420 Harkness Avenue",
-   "city": "San Francisco"
-  },
-  "SF426106041": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "1 Mccarthy Avenue",
-   "city": "San Francisco"
-  },
-  "SF426116121": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "750 Sweeny Street",
-   "city": "San Francisco"
-  },
-  "SF426120960": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "2937 Griffith Street",
-   "city": "San Francisco"
-  },
-  "SF426122245": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "2877 Cesar Chavez Street",
-   "city": "San Francisco"
-  },
-  "SF426126629": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "1552 Palou Avenue",
-   "city": "San Francisco"
-  },
-  "SF426132158": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "2816 23rd Street",
-   "city": "San Francisco"
-  },
-  "SF426132576": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "106 Madrid Street",
-   "city": "San Francisco"
-  },
-  "SF426135323": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "2063 Carroll Avenue",
-   "city": "San Francisco"
-  },
-  "SF426146279": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "814 Potrero Avenue",
-   "city": "San Francisco"
-  },
-  "SF426146559": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "483 Ellington Avenue",
-   "city": "San Francisco"
-  },
-  "SF426146676": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "422 Tehama Street",
-   "city": "San Francisco"
-  },
-  "SF426148193": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "263 Hale Street",
-   "city": "San Francisco"
-  },
-  "SF426148584": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "1055 Cayuga Avenue",
-   "city": "San Francisco"
-  },
-  "SF426149331": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "300 Burrows Street",
-   "city": "San Francisco"
-  },
-  "SF426149359": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "1712 Quesada Avenue",
-   "city": "San Francisco"
-  },
-  "SF426150302": {
-   "first_seen": "2026-07-31",
-   "last_seen": "2026-07-31",
-   "verdict": "checked",
-   "addr": "1157 Cayuga Avenue",
+  "SF426147253": {
+   "first_seen": "2026-08-01",
+   "last_seen": "2026-08-01",
+   "verdict": "dropped",
+   "addr": "1135 Naples Street, San Francisco, CA 94112",
    "city": "San Francisco"
   }
  },

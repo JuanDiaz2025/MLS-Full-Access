@@ -186,6 +186,13 @@ through the rest of the buy box (Peninsula → Sunnyvale → San Jose → Oaklan
 Berkeley → San Leandro → Hayward → Richmond). `DEFAULT_CITIES` in
 `scripts/mls-multi-scan.js` is already in this order — keep SF at the top.
 
+**Ledger cleared 1 Aug 2026** at Bryan's request — every verdict before that was
+made with the truncated-remarks bug (judging on the Open House teaser), the bare
+`/renovat/` drop that lost 21 College Terrace, and before the tenant and
+quick-flip screens existed. Those calls were not trustworthy, so the slate was
+wiped and the buy box is being re-reviewed from scratch. Bryan cleared the
+spreadsheet at the same time.
+
 **Cadence: hourly.** Each run looks for listings that are new *since the last
 run*. Runs are incremental, not full re-reviews. Requires `MLS_USER` / `MLS_PASS`
 in the environment's variables. If login is blocked by 2FA, the run stops
@@ -198,6 +205,11 @@ Anything already in the ledger — from yesterday or any earlier run — is **sk
 outright**: no photo pull, no comps, no scoring. Only genuinely new MLS #s cost
 any time. This is the whole point: the expensive stages (photo review, comps)
 must never run twice on the same property.
+
+Headless SF run (the same pipeline as the app — it imports `scan-core.js`, so
+the two cannot disagree about what qualifies): `node scripts/mls-sf-scan.js`
+(`MAX_LISTINGS=n` to sample). Writes `.mls-artifacts/sf-scan.json` and records
+its verdicts in the ledger.
 
 ```bash
 node scripts/mls-ledger.js filter .mls-artifacts/candidates.json   # → new only
