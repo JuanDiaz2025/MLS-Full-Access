@@ -11,6 +11,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
+const gsheets = require('./google-sheets');
 
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
@@ -661,15 +662,31 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       // even if a later city fails or you stop the run.
       const cityWinners = cityLeads.filter(l => l.surface);
       if (cityWinners.length || cityRejects.length) {
-        // Primary path: write the Drive drop file. The sheet reads it on
-        // refresh — no deployment, no URL, nothing to connect. Rejections ride
-        // along so their reasons reach the Rejected tab.
-        const d = writeDropFile(cityWinners.map(toSheetRow), cityRejects);
+        const rows = cityWinners.map(toSheetRow);
+        // Primary path: write into the spreadsheet over the Sheets API, using
+        // the Google account signed in at section 7. The rows are in the sheet
+        // by the time this line logs — nothing to refresh, nothing to wait for.
+        if (googleReady() && googleCfg().autoSync) {
+          const s = await googleSync(rows, cityRejects);
+          if (s.ok) {
+            runKpi.pushed += s.leads.added;
+            runKpi.pushSkipped += s.leads.updated;
+            log(`[${label}] sheet updated: ${s.leads.added} new lead(s), ${s.leads.updated} refreshed, `
+              + `${s.rejects.added} rejection(s) logged`, 'good');
+          } else {
+            log(`[${label}] sheet write failed: ${s.error} — falling back to the Drive file`, 'warn');
+          }
+        }
+        // Fallback: the Drive drop file, which the Apps Script pulls on refresh.
+        // Written either way, so a failed API call never loses a finished city.
+        const d = writeDropFile(rows, cityRejects);
         if (d.ok) {
-          runKpi.pushed += cityWinners.length;
+          if (!googleReady()) runKpi.pushed += cityWinners.length;
           log(`[${label}] wrote ${cityWinners.length} lead(s) + ${cityRejects.length} rejection(s) `
-            + `to Drive (${d.total} waiting) — the sheet picks these up within ~5 min, or hit Refresh now`, 'good');
-        } else {
+            + `to Drive (${d.total} waiting)`
+            + (googleReady() ? ' as a backup copy' : ' — the sheet picks these up within ~5 min, or hit Refresh now'),
+            'good');
+        } else if (!googleReady()) {
           log(`[${label}] could not write the Drive file: ${d.error}`, 'warn');
         }
         // Optional legacy path, only if a web app was configured.
@@ -701,9 +718,10 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
     // and a day with three aborted runs should look different from a quiet one.
     const day = recordKpi(runKpi);
     send('kpi', { today: day, history: kpiReport() });
-    // Only attempt the KPI push when the sheet is actually connected — an
+    // Only attempt the KPI push when a sheet is actually connected — an
     // unconfigured app must not log a failure after every single run.
-    if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) pushKpi(day).catch(() => {});
+    if (googleReady() && googleCfg().autoSync) googleSyncKpi(day).catch(() => {});
+    else if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) pushKpi(day).catch(() => {});
   }
 });
 
@@ -844,6 +862,231 @@ ipcMain.handle('drive-status', () => {
 
 ipcMain.on('show-file', (_e, p) => { try { shell.showItemInFolder(p); } catch (_) {} });
 
+// ---------- Google Sheets, written directly ----------
+// You sign in with your own Google account and paste your spreadsheet URL; the
+// app writes rows into it over the Sheets API. No Apps Script, no deployment,
+// no shared secret, no Drive-for-Desktop, no waiting for a trigger. The Drive
+// drop file below still runs as a fallback for machines that never sign in.
+
+const GOOGLE_FILE = () => path.join(app.getPath('userData'), 'google-account.json');
+const GOOGLE_BLANK = {
+  clientId: '', clientSecret: '', refreshToken: '', accessToken: '', expiresAt: 0,
+  email: '', sheetId: '', sheetTitle: '',
+  leadTab: 'Leads', rejectTab: 'Rejected', kpiTab: 'KPI',
+  autoSync: true,
+};
+let googleCache = null;
+function googleCfg() {
+  if (googleCache) return googleCache;
+  let saved = {};
+  try { saved = JSON.parse(fs.readFileSync(GOOGLE_FILE(), 'utf8')); } catch (_) {}
+  googleCache = Object.assign({}, GOOGLE_BLANK, saved);
+  return googleCache;
+}
+function saveGoogle(patch) {
+  const g = Object.assign(googleCfg(), patch || {});
+  try {
+    fs.mkdirSync(path.dirname(GOOGLE_FILE()), { recursive: true });
+    fs.writeFileSync(GOOGLE_FILE(), JSON.stringify(g, null, 1));
+  } catch (e) { log('Could not save the Google settings: ' + e.message, 'warn'); }
+  return g;
+}
+
+/** A live access token, refreshed if the hour is up. Throws with an instruction
+ *  rather than a Google error string when there is nothing to refresh from. */
+async function googleToken() {
+  const g = googleCfg();
+  if (!g.refreshToken) throw new Error('not signed in to Google yet — section 7');
+  if (g.accessToken && g.expiresAt > Date.now() + 60000) return g.accessToken;
+  const t = await gsheets.refresh({
+    clientId: g.clientId, clientSecret: g.clientSecret, refreshToken: g.refreshToken,
+  });
+  saveGoogle({ accessToken: t.accessToken, expiresAt: t.expiresAt });
+  return t.accessToken;
+}
+
+const googleReady = () => { const g = googleCfg(); return !!(g.refreshToken && g.sheetId); };
+
+// Same columns the Apps Script builds, so a sheet already set up by the script
+// keeps working unchanged and the two paths can't drift.
+const LEAD_HEADERS = [
+  'Status', 'MLS #', 'Address', 'City', 'Zip',
+  'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
+  'Purchase Price', '$/SqFt', 'Notes', 'MLS Link', 'First Added',
+];
+const REJECT_HEADERS = [
+  'Rejected On', 'MLS #', 'Address', 'City', 'Zip',
+  'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
+];
+const KPI_SHEET_HEADERS = [
+  'Date', 'Runs', 'Scanned', 'Candidates', 'Already Checked (skipped)',
+  'Reviewed', 'Kept', 'Dropped',
+  'Dropped: Renovated', 'Dropped: Multi-unit', 'Dropped: Fire',
+  'Dropped: Few photos', 'Dropped: Other',
+  'Leads', 'Clear Gate', 'Sent to Sheet', 'Already There',
+  'Reviewer Removed', 'Reviewer Kept', 'Reviewer',
+  'Keep Rate', 'Gate Rate', 'Last Run',
+];
+// Everything up to 'Already There' is the app's own count and gets replaced on
+// each push; the reviewer's three columns are never touched.
+const KPI_APP_COLS = KPI_SHEET_HEADERS.slice(0, KPI_SHEET_HEADERS.indexOf('Reviewer Removed'))
+  .concat(['Keep Rate', 'Gate Rate', 'Last Run']);
+
+const today = () => new Date().toISOString().slice(0, 10);
+const mlsLink = mls => `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${mls}`;
+
+/** A finished lead (already through toSheetRow) as a sheet record. */
+const leadRecord = r => ({
+  'Status': r.status || '', 'MLS #': r.mls, 'Address': r.address, 'City': r.city, 'Zip': r.zip,
+  'Beds': r.beds, 'Baths': r.baths, 'SqFt': r.sqft, 'Lot SqFt': r.lotSqft,
+  'Year Built': r.yearBuilt, 'DOM': r.dom, 'Purchase Price': r.price, '$/SqFt': r.ppsf,
+  'Notes': r.notes, 'MLS Link': r.link || mlsLink(r.mls), 'First Added': today(),
+});
+
+const rejectRecord = r => ({
+  'Rejected On': today(), 'MLS #': r.mls, 'Address': r.addr || r.address || '',
+  'City': r.city || '', 'Zip': r.zip || '', 'Price': r.price, '$/SqFt': r.ppsf,
+  'SqFt': r.sqft, 'DOM': r.dom, 'Reason': r.reason || '', 'Stage': r.stage || '',
+  'By': 'FlipScout', 'MLS Link': r.link || mlsLink(r.mls),
+});
+
+/** Push a batch straight into the spreadsheet. Leads and rejections go to their
+ *  own tabs; both are append-or-backfill, so nothing on the sheet is destroyed. */
+async function googleSync(leads, rejects) {
+  const g = googleCfg();
+  if (!g.refreshToken) return { ok: false, unconfigured: true, error: 'not signed in to Google — section 7' };
+  if (!g.sheetId) return { ok: false, unconfigured: true, error: 'no spreadsheet URL yet — section 7' };
+  try {
+    const token = await googleToken();
+    const blank = { added: 0, updated: 0, filled: 0 };
+    const L = (leads && leads.length)
+      ? await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', leads.map(leadRecord))
+      : blank;
+    // Rejections can repeat an MLS # across stages; key on it anyway so the tab
+    // holds one row per property rather than growing a row per scan.
+    const R = (rejects && rejects.length)
+      ? await gsheets.syncRows(token, g.sheetId, g.rejectTab, REJECT_HEADERS, 'MLS #',
+          rejects.filter(r => r && r.mls).map(rejectRecord))
+      : blank;
+    return { ok: true, leads: L, rejects: R };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+async function googleSyncKpi(day) {
+  const g = googleCfg();
+  if (!googleReady()) return { ok: false, unconfigured: true, error: 'Google sheet not connected' };
+  try {
+    const token = await googleToken();
+    const rec = {
+      'Date': day.date, 'Runs': day.runs, 'Scanned': day.scanned, 'Candidates': day.candidates,
+      'Already Checked (skipped)': day.skippedAlreadyChecked, 'Reviewed': day.reviewed,
+      'Kept': day.kept, 'Dropped': day.dropped,
+      'Dropped: Renovated': day.droppedRenovated, 'Dropped: Multi-unit': day.droppedMultiUnit,
+      'Dropped: Fire': day.droppedFire, 'Dropped: Few photos': day.droppedFewPhotos,
+      'Dropped: Other': day.droppedOther,
+      'Leads': day.leads, 'Clear Gate': day.gateCleared, 'Sent to Sheet': day.pushed,
+      'Already There': day.pushSkipped,
+      'Keep Rate': day.reviewed ? Math.round((day.kept / day.reviewed) * 100) + '%' : '',
+      'Gate Rate': day.leads ? Math.round((day.gateCleared / day.leads) * 100) + '%' : '',
+      'Last Run': new Date().toLocaleString(),
+    };
+    await gsheets.syncRows(token, g.sheetId, g.kpiTab, KPI_SHEET_HEADERS, 'Date', [rec],
+      { overwrite: KPI_APP_COLS });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+ipcMain.handle('google-status', () => {
+  const g = googleCfg();
+  return {
+    // The client id/secret come back so the fields repopulate after a restart.
+    // A desktop-app "secret" is not a credential — Google documents it as
+    // non-confidential — and it already sits in plaintext in userData.
+    clientId: g.clientId, clientSecret: g.clientSecret,
+    hasClient: !!g.clientId, signedIn: !!g.refreshToken, email: g.email,
+    sheetId: g.sheetId, sheetTitle: g.sheetTitle, leadTab: g.leadTab,
+    autoSync: !!g.autoSync, ready: googleReady(),
+  };
+});
+
+ipcMain.handle('google-save', (_e, patch) => {
+  const next = {};
+  if (patch.clientId !== undefined) next.clientId = String(patch.clientId).trim();
+  if (patch.clientSecret !== undefined) next.clientSecret = String(patch.clientSecret).trim();
+  if (patch.autoSync !== undefined) next.autoSync = !!patch.autoSync;
+  if (patch.sheetUrl !== undefined) {
+    const id = gsheets.parseSheetId(patch.sheetUrl);
+    if (patch.sheetUrl && !id) return { ok: false, error: "that doesn't look like a Google Sheets URL or ID" };
+    next.sheetId = id;
+  }
+  saveGoogle(next);
+  return { ok: true };
+});
+
+ipcMain.handle('google-signin', async () => {
+  const g = googleCfg();
+  if (!g.clientId) {
+    return { ok: false, error: 'paste your OAuth Client ID first — the one-time setup steps are under the button' };
+  }
+  try {
+    log('Opening the Google sign-in page in your browser…');
+    const t = await gsheets.signIn({
+      clientId: g.clientId, clientSecret: g.clientSecret,
+      openUrl: u => shell.openExternal(u),
+    });
+    // Google only issues a refresh token on the first consent for a client. If
+    // this is a re-auth it may be absent — keep the one we already hold rather
+    // than wiping a working connection.
+    saveGoogle({
+      accessToken: t.accessToken, expiresAt: t.expiresAt,
+      refreshToken: t.refreshToken || g.refreshToken,
+      email: t.email || g.email,
+    });
+    log(`Google connected${t.email ? ' as ' + t.email : ''}.`, 'good');
+    return { ok: true, email: googleCfg().email };
+  } catch (e) {
+    log('Google sign-in failed: ' + e.message, 'error');
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('google-signout', () => {
+  saveGoogle({ refreshToken: '', accessToken: '', expiresAt: 0, email: '' });
+  log('Signed out of Google.', 'warn');
+  return { ok: true };
+});
+
+/** Prove the whole chain works — token, spreadsheet, tabs — before a scan
+ *  depends on it, and create the tabs while we're here. */
+ipcMain.handle('google-test', async () => {
+  const g = googleCfg();
+  if (!g.refreshToken) return { ok: false, error: 'sign in with Google first' };
+  if (!g.sheetId) return { ok: false, error: 'paste your spreadsheet URL first' };
+  try {
+    const token = await googleToken();
+    const info = await gsheets.listTabs(token, g.sheetId);
+    await gsheets.ensureTab(token, g.sheetId, g.leadTab, LEAD_HEADERS);
+    await gsheets.ensureTab(token, g.sheetId, g.rejectTab, REJECT_HEADERS);
+    saveGoogle({ sheetTitle: info.title });
+    return { ok: true, title: info.title, tabs: info.tabs, email: g.email };
+  } catch (e) {
+    const m = /permission|PERMISSION_DENIED|403/i.test(e.message)
+      ? `${g.email || 'the signed-in account'} cannot edit that spreadsheet — share it with that address, or sign in as the owner`
+      : e.message;
+    return { ok: false, error: m };
+  }
+});
+
+ipcMain.handle('google-sync', async (_e, { leads, rejects }) => {
+  const set = (leads || []).filter(l => l.surface !== false).map(toSheetRow);
+  log(`Writing ${set.length} lead(s) to your Google Sheet…`);
+  const r = await googleSync(set, rejects || []);
+  log(r.ok
+    ? `Sheet updated: ${r.leads.added} new, ${r.leads.updated} refreshed, ${r.rejects.added} rejection(s) logged.`
+    : `Sheet write failed: ${r.error}`, r.ok ? 'good' : 'error');
+  return r;
+});
+
 ipcMain.handle('pick-drive-folder', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(controlWin, {
     title: 'Pick your Google Drive folder', properties: ['openDirectory'],
@@ -944,6 +1187,26 @@ ipcMain.handle('test-sheet', async () => {
 // Those MLS #s come back here and go into the ledger, so a deleted lead is
 // never scanned, reviewed, or re-pushed again.
 async function syncRejectedIntoLedger() {
+  // Direct read of the Rejected tab when Google is connected — that tab is where
+  // the reviewer's "Reject selected lead(s)" rows land, so it is the authoritative
+  // list either way.
+  if (googleReady()) {
+    try {
+      const g = googleCfg();
+      const token = await googleToken();
+      const col = gsheets.colName(REJECT_HEADERS.indexOf('MLS #'));
+      const info = await gsheets.listTabs(token, g.sheetId);
+      const ids = info.tabs.indexOf(g.rejectTab) < 0 ? []
+        : await gsheets.readCol(token, g.sheetId, g.rejectTab, `${col}2:${col}`);
+      const seen = loadLedger();
+      const fresh = ids.filter(m => m && !seen[String(m).trim().toUpperCase()]);
+      if (fresh.length) {
+        ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: 'reviewer-rejected' })));
+        log(`Reviewer rejections synced: ${fresh.length} new (won't be checked again).`);
+      }
+      return { ok: true, total: ids.length, added: fresh.length };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
   if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: notConfiguredMsg(), unconfigured: true };
   try {
     const u = cfg.sheetUrl + (cfg.sheetUrl.indexOf('?') >= 0 ? '&' : '?')
@@ -1023,7 +1286,8 @@ async function pushKpi(day) {
 
 ipcMain.handle('kpi-push', async () => {
   const rep = kpiReport(1);
-  const r = await pushKpi(rep.today);
+  // Direct Sheets API when Google is connected; the web app only as a fallback.
+  const r = googleReady() ? await googleSyncKpi(rep.today) : await pushKpi(rep.today);
   // An unconfigured sheet is a setup step, not a failure — say it once, plainly.
   log(r.ok ? 'KPI sent to the sheet.'
     : (r.unconfigured ? 'Sheet not connected yet: ' + r.error : 'KPI push failed: ' + r.error),

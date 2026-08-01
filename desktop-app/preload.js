@@ -19,6 +19,13 @@ contextBridge.exposeInMainWorld('fs', {
   ledgerStats: () => ipcRenderer.invoke('ledger-stats'),
   ledgerClear: () => ipcRenderer.invoke('ledger-clear'),
   syncRejected: () => ipcRenderer.invoke('sync-rejected'),
+  // Direct Google Sheets connection
+  googleStatus: () => ipcRenderer.invoke('google-status'),
+  googleSave: (patch) => ipcRenderer.invoke('google-save', patch),
+  googleSignIn: () => ipcRenderer.invoke('google-signin'),
+  googleSignOut: () => ipcRenderer.invoke('google-signout'),
+  googleTest: () => ipcRenderer.invoke('google-test'),
+  googleSync: (leads, rejects) => ipcRenderer.invoke('google-sync', { leads, rejects }),
   driveStatus: () => ipcRenderer.invoke('drive-status'),
   pickDriveFolder: () => ipcRenderer.invoke('pick-drive-folder'),
   showFile: (p) => ipcRenderer.send('show-file', p),

@@ -52,17 +52,43 @@ install (creates a desktop shortcut) or run the portable exe directly.
    after repair), Light/Heavy rehab, holding, days on market, and the dollar profit
    gate (Strong Deal / Marginal / Pass, with a Flip Quality label). **Export** to
    CSV or JSON.
-5. **Google Sheet** — section 6 connects the app to the "Flip Scout Agent" sheet.
-   Paste the Apps Script web app URL + shared secret, hit **Test connection**, then
-   either **Send to Google Sheet** manually or tick **Auto-send** to push every
-   finished scan. Only leads that clear the profit gate are sent, and the sheet
-   de-dupes on MLS # so re-sending a scan is harmless. The URL and secret are
-   remembered between runs.
+5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
+   your spreadsheet URL, and the app writes rows into it directly over the Sheets
+   API as each city finishes. No Apps Script, no deployment, no shared secret,
+   nothing to refresh. Three tabs are created if they don't exist:
+   - **Leads** — the qualifying properties
+   - **Rejected** — everything dropped, with the reason and the stage it fell out at
+   - **KPI** — one row per day, upserted
 
-   One-time sheet setup: open the sheet → Extensions → Apps Script → paste
-   `apps-script/flip-scout-agent-sheet.gs` → set `SHARED_SECRET` → run
-   `setupSheet()` → Deploy → New deployment → Web app (Execute as: **Me**, Access:
-   **Anyone with the link**) → copy the `/exec` URL.
+   Rows already on the sheet are **topped up, never overwritten** — a blank Zip
+   gets filled in on the next pass, but a note you typed yourself stays put. On
+   the KPI tab the app replaces its own counters and leaves the reviewer's
+   columns alone.
+
+## One-time Google setup
+
+Google won't let any app touch your spreadsheets unless it's registered to a
+Google Cloud project **you own** — this can't be shipped inside the app.
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → create or pick a project
+2. APIs & Services → Library → enable **Google Sheets API**
+3. OAuth consent screen → **External** → add your own Google address under **Test users**
+4. Credentials → Create credentials → OAuth client ID → **Desktop app**
+5. Paste the Client ID and secret into section 7 → **Sign in with Google**
+
+Sign-in opens your normal browser and comes back to the app on its own
+(loopback + PKCE — nothing is copied by hand). The app asks for one scope,
+`spreadsheets`; it cannot read your mail or your other files. Credentials and
+the refresh token live in `%APPDATA%/FlipScout/google-account.json`.
+
+If the check says the account "cannot edit that spreadsheet", either share the
+sheet with the address you signed in as, or sign in as the owner.
+
+### Fallback: the Apps Script path
+Still there if you'd rather not set up a Cloud project. Every finished city is
+also written to `flipscout-leads.json` in your Google Drive folder, and
+`apps-script/flip-scout-agent-sheet.gs` pulls it in on **⚡ Flip Scout → 🔄
+Refresh now** (or every 5 minutes with **⏱ Enable auto update**).
 
 ## The deal model (matches flip-scout-SOP.md)
 - Rehab: Light $70/sf, Heavy $145/sf. Holding (3mo) = 10%/yr financing prorated +

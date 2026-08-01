@@ -268,12 +268,27 @@ De-dupes on Redfin Link. Kept for the existing headless pipeline.
 ## 7. FlipScout desktop app
 
 `desktop-app/` (Electron). Sign in → scan the buy box → photo-review with
-pause/resume → deal report → push to the Flip Scout Agent sheet. Sections in the
+pause/resume → deal report → the leads land in the spreadsheet. Sections in the
 control window: 1 login · 2 auto-verify (rules or AI vision) · 3 scan ·
-4 photo review · 5 report · 6 sheet connection. The sheet URL + secret are
-entered in section 6 and remembered locally; tick **Auto-send** to push every
-finished scan. Only leads clearing the profit gate are sent. Renovated
-properties never reach the sheet — they are dropped at photo review (Rule #0/#2).
+4 photo review · 5 report · 6 daily KPI · 7 Google Sheet. Renovated properties
+never reach the sheet — they are dropped at photo review (Rule #0/#2).
+
+**Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
+his own Google account inside the app (OAuth loopback + PKCE, scope
+`spreadsheets` only) and pastes the spreadsheet URL; as each city finishes, the
+app writes to the **Leads**, **Rejected** (with reason + stage) and **KPI** tabs
+over the Sheets API. Rows are append-or-backfill — a blank cell gets filled on a
+later pass, a non-empty one is never overwritten, so hand edits survive. On KPI
+the app replaces only its own counters and leaves the reviewer's columns alone.
+Needs a one-time **OAuth Client ID (Desktop app type)** from the user's own
+Google Cloud project — that cannot be shipped in the app or created for them;
+the five console steps are in the app UI and `desktop-app/README.md`.
+Credentials persist in `google-account.json` under userData.
+
+Fallback (still written every run as a backup): the Drive drop file
+`flipscout-leads.json` + `apps-script/flip-scout-agent-sheet.gs`, which pulls it
+in on 🔄 Refresh now / ⏱ Enable auto update. Contract tests for the writer:
+`node desktop-app/test-google-sheets.js`.
 
 ## Notes
 

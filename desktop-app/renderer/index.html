@@ -178,18 +178,58 @@
   </div>
 
   <div class="card">
-    <h2>7 · Google Drive hand-off</h2>
-    <div id="driveStatus" class="status">Looking for your Google Drive folder…</div>
+    <h2>7 · Your Google Sheet</h2>
+    <div id="gStatus" class="status">Not connected.</div>
+
+    <label style="margin-top:10px">Your spreadsheet (paste the URL)</label>
+    <input id="gSheetUrl" type="text" autocomplete="off"
+           placeholder="https://docs.google.com/spreadsheets/d/…/edit">
+
     <div class="row" style="margin-top:10px">
-      <button id="pickDrive">Choose Drive folder</button>
-      <button id="openDrop">Show the file</button>
+      <button id="gSignIn">Sign in with Google</button>
+      <button id="gTest">Check connection</button>
+      <button id="gSend">Send this run's leads</button>
+      <button id="gSignOut">Sign out</button>
     </div>
-    <div class="hint">Finished leads are written to <code>flipscout-leads.json</code> in your
-      Google Drive folder. Drive syncs it up, and the sheet reads it — so in the
-      spreadsheet turn on <b>⏱ Enable auto update</b> once and it pulls every 5 minutes on
-      its own, or hit <b>🔄 Refresh now</b> if you don't want to wait. Nothing to
-      connect, no URL, no deployment.
-      <br>Needs <b>Google Drive for Desktop</b> installed and signed in.</div>
+    <label style="display:flex;align-items:center;gap:6px;margin:10px 0 0">
+      <input id="gAuto" type="checkbox" checked> Write to the sheet automatically after each city
+    </label>
+    <div class="hint">Signed in with your own Google account, the app writes leads
+      straight into the spreadsheet as each city finishes — <b>Leads</b>, <b>Rejected</b>
+      (with the reason) and <b>KPI</b> tabs, created if they aren't there. Rows already on
+      the sheet are topped up, never overwritten, so anything you edit by hand survives.
+      No Apps Script, no deployment, nothing to refresh.</div>
+
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px">One-time Google setup (Client ID)</summary>
+      <div class="hint" style="margin-top:8px">Google won't let any app touch your
+        spreadsheets unless it's registered to a Google Cloud project of yours. Five
+        minutes, once:
+        <ol style="margin:6px 0 0 16px;padding:0">
+          <li><a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a> → create or pick a project</li>
+          <li>APIs &amp; Services → Library → enable <b>Google Sheets API</b></li>
+          <li>OAuth consent screen → External → add your own Gmail under <b>Test users</b></li>
+          <li>Credentials → Create credentials → OAuth client ID → <b>Desktop app</b></li>
+          <li>Paste the Client ID and secret below</li>
+        </ol>
+      </div>
+      <label style="margin-top:8px">OAuth Client ID</label>
+      <input id="gClientId" type="text" autocomplete="off" placeholder="…apps.googleusercontent.com">
+      <label>Client secret</label>
+      <input id="gClientSecret" type="password" autocomplete="off">
+    </details>
+
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px">Fallback: Google Drive hand-off</summary>
+      <div id="driveStatus" class="status" style="margin-top:8px">Looking for your Google Drive folder…</div>
+      <div class="row" style="margin-top:10px">
+        <button id="pickDrive">Choose Drive folder</button>
+        <button id="openDrop">Show the file</button>
+      </div>
+      <div class="hint">A backup copy of every finished city goes to
+        <code>flipscout-leads.json</code> in your Drive folder, which the Apps Script picks
+        up on <b>🔄 Refresh now</b>. Only needed if the direct connection above isn't set up.</div>
+    </details>
 
     <details style="margin-top:12px">
       <summary style="cursor:pointer;color:var(--muted);font-size:12px">Legacy: push straight to a web app</summary>
@@ -293,7 +333,79 @@
   }
   $('sheetUrl').oninput = saveSheetCfg; $('sheetSecret').oninput = saveSheetCfg; $('autoPush').onchange = saveSheetCfg;
 
-  // --- Drive hand-off ---
+  // --- direct Google Sheets connection ---
+  // Everything here lives in the main process (google-account.json), not
+  // localStorage: the refresh token has to outlive the window and must not sit
+  // in a renderer that loads remote MLS content.
+  async function refreshGoogle(){
+    const s = await window.fs.googleStatus();
+    if (document.activeElement !== $('gClientId')) $('gClientId').value = s.clientId || '';
+    if (document.activeElement !== $('gClientSecret')) $('gClientSecret').value = s.clientSecret || '';
+    $('gAuto').checked = !!s.autoSync;
+    const box = $('gStatus');
+    if (!s.hasClient) {
+      box.className = 'status warn';
+      box.textContent = 'Add your OAuth Client ID first — open "One-time Google setup" below.';
+    } else if (!s.signedIn) {
+      box.className = 'status warn';
+      box.textContent = 'Client ID saved. Click "Sign in with Google".';
+    } else if (!s.sheetId) {
+      box.className = 'status warn';
+      box.textContent = `Signed in as ${s.email || 'your Google account'} — now paste your spreadsheet URL.`;
+    } else {
+      box.className = 'status good';
+      box.innerHTML = `Connected as <b>${s.email || 'your Google account'}</b> → `
+        + `<b>${s.sheetTitle || 'your spreadsheet'}</b>, tab "${s.leadTab}". `
+        + (s.autoSync ? 'Leads are written automatically as each city finishes.'
+                      : 'Auto-write is off — use "Send this run\'s leads".');
+    }
+    return s;
+  }
+  const saveGoogle = () => window.fs.googleSave({
+    clientId: $('gClientId').value, clientSecret: $('gClientSecret').value,
+    sheetUrl: $('gSheetUrl').value, autoSync: $('gAuto').checked,
+  });
+  $('gClientId').oninput = $('gClientSecret').oninput = () => { saveGoogle().then(refreshGoogle); };
+  $('gSheetUrl').oninput = async () => {
+    const r = await saveGoogle();
+    if (!r.ok) { $('gStatus').className='status warn'; $('gStatus').textContent = r.error; return; }
+    refreshGoogle();
+  };
+  $('gAuto').onchange = () => { saveGoogle().then(refreshGoogle); };
+
+  $('gSignIn').onclick = async () => {
+    await saveGoogle();
+    const box = $('gStatus');
+    box.className='status'; box.textContent = 'Finish the sign-in in your browser…';
+    const r = await window.fs.googleSignIn();
+    if (!r.ok) { box.className='status warn'; box.textContent = 'Sign-in failed: ' + r.error; return; }
+    await refreshGoogle();
+    if ($('gSheetUrl').value) $('gTest').click();
+  };
+  $('gSignOut').onclick = async () => { await window.fs.googleSignOut(); refreshGoogle(); };
+  $('gTest').onclick = async () => {
+    await saveGoogle();
+    const box = $('gStatus'); box.className='status'; box.textContent = 'Checking…';
+    const r = await window.fs.googleTest();
+    if (r.ok) {
+      box.className='status good';
+      box.innerHTML = `Connected ✓ — <b>${r.title}</b> as ${r.email||'your account'}. Tabs: ${r.tabs.join(', ')}.`;
+    } else { box.className='status warn'; box.textContent = 'Not connected: ' + r.error; }
+  };
+  $('gSend').onclick = async () => {
+    if (!lastLeads.length) { $('gStatus').className='status warn'; $('gStatus').textContent='No leads from this run yet.'; return; }
+    const box = $('gStatus'); box.className='status'; box.textContent='Writing…';
+    const r = await window.fs.googleSync(lastLeads, []);
+    box.className = 'status ' + (r.ok ? 'good' : 'warn');
+    box.textContent = r.ok ? `Wrote ${r.leads.added} new lead(s), refreshed ${r.leads.updated}.`
+                           : 'Failed: ' + r.error;
+  };
+  (async () => {
+    const s = await refreshGoogle();
+    if (s.sheetId) $('gSheetUrl').value = 'https://docs.google.com/spreadsheets/d/' + s.sheetId + '/edit';
+  })();
+
+  // --- Drive hand-off (fallback) ---
   async function refreshDrive(){
     const s = await window.fs.driveStatus();
     const box = $('driveStatus');
