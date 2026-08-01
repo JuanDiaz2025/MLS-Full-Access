@@ -1,28 +1,6 @@
 {
  "version": 1,
  "note": "Every MLS # ever scanned. Anything listed here is SKIPPED on future runs - never re-check it. Tracked in git on purpose: the container is ephemeral, so this must be committed after every scan or the next run re-checks everything. Managed by scripts/mls-ledger.js. Cleared 2026-08-01 at Bryan's request: everything before that was judged with the truncated-remarks bug, the bare /renovat/ drop, and before the tenant and quick-flip screens existed, so those verdicts were not trustworthy.",
- "entries": {
-  "SF426146559": {
-   "first_seen": "2026-08-01",
-   "last_seen": "2026-08-01",
-   "verdict": "kept",
-   "addr": "483 Ellington Avenue, San Francisco, CA 94112",
-   "city": "San Francisco"
-  },
-  "SF426150277": {
-   "first_seen": "2026-08-01",
-   "last_seen": "2026-08-01",
-   "verdict": "kept",
-   "addr": "21 College Terrace, San Francisco, CA 94112",
-   "city": "San Francisco"
-  },
-  "SF426147253": {
-   "first_seen": "2026-08-01",
-   "last_seen": "2026-08-01",
-   "verdict": "dropped",
-   "addr": "1135 Naples Street, San Francisco, CA 94112",
-   "city": "San Francisco"
-  }
- },
+ "entries": {},
  "updated": "2026-08-01"
 }
