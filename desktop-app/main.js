@@ -502,15 +502,16 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
 
       // Log why listings failed the buy-box filter. Capped, near-misses first —
       // a whole county's worth of "not below market" would drown the tab.
-      const FILTER_LOG_CAP = 25;
-      const filterRejects = (cityFiltered || []).slice(0, FILTER_LOG_CAP).map(r => ({
+      // EVERY buy-box rejection is logged, not a sample. This used to keep only
+      // the 25 nearest misses, which made "Scan Rejected" on the KPI tab an
+      // undercount — and a number that quietly means "some of them" is worse
+      // than no number at all.
+      const filterRejects = (cityFiltered || []).map(r => ({
         mls: r.mls, addr: r.addr, city: cityOf(r), zip: r.zip || '',
         price: r._price, ppsf: r._ppsf, sqft: r._sqft, dom: r._dom, reason: r._reason,
         link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${r.mls}`,
       }));
-      if (cityFiltered && cityFiltered.length > FILTER_LOG_CAP) {
-        log(`[${label}] ${cityFiltered.length} failed the buy-box filter; logging the ${FILTER_LOG_CAP} closest`);
-      }
+      if (filterRejects.length) log(`[${label}] ${filterRejects.length} failed the buy-box filter — all logged with the reason`);
 
       const seen = loadLedger();
       const fresh = cityCands.filter(c => !seen[String(c.mls || '').trim().toUpperCase()]);
@@ -718,8 +719,6 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
     send('kpi', { today: day, history: kpiReport() });
     // Only attempt the KPI push when a sheet is actually connected — an
     // unconfigured app must not log a failure after every single run.
-    if (googleReady() && googleCfg().autoSync) await googleSyncKpi(day).catch(() => {});
-
     // FINISH, VISIBLY. The run used to just stop making noise — the MLS window
     // still showed the last gallery, "Now reviewing" still named a property,
     // and there was no way to tell a finished scan from a stalled one.
@@ -874,14 +873,15 @@ const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
 ];
-// KPI is a NUMBERS tab — four columns, one row a day, no chart. The old
-// 23-column version was unreadable, which was the complaint. Ownership splits
-// by column: the app writes what only the app knows, the Apps Script counts
-// what only the sheet knows, and neither touches the other's cells.
-const KPI_SHEET_HEADERS = ['Date', 'Rejected', 'On List', 'Scan Rejected'];
-// 'Rejected' (by a person) and 'On List' are counted in the sheet by the Apps
-// Script — the app must never write them.
-const KPI_APP_COLS = ['Date', 'Scan Rejected'];
+// The KPI tab is built entirely by the Apps Script, from the Rejected and Leads
+// tabs. The app does not write it.
+//
+// Splitting it — app writes some columns, script writes others — looked tidy and
+// produced a tab reading "Scan Rejected: 0" after a scan that had rejected
+// hundreds: the app's figures were wiped when the header row was corrected, and
+// nothing rewrote them until the next run. Every drop is already on the Rejected
+// tab with its date and stage, so one source counts both numbers and they cannot
+// disagree.
 
 const today = () => new Date().toISOString().slice(0, 10);
 const fullAddress = core.fullAddress;
@@ -944,18 +944,6 @@ async function googleSync(leads, rejects) {
           rejects.filter(r => r && r.mls).map(rejectRecord))
       : blank;
     return { ok: true, leads: L, rejects: R, blocked };
-  } catch (e) { return { ok: false, error: e.message }; }
-}
-
-async function googleSyncKpi(day) {
-  const g = googleCfg();
-  if (!googleReady()) return { ok: false, unconfigured: true, error: 'Google sheet not connected' };
-  try {
-    const token = await googleToken();
-    const rec = { 'Date': day.date, 'Scan Rejected': day.dropped };
-    await gsheets.syncRows(token, g.sheetId, g.kpiTab, KPI_SHEET_HEADERS, 'Date', [rec],
-      { overwrite: KPI_APP_COLS });
-    return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 

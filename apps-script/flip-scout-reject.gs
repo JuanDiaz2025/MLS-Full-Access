@@ -116,8 +116,10 @@ function menuRefreshKpi() {
 //   On List       — qualified leads still sitting on the Leads tab
 //   Scan Rejected — thrown out by the scan itself, that day
 //
-// The app writes Scan Rejected; the other two are counted here from the sheet,
-// so they are right whether or not a scan has run today.
+// ALL of it is counted here, from the Rejected and Leads tabs. Nothing is
+// written by the app and nothing accumulates, so the tab can never disagree
+// with the rows it is describing. An earlier version had the app own
+// Scan Rejected; the tab then read 0 after a scan that had rejected hundreds.
 
 const KPI_HEADERS = ['Date', 'Rejected', 'On List', 'Scan Rejected'];
 
@@ -159,18 +161,21 @@ function dayKey_(v) {
 function rebuildKpi_() {
   const sh = kpiSheet_();
 
-  // Manual removals per day = Rejected rows the REVIEWER made, not the scan.
+  // Both rejection counts come off the Rejected tab, split by who did it.
+  // Stage says: 'Reviewer' / 'Deleted by hand' = a person; anything else
+  // ('Photo review', 'Buy-box filter') = the scan.
   const rej = rejectedSheet_();
   const ridx = headerIdx_(rej, REJECTED_HEADERS);
   const rn = Math.max(0, rej.getLastRow() - 1);
-  const removed = {};
+  const removed = {}, byScan = {};
   if (rn) {
     const vals = rej.getRange(2, 1, rn, Math.max(rej.getLastColumn(), REJECTED_HEADERS.length)).getValues();
     vals.forEach(r => {
-      const stage = String(r[ridx['Stage']] || '');
-      if (!/reviewer|deleted by hand/i.test(stage)) return;   // scan drops are not manual
       const d = dayKey_(r[ridx['Rejected On']]);
-      if (d) removed[d] = (removed[d] || 0) + 1;
+      if (!d) return;
+      const stage = String(r[ridx['Stage']] || '');
+      const bucket = /reviewer|deleted by hand/i.test(stage) ? removed : byScan;
+      bucket[d] = (bucket[d] || 0) + 1;
     });
   }
 
@@ -188,19 +193,9 @@ function rebuildKpi_() {
     }
   } catch (e) { /* no Leads tab yet — the counts stay zero */ }
 
-  // Scan Rejected is the app's number — keep whatever it last wrote.
-  const kn = Math.max(0, sh.getLastRow() - 1);
-  const prior = {};
-  if (kn) {
-    sh.getRange(2, 1, kn, KPI_HEADERS.length).getValues().forEach(r => {
-      const d = dayKey_(r[0]);
-      if (d) prior[d] = { scanRejected: r[3] };
-    });
-  }
-
   const days = {};
-  Object.keys(prior).forEach(d => { days[d] = true; });
   Object.keys(removed).forEach(d => { days[d] = true; });
+  Object.keys(byScan).forEach(d => { days[d] = true; });
   const sorted = Object.keys(days).sort();
   const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   if (sorted.indexOf(today) < 0) sorted.push(today);
@@ -209,8 +204,10 @@ function rebuildKpi_() {
     d,
     removed[d] || 0,
     d === today ? onList : '',           // a live count, so only today's row
-    (prior[d] && prior[d].scanRejected) || 0,
+    byScan[d] || 0,
   ]);
+
+  const kn = Math.max(0, sh.getLastRow() - 1);
 
   if (kn) sh.getRange(2, 1, kn, KPI_HEADERS.length).clearContent();
   if (rows.length) {

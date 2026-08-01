@@ -386,10 +386,20 @@ the `All ` prefix stripped as the fallback.
     today's row carries it)
   - `Scan Rejected` — thrown out by the scan itself that day
 
-  The **app** writes `Scan Rejected`; the **script** counts the other two from
-  the sheet, so they are right whether or not a scan has run. Counting, not
-  accumulating — a corrected row is reflected at once and nothing drifts.
-  Rebuilt after every rejection and on `⚡ Flip Scout → 📊 Refresh KPI`.
+  **The Apps Script builds the whole tab** from the `Rejected` and `Leads` tabs —
+  the app writes none of it. Both rejection figures come off `Rejected`, split by
+  `Stage`: *Reviewer* / *Deleted by hand* is a person, anything else
+  (*Photo review*, *Buy-box filter*) is the scan. One source, so the two numbers
+  cannot disagree, and nothing accumulates — a corrected row shows up at once.
+
+  Splitting ownership (app writes some columns, script others) was tried and
+  produced a tab reading **`Scan Rejected: 0`** after a scan that had rejected
+  hundreds: the app's figures were wiped when the header row got corrected and
+  nothing rewrote them until the next run.
+
+  **Every buy-box rejection is logged**, not a sample. The old 25-per-city cap
+  made `Scan Rejected` an undercount, and a number that quietly means "some of
+  them" is worse than no number.
 
   **Header rows are compared in FULL, never just cell A1.** A tab from an older
   layout still began with "Date", so the old headings survived and values landed
