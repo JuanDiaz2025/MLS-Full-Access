@@ -88,7 +88,7 @@ function filterCandidates(rowsByArea) {
   // Say WHY each listing failed, not just that it did. This is the first place
   // leads get rejected — long before photo review — so without a reason here
   // "why isn't this on my list" has no answer for most of the buy box.
-  // Only ONE screen left: age. Per Bryan, both price screens are removed.
+  // Two screens: age and days on market. Per Bryan, both PRICE screens are gone.
   //
   //   - the "<=85% of city median $/sqft" cut is gone
   //   - the oversized-for-the-area cut is gone
@@ -107,6 +107,12 @@ function filterCandidates(rowsByArea) {
   // to be enforced in code, not just remembered.
   const REJECTED_ADDR = [/^1430\s+shafter/i, /^183\s+victoria/i, /^322\s+1st\s+ave/i];
 
+  // Days on market: the 45-day cap is BACK ON (Bryan, 1 Aug) — list only what
+  // has been on the market 45 days or less. Applied to the MLS's own DOM rather
+  // than a List Date search window, so a relisted property is judged on the DOM
+  // the sheet will actually show.
+  const MAX_DOM = 45;
+
   const why = r => {
     const a = String(r.addr || '').trim();
     if (REJECTED_ADDR.some(re => re.test(a))) return 'previously rejected by Bryan — do not resurface';
@@ -114,6 +120,10 @@ function filterCandidates(rowsByArea) {
     // silently discarded the listing as too new. Missing is not new: let an
     // unknown age through to photo review, where the pictures settle it.
     if (r._age > 0 && r._age < 25) return `too new — built ${2026 - r._age}, want 25+ years old`;
+    // Same treatment for a missing DOM: 0 means "the MLS didn't say", not
+    // "listed today", and a blank must not be read as passing the cap either
+    // way — it simply isn't grounds to drop.
+    if (r._dom > MAX_DOM) return `on market ${r._dom} days — over the ${MAX_DOM}-day limit`;
     return '';
   };
 

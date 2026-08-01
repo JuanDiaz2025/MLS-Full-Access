@@ -220,32 +220,14 @@
     </details>
 
     <details style="margin-top:12px">
-      <summary style="cursor:pointer;color:var(--muted);font-size:12px">Fallback: Google Drive hand-off</summary>
-      <div id="driveStatus" class="status" style="margin-top:8px">Looking for your Google Drive folder…</div>
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px">Local backup</summary>
+      <div id="backupStatus" class="status" style="margin-top:8px">No backup yet.</div>
       <div class="row" style="margin-top:10px">
-        <button id="pickDrive">Choose Drive folder</button>
-        <button id="openDrop">Show the file</button>
+        <button id="openBackup">Show the backup file</button>
       </div>
-      <div class="hint">A backup copy of every finished city goes to
-        <code>flipscout-leads.json</code> in your Drive folder, which the Apps Script picks
-        up on <b>🔄 Refresh now</b>. Only needed if the direct connection above isn't set up.</div>
-    </details>
-
-    <details style="margin-top:12px">
-      <summary style="cursor:pointer;color:var(--muted);font-size:12px">Legacy: push straight to a web app</summary>
-      <label style="margin-top:8px">Apps Script web app URL</label>
-      <input id="sheetUrl" type="text" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
-      <label>Shared secret</label>
-      <input id="sheetSecret" type="password" autocomplete="off">
-      <div class="row" style="margin-top:10px">
-        <button id="testSheet">Test connection</button>
-        <label style="display:flex;align-items:center;gap:6px;margin:0">
-          <input id="autoPush" type="checkbox"> Also POST on finish
-        </label>
-      </div>
-      <div id="sheetStatus" class="status" style="margin-top:10px">Not connected.</div>
-      <div class="hint">Only needed if you'd rather the app POST directly. Requires the
-        script deployed with access set to <b>Anyone</b>.</div>
+      <div class="hint">Every reviewed city is saved here before anything else can fail,
+        so a dropped connection never loses work you have already paid for. If the sheet
+        was offline during a scan, reconnect and hit <b>Send this run's leads</b>.</div>
     </details>
   </div>
 </div>
@@ -295,7 +277,6 @@
     readSeconds: Number($('readSeconds').value||6),
     whenUnsure: $('whenUnsure').value,
     runComps: $('runComps').checked,
-    sheetUrl: $('sheetUrl').value.trim(), sheetSecret: $('sheetSecret').value, autoPush: $('autoPush').checked,
   }); }
   $('autoVerify').onchange = () => { $('autoFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
@@ -305,33 +286,6 @@
   $('runComps').checked = localStorage.getItem('fs.runComps') === '1';
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
-
-  // --- sheet settings: shipped defaults, then whatever was saved locally ---
-  const SHEET_KEYS = ['sheetUrl','sheetSecret'];
-  (async () => {
-    const d = await window.fs.sheetDefaults();          // from sheet-config.json
-    if (d.url) $('sheetUrl').value = d.url;
-    if (d.secret) $('sheetSecret').value = d.secret;
-    if (d.autoPush) $('autoPush').checked = true;
-    // Anything the user saved wins over the shipped default.
-    SHEET_KEYS.forEach(k => { const v = localStorage.getItem('fs.'+k); if (v) $(k).value = v; });
-    const saved = localStorage.getItem('fs.autoPush');
-    if (saved !== null) $('autoPush').checked = saved === '1';
-    pushConfig();
-    const box = $('sheetStatus');
-    if ($('sheetUrl').value && $('sheetSecret').value) {
-      box.textContent = 'Pre-filled — click Test connection to verify.';
-    } else if ($('sheetSecret').value) {
-      box.textContent = 'Secret pre-filled. Paste the Apps Script /exec URL above (⚡ Flip Scout → Connection info in the sheet).';
-      box.className = 'status warn';
-    }
-  })();
-  function saveSheetCfg(){
-    SHEET_KEYS.forEach(k => localStorage.setItem('fs.'+k, $(k).value));
-    localStorage.setItem('fs.autoPush', $('autoPush').checked ? '1' : '0');
-    pushConfig();
-  }
-  $('sheetUrl').oninput = saveSheetCfg; $('sheetSecret').oninput = saveSheetCfg; $('autoPush').onchange = saveSheetCfg;
 
   // --- direct Google Sheets connection ---
   // Everything here lives in the main process (google-account.json), not
@@ -405,37 +359,20 @@
     if (s.sheetId) $('gSheetUrl').value = 'https://docs.google.com/spreadsheets/d/' + s.sheetId + '/edit';
   })();
 
-  // --- Drive hand-off (fallback) ---
-  async function refreshDrive(){
-    const s = await window.fs.driveStatus();
-    const box = $('driveStatus');
-    if (!s.dir) {
-      box.className='status warn';
-      box.textContent = 'No Google Drive folder found. Install Google Drive for Desktop, or click "Choose Drive folder".';
-      return;
-    }
-    box.className='status good';
-    box.innerHTML = `Writing to <b>${s.path}</b>${s.autoDetected?' <span class="pill">auto-detected</span>':''}`
-      + (s.exists ? `<br>${s.count} lead(s) waiting${s.updated?' · updated '+new Date(s.updated).toLocaleString():''} — refresh the sheet to pull them in.`
-                  : '<br>No file yet — it appears after your first scan.');
+  // --- local backup ---
+  async function refreshBackup(){
+    const s = await window.fs.backupStatus();
+    const box = $('backupStatus');
+    box.className = 'status' + (s.exists ? ' good' : '');
+    box.innerHTML = s.exists
+      ? `${s.count} lead(s) saved locally${s.updated ? ' · ' + new Date(s.updated).toLocaleString() : ''}`
+      : 'No backup yet — it appears after your first scan.';
   }
-  $('pickDrive').onclick = async () => { const r = await window.fs.pickDriveFolder(); if(r.ok){ log('Drive folder: '+r.dir,'good'); refreshDrive(); } };
-  $('openDrop').onclick = async () => { const s = await window.fs.driveStatus(); if(s.path) window.fs.showFile(s.path); };
-  refreshDrive();
+  $('openBackup').onclick = async () => { const s = await window.fs.backupStatus(); if(s.path) window.fs.showFile(s.path); };
+  refreshBackup();
 
-  $('testSheet').onclick = async () => {
-    const box = $('sheetStatus'); box.textContent = 'Testing…'; box.className = 'status';
-    const r = await window.fs.testSheet();
-    box.textContent = r.ok ? `Connected ✓ — tab "${r.sheet}", ${r.columns} columns, ${r.rows} lead row(s).`
-                           : `Not connected: ${r.error}`;
-    box.className = 'status ' + (r.ok ? 'good' : 'warn');
-  };
-  $('push').onclick = async () => {
-    const r = await window.fs.pushSheet(lastLeads, true);
-    const box = $('sheetStatus');
-    box.textContent = r.ok ? `Sent ✓ — ${r.added} added, ${r.skipped} already there.` : `Send failed: ${r.error}`;
-    box.className = 'status ' + (r.ok ? 'good' : 'warn');
-  };
+  // The report's own send button and section 7's are the same action.
+  $('push').onclick = () => $('gSend').click();
 
   function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
   function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
@@ -521,7 +458,7 @@
   $('kpiExport').onclick = async () => { const r = await window.fs.kpiExport(90); if(r.ok) log('KPI exported → '+r.filePath,'good'); };
   $('kpiPush').onclick = async () => {
     const r = await window.fs.kpiPush();
-    if (!r.ok && r.unconfigured) { $('sheetStatus').textContent = r.error; $('sheetStatus').className='status warn'; }
+    if (!r.ok) { $('gStatus').textContent = r.error; $('gStatus').className='status warn'; }
   };
   window.fs.on('kpi', p => renderKpi({ ...(p.history||{}), today: p.today }));
   refreshKpi();

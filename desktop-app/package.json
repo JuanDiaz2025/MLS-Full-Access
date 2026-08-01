@@ -1,6 +1,6 @@
 {
   "name": "flipscout-desktop",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "FlipScout — MLS fixer-flip scanner (desktop). Log in, scan the buy box, photo-verify, and generate a deal report.",
   "main": "main.js",
   "author": "Twin Home Buyer",
@@ -14,7 +14,7 @@
   "build": {
     "appId": "com.twinhomebuyer.flipscout",
     "productName": "FlipScout",
-    "files": ["main.js", "preload.js", "scan-core.js", "google-sheets.js", "sheet-config.json", "renderer/**/*"],
+    "files": ["main.js", "preload.js", "scan-core.js", "google-sheets.js", "renderer/**/*"],
     "win": {
       "target": ["nsis", "portable"]
     },

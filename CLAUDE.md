@@ -218,11 +218,15 @@ headless-scrape workflow):
   **tenant-occupied**, multi-unit, vacant lot, **fire-damaged** (any listing noting a
   past fire / fire damage / fire-gutted interior — drop even if it reads as a genuine
   as-is fixer).
-- **Days on market: no limit (removed, temporary).** The old 45-day cap — both the
-  hard DOM drop and the List Date scan window — is lifted for now, so stale listings
-  are eligible again. A long DOM / repeated price cuts still get *flagged* on the lead
-  (they hint at a soft submarket or an overpriced property), never dropped. Restore
-  the cap on Bryan's instruction.
+- **Days on market: 45 days or less. BACK ON** (Bryan, 1 Aug — the removal was
+  temporary). Anything with DOM > 45 is dropped, with the reason logged. Applied
+  to the MLS's own DOM field rather than a List Date search window, so a relisted
+  property is judged on the DOM the sheet will actually show. A **blank** DOM is
+  not grounds to drop — missing is not stale.
+
+  After the first pass, each run is **incremental**: the seen-ledger means only
+  MLS #s never checked before cost any time, so day two surfaces the newest
+  listings and nothing else.
 - **ARV = size-matched sold comps:** median $/sqft of comps within **±20%** of
   subject sqft (widen to ±40%, then ±60% only if <3 comps), × subject sqft. Never a
   flat zip-wide median. Watch large-home / location-pocket / wrong-zip traps.
@@ -252,14 +256,24 @@ Header order + value vocabulary for both sheets: `docs/lead-format.md`.
 Recommendation vocab: `Strong Deal` / `Marginal`. Flip Quality: `Good Flip` /
 `Thin Flip` / `Flip W/ Caution` / `Negative`.
 
-**Primary — "Flip Scout Agent"** (`1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4`,
-tab `Leads`). This is what the desktop app writes to; new leads go here.
-Endpoint `apps-script/flip-scout-agent-sheet.gs`, POST `{secret, leads:[…]}`.
-Carries **`DOM`** and **`Estimated ARV (After Repair)`** on top of the old
-layout, plus `MLS #`, `Max Offer`, and `ARV Basis`. De-dupes on `MLS #`,
-auto-computes Total Cost / Gross Profit / Max Offer, stamps `First Added`.
-The sheet has an `⚡ Flip Scout` menu (setup, test lead, sort by profit, dedupe,
-purge unprofitable, lead count, connection info, clear all).
+**Primary — "Flip Scout Agent"** (`1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4`).
+The desktop app writes here **directly over the Sheets API** (§7) — there is no
+web app, no deployment and no shared secret any more. Three tabs:
+
+- **`Leads`** — `Status · MLS # · Address · City · Zip · Beds · Baths · SqFt ·
+  Lot SqFt · Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link ·
+  First Added`. Keyed on `MLS #`; rows are append-or-backfill.
+- **`Rejected`** — `Rejected On · MLS # · Address · City · Zip · Price · $/SqFt ·
+  SqFt · DOM · Reason · Stage · By · MLS Link`. Everything dropped lands here
+  with the reason and the stage it fell out at.
+- **`KPI`** — one upserted row per day.
+
+The only Apps Script left is **`apps-script/flip-scout-reject.gs`**, and it does
+one job: when a reviewer takes a QUALIFIED lead off `Leads`, record the date and
+the reason. `⚡ Flip Scout → 🚫 Reject selected lead(s)` prompts for the reason
+and moves the row; an installable `onChange` trigger ("Turn on delete tracking")
+catches rows deleted by hand and logs them as *removed with no reason given*, so
+nothing vanishes silently. Paste-and-save only — nothing to deploy.
 
 **Legacy — "Property Review"** (`10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA`,
 gid `1510205894`) via `apps-script/append-lead.gs`, POST `{secret, lead}`.
@@ -285,10 +299,16 @@ Google Cloud project — that cannot be shipped in the app or created for them;
 the five console steps are in the app UI and `desktop-app/README.md`.
 Credentials persist in `google-account.json` under userData.
 
-Fallback (still written every run as a backup): the Drive drop file
-`flipscout-leads.json` + `apps-script/flip-scout-agent-sheet.gs`, which pulls it
-in on 🔄 Refresh now / ⏱ Enable auto update. Contract tests for the writer:
-`node desktop-app/test-google-sheets.js`.
+**A rejected lead never comes back.** Two guards, because the ledger alone is
+not enough: every scan starts by pulling the `Rejected` tab into the seen-ledger,
+and the writer re-checks that tab before appending. The second guard is the one
+that matters — a lead reviewed *before* it was rejected is still in the batch,
+and once the reviewer deletes the `Leads` row there is no duplicate left for the
+`MLS #` key to catch, so it would append clean.
+
+Local backup (written every run, before anything can fail):
+`flipscout-leads.json` under userData — the app's own safety net, not a
+hand-off. Contract tests for the writer: `node desktop-app/test-google-sheets.js`.
 
 ## Notes
 

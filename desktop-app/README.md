@@ -36,7 +36,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
    **Check session** (it confirms you reached the dashboard).
 2. **Start scan** — scans the full buy box (SF · whole Peninsula @ $2M · Sunnyvale
    · San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond; Active ·
-   Single-Family · any days on market), then filters to below-market fixers.
+   Single-Family · **45 days on market or less** · 25+ years old). After the first
+   pass each run is incremental — listings already checked are skipped outright,
+   so day two only costs you the new ones.
 3. **Photo review** — for each candidate the MLS window shows the full photo
    gallery. Two ways to judge:
    - **Manual (default):** click **Keep** (genuine dated fixer) or **Drop**
@@ -84,11 +86,31 @@ the refresh token live in `%APPDATA%/FlipScout/google-account.json`.
 If the check says the account "cannot edit that spreadsheet", either share the
 sheet with the address you signed in as, or sign in as the owner.
 
-### Fallback: the Apps Script path
-Still there if you'd rather not set up a Cloud project. Every finished city is
-also written to `flipscout-leads.json` in your Google Drive folder, and
-`apps-script/flip-scout-agent-sheet.gs` pulls it in on **⚡ Flip Scout → 🔄
-Refresh now** (or every 5 minutes with **⏱ Enable auto update**).
+## Rejecting a lead (the reviewer's side)
+
+`apps-script/flip-scout-reject.gs` is the only script left, and it does one job:
+when someone takes a **qualified** lead off the Leads tab, record the **date** and
+the **reason**.
+
+Paste it into the sheet (Extensions → Apps Script → Save → reload the sheet).
+Nothing to deploy. Then:
+
+- **⚡ Flip Scout → 🚫 Reject selected lead(s)** — select the row(s), it asks why,
+  and moves them to **Rejected** stamped with the date, the reason and who did it.
+- **⚡ Flip Scout → ▶ Turn on delete tracking** (once) — if a row is deleted by
+  hand instead, it still gets logged, as *removed with no reason given*. Nothing
+  disappears from the list without a trace.
+- **⚡ Flip Scout → 📋 Rejections today** — the day's count and the reasons given.
+
+A rejected MLS # never comes back: every scan pulls the Rejected tab into the
+app's ledger first, and the writer re-checks that tab before it appends anything.
+
+## Local backup
+
+Every reviewed city is saved to `flipscout-leads.json` under the app's data
+folder before anything else can fail, so a dropped connection never loses work
+you have already paid for. If the sheet was offline during a scan, reconnect and
+hit **Send this run's leads**.
 
 ## The deal model (matches flip-scout-SOP.md)
 - Rehab: Light $70/sf, Heavy $145/sf. Holding (3mo) = 10%/yr financing prorated +

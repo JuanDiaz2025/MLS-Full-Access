@@ -1,6 +1,0 @@
-{
-  "_comment": "Defaults the app pre-fills into section 7 on first run. The secret must match CONFIG.SHARED_SECRET in apps-script/flip-scout-agent-sheet.gs. The URL is the canonical public form of the deployment (script.google.com/macros/s/<id>/exec) - the /a/macros/<domain>/ variant only works for signed-in Workspace users and will hit a Google login wall.",
-  "url": "https://script.google.com/macros/s/AKfycbxWj0L3M42iDPIRdazOjgfJNGfPws1sFrP3kGKasdU7d3Zz_LC_mEtpNx8U-7QWXkI0eg/exec",
-  "secret": "ZM85Wtbzf3lx7_412HVvII5_ifAVCzIA",
-  "autoPush": true
-}

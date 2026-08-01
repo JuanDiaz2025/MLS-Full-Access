@@ -26,44 +26,9 @@ const cfg = {
   // anything wrong — with that rejection feeding straight back into the ledger.
   whenUnsure: 'keep',
   runComps: false,     // OFF for now — qualify on CONDITION first, comp later
-  sheetUrl: '', sheetSecret: '', autoPush: false,                      // Flip Scout Agent sheet
 };
-/** Apps Script hands out two URL shapes for the same deployment. The
- *  /a/macros/<domain>/ one only works for signed-in Workspace users, so rewrite
- *  it to the public form rather than letting it fail confusingly. */
-function normalizeExecUrl(u) {
-  const s = String(u || '').trim();
-  const m = s.match(/^https:\/\/script\.google\.com\/a\/macros\/[^/]+\/s\/([^/]+)\/exec/i);
-  return m ? `https://script.google.com/macros/s/${m[1]}/exec` : s;
-}
 
-ipcMain.on('set-config', (_e, c) => {
-  const next = Object.assign({}, c || {});
-  if (next.sheetUrl) next.sheetUrl = normalizeExecUrl(next.sheetUrl);
-  Object.assign(cfg, next);
-});
-
-// Shipped defaults for the sheet connection, so section 6 arrives pre-filled
-// instead of blank. Bundled next to main.js; missing/!valid JSON just means
-// "no defaults", never a crash on startup.
-function sheetDefaults() {
-  try {
-    const p = path.join(__dirname, 'sheet-config.json');
-    if (!fs.existsSync(p)) return {};
-    const j = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return { url: normalizeExecUrl(j.url || ''), secret: j.secret || '', autoPush: !!j.autoPush };
-  } catch (_) { return {}; }
-}
-ipcMain.handle('sheet-defaults', () => sheetDefaults());
-
-// Seed the live config at startup so an auto-push works even if the renderer
-// never touches section 6.
-(() => {
-  const d = sheetDefaults();
-  if (d.url) cfg.sheetUrl = d.url;
-  if (d.secret) cfg.sheetSecret = d.secret;
-  if (d.autoPush) cfg.autoPush = true;
-})();
+ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
 
 // ---------- daily KPIs ----------
 // Every scan folds its funnel counts into a per-day record kept on disk, so the
@@ -531,7 +496,9 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         // Still record why the buy-box filter rejected things here, otherwise a
         // city with no new candidates explains nothing.
         if (filterRejects.length) {
-          writeDropFile([], filterRejects.map(r => ({ ...r, stage: 'Buy-box filter' })));
+          const rej = filterRejects.map(r => ({ ...r, stage: 'Buy-box filter' }));
+          writeBackup([], rej);
+          if (googleReady() && googleCfg().autoSync) await googleSync([], rej);
         }
         log(`${label}: nothing new — moving on.`);
         continue;
@@ -674,26 +641,16 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
             log(`[${label}] sheet updated: ${s.leads.added} new lead(s), ${s.leads.updated} refreshed, `
               + `${s.rejects.added} rejection(s) logged`, 'good');
           } else {
-            log(`[${label}] sheet write failed: ${s.error} — falling back to the Drive file`, 'warn');
+            log(`[${label}] sheet write failed: ${s.error} — kept in the local backup`, 'warn');
           }
+        } else {
+          log(`[${label}] Google Sheet not connected — ${cityWinners.length} lead(s) held in the `
+            + 'local backup. Connect it in section 7 and hit "Send this run\'s leads".', 'warn');
         }
-        // Fallback: the Drive drop file, which the Apps Script pulls on refresh.
-        // Written either way, so a failed API call never loses a finished city.
-        const d = writeDropFile(rows, cityRejects);
-        if (d.ok) {
-          if (!googleReady()) runKpi.pushed += cityWinners.length;
-          log(`[${label}] wrote ${cityWinners.length} lead(s) + ${cityRejects.length} rejection(s) `
-            + `to Drive (${d.total} waiting)`
-            + (googleReady() ? ' as a backup copy' : ' — the sheet picks these up within ~5 min, or hit Refresh now'),
-            'good');
-        } else if (!googleReady()) {
-          log(`[${label}] could not write the Drive file: ${d.error}`, 'warn');
-        }
-        // Optional legacy path, only if a web app was configured.
-        if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) {
-          const r = await pushLeads(cityWinners);
-          if (r.ok) log(`[${label}] web app: ${r.added} added, ${r.skipped} already there`, 'good');
-        }
+        // Written either way: a failed API call, or a disconnected sheet, must
+        // never lose a city that has already been reviewed.
+        const d = writeBackup(rows, cityRejects);
+        if (!d.ok) log(`[${label}] could not write the local backup: ${d.error}`, 'warn');
       }
       log(`━━━ ${label} done: ${kept.length} kept, ${cityWinners.length} clear the gate ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'done',
@@ -705,9 +662,9 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       send('report', { leads: [], generatedAt: new Date().toString(), noNew: true });
       return { ok: true, leads: [] };
     }
-    // Leads were already pushed city by city above — don't re-send them here.
+    // Leads were already written city by city above — don't re-send them here.
     log(`Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate`
-      + (cfg.autoPush ? `; ${runKpi.pushed} sent to the sheet.` : '.'), 'good');
+      + (googleReady() ? `; ${runKpi.pushed} written to the sheet.` : '.'), 'good');
     return { ok: true, leads };
   } catch (e) {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
@@ -721,7 +678,6 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
     // Only attempt the KPI push when a sheet is actually connected — an
     // unconfigured app must not log a failure after every single run.
     if (googleReady() && googleCfg().autoSync) googleSyncKpi(day).catch(() => {});
-    else if (cfg.autoPush && cfg.sheetUrl && cfg.sheetSecret) pushKpi(day).catch(() => {});
   }
 });
 
@@ -730,92 +686,18 @@ ipcMain.on('resume', () => { control.paused = false; log('Resumed.', 'good'); })
 ipcMain.on('stop', () => { control.stopped = true; control.paused = false; Object.values(pendingDecision).forEach(r => r('drop')); });
 ipcMain.on('decide', (_e, { mls, decision }) => { if (pendingDecision[mls]) pendingDecision[mls](decision); });
 
-// ---------- Flip Scout Agent sheet ----------
-// Posts to the Apps Script web app in apps-script/flip-scout-agent-sheet.gs.
-// The script owns de-duping (by MLS #) and the derived money columns, so the
-// app sends raw values and lets the sheet be the single source of truth.
-/**
- * The endpoint answered with HTML instead of JSON. By far the most common
- * cause is a deployment whose access is set to the Workspace domain rather
- * than "Anyone" — Google then serves a sign-in page, which the app cannot get
- * past because it posts without a Google login. Name that specifically.
- */
-function describeHtmlReply(text) {
-  const t = String(text || '');
-  // Check sign-in FIRST and match it broadly: Google's login page is huge and
-  // contains plenty of incidental words. (An earlier version tested a bare
-  // /not found/ here, which matched inside that login page and reported a
-  // deployed-version problem when the real issue was access.)
-  if (/accounts\.google\.(com|[a-z.]+)|AccountChooser|signin|Sign in|ServiceLogin/i.test(t)) {
-    return 'Google returned a SIGN-IN PAGE, so the deployment is still not public. '
-      + 'Apps Script editor → Deploy → Manage deployments → pencil/edit → '
-      + '"Who has access" = Anyone (NOT "Anyone within <your domain>") → Deploy. '
-      + 'Domain-restricted deployments can never work here: the app has no Google '
-      + 'login to offer.';
-  }
-  if (/Script function not found/i.test(t)) {
-    return 'The deployed version predates doGet/doPost — Deploy → Manage '
-      + 'deployments → pencil/edit → Version: New version → Deploy.';
-  }
-  if (/authoriz|permission|consent/i.test(t)) {
-    return 'The script needs authorising — open the Apps Script editor, Run any '
-      + 'function once, accept the permission prompt, then redeploy.';
-  }
-  if (/unable to open|does not exist|no longer exists|moved or deleted/i.test(t)) {
-    return 'Google says the script file cannot be opened — the deployment URL '
-      + 'points at a script that was deleted or is not shared with you.';
-  }
-  // Unknown page: quote it rather than shrugging, so the real cause is visible
-  // instead of guessed at.
-  return 'Expected JSON, got an HTML page. It says: "' + visibleText(t, 240) + '"';
-}
+// ---------- local backup ----------
+// A copy of every reviewed city, written before anything else can fail. It is
+// the app's own safety net, not a hand-off: when the sheet is connected the
+// rows are already there, and when it is not this is what holds the work until
+// it is. Kept in userData so it survives restarts and upgrades.
 
-/** Strip tags/scripts/styles and return the first meaningful text on a page. */
-function visibleText(html, max) {
-  const s = String(html || '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return s.slice(0, max || 240) || '(the page had no readable text)';
-}
+const BACKUP_FILE = () => path.join(app.getPath('userData'), 'flipscout-leads.json');
 
-// ---------- Drive drop file ----------
-// The sheet reads this file out of Google Drive on refresh, which is why no
-// published web app is needed. We just write it into the synced Drive folder
-// and Drive for Desktop uploads it.
-
-/** Best guess at the local Google Drive folder, so this needs no setup. */
-function findDriveFolder() {
-  const home = app.getPath('home');
-  const guesses = [
-    path.join(home, 'My Drive'),
-    path.join(home, 'Google Drive', 'My Drive'),
-    path.join(home, 'Google Drive'),
-    'G:\\My Drive', 'H:\\My Drive',
-  ];
-  for (const g of guesses) {
-    try { if (fs.existsSync(g) && fs.statSync(g).isDirectory()) return g; } catch (_) {}
-  }
-  return '';
-}
-
-const DROP_NAME = 'flipscout-leads.json';
-function dropPath() {
-  const dir = cfg.driveFolder || findDriveFolder();
-  return dir ? path.join(dir, DROP_NAME) : '';
-}
-
-/**
- * Merge this run's leads into the drop file. Merging (not overwriting) matters:
- * the sheet may not have picked up the previous batch yet, and a scan that
- * replaced the file would silently destroy leads that were never read.
- */
-function writeDropFile(leads, rejects) {
-  const p = dropPath();
-  if (!p) return { ok: false, error: 'no Google Drive folder found — pick one in section 7' };
+/** Merge into the backup rather than replacing it — a later city must not wipe
+ *  an earlier one, and a re-run must not erase what it did not re-review. */
+function writeBackup(leads, rejects) {
+  const p = BACKUP_FILE();
   try {
     let prevLeads = [], prevRejects = [];
     if (fs.existsSync(p)) {
@@ -823,7 +705,7 @@ function writeDropFile(leads, rejects) {
         const prev = JSON.parse(fs.readFileSync(p, 'utf8'));
         prevLeads = Array.isArray(prev) ? prev : (prev.leads || []);
         prevRejects = Array.isArray(prev) ? [] : (prev.rejects || []);
-      } catch (_) { /* unreadable → rebuild rather than fail the scan */ }
+      } catch (_) { /* unreadable -> rebuild rather than fail the scan */ }
     }
     const dedupe = arr => {
       const by = {};
@@ -846,18 +728,17 @@ function writeDropFile(leads, rejects) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
-ipcMain.handle('drive-status', () => {
-  const dir = cfg.driveFolder || findDriveFolder();
-  const p = dir ? path.join(dir, DROP_NAME) : '';
+ipcMain.handle('backup-status', () => {
+  const p = BACKUP_FILE();
   let count = 0, updated = '';
-  if (p && fs.existsSync(p)) {
+  if (fs.existsSync(p)) {
     try {
       const j = JSON.parse(fs.readFileSync(p, 'utf8'));
-      count = (Array.isArray(j) ? j : (j.leads || [])).length;
+      count = (j.leads || []).length;
       updated = j.updated || '';
     } catch (_) {}
   }
-  return { dir, path: p, exists: !!p && fs.existsSync(p), count, updated, autoDetected: !cfg.driveFolder };
+  return { path: p, exists: fs.existsSync(p), count, updated };
 });
 
 ipcMain.on('show-file', (_e, p) => { try { shell.showItemInFolder(p); } catch (_) {} });
@@ -950,6 +831,18 @@ const rejectRecord = r => ({
   'By': 'FlipScout', 'MLS Link': r.link || mlsLink(r.mls),
 });
 
+/** Every MLS # already on the Rejected tab. */
+async function rejectedOnSheet(token) {
+  const g = googleCfg();
+  const info = await gsheets.listTabs(token, g.sheetId);
+  if (info.tabs.indexOf(g.rejectTab) < 0) return {};
+  const col = gsheets.colName(REJECT_HEADERS.indexOf('MLS #'));
+  const out = {};
+  (await gsheets.readCol(token, g.sheetId, g.rejectTab, `${col}2:${col}`))
+    .forEach(m => { const k = String(m || '').trim().toUpperCase(); if (k) out[k] = true; });
+  return out;
+}
+
 /** Push a batch straight into the spreadsheet. Leads and rejections go to their
  *  own tabs; both are append-or-backfill, so nothing on the sheet is destroyed. */
 async function googleSync(leads, rejects) {
@@ -959,6 +852,17 @@ async function googleSync(leads, rejects) {
   try {
     const token = await googleToken();
     const blank = { added: 0, updated: 0, filled: 0 };
+    // A rejected lead must never come back. The ledger already stops it being
+    // re-reviewed, but a lead reviewed BEFORE it was rejected is still in this
+    // batch — and once the reviewer deletes the Leads row there is no duplicate
+    // left for the MLS # key to catch, so it would append clean. Check the
+    // Rejected tab itself, which is the record that survives the deletion.
+    const dead = await rejectedOnSheet(token);
+    const fresh = (leads || []).filter(l => !dead[String(l.mls || '').trim().toUpperCase()]);
+    const blocked = (leads || []).length - fresh.length;
+    if (blocked) log(`${blocked} lead(s) skipped — already on the Rejected tab.`);
+    leads = fresh;
+
     const L = (leads && leads.length)
       ? await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', leads.map(leadRecord))
       : blank;
@@ -968,7 +872,7 @@ async function googleSync(leads, rejects) {
       ? await gsheets.syncRows(token, g.sheetId, g.rejectTab, REJECT_HEADERS, 'MLS #',
           rejects.filter(r => r && r.mls).map(rejectRecord))
       : blank;
-    return { ok: true, leads: L, rejects: R };
+    return { ok: true, leads: L, rejects: R, blocked };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
@@ -1087,29 +991,8 @@ ipcMain.handle('google-sync', async (_e, { leads, rejects }) => {
   return r;
 });
 
-ipcMain.handle('pick-drive-folder', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(controlWin, {
-    title: 'Pick your Google Drive folder', properties: ['openDirectory'],
-    defaultPath: findDriveFolder() || undefined,
-  });
-  if (canceled || !filePaths.length) return { ok: false };
-  cfg.driveFolder = filePaths[0];
-  return { ok: true, dir: cfg.driveFolder };
-});
-
-/** Say which half is missing — "not configured" tells you nothing. */
-function notConfiguredMsg() {
-  if (!cfg.sheetUrl && !cfg.sheetSecret) return 'no web app URL or secret — see section 7';
-  if (!cfg.sheetUrl) {
-    return 'no web app URL yet. In the sheet: ⚡ Flip Scout → Connect the app '
-      + '(deploy the script first: Deploy → New deployment → Web app, Execute as Me, '
-      + 'Anyone with the link), then paste the /exec URL into section 7.';
-  }
-  return 'no shared secret — paste it into section 7 (⚡ Flip Scout → Connect the app shows it).';
-}
-
-/** One lead in the shape the sheet expects. Shared by the Drive file and the
- *  legacy web-app push so the two can never drift apart. */
+/** One lead in the shape the sheet expects. Shared by the sheet writer and the
+ *  local backup so the two can never drift apart. */
 function toSheetRow(l) {
   return {
     status: l.recommendation || (l.needsComps ? 'Needs Comps' : ''),
@@ -1124,68 +1007,10 @@ function toSheetRow(l) {
   };
 }
 
-async function pushLeads(leads) {
-  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: notConfiguredMsg(), unconfigured: true };
-  if (!leads || !leads.length) return { ok: true, added: 0, skipped: 0 };
-  try {
-    const r = await fetch(cfg.sheetUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // Apps Script /exec answers with a 302 to googleusercontent; follow it.
-      redirect: 'follow',
-      body: JSON.stringify({
-        secret: cfg.sheetSecret,
-        leads: leads.map(l => ({
-          score: l.score, recommendation: l.recommendation, flipQuality: l.flipQuality,
-          mls: l.mls, address: l.address, city: l.city, zip: l.zip,
-          beds: l.beds, baths: l.baths || '', sqft: l.sqft, lotSqft: l.lotSqft || '',
-          yearBuilt: l.yearBuilt, dom: l.dom,
-          price: l.price, ppsf: l.ppsf || '', arv: l.arv,
-          rehabLight: l.rehabLight, rehabHeavy: l.rehabHeavy, holding: l.holding,
-          maxOffer: l.recommendedMaxOffer, arvBasis: l.arvBasis || '',
-          risks: l.risks || 'None', link: l.link || '',
-        })),
-      }),
-    });
-    const text = await r.text();
-    let j = {};
-    try { j = JSON.parse(text); } catch (_) { return { ok: false, error: describeHtmlReply(text) }; }
-    if (!j.ok) return { ok: false, error: j.error || 'unknown error' };
-    return { ok: true, added: j.added || 0, skipped: j.skipped || 0 };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
-
-ipcMain.handle('push-sheet', async (_e, { leads, onlySurfacing }) => {
-  const set = onlySurfacing === false ? (leads || []) : (leads || []).filter(l => l.surface);
-  log(`Pushing ${set.length} lead(s) to the sheet…`);
-  const r = await pushLeads(set);
-  log(r.ok ? `Sheet updated: ${r.added} added, ${r.skipped} already there.`
-           : `Sheet push failed: ${r.error}`, r.ok ? 'good' : 'error');
-  return r;
-});
-
-ipcMain.handle('test-sheet', async () => {
-  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: 'enter the web app URL and secret first' };
-  try {
-    const u = cfg.sheetUrl + (cfg.sheetUrl.indexOf('?') >= 0 ? '&' : '?') + 'secret=' + encodeURIComponent(cfg.sheetSecret);
-    const r = await fetch(u, { redirect: 'follow' });
-    const text = await r.text();
-    let j = {};
-    try { j = JSON.parse(text); } catch (_) { return { ok: false, error: describeHtmlReply(text) }; }
-    if (!j.ok) return { ok: false, error: j.error || 'rejected' };
-    if ((j.missingColumns || []).length) {
-      return { ok: false, error: 'sheet is missing columns: ' + j.missingColumns.join(', ') + ' — run setupSheet()' };
-    }
-    return { ok: true, sheet: j.sheet, columns: (j.columns || []).length, rows: j.rows || 0 };
-  } catch (e) { return { ok: false, error: e.message }; }
-});
-
 // ---------- reviewer rejections ----------
-// The human reviewer works in the sheet and deletes leads she does not want.
-// Those MLS #s come back here and go into the ledger, so a deleted lead is
-// never scanned, reviewed, or re-pushed again.
+// The reviewer works in the sheet and rejects leads she does not want, giving a
+// reason. Those MLS #s come back here and go into the ledger, so a rejected
+// lead is never scanned, reviewed, or re-added again.
 async function syncRejectedIntoLedger() {
   // Direct read of the Rejected tab when Google is connected — that tab is where
   // the reviewer's "Reject selected lead(s)" rows land, so it is the authoritative
@@ -1207,22 +1032,9 @@ async function syncRejectedIntoLedger() {
       return { ok: true, total: ids.length, added: fresh.length };
     } catch (e) { return { ok: false, error: e.message }; }
   }
-  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: notConfiguredMsg(), unconfigured: true };
-  try {
-    const u = cfg.sheetUrl + (cfg.sheetUrl.indexOf('?') >= 0 ? '&' : '?')
-      + 'secret=' + encodeURIComponent(cfg.sheetSecret) + '&rejected=1';
-    const r = await fetch(u, { redirect: 'follow' });
-    const j = JSON.parse(await r.text());
-    if (!j.ok || !Array.isArray(j.rejected)) return { ok: false, error: j.error || 'no list returned' };
-    const seen = loadLedger();
-    const fresh = j.rejected.filter(m => m && !seen[String(m).trim().toUpperCase()]);
-    if (fresh.length) {
-      ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: 'reviewer-rejected' })));
-      log(`Reviewer rejections synced: ${fresh.length} new (won't be checked again).`);
-    }
-    return { ok: true, total: j.rejected.length, added: fresh.length };
-  } catch (e) { return { ok: false, error: e.message }; }
+  return { ok: false, unconfigured: true, error: 'connect your Google Sheet in section 7 first' };
 }
+
 ipcMain.handle('sync-rejected', () => syncRejectedIntoLedger());
 
 ipcMain.handle('ledger-stats', () => {
@@ -1271,23 +1083,9 @@ ipcMain.handle('kpi-export', async (_e, { days }) => {
   return { ok: true, filePath };
 });
 
-/** Mirror the day's numbers onto the sheet's KPI tab (upserted by date). */
-async function pushKpi(day) {
-  if (!cfg.sheetUrl || !cfg.sheetSecret) return { ok: false, error: notConfiguredMsg(), unconfigured: true };
-  try {
-    const r = await fetch(cfg.sheetUrl, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, redirect: 'follow',
-      body: JSON.stringify({ secret: cfg.sheetSecret, kpi: day }),
-    });
-    const j = JSON.parse(await r.text());
-    return j.ok ? { ok: true } : { ok: false, error: j.error };
-  } catch (e) { return { ok: false, error: e.message }; }
-}
-
 ipcMain.handle('kpi-push', async () => {
   const rep = kpiReport(1);
-  // Direct Sheets API when Google is connected; the web app only as a fallback.
-  const r = googleReady() ? await googleSyncKpi(rep.today) : await pushKpi(rep.today);
+  const r = await googleSyncKpi(rep.today);
   // An unconfigured sheet is a setup step, not a failure — say it once, plainly.
   log(r.ok ? 'KPI sent to the sheet.'
     : (r.unconfigured ? 'Sheet not connected yet: ' + r.error : 'KPI push failed: ' + r.error),
