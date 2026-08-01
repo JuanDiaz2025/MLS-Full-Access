@@ -1,41 +1,3 @@
-function applyConditionalFormatting_(sheet, idx, maxRows) {
-  const rules = [];
-  const at = c => (idx[c] == null ? null : sheet.getRange(2, idx[c] + 1, maxRows, 1));
-  const tint = (rng, text, bg, fg) => {
-    if (!rng) return;
-    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text)
-      .setBackground(bg).setFontColor(fg).setRanges([rng]).build());
-  };
-
-  // Status is the at-a-glance column now that the deal-math block is off sheet.
-  const st = at('Status');
-  tint(st, 'Needs Comps', '#e8eaf6', '#1a237e');
-  tint(st, 'Strong Deal', '#d9ead3', '#274e13');
-  tint(st, 'Marginal', '#fff2cc', '#7f6000');
-
-  // These only exist when comps are switched back on; guarded so their absence
-  // is a no-op rather than a crash.
-  const rec = at('Recommendation');
-  tint(rec, 'Strong Deal', '#d9ead3', '#274e13');
-  tint(rec, 'Marginal', '#fff2cc', '#7f6000');
-  const q = at('Flip Quality');
-  tint(q, 'Good Flip', '#d9ead3', '#274e13');
-  tint(q, 'Flip W/ Caution', '#fce5cd', '#783f04');
-  tint(q, 'Negative', '#f4cccc', '#990000');
-  ['Gross Profit (Light)', 'Gross Profit (Heavy)'].forEach(c => {
-    const r = at(c);
-    if (r) rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0)
-      .setFontColor('#990000').setRanges([r]).build());
-  });
-
-  // A long DOM is a flag, never a drop (the 45-day cap was removed).
-  const dom = at('DOM');
-  if (dom) rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(90)
-    .setBackground('#fce5cd').setRanges([dom]).build());
-
-  sheet.setConditionalFormatRules(rules);
-}
-
 /**
  * Twin Home Buyer — "Flip Scout Agent" sheet endpoint.
  *
@@ -105,14 +67,6 @@ const COMP_ONLY_HEADERS = [
   'Score', 'Recommendation', 'Flip Quality',
 ];
 
-/** Columns that only mean anything once comping is on. */
-const COMP_COLS = [
-  'Estimated ARV (After Repair)', 'ARV Basis',
-  'Rehab Cost (Light)', 'Rehab Cost (Heavy)', 'Holding Costs (3mo)',
-  'Total Cost (Light)', 'Total Cost (Heavy)',
-  'Gross Profit (Light)', 'Gross Profit (Heavy)', 'Max Offer',
-  'Score', 'Recommendation', 'Flip Quality',
-];
 
 const MONEY_COLS = [
   'Purchase Price', '$/SqFt', 'Estimated ARV (After Repair)',
@@ -181,17 +135,31 @@ function appendLeads(leads) {
   const sheet = h.sheet;
   const seen = existingKeys_(sheet, h);
 
+  // Row number of each existing key, so a re-send can BACKFILL rather than be
+  // thrown away. Skipping duplicates outright meant a corrected payload (zip,
+  // sqft, better notes) could never reach a row already on the sheet - the
+  // sheet just silently stayed wrong.
+  const rowOf = existingRows_(sheet, h);
+
   const rows = [], results = [];
+  let filled = 0;
   for (const raw of leads) {
     const lead = normalize_(raw);
     const key = keyOf_(lead);
-    if (key && seen[key]) { results.push({ skipped: true, reason: 'duplicate', key: key, address: lead['Address'] }); continue; }
+    if (key && seen[key]) {
+      const n = backfillRow_(sheet, h, rowOf[key], lead);
+      filled += n;
+      results.push({ skipped: true, reason: n ? 'existing row backfilled (' + n + ' cell(s))' : 'duplicate',
+        backfilled: n, key: key, address: lead['Address'] });
+      continue;
+    }
     if (key) seen[key] = true;           // also de-dupes within this same batch
     compute_(lead);
     if (!lead['First Added']) lead['First Added'] = new Date();
     rows.push(HEADERS.map(c => (h.idx[c] == null ? null : valueFor_(lead, c))));
     results.push({ skipped: false, address: lead['Address'] || '', mls: lead['MLS #'] || '' });
   }
+  if (filled) results.push({ note: 'backfilled ' + filled + ' blank cell(s) on existing rows' });
   if (!rows.length) return results;
 
   // Build a dense block in the sheet's own column order, then write in ONE call.
@@ -206,6 +174,40 @@ function appendLeads(leads) {
   sheet.getRange(start, 1, block.length, width).setValues(block);
   formatRange_(sheet, h, start, block.length);
   return results;
+}
+
+/** key -> sheet row number, for backfilling. */
+function existingRows_(sheet, h) {
+  const end = lastDataRow_(sheet, h);
+  const map = {};
+  if (end <= h.row) return map;
+  const n = end - h.row;
+  const col = c => (h.idx[c] == null ? null : sheet.getRange(h.row + 1, h.idx[c] + 1, n, 1).getValues());
+  const mls = col('MLS #'), addr = col('Address'), city = col('City');
+  for (let i = 0; i < n; i++) {
+    const m = mls && String(mls[i][0]).trim();
+    if (m) map['mls:' + m.toUpperCase()] = h.row + 1 + i;
+    const a = addr && String(addr[i][0]).trim();
+    if (a) map['addr:' + (a + '|' + (city ? String(city[i][0]).trim() : '')).toUpperCase()] = h.row + 1 + i;
+  }
+  return map;
+}
+
+/** Fill only the EMPTY cells of an existing row. Never overwrites a value that
+ *  is already there, so anything edited by hand on the sheet survives. */
+function backfillRow_(sheet, h, row, lead) {
+  if (!row) return 0;
+  compute_(lead);
+  let n = 0;
+  HEADERS.forEach(c => {
+    if (h.idx[c] == null || c === 'First Added') return;
+    const v = valueFor_(lead, c);
+    if (v === '' || v == null) return;
+    const cell = sheet.getRange(row, h.idx[c] + 1);
+    const cur = cell.getValue();
+    if (cur === '' || cur == null) { cell.setValue(v); n++; }
+  });
+  return n;
 }
 
 /** Accept both the app's camelCase lead objects and literal sheet-header keys. */
@@ -579,7 +581,7 @@ function bumpReviewerKpi_(column, n, who) {
 // this list before each scan so a rejected property is never surfaced again.
 
 const REJECTED_HEADERS = [
-  'Rejected On', 'MLS #', 'Address', 'City',
+  'Rejected On', 'MLS #', 'Address', 'City', 'Zip',
   'Price', '$/SqFt', 'SqFt', 'DOM',
   'Reason', 'Stage', 'By', 'MLS Link',
 ];
@@ -596,7 +598,7 @@ function rejectedSheet_() {
       .setFontWeight('bold').setBackground('#7f1d1d').setFontColor('#ffffff').setWrap(true);
     sh.setRowHeight(1, 36);
     sh.setFrozenRows(1);
-    const w = { 'Rejected On': 100, 'MLS #': 95, 'Address': 210, 'City': 115,
+    const w = { 'Rejected On': 100, 'MLS #': 95, 'Address': 210, 'City': 115, 'Zip': 65,
       'Price': 100, '$/SqFt': 75, 'SqFt': 70, 'DOM': 55,
       'Reason': 340, 'Stage': 110, 'By': 170, 'MLS Link': 190 };
     REJECTED_HEADERS.forEach((c, i) => sh.setColumnWidth(i + 1, w[c] || 110));
@@ -647,7 +649,8 @@ function addRejected_(items, who, stage) {
     put('Rejected On', date);
     put('MLS #', it.mls || '');
     put('Address', it.addr || it.address || '');
-    put('City', it.city || '');
+    put('City', it.city || 'San Francisco');
+    put('Zip', it.zip || '');
     put('Price', num_(it.price) || '');
     put('$/SqFt', num_(it.ppsf) || '');
     put('SqFt', num_(it.sqft) || '');
@@ -1013,3 +1016,42 @@ function testAppend() {
     link: 'https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=TEST0001',
   }]), null, 2));
 }
+
+function applyConditionalFormatting_(sheet, idx, maxRows) {
+  const rules = [];
+  const at = c => (idx[c] == null ? null : sheet.getRange(2, idx[c] + 1, maxRows, 1));
+  const tint = (rng, text, bg, fg) => {
+    if (!rng) return;
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text)
+      .setBackground(bg).setFontColor(fg).setRanges([rng]).build());
+  };
+
+  // Status is the at-a-glance column now that the deal-math block is off sheet.
+  const st = at('Status');
+  tint(st, 'Needs Comps', '#e8eaf6', '#1a237e');
+  tint(st, 'Strong Deal', '#d9ead3', '#274e13');
+  tint(st, 'Marginal', '#fff2cc', '#7f6000');
+
+  // These only exist when comps are switched back on; guarded so their absence
+  // is a no-op rather than a crash.
+  const rec = at('Recommendation');
+  tint(rec, 'Strong Deal', '#d9ead3', '#274e13');
+  tint(rec, 'Marginal', '#fff2cc', '#7f6000');
+  const q = at('Flip Quality');
+  tint(q, 'Good Flip', '#d9ead3', '#274e13');
+  tint(q, 'Flip W/ Caution', '#fce5cd', '#783f04');
+  tint(q, 'Negative', '#f4cccc', '#990000');
+  ['Gross Profit (Light)', 'Gross Profit (Heavy)'].forEach(c => {
+    const r = at(c);
+    if (r) rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0)
+      .setFontColor('#990000').setRanges([r]).build());
+  });
+
+  // A long DOM is a flag, never a drop (the 45-day cap was removed).
+  const dom = at('DOM');
+  if (dom) rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(90)
+    .setBackground('#fce5cd').setRanges([dom]).build());
+
+  sheet.setConditionalFormatRules(rules);
+}
+
