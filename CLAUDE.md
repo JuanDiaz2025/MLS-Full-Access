@@ -378,15 +378,26 @@ the above.
 Also: **"All San Francisco" is a log heading, never a city.** Data rows use the
 listing's own `Postal City` (the only right answer on a county-wide scan), with
 the `All ` prefix stripped as the fallback.
-- **`KPI`** — **numbers only**, five columns, one row per day, plus a bar chart:
-  `Date · Leads Added · Auto-Dropped · Manually Removed · On List`. The old
-  23-column version was unreadable — that was the complaint. Ownership splits by
-  column: the **app** writes `Leads Added` / `Auto-Dropped`, the **script**
-  counts `Manually Removed` (Rejected rows whose Stage is *Reviewer* or *Deleted
-  by hand* — scan drops are not manual) and `On List`, then redraws the chart.
-  Counting, not accumulating, so a corrected row is reflected at once and the
-  numbers cannot drift. Rebuilt automatically after every rejection, and on
-  `⚡ Flip Scout → 📊 Refresh KPI + chart`.
+- **`KPI`** — **four columns, numbers, no chart**:
+  `Date · Rejected · On List · Scan Rejected`.
+  - `Rejected` — taken off the list by a **person** that day (Rejected rows whose
+    Stage is *Reviewer* or *Deleted by hand*; scan drops are not manual)
+  - `On List` — qualified leads still on the `Leads` tab (a live count, so only
+    today's row carries it)
+  - `Scan Rejected` — thrown out by the scan itself that day
+
+  The **app** writes `Scan Rejected`; the **script** counts the other two from
+  the sheet, so they are right whether or not a scan has run. Counting, not
+  accumulating — a corrected row is reflected at once and nothing drifts.
+  Rebuilt after every rejection and on `⚡ Flip Scout → 📊 Refresh KPI`.
+
+  **Header rows are compared in FULL, never just cell A1.** A tab from an older
+  layout still began with "Date", so the old headings survived and values landed
+  under the wrong ones — the 23-column KPI tab kept its headers while the app
+  wrote into the first few columns, and a chart titled "Manually removed per
+  day" plotted *Runs* and *Candidates*. `ensureTab()` (app) and `kpiSheet_()`
+  (script) both rewrite a mismatched header row and blank the stale extras, so
+  an old tab heals itself instead of needing to be deleted by hand.
 
 The only Apps Script left is **`apps-script/flip-scout-reject.gs`**, and it does
 one job: when a reviewer takes a QUALIFIED lead off `Leads`, record the date and
