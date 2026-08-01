@@ -431,6 +431,12 @@ control window: 1 login · 2 how listings are judged · 3 scan · 4 now reviewin
 5 report · 6 daily KPI · 7 Google Sheet. Renovated properties never reach the
 sheet — they are dropped at photo review (Rule #0/#2).
 
+**You pick the areas.** Section 3 has a checkbox per buy-box area (plus All /
+None / San Francisco only), remembered between runs; only ticked areas are
+scanned. The renderer sends **indexes**, not area objects, so `DEFAULT_BUYBOX`
+stays the single definition of the buy box. San Francisco alone takes minutes;
+the whole box takes hours.
+
 **And it stops by itself.** When the last city is done the app closes the MLS
 window, clears "Now reviewing", resets the buttons and prints
 `Scan COMPLETE — N scanned · N skipped · N reviewed · N kept · N dropped · N

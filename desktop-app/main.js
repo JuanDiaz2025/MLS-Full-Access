@@ -451,10 +451,22 @@ async function autoDecide(c) {
 }
 
 // ---------- full run ----------
-ipcMain.handle('start-scan', async (_e, { buybox }) => {
+/** The buy box as pickable areas, for the checkboxes in section 3. */
+ipcMain.handle('buybox', () => core.DEFAULT_BUYBOX.map((a, i) => ({
+  i, maxk: a.maxk,
+  label: a.city && a.city !== '*' ? a.city : `All ${a.county}`,
+})));
+
+ipcMain.handle('start-scan', async (_e, opts) => {
   if (control.running) return { ok: false, error: 'already running' };
+  // Indexes, not objects: the renderer says WHICH areas, the buy box itself
+  // stays defined in one place.
+  const picked = opts && Array.isArray(opts.areaIndexes) ? opts.areaIndexes : null;
+  const areas = picked
+    ? picked.map(i => core.DEFAULT_BUYBOX[i]).filter(Boolean)
+    : core.DEFAULT_BUYBOX;
+  if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
   control.running = true; control.stopped = false; control.paused = false;
-  const areas = (buybox && buybox.length) ? buybox : core.DEFAULT_BUYBOX;
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
   // Only a run that actually started closes the browser window at the end.
   // Bailing out for "not signed in" and then shutting the window the user is
@@ -488,7 +500,7 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
       // and fall back to the area name with the "All " stripped off.
       const areaCity = label.replace(/^All\s+/i, '');
       const cityOf = r => String(r.city || '').trim() || areaCity;
-      log(`━━━ ${label}  (city ${ai + 1} of ${areas.length}) ━━━`, 'good');
+      log(`━━━ ${label}  (area ${ai + 1} of ${areas.length}) ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'scanning' });
 
       const scanned = await scanArea(area);

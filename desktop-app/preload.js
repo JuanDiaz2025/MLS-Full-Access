@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('fs', {
   login: (creds) => ipcRenderer.invoke('login', creds),
   checkSession: () => ipcRenderer.invoke('check-session'),
+  buybox: () => ipcRenderer.invoke('buybox'),
   startScan: (cfg) => ipcRenderer.invoke('start-scan', cfg),
   pause: () => ipcRenderer.send('pause'),
   resume: () => ipcRenderer.send('resume'),

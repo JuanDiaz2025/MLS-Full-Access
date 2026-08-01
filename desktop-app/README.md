@@ -34,7 +34,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
 1. **Sign in** — type your MLS username/password, click **Open MLS sign-in**. The
    MLS window opens; finish sign-in and any 2FA there yourself, then click
    **Check session** (it confirms you reached the dashboard).
-2. **Start scan** — scans the full buy box (SF · whole Peninsula @ $2M · Sunnyvale
+2. **Pick your areas, then Start scan** — tick only the areas you want in
+   section 3 (All / None / San Francisco only shortcuts are there, and the choice
+   is remembered). The full box is SF · whole Peninsula @ $2M · Sunnyvale
    · San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond; Active ·
    Single-Family · **45 days on market or less** · 25+ years old). After the first
    pass each run is incremental — listings already checked are skipped outright,
