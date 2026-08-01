@@ -133,6 +133,7 @@ function filterCandidates(rowsByArea) {
 
   const why = r => {
     const a = String(r.addr || '').trim();
+    if (isConfirmed(a)) return '';   // confirmed deal — no screen may drop it
     if (REJECTED_ADDR.some(re => re.test(a))) return 'previously rejected by Bryan — do not resurface';
     // A BLANK age field parses to 0, which used to read as "built this year" and
     // silently discarded the listing as too new. Missing is not new: let an
@@ -196,7 +197,6 @@ function arvFromComps(soldRows, subjectSqft) {
 // ---- built-in buy-box rules (no API): decide KEEP/DROP from remarks + photo count ----
 // Encodes CLAUDE.md / flip-scout-SOP: drop renovated/turnkey (Rule #0), multi-unit,
 // fire, and exterior-only/no-access; keep genuine as-is / estate / fixer language.
-const DROP_KW = /(remodel|renovat|updated throughout|fully updated|turnkey|turn[- ]key|move[- ]?in ready|quartz|stainless|luxury vinyl|designer|reimagined|refreshed|newly built|new construction|fully renovated|beautifully updated|tastefully updated|gut renovat)/i;
 const KEEP_KW = /(fixer|as[- ]?is|\btlc\b|handyman|contractor special|probate|estate sale|trust sale|needs work|needs updating|bring your|first time on market|deferred maintenance|original condition|diamond in the rough|great potential|sold as[- ]is|needs tlc)/i;
 const MULTI_KW = /(duplex|triplex|fourplex|two units|2 units|3 units|second unit|in[- ]?law|mother[- ]in[- ]law|\badu\b|multi[- ]?unit|separate unit|two homes|2 homes)/i;
 const FIRE_KW = /(fire damage|fire[- ]damaged|fire gutted|gutted by fire|burned|fire[- ]affected)/i;
@@ -228,9 +228,64 @@ const TENANT_KW = new RegExp([
   'do not disturb (?:the )?tenant', 'month[- ]to[- ]month tenan',
 ].join('|'), 'i');
 
+// Deals Bryan has looked at and confirmed he wants. Nothing may drop these —
+// not a keyword, not the vision model, not a DOM cap. The mirror of
+// REJECTED_ADDR: that list is what must never come back, this is what must
+// never be lost. 21 College Terrace went missing because /renovat/ matched
+// "Renovation Opportunity", and a rule that can silently swallow a live deal
+// needs a backstop that does not depend on the rule being right.
+const CONFIRMED_ADDR = [/^21\s+college\s+(?:ter|terrace)/i];
+const isConfirmed = addr => CONFIRMED_ADDR.some(re => re.test(String(addr || '').trim()));
+
+// "Renovation" cuts BOTH ways and that is the whole difficulty. "Beautifully
+// renovated" means the value is gone; "renovation opportunity" means the value
+// is still there. A bare /renovat/ dropped 21 College Terrace — "Exceptional
+// Renovation Opportunity ... to renovate this 1914 Edwardian ... significant
+// deferred maintenance ... bring your imagination" — which is exactly the deal
+// we want. So needs-work context is tested FIRST and wins.
+const NEEDS_WORK_KW = new RegExp([
+  '(?:renovation|remodel(?:ing)?|update|upgrade|rehab)s?\\s+(?:opportunity|potential|project|ideas?|needed|required)',
+  '(?:opportunity|potential|ready|waiting|awaits?|chance|room|prime|ripe)\\s+(?:for|to)\\s+(?:a |the |your |full |complete )*(?:renovat|remodel|updat|upgrad|rehab|restor|transform)',
+  '(?:to|and)\\s+(?:renovate|remodel|restore|transform|rehab|reimagine)\\s+this',
+  '(?:needs?|requires?|awaiting|awaits?|calls for)\\s+(?:a |some |significant |full |complete |total |extensive |major )*(?:renovation|remodel|updating|updates|rehab|work|tlc|love|repair)',
+  '(?:never|not|un)[- ]?(?:renovated|remodel(?:l?ed)|updated|touched)',
+  '(?:renovate|remodel|update|customize|finish)\\s+to your',
+  'deferred maintenance', 'bring your',
+].join('|'), 'i');
+
+// Completed work, stated unambiguously. These beat even needs-work language,
+// because "fully renovated" is not a thing anyone writes about a fixer.
+const DONE_STRONG_KW = new RegExp([
+  '(?:fully|completely|totally|entirely|just|newly|recently|beautifully|tastefully|extensively|meticulously|thoughtfully|stunningly|gut)[- ]?(?:renovated|remodel(?:l?ed)|rebuilt|updated|redone|refreshed|restored)',
+  '(?:renovated|remodel(?:l?ed)|updated|redone)\\s+(?:from )?top[- ]to[- ]bottom',
+  'turn[- ]?key', 'move[- ]?in[- ]?ready', 'nothing to do but move in',
+  'new construction', 'newly built', 'brand[- ]new home',
+].join('|'), 'i');
+
+// Weaker completed-work signals — including the finish brags an agent only
+// writes when there is something to brag about. Only trusted when the remarks
+// carry NO needs-work language, because "quartz" in a fixer listing is one
+// surface, not a flip (see the 844 Brunswick calibration in CLAUDE.md).
+const DONE_SOFT_KW = new RegExp([
+  'renovated', 'remodel(?:l?ed)', 'updated throughout', 'modernized', 'reimagined',
+  'quartz', 'stainless steel appliance', 'luxury vinyl', 'designer (?:kitchen|bath|finish)',
+  'new (?:kitchen|bathrooms?|appliances|cabinets|countertops?|flooring)',
+].join('|'), 'i');
+
+// A house being SOLD ON ITS CONDITION is not a fixer. One superlative is
+// marketing noise; two or more, with no needs-work language anywhere, is an
+// agent describing a home that is already finished.
+const NICE_KW = new RegExp([
+  'immaculate', 'pristine', 'shows? like (?:a )?new', 'pride of ownership',
+  'meticulously maintained', 'dream home', "entertainer's (?:dream|delight)",
+  'impeccable', 'move right in', 'lovingly maintained', 'turn[- ]?key',
+  'spa[- ]like', 'resort[- ]like', 'chef\'s kitchen', 'gourmet kitchen',
+].join('|'), 'gi');
+
 function rulesDecide(meta) {
   const t = ((meta.remarks || '') + ' ' + (meta.condition || '')).toLowerCase();
   const photos = meta.photos || 0;
+  if (isConfirmed(meta.addr)) return { decision: 'keep', reason: 'confirmed deal — Bryan wants this one' };
   if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
   if (MULTI_KW.test(t)) return { decision: 'drop', reason: 'remarks indicate multi-unit / second unit' };
   if (TENANT_KW.test(t)) return { decision: 'drop', reason: 'remarks say tenant-occupied (hard exclusion)' };
@@ -238,9 +293,24 @@ function rulesDecide(meta) {
     const hit = (t.match(SLOW_KW) || [''])[0];
     return { decision: 'drop', reason: `not a quick flip — remarks mention "${hit}" (structural/permit work, not cosmetic)` };
   }
-  if (DROP_KW.test(t)) return { decision: 'drop', reason: 'remarks describe renovated / updated / turnkey (Rule #0)' };
-  if (photos > 0 && photos <= 4 && !KEEP_KW.test(t)) return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access (tenant?)` };
-  if (KEEP_KW.test(t)) return { decision: 'keep', reason: 'as-is / estate / fixer language + below-market $/sf' };
+  // Completed work, stated outright — no amount of fixer language rescues this.
+  if (DONE_STRONG_KW.test(t)) {
+    return { decision: 'drop', reason: `remarks say the work is done — "${(t.match(DONE_STRONG_KW) || [''])[0]}" (Rule #0)` };
+  }
+  // Needs-work context beats every softer renovated-sounding word.
+  const needsWork = NEEDS_WORK_KW.test(t);
+  if (needsWork) {
+    return { decision: 'keep', reason: `remarks describe work still to do — "${(t.match(NEEDS_WORK_KW) || [''])[0]}"` };
+  }
+  if (KEEP_KW.test(t)) return { decision: 'keep', reason: 'as-is / estate / fixer language' };
+  if (DONE_SOFT_KW.test(t)) {
+    return { decision: 'drop', reason: `remarks describe finished work — "${(t.match(DONE_SOFT_KW) || [''])[0]}" and nothing left to do (Rule #0)` };
+  }
+  const nice = (t.match(NICE_KW) || []);
+  if (nice.length >= 2) {
+    return { decision: 'drop', reason: `sold on its condition — "${nice.slice(0, 3).join('", "')}" — not a fixer` };
+  }
+  if (photos > 0 && photos <= 4) return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access (tenant?)` };
   // Remarks say nothing either way. This engine reads TEXT only — it has not
   // looked at a single photo — so "no renovated keyword" is not evidence the
   // house is a fixer. Auto-keeping here is what let renovated listings through.
@@ -327,7 +397,7 @@ function parseDetail(text, wantMls) {
 }
 
 module.exports = {
-  fullAddress, parseDetail, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
+  fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,

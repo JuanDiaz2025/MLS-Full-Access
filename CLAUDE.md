@@ -53,6 +53,31 @@ So: judge the *finishes*, not the housekeeping or the staging. When photos are
 genuinely ambiguous between "clean but dated" and "lightly updated," keep it and
 note the uncertainty on the lead rather than dropping it.
 
+### ⚠️ "Renovation" cuts BOTH ways — the word alone means nothing
+
+**Never drop on `/renovat/`.** The same root describes the deal we want and the
+deal we don't:
+
+- **KEEP — work still to do:** "Renovation **Opportunity**", "a chance **to
+  renovate** this 1914 Edwardian", "**needs** a full renovation", "**never**
+  renovated", "requires updating", "bring your imagination", "deferred
+  maintenance", "ripe **for** renovation", "remodel **project**".
+- **DROP — work already done:** "**beautifully** renovated", "**fully**
+  remodeled", "renovated **top to bottom**", "turnkey", "move-in ready",
+  "nothing to do but move in", "new construction", "**tastefully** updated".
+
+**Real miss:** 21 College Terrace (SF426150277) — *"Exceptional Renovation
+Opportunity… to renovate this 1914 Edwardian… significant deferred maintenance…
+bring your imagination"* — was **dropped as renovated** by a bare `/renovat/`.
+It is a deal Bryan wants. Needs-work context is now tested **first** and wins;
+only unambiguous completed-work phrasing drops. Single finish brags (quartz,
+stainless) drop **only** when no needs-work language is present anywhere.
+
+A house **sold on its condition** — two or more of "immaculate", "pristine",
+"pride of ownership", "dream home", "shows like new", "impeccable" with no
+fixer language — is dropped as *not a fixer*. Two, not one: a genuine fixer can
+still have an immaculate garden.
+
 ### ⚠️ Calibration — ONE updated surface is not a flip (learned the hard way)
 
 The drop list above is a list of **cues, not triggers**. Spotting a single item
@@ -259,6 +284,13 @@ headless-scrape workflow):
   risk flags (all removed per standing instruction).
 - **User-rejected (do not resurface):** 183 Victoria St, 1430 Shafter Ave (SF);
   322 1st Ave (Redwood City) — plus the sheet's Rejected Redfin list.
+- **✅ CONFIRMED DEALS — never drop these, whatever a rule says:**
+  **21 College Terrace, San Francisco, CA 94112** (SF426150277 · 2,185 sqft ·
+  $455/sqft · built 1914). Bryan: *"THIS IS SOMETHING WE CAN DEAL."* Enforced by
+  `CONFIRMED_ADDR` / `core.isConfirmed()` in `scan-core.js`, which short-circuits
+  every screen *and* the vision model — the mirror of `REJECTED_ADDR`. Add to it
+  whenever Bryan names a property he wants; a rule that can silently swallow a
+  live deal needs a backstop that doesn't depend on the rule being right.
 
 ## 6. Lead output → Google Sheets
 

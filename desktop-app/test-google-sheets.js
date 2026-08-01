@@ -179,7 +179,35 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(rules('Beautifully updated with quartz counters and stainless appliances.'), 'drop', 'renovated dropped');
   eq(rules('Lovely garden, three bedrooms, close to transit.'), 'manual', 'silent remarks go to the fallback');
 
-  // 10. The composed sheet value, end to end.
+  // 10. "Renovation" cuts both ways, and getting it backwards cost us a live
+  //     deal. 21 College Terrace reads "Exceptional Renovation Opportunity ...
+  //     to renovate this 1914 Edwardian ... significant deferred maintenance"
+  //     and a bare /renovat/ dropped it as already-renovated.
+  eq(rules(parseDetail(fixture('SF426150277'), 'SF426150277').remarks), 'keep',
+    '21 College Terrace is a KEEP (the miss that prompted this)');
+  eq(rules('Exceptional Renovation Opportunity for contractors and investors.'), 'keep', 'renovation OPPORTUNITY kept');
+  eq(rules('A rare chance to renovate this 1914 Edwardian to your taste.'), 'keep', 'chance TO renovate kept');
+  eq(rules('Never renovated — original 1940s kitchen and bath.'), 'keep', 'NEVER renovated kept');
+  eq(rules('Home requires extensive updating throughout.'), 'keep', 'requires updating kept');
+  eq(rules('Beautifully renovated top to bottom in 2024.'), 'drop', 'actually renovated dropped');
+  eq(rules('Turnkey home, nothing to do but move in.'), 'drop', 'turnkey dropped');
+  eq(rules('Tastefully updated throughout.'), 'drop', 'updated throughout dropped');
+  eq(rules('Recently updated with quartz counters and stainless steel appliances.'), 'drop', 'finish brags dropped');
+
+  //     "Nice house" needs two superlatives and no fixer language — one is
+  //     just marketing, and a fixer can still have a nice garden.
+  eq(rules('Immaculate home showing pride of ownership throughout.'), 'drop', 'two superlatives = not a fixer');
+  eq(rules('Immaculate garden, but the house needs work throughout.'), 'keep', 'one superlative + needs work = keep');
+
+  //     A confirmed deal outranks every screen, including its own remarks.
+  const { rulesDecide, isConfirmed } = require('./scan-core');
+  eq(isConfirmed('21 College Terrace'), true, 'confirmed list matches');
+  eq(rulesDecide({ addr: '21 College Ter', remarks: 'Beautifully renovated turnkey dream home.', photos: 20 }).decision,
+    'keep', 'a confirmed deal cannot be dropped by any keyword');
+  eq(filterCandidates({ SF: { rows: [{ mls: 'X', addr: '21 College Terrace', price: '995000', sqft: '2185', age: '112', dom: '400' }] } })
+    .candidates.length, 1, 'a confirmed deal survives even the DOM cap');
+
+  // 11. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
 

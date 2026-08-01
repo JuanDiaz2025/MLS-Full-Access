@@ -554,13 +554,19 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         // (they read remarks, they never see a photo) the fallback in
         // section 2 settles it. There is no approval step to click through.
         let decision, dropReason = '';
-        if (cfg.useAI && cfg.apiKey) {
+        if (core.isConfirmed(c.addr)) {
+          // A deal Bryan has already confirmed. No screen, and no model, gets
+          // to overrule that.
+          decision = 'keep'; dropReason = '';
+          send('review', { ...base, verdict: 'keep', why: 'Confirmed deal — kept regardless of the rules' });
+          log(`  KEEP ${c.addr} — confirmed deal`, 'good');
+        } else if (cfg.useAI && cfg.apiKey) {
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
           decision = v.decision; dropReason = v.reason;
           send('review', { ...base, verdict: v.decision, why: 'AI (vision): ' + v.reason });
           log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
         } else {
-          const v = core.rulesDecide({ photos: n, remarks: gal.remarks, condition: gal.condition });
+          const v = core.rulesDecide({ addr: c.addr, photos: n, remarks: gal.remarks, condition: gal.condition });
           const settled = v.decision === 'manual' ? (cfg.whenUnsure === 'drop' ? 'drop' : 'keep') : v.decision;
           decision = settled;
           dropReason = v.decision === 'manual' ? v.reason + ' (auto-' + settled + ')' : v.reason;
