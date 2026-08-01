@@ -161,9 +161,13 @@ function dayKey_(v) {
 function rebuildKpi_() {
   const sh = kpiSheet_();
 
-  // Both rejection counts come off the Rejected tab, split by who did it.
-  // Stage says: 'Reviewer' / 'Deleted by hand' = a person; anything else
-  // ('Photo review', 'Buy-box filter') = the scan.
+  // Both rejection counts come off the Rejected tab, split by WHO did it.
+  //
+  // The 'By' column is the honest signal: a person leaves an email address
+  // (bryan@twinhomebuyer.com), the scan writes 'FlipScout'. Stage is checked
+  // too, because a row deleted by hand has a stage but no email — but an email
+  // in 'By' is on its own enough to call it a manual rejection, whatever the
+  // stage says.
   const rej = rejectedSheet_();
   const ridx = headerIdx_(rej, REJECTED_HEADERS);
   const rn = Math.max(0, rej.getLastRow() - 1);
@@ -174,7 +178,9 @@ function rebuildKpi_() {
       const d = dayKey_(r[ridx['Rejected On']]);
       if (!d) return;
       const stage = String(r[ridx['Stage']] || '');
-      const bucket = /reviewer|deleted by hand/i.test(stage) ? removed : byScan;
+      const by = String(r[ridx['By']] || '');
+      const byAPerson = /@/.test(by) || /reviewer|deleted by hand/i.test(stage);
+      const bucket = byAPerson ? removed : byScan;
       bucket[d] = (bucket[d] || 0) + 1;
     });
   }

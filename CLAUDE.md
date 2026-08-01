@@ -388,8 +388,10 @@ the `All ` prefix stripped as the fallback.
 
   **The Apps Script builds the whole tab** from the `Rejected` and `Leads` tabs —
   the app writes none of it. Both rejection figures come off `Rejected`, split by
-  `Stage`: *Reviewer* / *Deleted by hand* is a person, anything else
-  (*Photo review*, *Buy-box filter*) is the scan. One source, so the two numbers
+  **who did it**: an **email address in `By`** (`bryan@twinhomebuyer.com`) means a
+  person, `FlipScout` means the scan. `Stage` is checked too — a row deleted by
+  hand has a stage but no email — but an email is enough on its own, whatever
+  the stage says. One source, so the two numbers
   cannot disagree, and nothing accumulates — a corrected row shows up at once.
 
   Splitting ownership (app writes some columns, script others) was tried and
