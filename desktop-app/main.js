@@ -274,7 +274,7 @@ async function showGallery(mls) {
     await sleep(900);
   }
   // Capture agent remarks + condition (for the no-API rules engine) via the Client Full report.
-  let meta = { remarks: '', condition: '', zip: '', address: '', yearBuilt: '', mismatch: false };
+  let meta = { remarks: '', condition: '', zip: '', address: '', yearBuilt: '', propClass: '', mismatch: false };
   try {
     await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); })()`);
     await sleep(400);
@@ -309,6 +309,7 @@ async function showGallery(mls) {
   return { count: urls.length, urls: urls,
     remarks: meta.remarks || '', condition: meta.condition || '',
     zip: meta.zip || '', address: meta.address || '', yearBuilt: meta.yearBuilt || '',
+    propClass: meta.propClass || '',
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
 }
 
@@ -566,7 +567,8 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
           send('review', { ...base, verdict: v.decision, why: 'AI (vision): ' + v.reason });
           log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
         } else {
-          const v = core.rulesDecide({ addr: c.addr, photos: n, remarks: gal.remarks, condition: gal.condition });
+          const v = core.rulesDecide({ addr: c.addr, photos: n, remarks: gal.remarks,
+            condition: gal.condition, propClass: gal.propClass });
           const settled = v.decision === 'manual' ? (cfg.whenUnsure === 'drop' ? 'drop' : 'keep') : v.decision;
           decision = settled;
           dropReason = v.decision === 'manual' ? v.reason + ' (auto-' + settled + ')' : v.reason;

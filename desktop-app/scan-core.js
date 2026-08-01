@@ -197,8 +197,28 @@ function arvFromComps(soldRows, subjectSqft) {
 // ---- built-in buy-box rules (no API): decide KEEP/DROP from remarks + photo count ----
 // Encodes CLAUDE.md / flip-scout-SOP: drop renovated/turnkey (Rule #0), multi-unit,
 // fire, and exterior-only/no-access; keep genuine as-is / estate / fixer language.
-const KEEP_KW = /(fixer|as[- ]?is|\btlc\b|handyman|contractor special|probate|estate sale|trust sale|needs work|needs updating|bring your|first time on market|deferred maintenance|original condition|diamond in the rough|great potential|sold as[- ]is|needs tlc)/i;
-const MULTI_KW = /(duplex|triplex|fourplex|two units|2 units|3 units|second unit|in[- ]?law|mother[- ]in[- ]law|\badu\b|multi[- ]?unit|separate unit|two homes|2 homes)/i;
+const KEEP_KW = /(fixer|as[- ]?is|\btlc\b|handyman|contractor special|probate|estate sale|trust sale|needs work|needs updating|bring your|(?:first|1st) time on (?:the )?market|deferred maintenance|original condition|diamond in the rough|great potential|sold as[- ]is|needs tlc)/i;
+// Multi-unit, and ONLY where a second dwelling actually exists. This list used
+// to include "in-law", "ADU", "second unit" and "separate unit", which dropped
+// 347 Faxon Avenue — a 1924 single-family the MLS classes
+// "Res. Single Family / Attached, Single Family", whose remarks merely say a
+// bonus room "could serve as ... an in-law setup" and that the yard has room to
+// "add an ADU". Neither exists. Those words describe POTENTIAL, and potential
+// in a single-family house is a bonus, not a disqualification.
+const MULTI_KW = new RegExp([
+  '\\bduplex\\b', '\\btriplex\\b', '\\bfourplex\\b', '\\bmulti[- ]?unit\\b',
+  '(?:two|three|four|2|3|4) (?:separate )?(?:units|homes|houses|dwellings)',
+  '(?:two|2) (?:full|separate|complete) kitchens',
+  'legal (?:second|2nd) unit', 'separate legal unit',
+].join('|'), 'i');
+
+// The same words, framed as something a buyer COULD do. Never a drop.
+const POTENTIAL_RE = new RegExp([
+  '(?:could|can|may|might|would)\\s+(?:be\\s+)?(?:serve|used?|convert|make|become|add)',
+  '(?:add|adding|build|create|convert(?:ing)? to)\\s+(?:a |an )?(?:adu|in[- ]?law|unit|second unit)',
+  '(?:adu|in[- ]?law|unit)\\s+potential', 'potential (?:for|to)',
+  'room (?:for|to)\\b', 'possible\\b', 'opportunity to',
+].join('|'), 'i');
 const FIRE_KW = /(fire damage|fire[- ]damaged|fire gutted|gutted by fire|burned|fire[- ]affected)/i;
 
 // QUICK FLIP ONLY. A quick flip is a COSMETIC job — paint, floors, kitchen,
@@ -287,7 +307,13 @@ function rulesDecide(meta) {
   const photos = meta.photos || 0;
   if (isConfirmed(meta.addr)) return { decision: 'keep', reason: 'confirmed deal — Bryan wants this one' };
   if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
-  if (MULTI_KW.test(t)) return { decision: 'drop', reason: 'remarks indicate multi-unit / second unit' };
+  // The MLS's own classification beats a word in the remarks. The search asks
+  // for Single Family Home and the report says so again on every listing, so a
+  // keyword is not grounds to overrule it.
+  const saysSingle = /single family/i.test(String(meta.propClass || ''));
+  if (!saysSingle && MULTI_KW.test(t) && !POTENTIAL_RE.test(t)) {
+    return { decision: 'drop', reason: `remarks indicate an existing second dwelling — "${(t.match(MULTI_KW) || [''])[0]}"` };
+  }
   if (TENANT_KW.test(t)) return { decision: 'drop', reason: 'remarks say tenant-occupied (hard exclusion)' };
   if (SLOW_KW.test(t)) {
     const hit = (t.match(SLOW_KW) || [''])[0];
@@ -393,6 +419,9 @@ function parseDetail(text, wantMls) {
     // description — which is what the rules engine was judging condition on.
     remarks: grab(/(?:^|\n)\s*(?:Public|Public Remarks?|Marketing Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i),
     condition: grab(/Prop(?:erty)? Condition:?\s*([^\n]{0,60})/i),
+    // The MLS's own classification — "Res. Single Family / Attached, Single
+    // Family". It outranks any keyword in the remarks about second units.
+    propClass: grab(/Class:?\s*([^\n\t]{0,80})/i),
   };
 }
 

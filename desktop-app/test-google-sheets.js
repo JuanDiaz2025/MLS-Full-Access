@@ -207,7 +207,24 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(filterCandidates({ SF: { rows: [{ mls: 'X', addr: '21 College Terrace', price: '995000', sqft: '2185', age: '112', dom: '400' }] } })
     .candidates.length, 1, 'a confirmed deal survives even the DOM cap');
 
-  // 11. The composed sheet value, end to end.
+  // 11. Multi-unit vs multi-unit POTENTIAL. 347 Faxon Avenue is classed by the
+  //     MLS as "Res. Single Family / Attached, Single Family"; its remarks only
+  //     say a bonus room "could serve as ... an in-law setup" and the yard has
+  //     room to "add an ADU". Neither exists, and the old rule dropped it.
+  const faxon = parseDetail(fixture('SF426134156'), 'SF426134156');
+  eq(/single family/i.test(faxon.propClass), true, 'the MLS class is read off the report');
+  eq(rulesDecide({ addr: '347 Faxon Avenue', photos: 17, remarks: faxon.remarks,
+    propClass: faxon.propClass }).decision, 'keep', '347 Faxon is a KEEP, not multi-unit');
+  eq(rules('Bonus room down could serve as an in-law setup.'), 'manual', 'in-law POTENTIAL is not a drop');
+  eq(rules('Large yard with room to add an ADU.'), 'manual', 'ADU potential is not a drop');
+  eq(rulesDecide({ remarks: 'Rare duplex, two separate units, each with a full kitchen.', photos: 20 }).decision,
+    'drop', 'an actual duplex still drops');
+  eq(rulesDecide({ remarks: 'Rare duplex with two units.', photos: 20, propClass: 'Res. Single Family' }).decision,
+    'manual', 'but the MLS class outranks the remarks');
+  eq(rules('1st time on the market in 50 years, sold in present "as is" condition.'),
+    'keep', '"1st time on the market" reads the same as "first time"');
+
+  // 12. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
 

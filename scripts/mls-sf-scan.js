@@ -132,7 +132,7 @@ function recordLedger(items) {
       continue;
     }
     const v = core.rulesDecide({ addr: c.addr, photos: detail.photos,
-      remarks: detail.remarks, condition: detail.condition });
+      remarks: detail.remarks, condition: detail.condition, propClass: detail.propClass });
     const rec = {
       mls: c.mls,
       address: core.fullAddress(detail.address || c.addr, c.city, detail.zip),

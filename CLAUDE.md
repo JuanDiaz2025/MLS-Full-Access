@@ -78,6 +78,28 @@ A house **sold on its condition** — two or more of "immaculate", "pristine",
 fixer language — is dropped as *not a fixer*. Two, not one: a genuine fixer can
 still have an immaculate garden.
 
+### ⚠️ "in-law" / "ADU" is POTENTIAL, not a second unit
+
+**The MLS's own `Class:` outranks any word in the remarks.** Every search asks
+for Property Type = Single Family Home and the Client Full report repeats it
+(`Class: Res. Single Family / Attached, Single Family`). Dropping such a listing
+as multi-unit because the remarks contain "in-law" or "ADU" is overruling the
+MLS with a keyword — and SF remarks mention those constantly, as *potential*.
+
+**Real miss:** 347 Faxon Avenue (SF426134156), a 1924 single-family — *"bonus
+room and bath down… could serve as a 3rd bedroom, home office, family room,
+studio and/or **in-law setup**"* and *"room to make a nice garden or **add an
+ADU**"* — dropped as multi-unit. Neither unit exists. It is a genuine fixer:
+*"1st time on the market in 50 years… sold in its present 'as is' condition."*
+Bryan: *"there's a lot of leads you mentioned it as multi family this is
+wrong."*
+
+`MULTI_KW` now matches only an **existing** second dwelling (duplex / triplex /
+fourplex / "two separate units" / "two full kitchens" / "legal second unit"),
+never fires when `Class` says Single Family, and is suppressed by
+`POTENTIAL_RE` ("could serve as", "room to add", "potential for", "possible").
+Same lesson as `/renovat/`: **the word alone means nothing — the framing does.**
+
 ### ⚠️ Calibration — ONE updated surface is not a flip (learned the hard way)
 
 The drop list above is a list of **cues, not triggers**. Spotting a single item
