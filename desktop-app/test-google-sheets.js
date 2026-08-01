@@ -164,7 +164,22 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(parseDetail(fixture('SF426146279'), 'CRPW26161101').address,
     '220 Saddlehorn Loop, Lincoln 95648', 'the same page parses fine for its own MLS #');
 
-  // 9. The composed sheet value, end to end.
+  // 9. Quick flips only: cosmetic work in, engineer-and-permit work out. These
+  //    are the calls the run makes unattended, so they get pinned down here.
+  const rules = r => require('./scan-core').rulesDecide({ remarks: r, photos: 20 }).decision;
+  eq(rules('Charming 1920s home, needs work throughout, sold as-is.'), 'keep', 'cosmetic fixer kept');
+  eq(rules('Estate sale, original condition, first time on market in 60 years.'), 'keep', 'estate original kept');
+  eq(rules('Beautiful crown moldings and original hardwood, needs updating.'), 'keep', '"moldings" is not mould');
+  eq(rules('Contractor special. Foundation repair needed per inspection.'), 'drop', 'foundation work dropped');
+  eq(rules('Great potential! Structural damage in the rear addition.'), 'drop', 'structural damage dropped');
+  eq(rules('Tear-down opportunity, value is in the land.'), 'drop', 'tear-down dropped');
+  eq(rules('Probate sale. Property is red-tagged and uninhabitable.'), 'drop', 'red-tagged dropped');
+  eq(rules('Bring your contractor \u2014 needs a full gut.'), 'drop', 'full gut dropped');
+  eq(rules('Fixer upper. This level is currently tenant-occupied.'), 'drop', 'tenant-occupied dropped');
+  eq(rules('Beautifully updated with quartz counters and stainless appliances.'), 'drop', 'renovated dropped');
+  eq(rules('Lovely garden, three bedrooms, close to transit.'), 'manual', 'silent remarks go to the fallback');
+
+  // 10. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
 

@@ -15,9 +15,8 @@ const gsheets = require('./google-sheets');
 
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
-const pendingDecision = {}; // mls -> resolve fn
 const cfg = {
-  apiKey: '', model: 'claude-opus-5', autoVerify: false, useAI: false, // auto-verify config
+  apiKey: '', model: 'claude-opus-5', useAI: false,   // AI vision (optional)
   readSeconds: 6,                                                      // dwell per listing
   // What to do when the text rules can't tell renovated from dated: ask | keep | drop.
   // Defaults to 'keep' so a run never stalls waiting for a click. It is a safe
@@ -224,15 +223,19 @@ async function scanArea(area) {
     await js(setInput(core.FIELDS.cityBox, area.city)); await sleep(700);
     await js(selectByLabel(core.FIELDS.cityList, area.city)); await sleep(900);
   }
-  // No List Date filter — the 45-day window is lifted for now. Set DAYS to a
-  // positive number to restore a rolling window.
-  const days = parseInt(process.env.DAYS || '0', 10);
-  const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   await js(setInput(core.FIELDS.price, `0-${area.maxk}`)); await sleep(500);
-  if (days > 0) {
-    const to = new Date(); const from = new Date(Date.now() - days * 86400000);
-    await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`));
-  }
+  // Cut the 45-day rule in at the SEARCH, not just after — otherwise the scan
+  // drags a whole county's back catalogue through the grid to throw most of it
+  // away. The search form has no days-on-market field (checked against the live
+  // form), so List Date is the lever.
+  //
+  // The window is deliberately WIDER than the rule: DOM can never exceed the
+  // days since the list date, so a 60-day list window is guaranteed to contain
+  // every listing with DOM <= 45, while still cutting the volume hard. DOM
+  // stays the authoritative test in filterCandidates.
+  const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+  const to = new Date(), from = new Date(Date.now() - core.LIST_WINDOW_DAYS * 86400000);
+  await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`));
   await sleep(1600);
   const count = await js(core.JS_MATCH_COUNT).catch(() => '?');
   log(`  ${label}: ${count} matches`);
@@ -356,6 +359,8 @@ DROP if ANY of:
 - Fire damage / charring.
 - Newer build that looks modern.
 - Exterior-only / too few interior photos to judge condition (then DROP, reason "insufficient photos").
+- NOT A QUICK FLIP. We want a COSMETIC job — paint, floors, kitchen, bath, done in one pass without drawings or engineers. DROP if the photos or remarks show work that is structural or permit-heavy: foundation cracks, visible settlement or a sloping/sagging floor, jacked-up posts or shoring, an open framed shell / stripped down to studs, a collapsed or missing roof, extensive water damage or mould, or a tear-down / land-value listing. A dated house needing everything cosmetically is EXACTLY what we want; a house needing an engineer is not.
+- Tenant-occupied: remarks say tenant/lease in place, or the photos show a lived-in unit the seller cannot deliver vacant.
 
 If you saw NO kitchen photo and NO bathroom photo, you cannot judge condition: DROP with
 reason "no kitchen/bath photos".
@@ -363,6 +368,7 @@ reason "no kitchen/bath photos".
 Respond with ONLY a JSON object, no other text:
 {"kitchen":"<what the kitchen photos show, or 'none seen'>",
  "bathroom":"<what the bathroom photos show, or 'none seen'>",
+ "quickFlip":"<cosmetic | structural — and why, in a few words>",
  "decision":"KEEP"|"DROP",
  "reason":"<8-15 words citing the specific finishes you saw>"}`;
 }
@@ -430,8 +436,8 @@ async function autoDecide(c) {
     const decision = /^keep$/i.test(String(o.decision || '').trim()) ? 'keep' : 'drop';
     // Surface what it actually saw, so a wrong call is diagnosable from the log
     // instead of being a bare verdict.
-    const seen = [o.kitchen && ('kitchen: ' + o.kitchen), o.bathroom && ('bath: ' + o.bathroom)]
-      .filter(Boolean).join(' | ');
+    const seen = [o.kitchen && ('kitchen: ' + o.kitchen), o.bathroom && ('bath: ' + o.bathroom),
+      o.quickFlip && ('rehab: ' + o.quickFlip)].filter(Boolean).join(' | ');
     const reason = [(o.reason || text || '').trim(), seen].filter(Boolean).join(' — ');
     return { decision, reason: reason.slice(0, 300), photos: photos.length };
   } catch (e) { return { decision: 'drop', reason: 'AI call failed: ' + e.message }; }
@@ -543,37 +549,24 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
         const base = { i: i + 1, total: fresh.length, city: cityOf(c), mls: c.mls, addr: c.addr,
           price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n,
           remarks: gal.remarks || '', details: gal.details || {} };
+        // The run NEVER stops to ask. AI vision when a key is configured,
+        // otherwise the text rules; when the rules genuinely cannot tell
+        // (they read remarks, they never see a photo) the fallback in
+        // section 2 settles it. There is no approval step to click through.
         let decision, dropReason = '';
-        if (cfg.autoVerify && cfg.useAI && cfg.apiKey) {
-          const v = await autoDecide({ ...c, _cityKey: label, _sqft: c._sqft, _price: c._price, _gal: gal });
+        if (cfg.useAI && cfg.apiKey) {
+          const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
           decision = v.decision; dropReason = v.reason;
-          send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'AI (vision): ' + v.reason });
+          send('review', { ...base, verdict: v.decision, why: 'AI (vision): ' + v.reason });
           log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
-        } else if (cfg.autoVerify) {
-          const v = core.rulesDecide({ photos: n, remarks: gal.remarks, condition: gal.condition });
-          if (v.decision === 'manual') {
-            // The text rules genuinely can't tell renovated from dated — they
-            // never see a photo. What happens next is your call (section 2):
-            //   ask  — stop and show it (accurate, but hands-on)
-            //   keep — let it through (fast, may surface renovated homes)
-            //   drop — skip it (fast, loses some real fixers)
-            // With an API key + AI vision this branch never runs, because
-            // vision actually looks at the pictures.
-            // Never stop the run to ask. Auto-verify means unattended.
-            const mode = cfg.whenUnsure === 'drop' ? 'drop' : 'keep';
-            decision = mode;
-            dropReason = v.reason + ' (auto-' + mode + ')';
-            send('review', { ...base, ai: true, aiDecision: mode, aiReason: 'Rules (unsure → ' + mode + '): ' + v.reason });
-            log(`  RULES unsure → ${mode.toUpperCase()}: ${v.reason}`);
-          } else {
-            decision = v.decision; dropReason = v.reason;
-            send('review', { ...base, ai: true, aiDecision: v.decision, aiReason: 'Rules: ' + v.reason });
-            log(`  RULES ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
-          }
         } else {
-          send('review', base);
-          decision = await new Promise(res => { pendingDecision[c.mls] = res; });
-          delete pendingDecision[c.mls];
+          const v = core.rulesDecide({ photos: n, remarks: gal.remarks, condition: gal.condition });
+          const settled = v.decision === 'manual' ? (cfg.whenUnsure === 'drop' ? 'drop' : 'keep') : v.decision;
+          decision = settled;
+          dropReason = v.decision === 'manual' ? v.reason + ' (auto-' + settled + ')' : v.reason;
+          const tag = v.decision === 'manual' ? `Rules unsure → ${settled.toUpperCase()}` : `Rules ${settled.toUpperCase()}`;
+          send('review', { ...base, verdict: settled, why: tag + ': ' + v.reason });
+          log(`  ${tag}: ${v.reason}`, settled === 'keep' ? 'good' : 'info');
         }
         if (control.stopped) break;
         runKpi.reviewed++;
@@ -709,8 +702,7 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
 
 ipcMain.on('pause', () => { control.paused = true; log('Paused.', 'warn'); });
 ipcMain.on('resume', () => { control.paused = false; log('Resumed.', 'good'); });
-ipcMain.on('stop', () => { control.stopped = true; control.paused = false; Object.values(pendingDecision).forEach(r => r('drop')); });
-ipcMain.on('decide', (_e, { mls, decision }) => { if (pendingDecision[mls]) pendingDecision[mls](decision); });
+ipcMain.on('stop', () => { control.stopped = true; control.paused = false; });
 
 // ---------- local backup ----------
 // A copy of every reviewed city, written before anything else can fail. It is

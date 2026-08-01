@@ -218,6 +218,16 @@ headless-scrape workflow):
   **tenant-occupied**, multi-unit, vacant lot, **fire-damaged** (any listing noting a
   past fire / fire damage / fire-gutted interior — drop even if it reads as a genuine
   as-is fixer).
+- **⚡ QUICK FLIPS ONLY** (Bryan, 1 Aug). A quick flip is a **cosmetic** job — paint,
+  floors, kitchen, bath, done in one pass without drawings or engineers. **Drop**
+  anything structural or permit-heavy even when it is a genuine fixer: foundation
+  issues, structural damage, visible settlement, red-tagged / uninhabitable,
+  unpermitted work, permits or plans pending, entitlement plays, tear-down /
+  land-value listings, stripped-to-the-studs shells, extensive water damage or mould.
+  A dated house needing everything *cosmetically* is exactly the target; a house
+  needing an engineer is not. Enforced in `SLOW_KW` (`scan-core.js`) and in the vision
+  prompt, which returns a `quickFlip: cosmetic | structural` field.
+  Note `tear-down` was previously in KEEP_KW — it is the opposite of a quick flip.
 - **Days on market: 45 days or less. BACK ON** (Bryan, 1 Aug — the removal was
   temporary). Anything with DOM > 45 is dropped, with the reason logged. Applied
   to the MLS's own DOM field rather than a List Date search window, so a relisted
@@ -319,9 +329,15 @@ De-dupes on Redfin Link. Kept for the existing headless pipeline.
 
 `desktop-app/` (Electron). Sign in → scan the buy box → photo-review with
 pause/resume → deal report → the leads land in the spreadsheet. Sections in the
-control window: 1 login · 2 auto-verify (rules or AI vision) · 3 scan ·
-4 photo review · 5 report · 6 daily KPI · 7 Google Sheet. Renovated properties
-never reach the sheet — they are dropped at photo review (Rule #0/#2).
+control window: 1 login · 2 how listings are judged · 3 scan · 4 now reviewing ·
+5 report · 6 daily KPI · 7 Google Sheet. Renovated properties never reach the
+sheet — they are dropped at photo review (Rule #0/#2).
+
+**The run never stops to ask.** There is no Keep/Drop approval step — it was
+removed per Bryan. AI vision decides when an API key is set, otherwise the text
+rules do, and `whenUnsure` (keep/drop) settles the cases the rules cannot read.
+Section 4 is a live read-out, not a prompt. The sheet reviewer is the backstop,
+and every rejection she makes flows back into the ledger.
 
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope

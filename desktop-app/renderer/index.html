@@ -65,28 +65,25 @@
   </div>
 
   <div class="card">
-    <h2>2 · Auto-verify (optional)</h2>
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink)">
-      <input id="autoVerify" type="checkbox" style="width:auto" checked> Decide Keep/Drop automatically using the built-in flip rules (no API key, no cost)
+    <h2>2 · How each listing is judged</h2>
+    <div class="hint">The run decides Keep/Drop on its own and <b>never stops to ask you</b>.
+      Built-in rules read the agent remarks: they drop renovated / turnkey wording,
+      multi-unit, tenant-occupied, fire damage, and anything that isn't a quick flip
+      (foundation, structural, permits, tear-down). Rules can't see photos, so add a key
+      below and AI vision judges the pictures instead.</div>
+    <label style="margin-top:10px">When the remarks don't say either way</label>
+    <select id="whenUnsure" style="width:100%;padding:6px">
+      <option value="keep">Keep it and carry on (default)</option>
+      <option value="drop">Drop it and carry on</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:12px">
+      <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — reads every photo (needs an Anthropic API key)
     </label>
-    <div id="autoFields" style="margin-top:10px">
-      <label>When the remarks don't say either way</label>
-      <select id="whenUnsure" style="width:100%;padding:6px">
-        <option value="keep">Keep it and carry on (default)</option>
-        <option value="drop">Drop it and carry on</option>
-      </select>
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:10px">
-        <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — reads the actual photos (needs an Anthropic API key)
-      </label>
-      <div id="aiFields" style="display:none;margin-top:10px">
-        <label>Anthropic API key</label>
-        <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
-        <label>Model</label>
-        <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
-      </div>
-      <div class="hint">Rules read the agent remarks only, so a renovated home with plain
-        remarks can slip through — AI vision looks at every photo instead. Either way the
-        run never stops to ask you anything.</div>
+    <div id="aiFields" style="display:none;margin-top:10px">
+      <label>Anthropic API key</label>
+      <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
+      <label>Model</label>
+      <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
     </div>
   </div>
 
@@ -105,32 +102,25 @@
         seconds
       </label>
     </div>
-    <div class="hint"><b>One city at a time, in order</b> — San Francisco is scanned, every
-      new listing reviewed one by one and written to the sheet, and only then does the next
-      city start. SF · Peninsula ($2M) · Sunnyvale · San Jose · Oakland · Berkeley ·
-      San Leandro · Hayward · Richmond.
-      <br>Active · single-family · <b>45 days on market or less</b> · 25+ years old.
-      Anything checked on an earlier run is skipped, so day two only costs you the new ones.</div>
+    <div class="hint"><b>What it looks for</b> — Active · single-family ·
+      <b>45 days on market or less</b> · 25+ years old · <b>quick flips only</b>
+      (cosmetic work; foundation / structural / permit jobs and tear-downs are dropped) ·
+      not renovated · not multi-unit · not tenant-occupied.
+      <br><b>Only new listings.</b> Every MLS # ever checked is remembered, so today's run
+      skips everything yesterday already looked at — day two costs you only the new ones.
+      <br><b>One city at a time, in order</b> — San Francisco is finished completely before
+      the next city starts. SF · Peninsula ($2M) · Sunnyvale · San Jose · Oakland ·
+      Berkeley · San Leandro · Hayward · Richmond.</div>
     <div id="funnel" class="status" style="margin-top:10px">Idle.</div>
   </div>
 
   <div class="card review" id="review">
-    <h2>4 · Photo review</h2>
+    <h2>4 · Now reviewing</h2>
     <div class="addr" id="rAddr">—</div>
     <div class="meta" id="rMeta">—</div>
-    <div id="manualControls">
-      <div class="row">
-        <button id="keep" class="keep">✓ Keep (genuine fixer)</button>
-        <button id="dropBtn" class="drop">✕ Drop (renovated / multi-unit)</button>
-        <button id="stopAsking">▶▶ Stop asking — keep going on its own</button>
-      </div>
-      <div class="hint">Look at the gallery in the MLS window — every photo. Drop anything
-        <b>renovated</b>, multi-unit, or exterior-only. <b>Clean but dated is a KEEP</b> —
-        judge the finishes, not the staging.<br>
-        <b>Stop asking</b> switches this run (and future ones) to deciding on its own; change
-        it back any time in section 2.</div>
-    </div>
     <div id="aiVerdict" class="status" style="display:none"></div>
+    <div class="hint">The gallery opens in the MLS window so you can watch, but nothing
+      waits on you — every listing is judged and the run carries on.</div>
   </div>
 
   <div class="card">
@@ -240,29 +230,15 @@
   $('pause').onclick = () => { window.fs.pause(); $('pause').disabled=true; $('resume').disabled=false; };
   $('resume').onclick = () => { window.fs.resume(); $('pause').disabled=false; $('resume').disabled=true; };
   $('stop').onclick = () => { window.fs.stop(); setScanButtons(false); };
-  $('keep').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'keep'); hideReview(); } };
-  $('dropBtn').onclick = () => { if(currentMls){ window.fs.decide(currentMls,'drop'); hideReview(); } };
-  // Flip to unattended mid-run without digging through settings.
-  $('stopAsking').onclick = () => {
-    // Manual mode is the only remaining way to get prompted, so switch that off
-    // too — otherwise the button would not actually stop the asking.
-    $('autoVerify').checked = true; $('autoFields').style.display = 'block';
-    $('whenUnsure').value = 'keep';
-    localStorage.setItem('fs.whenUnsure','keep');
-    pushConfig();
-    log('Won\'t ask again — the run decides on its own from here. Your sheet reviewer is the backstop.','warn');
-    if(currentMls){ window.fs.decide(currentMls,'keep'); hideReview(); }
-  };
   $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
 
   function pushConfig(){ window.fs.setConfig({
-    autoVerify: $('autoVerify').checked, useAI: $('useAI').checked,
+    useAI: $('useAI').checked,
     apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
     readSeconds: Number($('readSeconds').value||6),
     whenUnsure: $('whenUnsure').value,
     runComps: false,   // comping is off; see CLAUDE.md §5
   }); }
-  $('autoVerify').onchange = () => { $('autoFields').style.display = $('autoVerify').checked ? 'block' : 'none'; pushConfig(); };
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
   $('readSeconds').oninput = pushConfig;
@@ -363,21 +339,10 @@
     $('rAddr').textContent = `${p.addr} — ${p.city}`;
     $('rMeta').innerHTML = `<span class="pill">#${p.i} of ${p.total}</span> &nbsp; ${money(p.price)} · ${p.sqft} sqft · $${p.ppsf}/sf · ${p.photos} photos`;
     $('review').classList.add('on');
-    if (p.ai) {
-      $('manualControls').style.display = 'none';
-      const box = $('aiVerdict');
-      box.style.display = 'block';
-      box.className = 'status ' + (p.aiDecision === 'keep' ? 'good' : 'warn');
-      box.textContent = `AI verdict: ${p.aiDecision.toUpperCase()} — ${p.aiReason}`;
-    } else {
-      // needsEye = the text rules couldn't decide; a person must look.
-      $('manualControls').style.display = 'block';
-      const box = $('aiVerdict');
-      if (p.needsEye) {
-        box.style.display = 'block'; box.className = 'status warn';
-        box.textContent = '👀 ' + (p.aiReason || 'Judge this one from the photos.');
-      } else { box.style.display = 'none'; }
-    }
+    const box = $('aiVerdict');
+    box.style.display = 'block';
+    box.className = 'status ' + (p.verdict === 'keep' ? 'good' : 'warn');
+    box.textContent = `${p.verdict === 'keep' ? '✓ KEEP' : '✕ DROP'} — ${p.why || ''}`;
     if (p.remarks) {
       $('rMeta').innerHTML += `<div class="hint" style="margin-top:6px">${
         String(p.remarks).slice(0,400).replace(/[<>]/g,'')}</div>`;

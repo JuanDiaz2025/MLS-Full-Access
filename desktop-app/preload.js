@@ -7,7 +7,6 @@ contextBridge.exposeInMainWorld('fs', {
   pause: () => ipcRenderer.send('pause'),
   resume: () => ipcRenderer.send('resume'),
   stop: () => ipcRenderer.send('stop'),
-  decide: (mls, decision) => ipcRenderer.send('decide', { mls, decision }),
   setConfig: (c) => ipcRenderer.send('set-config', c),
   export: (leads) => ipcRenderer.invoke('export', { leads }),
   kpiReport: (days) => ipcRenderer.invoke('kpi-report', { days }),

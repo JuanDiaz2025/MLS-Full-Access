@@ -77,6 +77,13 @@ const JS_TITLE = `document.title`;
 const num = s => { const n = parseFloat(String(s||'').replace(/[^0-9.]/g,'')); return isFinite(n)?n:0; };
 const median = a => { const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length? (s.length%2? s[m] : Math.round((s[m-1]+s[m])/2)) : 0; };
 
+// Days on market: 45 or less, and the search itself only asks for listings from
+// the last LIST_WINDOW_DAYS. The window is wider on purpose - DOM can never be
+// larger than the days since the list date, so 60 cannot exclude anything the
+// 45-day rule would keep, and DOM below stays the real test.
+const MAX_DOM_DAYS = 45;
+const LIST_WINDOW_DAYS = 60;
+
 // Stage-3 filter: older SFR, on the market 45 days or less. The price screens
 // are gone; $/sqft is recorded and sorts the output but excludes nothing.
 function filterCandidates(rowsByArea) {
@@ -122,7 +129,7 @@ function filterCandidates(rowsByArea) {
   // has been on the market 45 days or less. Applied to the MLS's own DOM rather
   // than a List Date search window, so a relisted property is judged on the DOM
   // the sheet will actually show.
-  const MAX_DOM = 45;
+  const MAX_DOM = MAX_DOM_DAYS;
 
   const why = r => {
     const a = String(r.addr || '').trim();
@@ -190,15 +197,47 @@ function arvFromComps(soldRows, subjectSqft) {
 // Encodes CLAUDE.md / flip-scout-SOP: drop renovated/turnkey (Rule #0), multi-unit,
 // fire, and exterior-only/no-access; keep genuine as-is / estate / fixer language.
 const DROP_KW = /(remodel|renovat|updated throughout|fully updated|turnkey|turn[- ]key|move[- ]?in ready|quartz|stainless|luxury vinyl|designer|reimagined|refreshed|newly built|new construction|fully renovated|beautifully updated|tastefully updated|gut renovat)/i;
-const KEEP_KW = /(fixer|as[- ]?is|\btlc\b|handyman|contractor special|probate|estate sale|trust sale|needs work|needs updating|bring your|first time on market|deferred maintenance|original condition|diamond in the rough|great potential|tear[- ]?down|sold as[- ]is|needs tlc)/i;
+const KEEP_KW = /(fixer|as[- ]?is|\btlc\b|handyman|contractor special|probate|estate sale|trust sale|needs work|needs updating|bring your|first time on market|deferred maintenance|original condition|diamond in the rough|great potential|sold as[- ]is|needs tlc)/i;
 const MULTI_KW = /(duplex|triplex|fourplex|two units|2 units|3 units|second unit|in[- ]?law|mother[- ]in[- ]law|\badu\b|multi[- ]?unit|separate unit|two homes|2 homes)/i;
 const FIRE_KW = /(fire damage|fire[- ]damaged|fire gutted|gutted by fire|burned|fire[- ]affected)/i;
+
+// QUICK FLIP ONLY. A quick flip is a COSMETIC job — paint, floors, kitchen,
+// bath, in and out in one pass. Everything below means months of engineers,
+// drawings and inspections before a hammer swings, or a job whose cost cannot
+// be estimated from photos. Those are not the deals we are hunting, so they are
+// dropped with the reason recorded rather than surfaced and argued about later.
+// (`tear-down` used to sit in KEEP_KW; it is the opposite of a quick flip.)
+const SLOW_KW = new RegExp([
+  'foundation (?:issue|problem|repair|work|damage|replacement)',
+  'needs? (?:a )?new foundation', 'foundation needs',
+  'structural (?:issue|problem|damage|repair|work)',
+  'red[- ]?tagged?', 'uninhabitable', 'not habitable', 'unsafe to enter',
+  'unpermitted (?:addition|work|space)', 'permits? (?:are )?(?:required|needed|pending|in process)',
+  'plans (?:approved|submitted|in review)', 'entitle(?:d|ment)',
+  'tear[- ]?down', '\\bscraper\\b', '(?:land|lot) value', 'value (?:is )?in the land',
+  'down to the studs', 'full gut', 'gut job',
+  'extensive (?:damage|water damage|repairs)',
+  '\\bmold\\b', 'dry ?rot throughout', 'sinking', 'landslide', 'slide zone',
+].join('|'), 'i');
+
+// Tenant-occupied is a hard exclusion in the SOP: no vacant possession, no
+// access for trades, and a timeline nobody controls.
+const TENANT_KW = new RegExp([
+  'tenant[- ]occupied', 'occupied by (?:a )?tenant', 'tenants? in place',
+  'currently rented', 'lease in place', 'subject to (?:a )?lease',
+  'do not disturb (?:the )?tenant', 'month[- ]to[- ]month tenan',
+].join('|'), 'i');
 
 function rulesDecide(meta) {
   const t = ((meta.remarks || '') + ' ' + (meta.condition || '')).toLowerCase();
   const photos = meta.photos || 0;
   if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
   if (MULTI_KW.test(t)) return { decision: 'drop', reason: 'remarks indicate multi-unit / second unit' };
+  if (TENANT_KW.test(t)) return { decision: 'drop', reason: 'remarks say tenant-occupied (hard exclusion)' };
+  if (SLOW_KW.test(t)) {
+    const hit = (t.match(SLOW_KW) || [''])[0];
+    return { decision: 'drop', reason: `not a quick flip — remarks mention "${hit}" (structural/permit work, not cosmetic)` };
+  }
   if (DROP_KW.test(t)) return { decision: 'drop', reason: 'remarks describe renovated / updated / turnkey (Rule #0)' };
   if (photos > 0 && photos <= 4 && !KEEP_KW.test(t)) return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access (tenant?)` };
   if (KEEP_KW.test(t)) return { decision: 'keep', reason: 'as-is / estate / fixer language + below-market $/sf' };
@@ -288,7 +327,7 @@ function parseDetail(text, wantMls) {
 }
 
 module.exports = {
-  fullAddress, parseDetail,
+  fullAddress, parseDetail, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
