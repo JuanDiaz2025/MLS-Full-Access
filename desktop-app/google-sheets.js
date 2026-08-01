@@ -173,12 +173,27 @@ const appendRows = (token, id, tab, rows) =>
     + '?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
     { method: 'POST', body: JSON.stringify({ values: rows }) });
 
+const readRow = (token, id, tab, rowNum) =>
+  api(token, `/${id}/values/${encodeURIComponent(tab + '!' + rowNum + ':' + rowNum)}`)
+    .then(j => (j.values && j.values[0]) || []);
+
 const writeRow = (token, id, tab, rowNum, values) =>
   api(token, `/${id}/values/${encodeURIComponent(tab + '!A' + rowNum)}`
     + '?valueInputOption=USER_ENTERED',
     { method: 'PUT', body: JSON.stringify({ values: [values] }) });
 
-/** Create the tab and header row if they are not there yet. */
+/**
+ * Create the tab, and make sure its header row is the one we are about to write
+ * against.
+ *
+ * The WHOLE row is compared, not just the first cell. Checking only A1 was a
+ * real bug: a tab left over from an older column layout still began with the
+ * same header, so the row was never corrected and every value went into the
+ * wrong column — the app wrote "Leads Added" into a cell headed "Runs".
+ *
+ * Stale trailing headers from a wider old layout are blanked, so a 23-column
+ * tab becomes a 5-column one instead of keeping eighteen orphan headings.
+ */
 async function ensureTab(token, id, tab, headers) {
   const info = await listTabs(token, id);
   if (info.tabs.indexOf(tab) < 0) {
@@ -187,9 +202,13 @@ async function ensureTab(token, id, tab, headers) {
       body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
     });
   }
-  const first = await readCol(token, id, tab, 'A1:A1');
-  if (!first.length || String(first[0]).trim() !== headers[0]) {
-    await writeRow(token, id, tab, 1, headers);
+  const cur = await readRow(token, id, tab, 1);
+  const matches = cur.length >= headers.length
+    && headers.every((h, i) => String(cur[i] || '').trim() === h);
+  if (!matches) {
+    const row = headers.slice();
+    for (let i = headers.length; i < cur.length; i++) row.push('');
+    await writeRow(token, id, tab, 1, row);
   }
   return info.title;
 }
@@ -248,4 +267,4 @@ async function syncRows(token, id, tab, headers, keyHeader, records, opts) {
   return { added: toAppend.length, updated: toPatch.length, filled };
 }
 
-module.exports = { parseSheetId, signIn, refresh, listTabs, readCol, ensureTab, syncRows, colName, SCOPE };
+module.exports = { parseSheetId, signIn, refresh, listTabs, readCol, readRow, ensureTab, syncRows, colName, SCOPE };

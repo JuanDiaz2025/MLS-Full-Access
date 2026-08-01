@@ -874,15 +874,14 @@ const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
 ];
-// KPI is a NUMBERS tab — five columns, one row a day, and a chart drawn by the
-// Apps Script. The old 23-column version was unreadable, which is the whole
-// complaint. Ownership is split by column: the app writes what only the app
-// knows, the script writes what only the sheet knows, and neither touches the
-// other's cells.
-const KPI_SHEET_HEADERS = ['Date', 'Leads Added', 'Auto-Dropped', 'Manually Removed', 'On List'];
-// The app's columns. 'Manually Removed' and 'On List' are the reviewer's side
-// and are computed in the sheet — the app must never overwrite them.
-const KPI_APP_COLS = ['Date', 'Leads Added', 'Auto-Dropped'];
+// KPI is a NUMBERS tab — four columns, one row a day, no chart. The old
+// 23-column version was unreadable, which was the complaint. Ownership splits
+// by column: the app writes what only the app knows, the Apps Script counts
+// what only the sheet knows, and neither touches the other's cells.
+const KPI_SHEET_HEADERS = ['Date', 'Rejected', 'On List', 'Scan Rejected'];
+// 'Rejected' (by a person) and 'On List' are counted in the sheet by the Apps
+// Script — the app must never write them.
+const KPI_APP_COLS = ['Date', 'Scan Rejected'];
 
 const today = () => new Date().toISOString().slice(0, 10);
 const fullAddress = core.fullAddress;
@@ -953,11 +952,7 @@ async function googleSyncKpi(day) {
   if (!googleReady()) return { ok: false, unconfigured: true, error: 'Google sheet not connected' };
   try {
     const token = await googleToken();
-    const rec = {
-      'Date': day.date,
-      'Leads Added': day.pushed,
-      'Auto-Dropped': day.dropped,
-    };
+    const rec = { 'Date': day.date, 'Scan Rejected': day.dropped };
     await gsheets.syncRows(token, g.sheetId, g.kpiTab, KPI_SHEET_HEADERS, 'Date', [rec],
       { overwrite: KPI_APP_COLS });
     return { ok: true };

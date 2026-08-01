@@ -49,7 +49,7 @@ const CARRY = {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('⚡ Flip Scout')
     .addItem('🚫 Reject selected lead(s)', 'menuRejectSelected')
-    .addItem('📊 Refresh KPI + chart', 'menuRefreshKpi')
+    .addItem('📊 Refresh KPI', 'menuRefreshKpi')
     .addSeparator()
     .addItem('▶ Turn on delete tracking', 'menuEnableTracking')
     .addToUi();
@@ -101,29 +101,41 @@ function menuRefreshKpi() {
   const ui = SpreadsheetApp.getUi();
   try {
     const n = rebuildKpi_();
-    ui.alert('KPI updated', n + ' day(s) of numbers, chart redrawn.', ui.ButtonSet.OK);
+    ui.alert('KPI updated', n + ' day(s) of numbers.', ui.ButtonSet.OK);
   } catch (err) {
     ui.alert('Could not refresh the KPI', String(err && err.message || err), ui.ButtonSet.OK);
   }
 }
 
 // ------------------------------------------------------------------- KPI ----
-// Numbers only, one row a day, and a bar chart. Five columns is the point —
-// the old sheet had twenty-three and nobody could read it.
+// Four columns. Numbers. No chart.
 //
-//   Date | Leads Added | Auto-Dropped | Manually Removed | On List
+//   Date | Rejected | On List | Scan Rejected
 //
-// The app owns the first three; the two on the right are counted here from the
-// sheet itself, so they are right whether or not the app has run today.
+//   Rejected      — taken off the list by a PERSON, that day
+//   On List       — qualified leads still sitting on the Leads tab
+//   Scan Rejected — thrown out by the scan itself, that day
+//
+// The app writes Scan Rejected; the other two are counted here from the sheet,
+// so they are right whether or not a scan has run today.
 
-const KPI_HEADERS = ['Date', 'Leads Added', 'Auto-Dropped', 'Manually Removed', 'On List'];
-const CHART_NAME = 'Manually removed per day';
+const KPI_HEADERS = ['Date', 'Rejected', 'On List', 'Scan Rejected'];
 
 function kpiSheet_() {
   const ss = SpreadsheetApp.getActive();
   let sh = ss.getSheetByName(KPI_TAB);
   if (!sh) sh = ss.insertSheet(KPI_TAB);
-  if (String(sh.getRange(1, 1).getValue()).trim() !== KPI_HEADERS[0]) {
+  // Any chart left by an earlier version goes, along with a header row from an
+  // older layout. Checking only cell A1 was not enough: a 23-column tab still
+  // began with "Date", so the old headings stayed and the numbers landed under
+  // the wrong ones.
+  sh.getCharts().forEach(c => sh.removeChart(c));
+  const width = Math.max(sh.getLastColumn(), KPI_HEADERS.length);
+  const cur = sh.getRange(1, 1, 1, width).getValues()[0].map(c => String(c).trim());
+  const same = KPI_HEADERS.every((h, i) => cur[i] === h)
+    && cur.slice(KPI_HEADERS.length).every(c => !c);
+  if (!same) {
+    sh.clear();
     sh.getRange(1, 1, 1, KPI_HEADERS.length).setValues([KPI_HEADERS])
       .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
     sh.setFrozenRows(1);
@@ -140,9 +152,9 @@ function dayKey_(v) {
 }
 
 /**
- * Recount the reviewer's columns from the Rejected and Leads tabs and redraw
- * the chart. Counting rather than accumulating means a corrected or deleted
- * row is reflected immediately, and the numbers cannot drift.
+ * Recount from the Rejected and Leads tabs. Counting rather than accumulating
+ * means a corrected or deleted row shows up immediately and the numbers cannot
+ * drift out of step with the tabs they describe.
  */
 function rebuildKpi_() {
   const sh = kpiSheet_();
@@ -162,8 +174,7 @@ function rebuildKpi_() {
     });
   }
 
-  // Leads added per day, straight off the Leads tab's own First Added stamp.
-  const added = {};
+  // How many qualified leads are still on the list right now.
   let onList = 0;
   try {
     const leads = leadsSheet_();
@@ -171,44 +182,34 @@ function rebuildKpi_() {
     const ln = Math.max(0, leads.getLastRow() - 1);
     if (ln && width) {
       const head = leads.getRange(1, 1, 1, width).getValues()[0].map(c => String(c).trim());
-      const fa = head.indexOf('First Added'), mlsCol = head.indexOf('MLS #');
+      const mlsCol = head.indexOf('MLS #');
       const vals = leads.getRange(2, 1, ln, width).getValues();
-      vals.forEach(v => {
-        if (mlsCol >= 0 && !String(v[mlsCol] || '').trim()) return;
-        onList++;
-        const d = fa >= 0 ? dayKey_(v[fa]) : '';
-        if (d) added[d] = (added[d] || 0) + 1;
-      });
+      vals.forEach(v => { if (mlsCol < 0 || String(v[mlsCol] || '').trim()) onList++; });
     }
   } catch (e) { /* no Leads tab yet — the counts stay zero */ }
 
-  // Existing rows, so the app's Auto-Dropped figure survives the rebuild.
+  // Scan Rejected is the app's number — keep whatever it last wrote.
   const kn = Math.max(0, sh.getLastRow() - 1);
   const prior = {};
   if (kn) {
     sh.getRange(2, 1, kn, KPI_HEADERS.length).getValues().forEach(r => {
       const d = dayKey_(r[0]);
-      if (d) prior[d] = { added: r[1], dropped: r[2] };
+      if (d) prior[d] = { scanRejected: r[3] };
     });
   }
 
   const days = {};
   Object.keys(prior).forEach(d => { days[d] = true; });
   Object.keys(removed).forEach(d => { days[d] = true; });
-  Object.keys(added).forEach(d => { days[d] = true; });
   const sorted = Object.keys(days).sort();
   const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   if (sorted.indexOf(today) < 0) sorted.push(today);
 
   const rows = sorted.map(d => [
     d,
-    // The app's own figure wins: it counts what was WRITTEN that day. Counting
-    // the Leads tab instead would shrink yesterday's number every time the
-    // reviewer removes a row, which is not what "added" means.
-    (prior[d] && prior[d].added) || added[d] || 0,
-    (prior[d] && prior[d].dropped) || 0,
     removed[d] || 0,
-    d === today ? onList : '',
+    d === today ? onList : '',           // a live count, so only today's row
+    (prior[d] && prior[d].scanRejected) || 0,
   ]);
 
   if (kn) sh.getRange(2, 1, kn, KPI_HEADERS.length).clearContent();
@@ -216,30 +217,7 @@ function rebuildKpi_() {
     sh.getRange(2, 1, rows.length, KPI_HEADERS.length).setValues(rows);
     sh.getRange(2, 2, rows.length, KPI_HEADERS.length - 1).setNumberFormat('0');
   }
-  drawChart_(sh, rows.length);
   return rows.length;
-}
-
-/** One column chart, replaced in place so repeated refreshes don't stack. */
-function drawChart_(sh, rowCount) {
-  sh.getCharts().forEach(c => sh.removeChart(c));
-  if (!rowCount) return;
-  const chart = sh.newChart()
-    .asColumnChart()
-    .addRange(sh.getRange(1, 1, rowCount + 1, 1))    // Date
-    .addRange(sh.getRange(1, 2, rowCount + 1, 1))    // Leads Added
-    .addRange(sh.getRange(1, 4, rowCount + 1, 1))    // Manually Removed
-    .setNumHeaders(1)
-    .setOption('title', CHART_NAME)
-    .setOption('legend', { position: 'top' })
-    .setOption('colors', ['#2563eb', '#dc2626'])
-    .setOption('hAxis', { title: 'Date' })
-    .setOption('vAxis', { title: 'Leads', viewWindow: { min: 0 } })
-    .setOption('width', 720)
-    .setOption('height', 340)
-    .setPosition(2, KPI_HEADERS.length + 2, 0, 0)
-    .build();
-  sh.insertChart(chart);
 }
 
 // ------------------------------------------------------- delete tracking ----

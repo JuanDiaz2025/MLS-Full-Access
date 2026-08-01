@@ -63,6 +63,11 @@ function fakeSheets(initial) {
         const to = col[4] ? parseInt(col[4], 10) : grid.length;
         return json({ values: grid.slice(from, to).map(r => [r[ci] === undefined ? '' : r[ci]]) });
       }
+      const wholeRow = range.match(/^(\d+):(\d+)$/);
+      if (wholeRow) {
+        const r = grid[parseInt(wholeRow[1], 10) - 1];
+        return json({ values: r && r.length ? [r] : [] });
+      }
       const oneRow = range.match(/^A(\d+):(\d+)$/);
       if (oneRow) {
         const r = grid[parseInt(oneRow[1], 10) - 1];
@@ -224,7 +229,21 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(rules('1st time on the market in 50 years, sold in present "as is" condition.'),
     'keep', '"1st time on the market" reads the same as "first time"');
 
-  // 12. The composed sheet value, end to end.
+  // 12. A tab left over from an OLD column layout must be corrected, not
+  //     written into blindly. Checking only cell A1 meant a 23-column KPI tab
+  //     kept its headers while the app wrote five values into the first five
+  //     columns — "Leads Added" landed in a cell headed "Runs".
+  const NEWK = ['Date', 'Leads Added', 'Auto-Dropped', 'Manually Removed', 'On List'];
+  tabs = fakeSheets({ KPI: [['Date', 'Runs', 'Scanned', 'Candidates', 'Reviewed', 'Kept', 'Last Run']] });
+  await gs.ensureTab('tok', 'ID', 'KPI', NEWK);
+  eq(tabs.KPI[0].slice(0, 5), NEWK, 'a stale header row is rewritten');
+  eq(tabs.KPI[0].slice(5), ['', ''], 'and the extra old headings are blanked');
+
+  tabs = fakeSheets({ KPI: [NEWK.slice()] });
+  await gs.ensureTab('tok', 'ID', 'KPI', NEWK);
+  eq(tabs.KPI[0], NEWK, 'a correct header row is left alone');
+
+  // 13. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
 
