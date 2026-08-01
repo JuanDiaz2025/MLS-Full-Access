@@ -399,6 +399,13 @@ control window: 1 login · 2 how listings are judged · 3 scan · 4 now reviewin
 5 report · 6 daily KPI · 7 Google Sheet. Renovated properties never reach the
 sheet — they are dropped at photo review (Rule #0/#2).
 
+**And it stops by itself.** When the last city is done the app closes the MLS
+window, clears "Now reviewing", resets the buttons and prints
+`Scan COMPLETE — N scanned · N skipped · N reviewed · N kept · N dropped · N
+written to the sheet`. Nothing is left running. A run that never started (not
+signed in) leaves the browser window alone, so it cannot shut the window you are
+about to log in through. `finishRun()` in `main.js`.
+
 **The run never stops to ask.** There is no Keep/Drop approval step — it was
 removed per Bryan. AI vision decides when an API key is set, otherwise the text
 rules do, and `whenUnsure` (keep/drop) settles the cases the rules cannot read.

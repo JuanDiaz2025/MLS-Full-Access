@@ -159,7 +159,10 @@ function ensureMlsWindow() {
   return mlsWin;
 }
 
-const js = code => mlsWin.webContents.executeJavaScript(code, true);
+// Always go through ensureMlsWindow: the window is closed when a scan
+// finishes, and the next run has to be able to reopen it. Cookies live in the
+// 'persist:mls' partition, so reopening keeps the MLS session.
+const js = code => ensureMlsWindow().webContents.executeJavaScript(code, true);
 async function nav(url, settle = 1800) {
   await mlsWin.loadURL(url).catch(() => {}); // Matrix keeps sockets open; loadURL resolves on load event
   await sleep(settle);
@@ -200,7 +203,10 @@ ipcMain.handle('login', async (_e, { user, pass }) => {
 });
 
 ipcMain.handle('check-session', async () => {
-  if (!mlsWin || mlsWin.isDestroyed()) return { loggedIn: false };
+  // Reopen and reload rather than reporting "not signed in" just because the
+  // last scan closed the window — the cookies are still there.
+  const fresh = !mlsWin || mlsWin.isDestroyed();
+  if (fresh) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
   const title = await js(core.JS_TITLE).catch(() => '');
   const loggedIn = /MLSListings Pro Dashboard/i.test(title) || /Matrix/i.test(title);
   log(loggedIn ? `Session OK — ${title}` : `Not logged in yet (page: ${title})`, loggedIn ? 'good' : 'warn');
@@ -450,9 +456,17 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
   control.running = true; control.stopped = false; control.paused = false;
   const areas = (buybox && buybox.length) ? buybox : core.DEFAULT_BUYBOX;
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
+  // Only a run that actually started closes the browser window at the end.
+  // Bailing out for "not signed in" and then shutting the window the user is
+  // about to sign in through would be its own small disaster.
+  let started = false;
   try {
+    // A finished scan closes the MLS window, so reopen it and let the saved
+    // session load before deciding whether we are signed in.
+    if (!mlsWin || mlsWin.isDestroyed()) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
     const s = await js(core.JS_TITLE).catch(() => '');
     if (!/Dashboard|Matrix/i.test(s)) { log('Not logged in — sign in first.', 'error'); return { ok: false }; }
+    started = true;
 
     // Pull the reviewer's rejections down first, so anything she deleted is
     // treated as already-checked and never resurfaces.
@@ -704,9 +718,41 @@ ipcMain.handle('start-scan', async (_e, { buybox }) => {
     send('kpi', { today: day, history: kpiReport() });
     // Only attempt the KPI push when a sheet is actually connected — an
     // unconfigured app must not log a failure after every single run.
-    if (googleReady() && googleCfg().autoSync) googleSyncKpi(day).catch(() => {});
+    if (googleReady() && googleCfg().autoSync) await googleSyncKpi(day).catch(() => {});
+
+    // FINISH, VISIBLY. The run used to just stop making noise — the MLS window
+    // still showed the last gallery, "Now reviewing" still named a property,
+    // and there was no way to tell a finished scan from a stalled one.
+    // Everything now shuts down on its own and says so.
+    finishRun(runKpi, day, started);
   }
 });
+
+/** Close the browser window, clear the live panels, and announce the totals. */
+function finishRun(runKpi, day, started) {
+  if (!started) { send('done', { neverStarted: true, summary: 'Not signed in — nothing scanned.' }); return; }
+  closeMlsWindow();
+  const line = control.stopped
+    ? `Scan STOPPED early — ${runKpi.reviewed} reviewed, ${runKpi.kept} kept, ${runKpi.pushed} written to the sheet.`
+    : `Scan COMPLETE — ${runKpi.scanned} scanned · ${runKpi.skippedAlreadyChecked} already checked (skipped) · `
+      + `${runKpi.reviewed} reviewed · ${runKpi.kept} kept · ${runKpi.dropped} dropped · `
+      + `${runKpi.pushed} written to the sheet.`;
+  log(line, 'good');
+  log('Nothing else is running. Start scan again whenever you want the next pass.', 'good');
+  send('done', {
+    stopped: control.stopped, summary: line,
+    scanned: runKpi.scanned, reviewed: runKpi.reviewed, kept: runKpi.kept,
+    dropped: runKpi.dropped, pushed: runKpi.pushed,
+    skipped: runKpi.skippedAlreadyChecked, day: day,
+  });
+}
+
+/** The MLS window exists only to drive a scan — leaving it open after one
+ *  finishes is what made a completed run look like it was still going. */
+function closeMlsWindow() {
+  try { if (mlsWin && !mlsWin.isDestroyed()) mlsWin.close(); } catch (_) {}
+  mlsWin = null;
+}
 
 ipcMain.on('pause', () => { control.paused = true; log('Paused.', 'warn'); });
 ipcMain.on('resume', () => { control.paused = false; log('Resumed.', 'good'); });

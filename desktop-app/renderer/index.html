@@ -112,6 +112,7 @@
       the next city starts. SF · Peninsula ($2M) · Sunnyvale · San Jose · Oakland ·
       Berkeley · San Leandro · Hayward · Richmond.</div>
     <div id="funnel" class="status" style="margin-top:10px">Idle.</div>
+    <div id="finished" class="status good" style="display:none;margin-top:10px"></div>
   </div>
 
   <div class="card review" id="review">
@@ -226,7 +227,13 @@
     $('loginStatus').className = 'status ' + (r.loggedIn ? 'good' : 'warn');
     $('start').disabled = !r.loggedIn;
   };
-  $('start').onclick = async () => { setScanButtons(true); $('reportCard').style.display='none'; await window.fs.startScan({}); setScanButtons(false); };
+  $('start').onclick = async () => {
+    setScanButtons(true);
+    $('reportCard').style.display='none';
+    $('finished').style.display='none';
+    await window.fs.startScan({});
+    setScanButtons(false);
+  };
   $('pause').onclick = () => { window.fs.pause(); $('pause').disabled=true; $('resume').disabled=false; };
   $('resume').onclick = () => { window.fs.resume(); $('pause').disabled=false; $('resume').disabled=true; };
   $('stop').onclick = () => { window.fs.stop(); setScanButtons(false); };
@@ -331,6 +338,20 @@
 
   function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
   function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
+
+  // The run is over: put every live panel back to rest so a finished scan can
+  // never be mistaken for one that is still going.
+  window.fs.on('done', p => {
+    setScanButtons(false);
+    $('review').classList.remove('on');
+    currentMls = null;
+    $('funnel').textContent = p.neverStarted ? 'Idle.' : 'Finished.';
+    const box = $('finished');
+    box.style.display = 'block';
+    box.className = 'status ' + (p.stopped || p.neverStarted ? 'warn' : 'good');
+    box.innerHTML = (p.neverStarted ? '' : (p.stopped ? '⏹ ' : '✓ ')) + p.summary
+      + (p.neverStarted ? '' : '<br>The MLS window is closed and nothing is running.');
+  });
 
   window.fs.on('log', p => log(p.msg, p.level));
   window.fs.on('funnel', p => { $('funnel').textContent = `${p.scanned} scanned → ${p.candidates} fixer candidates`; $('funnel').className='status good'; });
