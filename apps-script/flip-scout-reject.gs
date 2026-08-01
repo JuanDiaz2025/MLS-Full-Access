@@ -23,6 +23,7 @@
  */
 
 const LEADS_TAB = 'Leads';
+const KPI_TAB = 'KPI';
 const REJECTED_TAB = 'Rejected';
 const SNAPSHOT_TAB = '_FlipScout snapshot';   // hidden; how deletions are noticed
 
@@ -48,7 +49,7 @@ const CARRY = {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('⚡ Flip Scout')
     .addItem('🚫 Reject selected lead(s)', 'menuRejectSelected')
-    .addItem('📋 Rejections today', 'menuRejectionsToday')
+    .addItem('📊 Refresh KPI + chart', 'menuRefreshKpi')
     .addSeparator()
     .addItem('▶ Turn on delete tracking', 'menuEnableTracking')
     .addToUi();
@@ -86,6 +87,7 @@ function menuRejectSelected() {
     // Delete bottom-up so the earlier row numbers stay valid.
     for (let i = sel.rows.length - 1; i >= 0; i--) sel.sheet.deleteRow(sel.rows[i]._row);
     snapshot_();                       // the tracker must not re-report these
+    rebuildKpi_();                     // the count is only useful if it is current
     ui.alert('Rejected', 'Rejected ' + sel.rows.length + ' lead(s).\n'
       + 'Reason logged: "' + reason + '"\n\n'
       + (n < sel.rows.length ? (sel.rows.length - n) + ' were already on the Rejected tab.\n\n' : '')
@@ -95,30 +97,149 @@ function menuRejectSelected() {
   }
 }
 
-function menuRejectionsToday() {
-  const sh = rejectedSheet_();
-  const idx = headerIdx_(sh, REJECTED_HEADERS);
-  const n = Math.max(0, sh.getLastRow() - 1);
-  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  let mine = 0, all = 0;
-  const lines = [];
-  if (n) {
-    const rows = sh.getRange(2, 1, n, Math.max(sh.getLastColumn(), REJECTED_HEADERS.length)).getValues();
-    rows.forEach(r => {
-      const on = String(r[idx['Rejected On']] || '');
-      if (on.indexOf(today) !== 0) return;
-      all++;
-      if (String(r[idx['Stage']] || '') === 'Reviewer') {
-        mine++;
-        if (lines.length < 15) lines.push('• ' + (r[idx['Address']] || r[idx['MLS #']]) + ' — ' + r[idx['Reason']]);
-      }
+function menuRefreshKpi() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const n = rebuildKpi_();
+    ui.alert('KPI updated', n + ' day(s) of numbers, chart redrawn.', ui.ButtonSet.OK);
+  } catch (err) {
+    ui.alert('Could not refresh the KPI', String(err && err.message || err), ui.ButtonSet.OK);
+  }
+}
+
+// ------------------------------------------------------------------- KPI ----
+// Numbers only, one row a day, and a bar chart. Five columns is the point —
+// the old sheet had twenty-three and nobody could read it.
+//
+//   Date | Leads Added | Auto-Dropped | Manually Removed | On List
+//
+// The app owns the first three; the two on the right are counted here from the
+// sheet itself, so they are right whether or not the app has run today.
+
+const KPI_HEADERS = ['Date', 'Leads Added', 'Auto-Dropped', 'Manually Removed', 'On List'];
+const CHART_NAME = 'Manually removed per day';
+
+function kpiSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(KPI_TAB);
+  if (!sh) sh = ss.insertSheet(KPI_TAB);
+  if (String(sh.getRange(1, 1).getValue()).trim() !== KPI_HEADERS[0]) {
+    sh.getRange(1, 1, 1, KPI_HEADERS.length).setValues([KPI_HEADERS])
+      .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
+    sh.setFrozenRows(1);
+    KPI_HEADERS.forEach((c, i) => sh.setColumnWidth(i + 1, i === 0 ? 110 : 130));
+  }
+  return sh;
+}
+
+/** yyyy-MM-dd from whatever the cell holds — a real Date or a stamped string. */
+function dayKey_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const m = String(v || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[0] : '';
+}
+
+/**
+ * Recount the reviewer's columns from the Rejected and Leads tabs and redraw
+ * the chart. Counting rather than accumulating means a corrected or deleted
+ * row is reflected immediately, and the numbers cannot drift.
+ */
+function rebuildKpi_() {
+  const sh = kpiSheet_();
+
+  // Manual removals per day = Rejected rows the REVIEWER made, not the scan.
+  const rej = rejectedSheet_();
+  const ridx = headerIdx_(rej, REJECTED_HEADERS);
+  const rn = Math.max(0, rej.getLastRow() - 1);
+  const removed = {};
+  if (rn) {
+    const vals = rej.getRange(2, 1, rn, Math.max(rej.getLastColumn(), REJECTED_HEADERS.length)).getValues();
+    vals.forEach(r => {
+      const stage = String(r[ridx['Stage']] || '');
+      if (!/reviewer|deleted by hand/i.test(stage)) return;   // scan drops are not manual
+      const d = dayKey_(r[ridx['Rejected On']]);
+      if (d) removed[d] = (removed[d] || 0) + 1;
     });
   }
-  SpreadsheetApp.getUi().alert(today,
-    'Rejected today: ' + all + ' (' + mine + ' by a reviewer, the rest by the scan)\n'
-    + 'Rejected all-time: ' + n + '\n\n'
-    + (lines.length ? lines.join('\n') : 'No reviewer rejections yet today.'),
-    SpreadsheetApp.getUi().ButtonSet.OK);
+
+  // Leads added per day, straight off the Leads tab's own First Added stamp.
+  const added = {};
+  let onList = 0;
+  try {
+    const leads = leadsSheet_();
+    const width = leads.getLastColumn();
+    const ln = Math.max(0, leads.getLastRow() - 1);
+    if (ln && width) {
+      const head = leads.getRange(1, 1, 1, width).getValues()[0].map(c => String(c).trim());
+      const fa = head.indexOf('First Added'), mlsCol = head.indexOf('MLS #');
+      const vals = leads.getRange(2, 1, ln, width).getValues();
+      vals.forEach(v => {
+        if (mlsCol >= 0 && !String(v[mlsCol] || '').trim()) return;
+        onList++;
+        const d = fa >= 0 ? dayKey_(v[fa]) : '';
+        if (d) added[d] = (added[d] || 0) + 1;
+      });
+    }
+  } catch (e) { /* no Leads tab yet — the counts stay zero */ }
+
+  // Existing rows, so the app's Auto-Dropped figure survives the rebuild.
+  const kn = Math.max(0, sh.getLastRow() - 1);
+  const prior = {};
+  if (kn) {
+    sh.getRange(2, 1, kn, KPI_HEADERS.length).getValues().forEach(r => {
+      const d = dayKey_(r[0]);
+      if (d) prior[d] = { added: r[1], dropped: r[2] };
+    });
+  }
+
+  const days = {};
+  Object.keys(prior).forEach(d => { days[d] = true; });
+  Object.keys(removed).forEach(d => { days[d] = true; });
+  Object.keys(added).forEach(d => { days[d] = true; });
+  const sorted = Object.keys(days).sort();
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (sorted.indexOf(today) < 0) sorted.push(today);
+
+  const rows = sorted.map(d => [
+    d,
+    // The app's own figure wins: it counts what was WRITTEN that day. Counting
+    // the Leads tab instead would shrink yesterday's number every time the
+    // reviewer removes a row, which is not what "added" means.
+    (prior[d] && prior[d].added) || added[d] || 0,
+    (prior[d] && prior[d].dropped) || 0,
+    removed[d] || 0,
+    d === today ? onList : '',
+  ]);
+
+  if (kn) sh.getRange(2, 1, kn, KPI_HEADERS.length).clearContent();
+  if (rows.length) {
+    sh.getRange(2, 1, rows.length, KPI_HEADERS.length).setValues(rows);
+    sh.getRange(2, 2, rows.length, KPI_HEADERS.length - 1).setNumberFormat('0');
+  }
+  drawChart_(sh, rows.length);
+  return rows.length;
+}
+
+/** One column chart, replaced in place so repeated refreshes don't stack. */
+function drawChart_(sh, rowCount) {
+  sh.getCharts().forEach(c => sh.removeChart(c));
+  if (!rowCount) return;
+  const chart = sh.newChart()
+    .asColumnChart()
+    .addRange(sh.getRange(1, 1, rowCount + 1, 1))    // Date
+    .addRange(sh.getRange(1, 2, rowCount + 1, 1))    // Leads Added
+    .addRange(sh.getRange(1, 4, rowCount + 1, 1))    // Manually Removed
+    .setNumHeaders(1)
+    .setOption('title', CHART_NAME)
+    .setOption('legend', { position: 'top' })
+    .setOption('colors', ['#2563eb', '#dc2626'])
+    .setOption('hAxis', { title: 'Date' })
+    .setOption('vAxis', { title: 'Leads', viewWindow: { min: 0 } })
+    .setOption('width', 720)
+    .setOption('height', 340)
+    .setPosition(2, KPI_HEADERS.length + 2, 0, 0)
+    .build();
+  sh.insertChart(chart);
 }
 
 // ------------------------------------------------------- delete tracking ----
@@ -143,6 +264,7 @@ function menuEnableTracking() {
       + '— dated, and marked as removed with no reason given.\n\n'
       + 'Use the menu item when you can: that is the one that records WHY.',
       ui.ButtonSet.OK);
+    rebuildKpi_();
   } catch (err) {
     ui.alert('Could not turn on tracking', String(err && err.message || err), ui.ButtonSet.OK);
   }
@@ -175,6 +297,7 @@ function reconcile_() {
     addRejected_(gone, '', 'Deleted by hand');
   }
   snapshot_();
+  rebuildKpi_();
   return gone.length;
 }
 

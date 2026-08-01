@@ -378,14 +378,23 @@ the above.
 Also: **"All San Francisco" is a log heading, never a city.** Data rows use the
 listing's own `Postal City` (the only right answer on a county-wide scan), with
 the `All ` prefix stripped as the fallback.
-- **`KPI`** — one upserted row per day.
+- **`KPI`** — **numbers only**, five columns, one row per day, plus a bar chart:
+  `Date · Leads Added · Auto-Dropped · Manually Removed · On List`. The old
+  23-column version was unreadable — that was the complaint. Ownership splits by
+  column: the **app** writes `Leads Added` / `Auto-Dropped`, the **script**
+  counts `Manually Removed` (Rejected rows whose Stage is *Reviewer* or *Deleted
+  by hand* — scan drops are not manual) and `On List`, then redraws the chart.
+  Counting, not accumulating, so a corrected row is reflected at once and the
+  numbers cannot drift. Rebuilt automatically after every rejection, and on
+  `⚡ Flip Scout → 📊 Refresh KPI + chart`.
 
 The only Apps Script left is **`apps-script/flip-scout-reject.gs`**, and it does
 one job: when a reviewer takes a QUALIFIED lead off `Leads`, record the date and
 the reason. `⚡ Flip Scout → 🚫 Reject selected lead(s)` prompts for the reason
 and moves the row; an installable `onChange` trigger ("Turn on delete tracking")
 catches rows deleted by hand and logs them as *removed with no reason given*, so
-nothing vanishes silently. Paste-and-save only — nothing to deploy.
+nothing vanishes silently. It also owns the KPI tab (above). Paste-and-save only
+— nothing to deploy.
 
 **Legacy — "Property Review"** (`10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA`,
 gid `1510205894`) via `apps-script/append-lead.gs`, POST `{secret, lead}`.

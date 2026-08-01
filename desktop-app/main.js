@@ -874,19 +874,15 @@ const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
 ];
-const KPI_SHEET_HEADERS = [
-  'Date', 'Runs', 'Scanned', 'Candidates', 'Already Checked (skipped)',
-  'Reviewed', 'Kept', 'Dropped',
-  'Dropped: Renovated', 'Dropped: Multi-unit', 'Dropped: Fire',
-  'Dropped: Few photos', 'Dropped: Other',
-  'Leads', 'Clear Gate', 'Sent to Sheet', 'Already There',
-  'Reviewer Removed', 'Reviewer Kept', 'Reviewer',
-  'Keep Rate', 'Gate Rate', 'Last Run',
-];
-// Everything up to 'Already There' is the app's own count and gets replaced on
-// each push; the reviewer's three columns are never touched.
-const KPI_APP_COLS = KPI_SHEET_HEADERS.slice(0, KPI_SHEET_HEADERS.indexOf('Reviewer Removed'))
-  .concat(['Keep Rate', 'Gate Rate', 'Last Run']);
+// KPI is a NUMBERS tab — five columns, one row a day, and a chart drawn by the
+// Apps Script. The old 23-column version was unreadable, which is the whole
+// complaint. Ownership is split by column: the app writes what only the app
+// knows, the script writes what only the sheet knows, and neither touches the
+// other's cells.
+const KPI_SHEET_HEADERS = ['Date', 'Leads Added', 'Auto-Dropped', 'Manually Removed', 'On List'];
+// The app's columns. 'Manually Removed' and 'On List' are the reviewer's side
+// and are computed in the sheet — the app must never overwrite them.
+const KPI_APP_COLS = ['Date', 'Leads Added', 'Auto-Dropped'];
 
 const today = () => new Date().toISOString().slice(0, 10);
 const fullAddress = core.fullAddress;
@@ -958,17 +954,9 @@ async function googleSyncKpi(day) {
   try {
     const token = await googleToken();
     const rec = {
-      'Date': day.date, 'Runs': day.runs, 'Scanned': day.scanned, 'Candidates': day.candidates,
-      'Already Checked (skipped)': day.skippedAlreadyChecked, 'Reviewed': day.reviewed,
-      'Kept': day.kept, 'Dropped': day.dropped,
-      'Dropped: Renovated': day.droppedRenovated, 'Dropped: Multi-unit': day.droppedMultiUnit,
-      'Dropped: Fire': day.droppedFire, 'Dropped: Few photos': day.droppedFewPhotos,
-      'Dropped: Other': day.droppedOther,
-      'Leads': day.leads, 'Clear Gate': day.gateCleared, 'Sent to Sheet': day.pushed,
-      'Already There': day.pushSkipped,
-      'Keep Rate': day.reviewed ? Math.round((day.kept / day.reviewed) * 100) + '%' : '',
-      'Gate Rate': day.leads ? Math.round((day.gateCleared / day.leads) * 100) + '%' : '',
-      'Last Run': new Date().toLocaleString(),
+      'Date': day.date,
+      'Leads Added': day.pushed,
+      'Auto-Dropped': day.dropped,
     };
     await gsheets.syncRows(token, g.sheetId, g.kpiTab, KPI_SHEET_HEADERS, 'Date', [rec],
       { overwrite: KPI_APP_COLS });
