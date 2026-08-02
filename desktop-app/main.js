@@ -499,6 +499,10 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       // answer on a county-wide scan, where the rows are not all one city —
       // and fall back to the area name with the "All " stripped off.
       const areaCity = label.replace(/^All\s+/i, '');
+      // The MLS leaves DOM blank on some listings. num() turns that into 0,
+      // which on the sheet reads as "listed today" — a fact we were never told.
+      // Blank in, blank out.
+      const domOf = r => (String(r.dom || '').trim() ? r._dom : '');
       const cityOf = r => String(r.city || '').trim() || areaCity;
       log(`━━━ ${label}  (area ${ai + 1} of ${areas.length}) ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'scanning' });
@@ -612,7 +616,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           // Record WHY, so the Rejected tab can answer "why isn't this on my list".
           cityRejects.push({
             mls: c.mls, addr: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
-            price: c._price, ppsf: c._ppsf, sqft: c._sqft, dom: c._dom,
+            price: c._price, ppsf: c._ppsf, sqft: c._sqft, dom: domOf(c),
             reason: dropReason || 'dropped at photo review', stage: 'Photo review',
             link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
           });
@@ -638,7 +642,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             // The report's own year beats 2026 - Age, which reads "2026" when
             // the grid's Age column is blank.
             yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
-            dom: c._dom, price: c._price, ppsf: c._ppsf,
+            dom: domOf(c), price: c._price, ppsf: c._ppsf,
             arv: 0, arvBasis: 'not comped yet',
             recommendation: 'Needs Comps', flipQuality: '', score: '',
             risks: 'Condition-qualified only — ARV and profit not yet calculated',
@@ -661,7 +665,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const deal = core.scoreDeal({ price: c._price, sqft: c._sqft, arv: comp.arv });
         cityLeads.push({ mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip, beds: c.bds, baths: c.baths || '',
           sqft: c._sqft, lotSqft: core.num(c.lotSqft || 0) || '',
-          yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''), dom: c._dom, price: c._price,
+          yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''), dom: domOf(c), price: c._price,
           arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
           arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
           link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
