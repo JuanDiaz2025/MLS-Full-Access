@@ -73,10 +73,18 @@ It is a deal Bryan wants. Needs-work context is now tested **first** and wins;
 only unambiguous completed-work phrasing drops. Single finish brags (quartz,
 stainless) drop **only** when no needs-work language is present anywhere.
 
-A house **sold on its condition** — two or more of "immaculate", "pristine",
-"pride of ownership", "dream home", "shows like new", "impeccable" with no
-fixer language — is dropped as *not a fixer*. Two, not one: a genuine fixer can
-still have an immaculate garden.
+**ONE finish is not a flip — TWO or more is.** A single mention (quartz counters,
+a new roof, one updated bath) is a light-rehab line item and stays; two or more
+distinct finishes redone, with no needs-work language anywhere, is a kitchen and
+bath already done by someone else. Enforced by `FINISH_KW` needing 2+ hits.
+Whole-house wording ("renovated", "remodeled", "updated throughout") drops on
+its own via `DONE_HOUSE_KW`.
+
+**There is deliberately NO "nice house" keyword rule.** One was added and
+removed: it dropped on "immaculate", "pristine", "pride of ownership",
+"meticulously maintained" — every one of which describes **housekeeping**, which
+HARD RULE #2 says in as many words not to judge on. A spotless house with a
+1950s kitchen is the target, not a disqualification.
 
 ### ⚠️ "in-law" / "ADU" is POTENTIAL, not a second unit
 

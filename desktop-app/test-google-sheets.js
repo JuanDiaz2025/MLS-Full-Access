@@ -199,10 +199,21 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(rules('Tastefully updated throughout.'), 'drop', 'updated throughout dropped');
   eq(rules('Recently updated with quartz counters and stainless steel appliances.'), 'drop', 'finish brags dropped');
 
-  //     "Nice house" needs two superlatives and no fixer language — one is
-  //     just marketing, and a fixer can still have a nice garden.
-  eq(rules('Immaculate home showing pride of ownership throughout.'), 'drop', 'two superlatives = not a fixer');
-  eq(rules('Immaculate garden, but the house needs work throughout.'), 'keep', 'one superlative + needs work = keep');
+  //     ONE finish redone is a light-rehab line item, not a flip. This is the
+  //     844 Brunswick calibration, and it has to be enforced, not just written
+  //     down — a bare /quartz/ was dropping exactly the houses we want.
+  eq(rules('Charming 1904 home with granite counters in the kitchen.'), 'manual', 'one finish is not a flip');
+  eq(rules('New roof installed 2023. Original kitchen and bath.'), 'manual', 'a new roof is not a flip');
+  eq(rules('Quartz counters, new cabinets and stainless steel appliances.'), 'drop', 'three finishes IS a flip');
+  eq(rules('Updated kitchen and updated bath with new flooring.'), 'drop', 'kitchen + bath + floors is a flip');
+
+  //     Housekeeping words must NEVER drop a listing — HARD RULE #2 says judge
+  //     the finishes, not the housekeeping. A spotless 1950s kitchen is the
+  //     target, not a disqualification.
+  eq(rules('Immaculate home showing pride of ownership throughout.'), 'manual', 'immaculate is housekeeping, not a drop');
+  eq(rules('Pristine and impeccable, a true dream home.'), 'manual', 'pristine is housekeeping, not a drop');
+  eq(rules('Meticulously maintained, lovingly cared for over 40 years.'), 'manual', 'well-kept is not renovated');
+  eq(rules('Immaculate garden, but the house needs work throughout.'), 'keep', 'needs-work still wins');
 
   //     A confirmed deal outranks every screen, including its own remarks.
   const { rulesDecide, isConfirmed } = require('./scan-core');

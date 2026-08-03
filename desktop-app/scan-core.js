@@ -282,25 +282,31 @@ const DONE_STRONG_KW = new RegExp([
   'new construction', 'newly built', 'brand[- ]new home',
 ].join('|'), 'i');
 
-// Weaker completed-work signals — including the finish brags an agent only
-// writes when there is something to brag about. Only trusted when the remarks
-// carry NO needs-work language, because "quartz" in a fixer listing is one
-// surface, not a flip (see the 844 Brunswick calibration in CLAUDE.md).
-const DONE_SOFT_KW = new RegExp([
-  'renovated', 'remodel(?:l?ed)', 'updated throughout', 'modernized', 'reimagined',
-  'quartz', 'stainless steel appliance', 'luxury vinyl', 'designer (?:kitchen|bath|finish)',
-  'new (?:kitchen|bathrooms?|appliances|cabinets|countertops?|flooring)',
+// Whole-house completed work. These describe the HOUSE, not a surface, so one
+// mention is enough — but only when nothing in the remarks says work remains.
+const DONE_HOUSE_KW = new RegExp([
+  'renovated', 'remodel(?:l?ed)', 'updated throughout', 'upgraded throughout',
+  'modernized', 'reimagined', 'rebuilt',
 ].join('|'), 'i');
 
-// A house being SOLD ON ITS CONDITION is not a fixer. One superlative is
-// marketing noise; two or more, with no needs-work language anywhere, is an
-// agent describing a home that is already finished.
-const NICE_KW = new RegExp([
-  'immaculate', 'pristine', 'shows? like (?:a )?new', 'pride of ownership',
-  'meticulously maintained', 'dream home', "entertainer's (?:dream|delight)",
-  'impeccable', 'move right in', 'lovingly maintained', 'turn[- ]?key',
-  'spa[- ]like', 'resort[- ]like', 'chef\'s kitchen', 'gourmet kitchen',
-].join('|'), 'gi');
+// Individual finishes. ONE of these is a light-rehab line item, not a flip —
+// that is the 844 Brunswick calibration, and enforcing it was the whole point
+// of writing it down: a 1904 house with granite counters and everything else
+// original is a KEEP. TWO OR MORE distinct finishes, with no needs-work
+// language anywhere, is an agent describing a kitchen and bath already done.
+const FINISH_KW = [
+  /quartz/i, /granite counter/i, /stainless steel appliance/i,
+  /luxury vinyl|\blvp\b/i, /designer (?:kitchen|bath|finish)/i,
+  /new (?:kitchen|bathrooms?|appliances|cabinets?|countertops?|flooring|floors)/i,
+  /(?:updated|refaced|new) cabinet/i, /tile back[- ]?splash/i,
+  /recessed light/i, /updated (?:kitchen|bath)/i,
+];
+
+// There is deliberately NO "nice house" rule any more. It dropped on
+// "immaculate", "pristine", "pride of ownership", "meticulously maintained" —
+// every one of which describes HOUSEKEEPING, and HARD RULE #2 says in as many
+// words: judge the finishes, not the housekeeping or the staging. A spotless
+// house with a 1950s kitchen is exactly what we are hunting.
 
 function rulesDecide(meta) {
   const t = ((meta.remarks || '') + ' ' + (meta.condition || '')).toLowerCase();
@@ -329,12 +335,14 @@ function rulesDecide(meta) {
     return { decision: 'keep', reason: `remarks describe work still to do — "${(t.match(NEEDS_WORK_KW) || [''])[0]}"` };
   }
   if (KEEP_KW.test(t)) return { decision: 'keep', reason: 'as-is / estate / fixer language' };
-  if (DONE_SOFT_KW.test(t)) {
-    return { decision: 'drop', reason: `remarks describe finished work — "${(t.match(DONE_SOFT_KW) || [''])[0]}" and nothing left to do (Rule #0)` };
+  if (DONE_HOUSE_KW.test(t)) {
+    return { decision: 'drop', reason: `remarks say the house is done — "${(t.match(DONE_HOUSE_KW) || [''])[0]}" (Rule #0)` };
   }
-  const nice = (t.match(NICE_KW) || []);
-  if (nice.length >= 2) {
-    return { decision: 'drop', reason: `sold on its condition — "${nice.slice(0, 3).join('", "')}" — not a fixer` };
+  // Two or more separate finishes redone = the kitchen and bath are already
+  // someone else's work. One on its own is a line item and stays.
+  const finishes = FINISH_KW.map(re => (t.match(re) || [''])[0]).filter(Boolean);
+  if (finishes.length >= 2) {
+    return { decision: 'drop', reason: `${finishes.length} finishes already done — "${finishes.slice(0, 3).join('", "')}" (Rule #0)` };
   }
   if (photos > 0 && photos <= 4) return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access (tenant?)` };
   // Remarks say nothing either way. This engine reads TEXT only — it has not
