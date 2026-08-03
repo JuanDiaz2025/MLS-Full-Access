@@ -270,16 +270,9 @@ async function showGallery(mls) {
   await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
   await sleep(2600);
-  // The results grid lazy-loads; poll until the photo count stops growing
-  // instead of grabbing whatever happens to be there after a fixed sleep.
-  let urls = [];
-  for (let tries = 0; tries < 6; tries++) {
-    const got = await js(core.JS_PHOTOS).catch(() => []);
-    if (got.length && got.length === urls.length) break;   // settled
-    urls = got;
-    await sleep(900);
-  }
-  // Capture agent remarks + condition (for the no-API rules engine) via the Client Full report.
+
+  // The Client Full report is the only place the full address, the zip, the
+  // year built and the real remarks exist — the results grid has none of them.
   let meta = { remarks: '', condition: '', zip: '', address: '', yearBuilt: '', propClass: '', mismatch: false };
   try {
     await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); })()`);
@@ -288,17 +281,43 @@ async function showGallery(mls) {
     if (selId) {
       await js(`(() => { const s=document.getElementById(${JSON.stringify(selId)}); if(!s) return; const o=[...s.options].find(o=>/Client Full - All Photos/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
       await sleep(2600);
-          const raw = await js('document.body.innerText').catch(() => '');
+      // Parse in Node rather than in the page: it makes the extraction testable
+      // against saved report text, which is how the wrong-listing bug surfaced.
+      const raw = await js('document.body.innerText').catch(() => '');
       meta = core.parseDetail(raw, mls);
     }
   } catch (_) {}
-  // Render the full gallery so you can watch along, then WAIT for the images to
-  // actually decode before anything judges the listing.
-  await js(`(() => {
-    const urls = ${JSON.stringify(urls)};
-    const cell = (u,i) => '<div style="width:32%"><img src="'+u+'" style="width:100%;height:220px;object-fit:cover"><div style="color:#fff;font:12px sans-serif">#'+i+'</div></div>';
-    document.body.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:6px;background:#111;padding:8px;font-family:sans-serif">' + urls.map(cell).join('') + '</div>';
-  })()`).catch(() => {});
+
+  // EVERY photo, not the handful the carousel happens to have preloaded.
+  //
+  // The report shows ONE frame at a time with three or four queued behind it,
+  // so reading it returned about 4 of 26 — and photo 1 is the exterior. The AI
+  // was being asked to judge a kitchen it had never been shown, which is
+  // exactly the "you are not analysing the images" complaint. PhotoPopup.aspx
+  // with View=G is a grid of the lot; the URL is built from the media Key on
+  // any carousel image, so no popup window has to be driven.
+  let urls = [];
+  try {
+    const info = await js(`(() => {
+      const img = [...document.images].find(i => /MediaServer/i.test(i.src));
+      if (!img) return null;
+      const key = (img.src.match(/Key=(\d+)/) || [])[1];
+      const tid = (img.src.match(/TableID=(\d+)/) || [])[1] || '9';
+      const n = (document.body.innerText.match(/\b\d+\s*\/\s*(\d+)\b/) || [])[1];
+      return key ? { key: key, tid: tid, n: n || '60' } : null;
+    })()`).catch(() => null);
+    if (info) {
+      await nav('https://search.mlslistings.com/Matrix/Public/PhotoPopup.aspx'
+        + `?n=${info.n}&i=0&L=1&tid=${info.tid}&key=${info.key}&mtid=1&View=G`, 3000);
+      urls = await js(`[...document.images].map(i => i.src).filter(u => /MediaServer/i.test(u))`)
+        .catch(() => []);
+    }
+  } catch (_) {}
+  // Fall back to the carousel rather than judging a listing with no photos.
+  if (!urls.length) urls = await js(core.JS_PHOTOS).catch(() => []);
+
+  // The grid page IS the gallery, so there is nothing to rebuild — just wait
+  // for the images to decode before anything judges the listing.
   await js(`(async () => {
     const imgs = [...document.images];
     await Promise.all(imgs.map(im => im.complete ? null : new Promise(r => {
@@ -307,7 +326,7 @@ async function showGallery(mls) {
     return imgs.filter(i => i.naturalWidth > 0).length;
   })()`).catch(() => 0);
 
-  // Dwell, so a human watching can actually see the gallery and the run isn't
+  // Dwell, so a human watching can actually see the gallery and the run is not
   // blasting through listings faster than the pictures render.
   const dwell = Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
   if (dwell) await sleep(dwell);
@@ -319,7 +338,6 @@ async function showGallery(mls) {
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
 }
 
-// ---------- comps for one kept candidate ----------
 async function compFor(mls, zip, sqft) {
   await nav(core.SEARCH_URL, 2200);
   await js(selectByLabel(core.FIELDS.status, 'Sold')); await sleep(400);
@@ -391,8 +409,22 @@ Respond with ONLY a JSON object, no other text:
  * (so the session cookies apply) and downscaling on a canvas gets every
  * picture to the model at a sane payload size.
  */
+/** Choose WHICH photos to send. Photo 1 is the exterior on essentially every
+ *  listing, and the first several are usually more exterior and street shots,
+ *  so taking the first N biases the model away from the kitchen and baths —
+ *  the only rooms that answer "has work been done here". Skip the cover and
+ *  spread across the rest. */
+function spreadPhotos(urls, max) {
+  const rest = (urls || []).slice(1);
+  if (rest.length <= max) return rest;
+  const step = rest.length / max;
+  const out = [];
+  for (let i = 0; out.length < max && Math.floor(i) < rest.length; i += step) out.push(rest[Math.floor(i)]);
+  return out;
+}
+
 async function collectPhotos(urls, max) {
-  const list = (urls || []).slice(0, max || 20);
+  const list = spreadPhotos(urls, max || 20);
   if (!list.length) return [];
   return await js(`(async () => {
     const urls = ${JSON.stringify(list)};

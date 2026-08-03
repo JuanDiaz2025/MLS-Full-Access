@@ -470,6 +470,14 @@ written to the sheet`. Nothing is left running. A run that never started (not
 signed in) leaves the browser window alone, so it cannot shut the window you are
 about to log in through. `finishRun()` in `main.js`.
 
+**The AI sees EVERY photo now.** `showGallery()` used to read the Client Full
+carousel, which yields ~4 of 26 and starts with the exterior — so vision was
+judging kitchens it had never been shown. It now navigates to
+`PhotoPopup.aspx?…&View=G` (URL built from the media `Key` on any carousel
+image) and reads the whole grid, and `spreadPhotos()` skips the cover shot and
+spreads the 20 sent across the set instead of taking the first 20. This was
+live-verified with `scripts/mls-photos.js`.
+
 **The run never stops to ask.** There is no Keep/Drop approval step — it was
 removed per Bryan. AI vision decides when an API key is set, otherwise the text
 rules do, and `whenUnsure` (keep/drop) settles the cases the rules cannot read.
