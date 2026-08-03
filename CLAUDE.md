@@ -136,6 +136,24 @@ house. **Should have been a KEEP.** A below-market $/sqft on a large old house
 is strong evidence the value is still there — weigh that against the finish
 cues rather than dropping on the cue alone.
 
+### 📷 Pulling the photos so they can actually be looked at
+
+`node scripts/mls-photos.js <MLS#> [...]` (`MAX_PHOTOS=n`) saves a listing's
+photos to `.mls-artifacts/photos/<MLS#>/NN.jpg`, ready to open and judge.
+
+The route matters. The Client Full report shows a **carousel** — one frame, three
+or four preloaded — so scraping it yields ~4 of 26. The `Open All` control
+(`font.print.icon[title="Open All"]`) opens **PhotoPopup.aspx … &View=G**, a grid
+of *every* photo, in a new tab. Read `document.images` there; `JS_PHOTOS` buckets
+by `Size=` and the popup serves a different size, so it finds nothing. Photo 1 is
+the exterior, so the download skips it and spreads across the rest.
+
+**Proof this matters — 21 College Terrace:** the living-room shot is staged with
+new flooring, fresh paint and good furniture and reads as a "nice house"; the
+kitchen two frames later is dark original cabinets and **red tile counters**,
+untouched since the 1950s. Judging on the staging would have discarded Bryan's
+own confirmed deal. **Furniture is not a finish.**
+
 ## 1. Browser access (do this first, every fresh session)
 
 Browsing only works after fixing the egress proxy + TLS. Run once:
