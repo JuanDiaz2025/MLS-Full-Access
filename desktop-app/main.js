@@ -248,18 +248,27 @@ async function scanArea(area) {
   if (count === '0') return { city: label, county: area.county, count, rows: [] };
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
   await sleep(3500);
-  let all = [], prev = '';
-  for (let pg = 1; pg <= 12; pg++) {
+  // Whole counties run to hundreds of listings — Contra Costa alone returns
+  // ~800. A 12-page cap silently truncated anything past ~600 and the run would
+  // report a clean finish having never seen the rest, so the cap is now high
+  // enough for the largest county AND says so if it is ever hit.
+  const PAGE_CAP = 60;
+  let all = [], prev = '', pagesRead = 0;
+  for (let pg = 1; pg <= PAGE_CAP; pg++) {
     await waitIfPaused();
+    if (control.stopped) break;
     const rows = await js(core.JS_SCRAPE_GRID).catch(() => []);
     if (!rows.length || rows[0].mls === prev) break;
-    prev = rows[0].mls; all = all.concat(rows);
+    prev = rows[0].mls; all = all.concat(rows); pagesRead = pg;
     const moved = await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/^\\s*Next/i.test(x.textContent)); if(a){a.click(); return true;} return false; })()`).catch(() => false);
     if (!moved) break;
     await sleep(3200);
   }
   const seen = new Set();
   all = all.filter(r => r.mls && !seen.has(r.mls) && seen.add(r.mls));
+  if (pagesRead >= PAGE_CAP) {
+    log(`  ⚠ hit the ${PAGE_CAP}-page cap in ${label} — some listings were NOT scanned`, 'warn');
+  }
   log(`  scraped ${all.length} rows`);
   return { city: label, county: area.county, count, rows: all };
 }
@@ -349,7 +358,7 @@ async function compFor(mls, zip, sqft) {
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
   await sleep(2600);
   let all = [], prev = '';
-  for (let pg = 1; pg <= 8; pg++) {
+  for (let pg = 1; pg <= 8; pg++) {   // comps only need the nearest few pages
     const rows = await js(core.JS_SCRAPE_GRID).catch(() => []);
     if (!rows.length || rows[0].addr === prev) break;
     prev = rows[0].addr; all = all.concat(rows);

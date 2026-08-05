@@ -20,17 +20,26 @@ const FIELDS = {
 
 const SEARCH_URL = 'https://search.mlslistings.com/Matrix/Search/Residential/ResidentialSearch';
 
-// The full buy box (flip-scout-SOP): County:City[:maxPriceK]. City '*' = whole county.
+// THE WHOLE BAY AREA — all nine counties, every city in each (Bryan, 1 Aug).
+// City '*' means the entire county, so no city list has to be maintained and
+// nothing is missed because a town was never typed in.
+//
+// Price caps follow the standing rule: San Mateo (the Peninsula) $2.0M,
+// everywhere else $1.5M. County names are exactly as the Matrix dropdown spells
+// them — checked against the live form, not guessed.
+//
+// San Francisco stays FIRST. It is the priority market and each area is
+// finished completely before the next one starts, so SF reaches the sheet first.
 const DEFAULT_BUYBOX = [
   { county: 'San Francisco', city: '*', maxk: 1500 },
   { county: 'San Mateo', city: '*', maxk: 2000 },
-  { county: 'Santa Clara', city: 'Sunnyvale', maxk: 1500 },
-  { county: 'Santa Clara', city: 'San Jose', maxk: 1500 },
-  { county: 'Alameda', city: 'Oakland', maxk: 1500 },
-  { county: 'Alameda', city: 'Berkeley', maxk: 1500 },
-  { county: 'Alameda', city: 'San Leandro', maxk: 1500 },
-  { county: 'Alameda', city: 'Hayward', maxk: 1500 },
-  { county: 'Contra Costa', city: 'Richmond', maxk: 1500 },
+  { county: 'Santa Clara', city: '*', maxk: 1500 },
+  { county: 'Alameda', city: '*', maxk: 1500 },
+  { county: 'Contra Costa', city: '*', maxk: 1500 },
+  { county: 'Marin', city: '*', maxk: 1500 },
+  { county: 'Sonoma', city: '*', maxk: 1500 },
+  { county: 'Napa', city: '*', maxk: 1500 },
+  { county: 'Solano', city: '*', maxk: 1500 },
 ];
 
 // ---- in-page snippets (strings executed via webContents.executeJavaScript) ----

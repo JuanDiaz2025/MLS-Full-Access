@@ -36,8 +36,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
    **Check session** (it confirms you reached the dashboard).
 2. **Pick your areas, then Start scan** — tick only the areas you want in
    section 3 (All / None / San Francisco only shortcuts are there, and the choice
-   is remembered). The full box is SF · whole Peninsula @ $2M · Sunnyvale
-   · San Jose · Oakland · Berkeley · San Leandro · Hayward · Richmond; Active ·
+   is remembered). The full box is the whole Bay Area — San Francisco · San Mateo
+   @ $2M · Santa Clara · Alameda · Contra Costa · Marin · Sonoma · Napa · Solano,
+   every city in each; Active ·
    Single-Family · **45 days on market or less** · 25+ years old). After the first
    pass each run is incremental — listings already checked are skipped outright,
    so day two only costs you the new ones.

@@ -282,9 +282,19 @@ headless-scrape workflow):
 
 - **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.0M max;
   ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
-  data floor only guards against garbled prices). Areas: SF · full
-  San Mateo/Peninsula · Sunnyvale · Oakland · Richmond · Berkeley · San Leandro ·
-  San Jose. Never change the buy box without Bryan's explicit instruction.
+  data floor only guards against garbled prices).
+  **Areas = THE WHOLE BAY AREA, all nine counties, every city** (Bryan, 1 Aug):
+  San Francisco · San Mateo · Santa Clara · Alameda · Contra Costa · Marin ·
+  Sonoma · Napa · Solano. Each is scanned as a **whole county** (`city: '*'`), so
+  no city list has to be kept up to date and no town is missed. **SF stays first.**
+  Never change the buy box without Bryan's explicit instruction.
+
+  Scale, measured live on 1 Aug (Active · SFR · under the cap · listed in the last
+  60 days): SF 60 · San Mateo 167 · Santa Clara 283 · Alameda 574 · Contra Costa
+  804 · Marin 56 · Sonoma 345 · Napa 95 · Solano 492 = **~2,900 listings**. The
+  results-grid pager is therefore capped at **60 pages** and **logs a warning if
+  the cap is ever hit** — the old 12-page cap silently truncated Contra Costa at
+  about 600 and the run still reported a clean finish.
 - **🚫 REMOVED screens — do not reinstate without Bryan's say-so:**
   - the **"≤85% of city median $/sqft"** cut, and
   - the **"oversized for the area"** cut (sqft > 1.5× the city median).
