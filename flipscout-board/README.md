@@ -26,9 +26,30 @@ screen lists every dated lead soonest-first.
 Passed and removed leads are left out of that list: neither has an offer left
 to get out the door.
 
-If an offer-due column is ever added to the Leads tab, add it to `FIELDS` in
-`build_data.py` and carry it onto the row; the board should then prefer the
-sheet's value and let a board-entered date override it.
+Deadlines are also read out of listing remarks automatically. `build_data.py`
+scans the Notes column (and an `Agent Remarks` column, if the pull ever adds
+one) and puts what it finds on the row, where the board shows it labelled
+"read from MLS remarks". Typing a date on the board replaces it; clearing a box
+that had a read date records "no deadline" rather than falling back to the
+remarks again.
+
+Two rules keep the parser from inventing deadlines, and they are the part to
+preserve if you touch it:
+
+- a date counts only when it FOLLOWS a phrase about offers, so a closing date
+  or an open-house time in the same remarks is never mistaken for one;
+- a weekday with no date ("offers due Thursday") is resolved against the pull
+  date and returned with a leading `~`, which the board renders as `≈ confirm`.
+  It is a reading, not a fact, and it is labelled as one.
+
+Anything ambiguous returns empty. An empty cell someone fills in beats a
+confident wrong date somebody plans around. `python3 -c` the module and feed
+`parse_offer_due` new phrasings before trusting it on a new remark style.
+
+**As of now this yields nothing**, because the pull does not carry listing
+remarks into the sheet — only 4 of 800 notes mention offers and none carries a
+date. The parser is the half that cannot be done later; getting remarks into
+the Notes column is the half that unlocks it.
 
 Each screen keeps its own pull-date scope: Leads opens on the newest pull, KPI
 on all dates (a single day's pull is always ~0% worked, which tells you

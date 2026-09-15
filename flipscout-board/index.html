@@ -253,6 +253,8 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   font-size:11px; font-weight:700; letter-spacing:.03em;
   border-radius:999px; padding:2px 8px; white-space:nowrap;
 }
+.due-src{display:block; margin-top:3px; font-size:10.5px; color:var(--muted); letter-spacing:.02em}
+.due-src.approx{color:var(--t-offer); font-weight:600}
 .due-over {background:var(--b-pass);   color:var(--t-pass)}
 .due-now  {background:var(--b-offer);  color:var(--t-offer)}
 .due-soon {background:var(--b-review); color:var(--t-review)}
@@ -415,6 +417,10 @@ footer .num{font-size:12px}
 
     <div class="kpi-head"><span>Offer deadlines</span><span class="rule"></span></div>
     <div class="tablecard kpi-table"><table id="kpiDue"></table></div>
+    <p class="kpi-note">Dates marked <span class="due-src approx" style="display:inline">≈</span> were read
+      from a weekday in the MLS remarks (&ldquo;offers due Thursday&rdquo;) and resolved against the pull
+      date — confirm them before planning around one. Typing a date on the Leads screen replaces whatever
+      was read.</p>
 
     <div class="panel">
       <div class="kpi-head" style="margin:0"><span>Status mix</span><span class="rule"></span></div>
@@ -441,14 +447,17 @@ footer .num{font-size:12px}
 (function(){
   "use strict";
   var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
-  var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date"];
+  var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue"];
   var LEADS = D.rows.map(function(r){
     var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i];
     o.link = "https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=" + o.mls;
     return o;
   });
-  var BY_DATE = {};
-  LEADS.forEach(function(l){ (BY_DATE[l.date] = BY_DATE[l.date] || []).push(l); });
+  var BY_DATE = {}, BY_MLS = {};
+  LEADS.forEach(function(l){
+    (BY_DATE[l.date] = BY_DATE[l.date] || []).push(l);
+    BY_MLS[l.mls] = l;
+  });
 
   var STATUSES = ["Needs Comps","Reviewing","Offer Sent","Won","Pass"];
   var STCLASS = {"Needs Comps":"st-needs","Reviewing":"st-review","Offer Sent":"st-offer","Won":"st-won","Pass":"st-pass"};
@@ -489,7 +498,16 @@ footer .num{font-size:12px}
   }
   function statusOf(l){ var e = rec(l.date, l.mls); return (e && e.s) || "Needs Comps"; }
   function removedOf(l){ var e = rec(l.date, l.mls); return !!(e && e.r); }
-  function dueOf(l){ var e = rec(l.date, l.mls); return (e && e.d) || ""; }
+  function teamDue(l){ var e = rec(l.date, l.mls); return (e && e.d) || ""; }
+  function sheetDue(l){ return l.sdue || ""; }
+  function dueOf(l){
+    var t = teamDue(l);
+    if (t === "-") return "";
+    if (t) return t;
+    return sheetDue(l).replace(/^~/, "");
+  }
+  function dueIsRead(l){ return !teamDue(l) && !!sheetDue(l); }
+  function dueIsApprox(l){ return dueIsRead(l) && sheetDue(l).charAt(0) === "~"; }
 
   function todayISO(){
     var n = new Date();
@@ -640,7 +658,12 @@ footer .num{font-size:12px}
       '<td data-l="DOM"><span class="dom ' + domClass(l.dom) + '">' + (l.dom == null ? "—" : l.dom) + '</span></td>' +
       '<td data-l="Offer due" class="wide"><input type="date" class="due-in" value="' + esc(due) +
         '" aria-label="Offer due date for ' + esc(l.mls) + '">' +
-        (dd === null ? '' : '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>') + '</td>' +
+        (dd === null ? '' : '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>') +
+        (dueIsRead(l)
+          ? '<span class="due-src' + (dueIsApprox(l) ? ' approx' : '') + '">' +
+            (dueIsApprox(l) ? '≈ read from MLS remarks — confirm' : 'read from MLS remarks') +
+            '</span>'
+          : '') + '</td>' +
       (view === "__all__" ? '<td data-l="Pulled" class="num">' + esc(l.date) + '</td>' : '') +
       '<td data-l="" class="act"><button class="btn tiny" data-act="' + (gone ? "restore" : "remove") + '" type="button">' +
         (gone ? "Restore" : "Remove") + '</button></td>' +
@@ -720,7 +743,9 @@ footer .num{font-size:12px}
     pending[date][mls] = next;
     draw();
     toast("d" in patch
-      ? (next.d ? "Offer due " + next.d + " — saved for the team" : "Deadline cleared")
+      ? (next.d === "-" ? "Marked no deadline — saved for the team"
+         : next.d ? "Offer due " + next.d + " — saved for the team"
+         : "Deadline cleared")
       : "r" in patch
         ? (next.r ? "Removed — saved for the team" : "Restored — saved for the team")
         : next.s === "Pass"
@@ -825,7 +850,12 @@ footer .num{font-size:12px}
     var dueIn = ev.target.closest("input.due-in");
     if (dueIn){
       tr = dueIn.closest("tr");
-      if (tr) applyEdit(tr.dataset.date, tr.dataset.mls, {d: dueIn.value});
+      if (!tr) return;
+      var lead = BY_MLS[tr.dataset.mls];
+      // clearing the box when the remarks supplied a date means "no deadline",
+      // not "fall back to the remarks again"
+      var v = dueIn.value || (lead && sheetDue(lead) ? "-" : "");
+      applyEdit(tr.dataset.date, tr.dataset.mls, {d: v});
     }
   });
 
@@ -909,7 +939,8 @@ footer .num{font-size:12px}
         '<th class="plain n">Price</th><th class="plain n">$/SqFt</th></tr></thead><tbody>' +
         dues.map(function(l){
           var dd = daysUntil(dueOf(l));
-          return '<tr><td class="n">' + esc(dueOf(l)) + '</td>' +
+          return '<tr><td class="n">' + esc(dueOf(l)) +
+            (dueIsApprox(l) ? ' <span class="due-src approx">≈</span>' : '') + '</td>' +
             '<td><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span></td>' +
             '<td><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' +
               esc(l.addr) + '</a><span class="mls">' + esc(l.mls) + '</span></td>' +
