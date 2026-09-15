@@ -9,19 +9,30 @@
   --brand:#0D5A87; --brand-2:#0E8585;
   --accent:#0B6FB0; --accent-soft:#DAEBFA;
 
-  /* the board's working hues — each one means something */
-  --violet-ink:#554AA6; --violet-bg:#E6E4F9;   /* Needs Comps  */
-  --blue-ink:#0A5F9B;   --blue-bg:#D9EAFA;     /* Reviewing    */
-  --amber-ink:#8A5804;  --amber-bg:#FCEAC2;    /* Offer Sent   */
-  --green-ink:#12714A;  --green-bg:#D3F0E0;    /* Won / in box */
-  --red-ink:#A81F3A;    --red-bg:#FBDBE2;      /* Pass / over  */
-  --teal-ink:#0A6E6E;   --teal-bg:#D2EFEF;
+  /* Status colours. --m-* are the chart marks: checked for colour-blind
+     separation, so no two adjacent pipeline segments collapse together.
+     --t-* are the darker inks their labels wear (a mark colour is rarely
+     legible as text), --b-* the soft pill grounds. Needs Comps is
+     deliberately neutral: no one has assigned it a state yet. */
+  --m-none:#5C6B7E;    --t-none:#4A5767;    --b-none:#E4E9F0;
+  --m-review:#0F6FB5;  --t-review:#0B5A94;  --b-review:#D9EAFA;
+  --m-offer:#9A5F00;   --t-offer:#7D4D00;   --b-offer:#FBEBC8;
+  --m-won:#26A574;     --t-won:#146B4C;     --b-won:#D5F2E6;
+  --m-pass:#9E1E3E;    --t-pass:#8B1A36;    --b-pass:#FBDCE3;
+  --m-removed:#36414F; --t-removed:#36414F; --b-removed:#DFE4EB;
 
-  --slate-ink:var(--violet-ink); --slate-bg:var(--violet-bg);
+  --violet-ink:var(--t-none);   --violet-bg:var(--b-none);
+  --blue-ink:var(--t-review);   --blue-bg:var(--b-review);
+  --amber-ink:var(--t-offer);   --amber-bg:var(--b-offer);
+  --green-ink:var(--t-won);     --green-bg:var(--b-won);
+  --red-ink:var(--t-pass);      --red-bg:var(--b-pass);
+  --teal-ink:#0A6E6E;           --teal-bg:#D2EFEF;
+  --slate-ink:var(--t-none);    --slate-bg:var(--b-none);
   --shadow:0 1px 2px rgba(18,40,70,.07), 0 10px 28px -18px rgba(18,40,70,.38);
 }
 
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{
   background:var(--ground); color:var(--ink);
   font-family:"Public Sans","Helvetica Neue",Arial,sans-serif;
@@ -105,6 +116,70 @@ select,input[type=text],input[type=search]{
 }
 #nameIn::placeholder{color:#BBD9EC}
 
+/* view switcher */
+.viewnav{
+  display:flex; gap:3px; padding:3px; border-radius:999px;
+  background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.3);
+}
+.viewnav button{
+  font-family:Archivo,sans-serif; font-size:12px; font-weight:600; letter-spacing:.05em;
+  color:#DCEBF6; background:transparent; border:0; border-radius:999px;
+  padding:6px 16px; cursor:pointer;
+}
+.viewnav button[aria-current="true"]{background:#FFFFFF; color:var(--brand)}
+
+/* ---------- KPI screen ---------- */
+.kpi-head{
+  display:flex; align-items:baseline; gap:10px; margin:22px 0 0;
+  font-family:Archivo,sans-serif; font-size:12px; font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+}
+.kpi-head .rule{flex:1; height:2px; border-radius:2px;
+  background:linear-gradient(90deg,var(--accent),var(--brand-2) 60%,transparent)}
+.kpi-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:12px; margin-top:14px}
+.kpi{background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  padding:14px 16px; box-shadow:var(--shadow)}
+.kpi dt{
+  font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0;
+}
+.kpi dd{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums;
+  font-size:34px; font-weight:500; letter-spacing:-.03em; margin:2px 0 0; line-height:1.1;
+}
+.kpi .sub{font-size:12px; color:var(--muted); margin-top:3px}
+.meter{height:7px; border-radius:999px; background:var(--line); overflow:hidden; margin-top:9px}
+.meter span{display:block; height:100%; border-radius:999px; background:var(--brand-2)}
+
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  box-shadow:var(--shadow); padding:16px; margin-top:14px}
+.pipe{display:flex; gap:2px; height:40px; margin:2px 0 0}
+.pipe .seg{min-width:3px; border-radius:2px; cursor:default}
+.pipe .seg:first-child{border-radius:6px 2px 2px 6px}
+.pipe .seg:last-child{border-radius:2px 6px 6px 2px}
+.legend{display:flex; flex-wrap:wrap; gap:8px 22px; margin-top:14px}
+.legend .item{display:flex; align-items:baseline; gap:8px; font-size:13px}
+.legend .sw{width:11px; height:11px; border-radius:3px; flex:none; transform:translateY(1px)}
+.legend .n{font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-variant-numeric:tabular-nums; font-weight:600}
+.legend .pct{color:var(--muted); font-size:12px}
+#kpiTip{
+  position:fixed; z-index:70; pointer-events:none; background:var(--ink); color:#FFFFFF;
+  font-size:12px; padding:6px 10px; border-radius:7px; box-shadow:0 6px 20px rgba(10,30,50,.35);
+  white-space:nowrap;
+}
+#kpiTip b{font-family:"IBM Plex Mono",ui-monospace,monospace; font-weight:600}
+.kpi-table{margin-top:14px; overflow-x:auto}
+.kpi-table table{min-width:640px}
+.kpi-table td, .kpi-table th{padding:8px 12px}
+.kpi-table tbody tr td:first-child{box-shadow:none}
+.kpi-table td.n{font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap}
+.kpi-table th.n{text-align:right}
+.kpi-table td.zero{color:var(--muted)}
+.kpi-table td:first-child, .kpi-table th:first-child{white-space:nowrap}
+.kpi-note{font-size:12px; color:var(--muted); margin-top:10px}
+
 /* ---------- stat strip ---------- */
 .stats{
   display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr));
@@ -148,11 +223,11 @@ tbody td{padding:10px 12px; border-bottom:1px solid var(--line-soft); vertical-a
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:var(--accent-soft)}
 tbody tr td:first-child{box-shadow:inset 4px 0 0 var(--line)}
-tbody tr.s-needs  td:first-child{box-shadow:inset 4px 0 0 var(--violet-ink)}
-tbody tr.s-review td:first-child{box-shadow:inset 4px 0 0 var(--blue-ink)}
-tbody tr.s-offer  td:first-child{box-shadow:inset 4px 0 0 var(--amber-ink)}
-tbody tr.s-won    td:first-child{box-shadow:inset 4px 0 0 var(--green-ink)}
-tbody tr.s-pass   td:first-child{box-shadow:inset 4px 0 0 var(--red-ink)}
+tbody tr.s-needs  td:first-child{box-shadow:inset 4px 0 0 var(--m-none)}
+tbody tr.s-review td:first-child{box-shadow:inset 4px 0 0 var(--m-review)}
+tbody tr.s-offer  td:first-child{box-shadow:inset 4px 0 0 var(--m-offer)}
+tbody tr.s-won    td:first-child{box-shadow:inset 4px 0 0 var(--m-won)}
+tbody tr.s-pass   td:first-child{box-shadow:inset 4px 0 0 var(--m-pass)}
 tbody tr.gone td{opacity:.45}
 tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
 
@@ -228,25 +303,30 @@ footer .num{font-size:12px}
   .field{flex:1 1 100%}
   .stepper{flex:1 1 auto}
   .stepper .btn{flex:1}
-  .tablecard{overflow-x:visible; background:transparent; border:0; box-shadow:none}
-  table,tbody,tr,td{display:block; width:auto; min-width:0}
-  thead{display:none}
-  tbody tr{
+  #viewLeads .tablecard{overflow-x:visible; background:transparent; border:0; box-shadow:none}
+  #viewLeads table, #viewLeads tbody, #viewLeads tr, #viewLeads td{display:block; width:auto; min-width:0}
+  #viewLeads thead{display:none}
+  #viewLeads tbody tr{
     background:var(--surface); border:1px solid var(--line); border-radius:10px;
     margin-bottom:10px; padding:4px 2px; box-shadow:var(--shadow);
   }
-  tbody tr:hover td{background:transparent}
-  tbody td{
+  #viewLeads tbody tr:hover td{background:transparent}
+  #viewLeads tbody td{
     border-bottom:1px solid var(--line-soft); padding:7px 12px;
     display:flex; gap:12px; align-items:baseline; justify-content:space-between;
   }
-  tbody td:last-child{border-bottom:0}
-  tbody td::before{
+  #viewLeads tbody td:last-child{border-bottom:0}
+  #viewLeads tbody td::before{
     content:attr(data-l); font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
     letter-spacing:.09em; text-transform:uppercase; color:var(--muted); flex:none;
   }
-  tbody td.wide{display:block}
-  tbody td.wide::before{display:block; margin-bottom:3px}
+  #viewLeads tbody td.wide{display:block}
+  #viewLeads tbody td.wide::before{display:block; margin-bottom:3px}
+  /* KPI tables keep their columns and scroll sideways in their own card */
+  .kpi-table{-webkit-overflow-scrolling:touch}
+  .kpi-table table{min-width:560px}
+  .kpi-row{grid-template-columns:repeat(auto-fit,minmax(132px,1fr)); gap:10px}
+  .kpi dd{font-size:28px}
   .addr,.note{max-width:none}
   td.act{text-align:left}
 }
@@ -257,6 +337,10 @@ footer .num{font-size:12px}
     <div class="brandrow">
       <h1>FlipScout Lead Board</h1>
       <span class="src">Leads tab · sheet read <b id="pulledAt">2026-09-15</b> · <b id="totAll">800</b> leads · <b id="totDates">33</b> pull dates</span>
+      <div class="viewnav" role="group" aria-label="Screen">
+        <button type="button" id="navLeads" aria-current="true">Leads</button>
+        <button type="button" id="navKpi" aria-current="false">KPI</button>
+      </div>
       <div class="presence"><span id="peerList"></span><input type="text" id="nameIn" placeholder="Your name" aria-label="Your name on this board"></div>
     </div>
 
@@ -292,6 +376,7 @@ footer .num{font-size:12px}
 </header>
 
 <div class="wrap">
+  <div id="viewLeads">
   <dl class="stats" id="stats"></dl>
   <div class="banner" id="syncNote">Connecting to the shared board…</div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
@@ -303,6 +388,25 @@ footer .num{font-size:12px}
     <button class="btn tiny" id="toggleRemoved" type="button">Show</button>
   </div>
   <div class="tablecard" id="removedCard" hidden><table id="tblRemoved"></table></div>
+  </div><!-- /viewLeads -->
+
+  <div id="viewKpi" hidden>
+    <div class="kpi-head"><span id="kpiScopeLabel">Pipeline</span><span class="rule"></span></div>
+    <dl class="kpi-row" id="kpiTiles"></dl>
+
+    <div class="panel">
+      <div class="kpi-head" style="margin:0"><span>Status mix</span><span class="rule"></span></div>
+      <div class="pipe" id="kpiPipe"></div>
+      <div class="legend" id="kpiLegend"></div>
+    </div>
+
+    <div class="kpi-head"><span>By pull date</span><span class="rule"></span></div>
+    <div class="tablecard kpi-table"><table id="kpiByDate"></table></div>
+
+    <div class="kpi-head"><span>Who worked what</span><span class="rule"></span></div>
+    <div class="tablecard kpi-table"><table id="kpiByPerson"></table></div>
+    <p class="kpi-note" id="kpiPersonNote"></p>
+  </div>
 
   <footer>
     Status changes and removals are saved on this board and shared with everyone who opens this link — they survive every data refresh.
@@ -333,7 +437,8 @@ footer .num{font-size:12px}
   var pending  = {};  // date -> mls -> record, changed here, not confirmed yet
   var inflight = {};  // "date|mls" -> true while a write is in the air
   var db = null;
-  var view = D.dates[0] || "";
+  var scopeFor = {leads: D.dates[0] || "", kpi: "__all__"};
+  var view = scopeFor.leads;
   var showRemoved = true;
 
   var $ = function(id){ return document.getElementById(id); };
@@ -343,6 +448,11 @@ footer .num{font-size:12px}
     var p = d.split("-");
     var dt = new Date(Date.UTC(+p[0], +p[1]-1, +p[2]));
     return dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",timeZone:"UTC"});
+  }
+  function fmtShort(d){
+    var p = d.split("-");
+    var dt = new Date(Date.UTC(+p[0], +p[1]-1, +p[2]));
+    return dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:"UTC"});
   }
   function esc(s){
     return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -474,6 +584,10 @@ footer .num{font-size:12px}
     '</tr>';
   }
 
+  function draw(){
+    if (activeScreen === "kpi") renderKpi(); else render();
+  }
+
   function render(){
     var rows = currentRows();
     renderStats(rows);
@@ -520,7 +634,7 @@ footer .num{font-size:12px}
     if ("r" in patch) next.r = patch.r;
     pending[date] = pending[date] || {};
     pending[date][mls] = next;
-    render();
+    draw();
     toast("r" in patch
       ? (next.r ? "Removed — saved for the team" : "Restored — saved for the team")
       : "Marked " + next.s + " — saved for the team");
@@ -580,10 +694,14 @@ footer .num{font-size:12px}
   }
 
   /* ---------- events ---------- */
-  sel.addEventListener("change", function(){ view = sel.value; render(); syncStep(); });
-  $("q").addEventListener("input", render);
-  $("statusFilter").addEventListener("change", render);
-  $("toggleRemoved").addEventListener("click", function(){ showRemoved = !showRemoved; render(); });
+  sel.addEventListener("change", function(){
+    view = sel.value;
+    scopeFor[activeScreen] = view;
+    draw(); syncStep();
+  });
+  $("q").addEventListener("input", draw);
+  $("statusFilter").addEventListener("change", draw);
+  $("toggleRemoved").addEventListener("click", function(){ showRemoved = !showRemoved; draw(); });
 
   function syncStep(){
     var i = D.dates.indexOf(view);
@@ -591,10 +709,10 @@ footer .num{font-size:12px}
     $("older").disabled = (view === "__all__" || i < 0 || i >= D.dates.length - 1);
   }
   $("newer").addEventListener("click", function(){
-    var i = D.dates.indexOf(view); if (i > 0){ view = D.dates[i-1]; sel.value = view; render(); syncStep(); }
+    var i = D.dates.indexOf(view); if (i > 0){ view = D.dates[i-1]; sel.value = view; scopeFor[activeScreen] = view; draw(); syncStep(); }
   });
   $("older").addEventListener("click", function(){
-    var i = D.dates.indexOf(view); if (i > -1 && i < D.dates.length-1){ view = D.dates[i+1]; sel.value = view; render(); syncStep(); }
+    var i = D.dates.indexOf(view); if (i > -1 && i < D.dates.length-1){ view = D.dates[i+1]; sel.value = view; scopeFor[activeScreen] = view; draw(); syncStep(); }
   });
 
   document.addEventListener("click", function(ev){
@@ -602,7 +720,7 @@ footer .num{font-size:12px}
     if (th){
       var k = th.dataset.s;
       if (k === sortKey) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
-      render(); return;
+      draw(); return;
     }
     var b = ev.target.closest("button[data-act]"); if (!b) return;
     var tr = b.closest("tr"); if (!tr) return;
@@ -614,7 +732,167 @@ footer .num{font-size:12px}
     applyEdit(tr.dataset.date, tr.dataset.mls, {s: s.value});
   });
 
-  render(); syncStep();
+  /* ---------- KPI screen ---------- */
+  // Pipeline order, each with its validated mark colour. "Removed" sits apart
+  // from the statuses: it is where a lead leaves the pipeline, not a state in it.
+  var PIPE = [
+    ["Needs Comps", "--m-none"],
+    ["Reviewing",   "--m-review"],
+    ["Offer Sent",  "--m-offer"],
+    ["Won",         "--m-won"],
+    ["Pass",        "--m-pass"]
+  ];
+  var REMOVED_MARK = "--m-removed";
+
+  function tally(list){
+    var counts = {}, removed = 0, touched = 0, people = {};
+    PIPE.forEach(function(p){ counts[p[0]] = 0; });
+    list.forEach(function(l){
+      var e = rec(l.date, l.mls);
+      if (e && e.r) removed++;
+      else counts[statusOf(l)]++;
+      if (!e) return;
+      touched++;
+      var who = e.by || "Someone";
+      people[who] = people[who] || {touched: 0, removals: 0, statuses: 0};
+      people[who].touched++;
+      if (e.r) people[who].removals++;
+      else if (e.s && e.s !== "Needs Comps") people[who].statuses++;
+    });
+    return {counts: counts, removed: removed, touched: touched,
+            people: people, total: list.length};
+  }
+
+  function pct(n, of){ return of ? Math.round(n / of * 1000) / 10 : 0; }
+  function tdN(n){ return '<td class="n' + (n ? '' : ' zero') + '">' + n + '</td>'; }
+
+  function renderKpi(){
+    var list = view === "__all__" ? LEADS : (BY_DATE[view] || []);
+    var k = tally(list);
+    var scope = view === "__all__"
+      ? "All " + D.dates.length + " pull dates"
+      : fmtDate(view) + " pull";
+    $("kpiScopeLabel").textContent = scope;
+
+    var active = k.total - k.removed;
+    var untouched = k.total - k.touched;
+    $("kpiTiles").innerHTML = [
+      ['<div class="kpi"><dt>Leads</dt><dd>' + k.total + '</dd>' +
+       '<div class="sub">' + scope + '</div></div>'],
+      ['<div class="kpi"><dt>Still live</dt><dd style="color:var(--t-review)">' + active + '</dd>' +
+       '<div class="sub">' + k.removed + ' removed</div></div>'],
+      ['<div class="kpi"><dt>Worked</dt><dd style="color:var(--t-won)">' + k.touched + '</dd>' +
+       '<div class="sub">' + pct(k.touched, k.total) + '% of the list</div>' +
+       '<div class="meter"><span style="width:' + pct(k.touched, k.total) + '%"></span></div></div>'],
+      ['<div class="kpi"><dt>Untouched</dt><dd style="color:var(--t-none)">' + untouched + '</dd>' +
+       '<div class="sub">nobody has opened these yet</div></div>'],
+      ['<div class="kpi"><dt>Offers out</dt><dd style="color:var(--t-offer)">' +
+       k.counts["Offer Sent"] + '</dd><div class="sub">' + k.counts["Won"] + ' won</div></div>'],
+      ['<div class="kpi"><dt>Passed</dt><dd style="color:var(--t-pass)">' + k.counts["Pass"] + '</dd>' +
+       '<div class="sub">ruled out on review</div></div>']
+    ].join("");
+
+    // one stacked bar; numbers live in the legend and the tables, never inside
+    // a segment, where they would sit on a fill that cannot carry text safely
+    var segs = PIPE.map(function(p){ return [p[0], k.counts[p[0]], p[1]]; });
+    segs.push(["Removed", k.removed, REMOVED_MARK]);
+    $("kpiPipe").innerHTML = segs.map(function(sg){
+      if (!sg[1]) return "";
+      return '<div class="seg" style="flex:' + sg[1] + ' 0 0; background:var(' + sg[2] + ')" ' +
+             'data-label="' + esc(sg[0]) + '" data-n="' + sg[1] +
+             '" data-pct="' + pct(sg[1], k.total) + '"></div>';
+    }).join("");
+    $("kpiLegend").innerHTML = segs.map(function(sg){
+      return '<span class="item"><span class="sw" style="background:var(' + sg[2] + ')"></span>' +
+             esc(sg[0]) + ' <span class="n">' + sg[1] + '</span>' +
+             '<span class="pct">' + pct(sg[1], k.total) + '%</span></span>';
+    }).join("");
+
+    var cols = PIPE.map(function(p){ return p[0]; });
+    var headCells = '<th class="plain">Pulled</th><th class="plain n">Leads</th>' +
+      cols.map(function(c){ return '<th class="plain n">' + c + '</th>'; }).join("") +
+      '<th class="plain n">Removed</th><th class="plain n">Worked</th>';
+    var dates = view === "__all__" ? D.dates : [view];
+    var body = dates.map(function(d){
+      var kd = tally(BY_DATE[d] || []);
+      return '<tr><td>' + fmtShort(d) + '</td>' + tdN(kd.total) +
+        cols.map(function(c){ return tdN(kd.counts[c]); }).join("") +
+        tdN(kd.removed) +
+        '<td class="n">' + pct(kd.touched, kd.total) + '%</td></tr>';
+    }).join("");
+    var totalRow = '<tr><td><b>Total</b></td>' + tdN(k.total) +
+      cols.map(function(c){ return tdN(k.counts[c]); }).join("") +
+      tdN(k.removed) + '<td class="n">' + pct(k.touched, k.total) + '%</td></tr>';
+    $("kpiByDate").innerHTML = '<thead><tr>' + headCells + '</tr></thead><tbody>' +
+      body + totalRow + '</tbody>';
+
+    var names = Object.keys(k.people).sort(function(a, b){
+      return k.people[b].touched - k.people[a].touched;
+    });
+    $("kpiByPerson").innerHTML = names.length
+      ? '<thead><tr><th class="plain">Who</th><th class="plain n">Leads worked</th>' +
+        '<th class="plain n">Statuses set</th><th class="plain n">Removed</th></tr></thead><tbody>' +
+        names.map(function(n){
+          var pp = k.people[n];
+          return '<tr><td>' + esc(n) + '</td>' + tdN(pp.touched) +
+                 tdN(pp.statuses) + tdN(pp.removals) + '</tr>';
+        }).join("") + '</tbody>'
+      : '<tbody><tr><td class="empty"><b>Nothing worked yet</b>' +
+        'Set a status or remove a lead on the Leads screen and it shows up here.</td></tr></tbody>';
+
+    var anon = names.indexOf("Someone") !== -1 ? k.people["Someone"].touched : 0;
+    $("kpiPersonNote").textContent = anon
+      ? anon + ' of these are logged as "Someone" — that teammate had not typed a name in the box beside the Leads/KPI switch when they made the edit.'
+      : "";
+  }
+
+  var tip = null;
+  document.addEventListener("mouseover", function(ev){
+    var sg = ev.target.closest(".pipe .seg");
+    if (!sg) return;
+    if (!tip){ tip = document.createElement("div"); tip.id = "kpiTip"; document.body.appendChild(tip); }
+    tip.innerHTML = esc(sg.dataset.label) + ' &nbsp;<b>' + sg.dataset.n + '</b> · ' + sg.dataset.pct + '%';
+    tip.hidden = false;
+  });
+  document.addEventListener("mousemove", function(ev){
+    if (!tip || tip.hidden) return;
+    tip.style.left = Math.min(ev.clientX + 14, window.innerWidth - tip.offsetWidth - 10) + "px";
+    tip.style.top = Math.max(ev.clientY - 38, 8) + "px";
+  });
+  document.addEventListener("mouseout", function(ev){
+    if (tip && ev.target.closest(".pipe .seg")) tip.hidden = true;
+  });
+
+  var activeScreen = "leads";
+  function showScreen(next, push){
+    scopeFor[activeScreen] = view;
+    activeScreen = next === "kpi" ? "kpi" : "leads";
+    var onKpi = activeScreen === "kpi";
+    view = scopeFor[activeScreen];
+    sel.value = view;
+    $("viewLeads").hidden = onKpi;
+    $("viewKpi").hidden = !onKpi;
+    $("navLeads").setAttribute("aria-current", String(!onKpi));
+    $("navKpi").setAttribute("aria-current", String(onKpi));
+    // search and status filter belong to the lead list, not the numbers
+    $("q").closest(".field").hidden = onKpi;
+    $("statusFilter").closest(".field").hidden = onKpi;
+    syncStep();
+    if (push) {
+      try {
+        history.replaceState(null, "", onKpi ? "#kpi" : location.pathname + location.search);
+      } catch (e) { /* sandboxed frame: the switch still works, the URL just won't carry it */ }
+    }
+    draw();
+  }
+  $("navLeads").addEventListener("click", function(){ showScreen("leads", true); });
+  $("navKpi").addEventListener("click", function(){ showScreen("kpi", true); });
+  window.addEventListener("hashchange", function(){
+    showScreen(location.hash === "#kpi" ? "kpi" : "leads", false);
+  });
+
+  showScreen(location.hash === "#kpi" ? "kpi" : "leads", false);
+  syncStep();
 
   /* ---------- shared board (db) ---------- */
   if (window.claude && claude.use){
@@ -628,7 +906,7 @@ footer .num{font-size:12px}
         server = next;
         reconcile();
         note("Shared board <b>connected</b>. Status changes and removals save here for the whole team and survive every sheet refresh.");
-        render();
+        draw();
         flush();
       }, function(){
         note("Lost the connection to the shared board — changes from here may not save. Reload the page.", true);

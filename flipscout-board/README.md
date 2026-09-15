@@ -4,6 +4,16 @@ A published board of every MLS lead in the acquisitions sheet, grouped by the
 date it was pulled. The team works it directly: set a status, remove a lead,
 restore one.
 
+Two screens, switched in the header:
+
+- **Leads** — the list for the selected pull date.
+- **KPI** — the pipeline counted by status, by pull date, and by teammate.
+  Deep-links as `#kpi`, so it can be bookmarked and shared on its own.
+
+Each screen keeps its own pull-date scope: Leads opens on the newest pull, KPI
+on all dates (a single day's pull is always ~0% worked, which tells you
+nothing).
+
 - **Board:** https://claude.ai/code/artifact/864f77f8-9101-43d3-a7c8-c50e1872478c
 - **Source sheet:** `1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ`, the **Leads** tab
 - **Refreshed:** daily at 11:00 Pacific by the "FlipScout board — daily 11am refresh" Routine
@@ -16,6 +26,13 @@ Lead data and team edits live in two different places, on purpose:
 |---|---|---|
 | Leads (address, price, $/SqFt, DOM, notes) | `data.js`, rebuilt from the sheet | this refresh |
 | Statuses and removals | the artifact's own database, keyed by pull date + MLS # | the team, in the board |
+
+Every number on the KPI screen is counted live from those two sources at render
+time. Nothing is precomputed, so the KPI screen cannot drift from the board.
+
+The status colours in `--m-*` were checked for colour-blind separation; if you
+restyle them, re-check rather than eyeball, and keep the labels — the pipeline
+bar must never rely on colour alone.
 
 Rebuilding `data.js` therefore **cannot** disturb the team's work. That
 separation is the whole point — an earlier version kept edits in the browser
