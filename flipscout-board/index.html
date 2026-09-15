@@ -1,0 +1,663 @@
+<title>FlipScout Lead Board</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme: light;               /* keep form controls light on dark OS */
+  --ground:#EDF2F8; --surface:#FFFFFF; --surface-2:#F5F9FD;
+  --ink:#14202E; --muted:#57687C; --line:#D3DEEB; --line-soft:#E6EDF6;
+
+  --brand:#0D5A87; --brand-2:#0E8585;
+  --accent:#0B6FB0; --accent-soft:#DAEBFA;
+
+  /* the board's working hues — each one means something */
+  --violet-ink:#554AA6; --violet-bg:#E6E4F9;   /* Needs Comps  */
+  --blue-ink:#0A5F9B;   --blue-bg:#D9EAFA;     /* Reviewing    */
+  --amber-ink:#8A5804;  --amber-bg:#FCEAC2;    /* Offer Sent   */
+  --green-ink:#12714A;  --green-bg:#D3F0E0;    /* Won / in box */
+  --red-ink:#A81F3A;    --red-bg:#FBDBE2;      /* Pass / over  */
+  --teal-ink:#0A6E6E;   --teal-bg:#D2EFEF;
+
+  --slate-ink:var(--violet-ink); --slate-bg:var(--violet-bg);
+  --shadow:0 1px 2px rgba(18,40,70,.07), 0 10px 28px -18px rgba(18,40,70,.38);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:"Public Sans","Helvetica Neue",Arial,sans-serif;
+  font-size:14px; line-height:1.45; margin:0;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1400px; margin:0 auto; padding:0 20px; padding-block:0 56px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+@media (prefers-reduced-motion: reduce){*{animation:none!important; transition:none!important}}
+
+/* ---------- masthead ---------- */
+header.top{
+  background:linear-gradient(100deg,var(--brand) 0%,#0A6E93 52%,var(--brand-2) 100%);
+  position:sticky; top:0; z-index:30;
+  box-shadow:0 2px 14px rgba(10,60,92,.25);
+}
+header.top h1{color:#FFFFFF}
+header.top .src{color:#B9D9EC}
+header.top .src b{color:#FFFFFF}
+header.top .field label{color:#B9D9EC}
+header.top .btn{background:rgba(255,255,255,.94); border-color:rgba(255,255,255,.5); color:var(--brand)}
+header.top .btn:hover{background:#FFFFFF; border-color:#FFFFFF; color:var(--brand)}
+header.top .btn[disabled]{background:rgba(255,255,255,.35); color:#DCEAF4; border-color:transparent}
+.top .wrap{padding-block:14px}
+.brandrow{display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px}
+h1{
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif; font-weight:700;
+  font-size:19px; letter-spacing:-.015em; margin:0; text-wrap:balance;
+}
+.src{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px;
+  color:var(--muted); letter-spacing:.02em;
+}
+.src b{color:var(--ink); font-weight:500}
+
+/* controls */
+.controls{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:14px}
+.field{display:flex; flex-direction:column; gap:5px}
+.field label{
+  font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted);
+}
+select,input[type=text],input[type=search]{
+  font-family:inherit; font-size:14px; color:var(--ink);
+  background:var(--surface-2); border:1px solid var(--line);
+  border-radius:7px; padding:8px 10px; min-height:38px;
+}
+#dateSel{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-weight:600;
+  min-width:230px; background:#FFFFFF; color:var(--brand);
+  border:2px solid #FFFFFF; box-shadow:0 2px 8px rgba(6,40,62,.22);
+}
+#q,#statusFilter{background:#FFFFFF; border-color:rgba(255,255,255,.55)}
+#q{min-width:230px}
+.field.grow{flex:1 1 230px}
+.field.grow #q{width:100%}
+.stepper{display:flex; gap:6px}
+.btn{
+  font-family:inherit; font-size:13px; font-weight:500; color:var(--ink);
+  background:var(--surface-2); border:1px solid var(--line);
+  border-radius:7px; padding:8px 12px; min-height:38px; cursor:pointer;
+}
+.btn:hover{border-color:var(--accent); color:var(--accent)}
+.btn[disabled]{opacity:.4; cursor:default; border-color:var(--line); color:var(--muted)}
+.btn.tiny{min-height:0; padding:4px 9px; font-size:12px; border-radius:6px}
+
+/* presence */
+.presence{display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-left:auto}
+.who{
+  display:inline-flex; align-items:center; gap:6px; font-size:12px;
+  background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.32);
+  border-radius:999px; padding:4px 10px 4px 6px; color:#DCEBF6;
+}
+.who .dot{width:7px; height:7px; border-radius:50%; background:#7FE3C4; flex:none}
+.who.me{border-color:#FFFFFF; color:#FFFFFF}
+.who.me .dot{background:#FFD36B}
+#nameIn{
+  min-height:0; padding:4px 10px; font-size:12px; width:120px; border-radius:999px;
+  background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.32); color:#FFFFFF;
+}
+#nameIn::placeholder{color:#BBD9EC}
+
+/* ---------- stat strip ---------- */
+.stats{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr));
+  gap:1px; background:var(--line); border:1px solid var(--line);
+  border-radius:10px; overflow:hidden; margin:20px 0 0;
+}
+.stat{background:var(--surface); padding:12px 14px; border-top:3px solid var(--line)}
+.stat.c-blue  {border-top-color:var(--blue-ink)}   .stat.c-blue dd  {color:var(--blue-ink)}
+.stat.c-green {border-top-color:var(--green-ink)}  .stat.c-green dd {color:var(--green-ink)}
+.stat.c-amber {border-top-color:var(--amber-ink)}  .stat.c-amber dd {color:var(--amber-ink)}
+.stat.c-red   {border-top-color:var(--red-ink)}    .stat.c-red dd   {color:var(--red-ink)}
+.stat.c-teal  {border-top-color:var(--teal-ink)}   .stat.c-teal dd  {color:var(--teal-ink)}
+.stat.c-violet{border-top-color:var(--violet-ink)} .stat.c-violet dd{color:var(--violet-ink)}
+.stat dt{
+  font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0;
+}
+.stat dd{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums;
+  font-size:22px; font-weight:500; margin:3px 0 0; letter-spacing:-.02em;
+}
+.stat dd small{font-size:12px; color:var(--muted); font-weight:400; margin-left:3px}
+
+/* ---------- table ---------- */
+.tablecard{
+  background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  box-shadow:var(--shadow); margin-top:16px; overflow-x:auto;
+}
+table{border-collapse:collapse; width:100%; min-width:1080px}
+thead th{
+  position:sticky; top:0; z-index:5; background:var(--accent-soft); color:var(--brand);
+  font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase;
+  text-align:left; padding:10px 12px; border-bottom:2px solid var(--accent);
+  white-space:nowrap; cursor:pointer; user-select:none;
+}
+thead th.plain{cursor:default}
+thead th .arrow{opacity:0; margin-left:4px}
+thead th[aria-sort] .arrow{opacity:1; color:var(--accent)}
+tbody td{padding:10px 12px; border-bottom:1px solid var(--line-soft); vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--accent-soft)}
+tbody tr td:first-child{box-shadow:inset 4px 0 0 var(--line)}
+tbody tr.s-needs  td:first-child{box-shadow:inset 4px 0 0 var(--violet-ink)}
+tbody tr.s-review td:first-child{box-shadow:inset 4px 0 0 var(--blue-ink)}
+tbody tr.s-offer  td:first-child{box-shadow:inset 4px 0 0 var(--amber-ink)}
+tbody tr.s-won    td:first-child{box-shadow:inset 4px 0 0 var(--green-ink)}
+tbody tr.s-pass   td:first-child{box-shadow:inset 4px 0 0 var(--red-ink)}
+tbody tr.gone td{opacity:.45}
+tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
+
+.num{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+.addr{font-weight:500; display:block; max-width:34ch; text-decoration:none; color:var(--brand)}
+.addr:hover{text-decoration:underline}
+.mls{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px;
+  color:var(--muted); letter-spacing:.01em;
+}
+.note{
+  display:block; margin-top:4px; font-size:12.5px;
+  background:var(--amber-bg); color:var(--amber-ink); border-radius:5px;
+  padding:3px 7px; max-width:38ch;
+}
+.pill{
+  display:inline-block; font-family:Archivo,sans-serif; font-size:11px; font-weight:600;
+  letter-spacing:.03em; border-radius:999px; padding:3px 9px; white-space:nowrap;
+}
+.st-sel{
+  font-family:Archivo,sans-serif; font-size:11.5px; font-weight:600; letter-spacing:.02em;
+  border-radius:999px; padding:5px 8px; min-height:0; border:1px solid transparent;
+  appearance:none; cursor:pointer; min-width:108px;
+}
+.st-needs{background:var(--slate-bg); color:var(--slate-ink)}
+.st-review{background:var(--blue-bg); color:var(--blue-ink)}
+.st-offer{background:var(--amber-bg); color:var(--amber-ink)}
+.st-won{background:var(--green-bg); color:var(--green-ink)}
+.st-pass{background:var(--red-bg); color:var(--red-ink)}
+.dom{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; border-radius:5px; padding:2px 7px; font-size:12.5px}
+.dom-ok{background:var(--green-bg); color:var(--green-ink)}
+.dom-none{background:transparent; color:var(--muted)}
+.dom-warn{background:var(--amber-bg); color:var(--amber-ink)}
+.dom-over{background:var(--red-bg); color:var(--red-ink)}
+td.act{white-space:nowrap; text-align:right}
+.by{display:block; font-size:11px; color:var(--muted); margin-top:4px; font-style:italic}
+.empty{padding:44px 20px; text-align:center; color:var(--muted)}
+.empty b{display:block; font-family:Archivo,sans-serif; color:var(--ink); font-size:15px; margin-bottom:4px}
+
+/* section heads */
+.sechead{
+  display:flex; align-items:baseline; gap:10px; margin:26px 0 0;
+  font-family:Archivo,sans-serif; font-size:12px; font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+}
+.sechead .rule{flex:1; height:2px; border-radius:2px;
+  background:linear-gradient(90deg,var(--accent),var(--brand-2) 60%,transparent)}
+.sechead .cnt{font-family:"IBM Plex Mono",monospace; letter-spacing:0}
+
+.banner{
+  margin-top:16px; border:1px solid var(--line); border-left:4px solid var(--brand-2);
+  background:var(--surface); border-radius:8px; padding:10px 14px;
+  font-size:12.5px; color:var(--muted);
+}
+.banner b{color:var(--ink); font-weight:600}
+footer{margin-top:28px; font-size:12px; color:var(--muted)}
+footer .num{font-size:12px}
+
+#toast{
+  position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:60;
+  background:var(--brand); color:#FFFFFF; box-shadow:0 6px 22px rgba(10,50,80,.4);
+  font-family:Archivo,sans-serif; font-size:13px; font-weight:600;
+  padding:9px 16px; border-radius:999px; text-align:center;
+  max-width:calc(100% - 32px);
+}
+
+/* ---------- phone ---------- */
+@media (max-width:760px){
+  header.top{position:static}
+  .wrap{padding:0 16px; padding-block:0 40px}
+  .presence{margin-left:0; width:100%}
+  #dateSel,#q,.field.grow{min-width:0; width:100%}
+  .field{flex:1 1 100%}
+  .stepper{flex:1 1 auto}
+  .stepper .btn{flex:1}
+  .tablecard{overflow-x:visible; background:transparent; border:0; box-shadow:none}
+  table,tbody,tr,td{display:block; width:auto; min-width:0}
+  thead{display:none}
+  tbody tr{
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    margin-bottom:10px; padding:4px 2px; box-shadow:var(--shadow);
+  }
+  tbody tr:hover td{background:transparent}
+  tbody td{
+    border-bottom:1px solid var(--line-soft); padding:7px 12px;
+    display:flex; gap:12px; align-items:baseline; justify-content:space-between;
+  }
+  tbody td:last-child{border-bottom:0}
+  tbody td::before{
+    content:attr(data-l); font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--muted); flex:none;
+  }
+  tbody td.wide{display:block}
+  tbody td.wide::before{display:block; margin-bottom:3px}
+  .addr,.note{max-width:none}
+  td.act{text-align:left}
+}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brandrow">
+      <h1>FlipScout Lead Board</h1>
+      <span class="src">Leads tab · sheet read <b id="pulledAt">2026-09-15</b> · <b id="totAll">800</b> leads · <b id="totDates">33</b> pull dates</span>
+      <div class="presence"><span id="peerList"></span><input type="text" id="nameIn" placeholder="Your name" aria-label="Your name on this board"></div>
+    </div>
+
+    <div class="controls">
+      <div class="field">
+        <label for="dateSel">Pull date</label>
+        <select id="dateSel"></select>
+      </div>
+      <div class="field">
+        <label>Step</label>
+        <div class="stepper">
+          <button class="btn" id="newer" type="button">← Newer</button>
+          <button class="btn" id="older" type="button">Older →</button>
+        </div>
+      </div>
+      <div class="field grow">
+        <label for="q">Search this view</label>
+        <input type="search" id="q" placeholder="Address, MLS #, city, note…">
+      </div>
+      <div class="field">
+        <label for="statusFilter">Status</label>
+        <select id="statusFilter">
+          <option value="">All statuses</option>
+          <option>Needs Comps</option>
+          <option>Reviewing</option>
+          <option>Offer Sent</option>
+          <option>Won</option>
+          <option>Pass</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <dl class="stats" id="stats"></dl>
+  <div class="banner" id="syncNote">Connecting to the shared board…</div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <div class="sechead"><span id="activeLabel">Active</span><span class="cnt" id="activeCount"></span><span class="rule"></span></div>
+  <div class="tablecard"><table id="tblActive"></table></div>
+
+  <div class="sechead" id="removedHead" hidden><span>Removed</span><span class="cnt" id="removedCount"></span><span class="rule"></span>
+    <button class="btn tiny" id="toggleRemoved" type="button">Show</button>
+  </div>
+  <div class="tablecard" id="removedCard" hidden><table id="tblRemoved"></table></div>
+
+  <footer>
+    Status changes and removals are saved on this board and shared with everyone who opens this link — they survive every data refresh.
+    Lead data comes from the <span class="num">Leads</span> tab of the MLS sheet; removing a lead here never edits the sheet.
+  </footer>
+</div>
+
+<script src="data.js"></script>
+<script>
+(function(){
+  "use strict";
+  var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
+  var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date"];
+  var LEADS = D.rows.map(function(r){
+    var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i];
+    o.link = "https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=" + o.mls;
+    return o;
+  });
+  var BY_DATE = {};
+  LEADS.forEach(function(l){ (BY_DATE[l.date] = BY_DATE[l.date] || []).push(l); });
+
+  var STATUSES = ["Needs Comps","Reviewing","Offer Sent","Won","Pass"];
+  var STCLASS = {"Needs Comps":"st-needs","Reviewing":"st-review","Offer Sent":"st-offer","Won":"st-won","Pass":"st-pass"};
+  var STRIPE  = {"Needs Comps":"s-needs","Reviewing":"s-review","Offer Sent":"s-offer","Won":"s-won","Pass":"s-pass"};
+
+  // A record is {s:status, r:removed, by:name, at:iso}.
+  var server   = {};  // date -> mls -> record, as the shared board has it
+  var pending  = {};  // date -> mls -> record, changed here, not confirmed yet
+  var inflight = {};  // "date|mls" -> true while a write is in the air
+  var db = null;
+  var view = D.dates[0] || "";
+  var showRemoved = true;
+
+  var $ = function(id){ return document.getElementById(id); };
+  var fmtMoney = function(n){ return n == null ? "—" : "$" + n.toLocaleString("en-US"); };
+  var fmtNum = function(n){ return n == null ? "—" : n.toLocaleString("en-US"); };
+  function fmtDate(d){
+    var p = d.split("-");
+    var dt = new Date(Date.UTC(+p[0], +p[1]-1, +p[2]));
+    return dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",timeZone:"UTC"});
+  }
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function rec(date, mls){
+    var p = pending[date] && pending[date][mls];
+    if (p) return p;
+    return (server[date] && server[date][mls]) || null;
+  }
+  function statusOf(l){ var e = rec(l.date, l.mls); return (e && e.s) || "Needs Comps"; }
+  function removedOf(l){ var e = rec(l.date, l.mls); return !!(e && e.r); }
+
+  var myName = "";
+  try { myName = localStorage.getItem("flipscout.name") || ""; } catch(e){}
+
+  /* ---------- build the date dropdown ---------- */
+  var sel = $("dateSel");
+  D.dates.forEach(function(d, i){
+    var n = (BY_DATE[d] || []).length;
+    var o = document.createElement("option");
+    o.value = d;
+    o.textContent = fmtDate(d) + "  ·  " + n + (n === 1 ? " lead" : " leads") + (i === 0 ? "  ·  latest" : "");
+    sel.appendChild(o);
+  });
+  var allOpt = document.createElement("option");
+  allOpt.value = "__all__";
+  allOpt.textContent = "All pull dates  ·  " + LEADS.length + " leads";
+  sel.appendChild(allOpt);
+  sel.value = view;
+
+  $("pulledAt").textContent = fmtDate(D.pulled);
+  $("totAll").textContent = LEADS.length;
+  $("totDates").textContent = D.dates.length;
+
+  /* ---------- rows for the current view ---------- */
+  function currentRows(){
+    var base = view === "__all__" ? LEADS.slice() : (BY_DATE[view] || []).slice();
+    var q = $("q").value.trim().toLowerCase();
+    var st = $("statusFilter").value;
+    return base.filter(function(l){
+      if (st && statusOf(l) !== st) return false;
+      if (!q) return true;
+      return (l.addr + " " + l.mls + " " + (l.note || "")).toLowerCase().indexOf(q) !== -1;
+    });
+  }
+
+  function median(a){
+    var v = a.filter(function(x){ return typeof x === "number"; }).sort(function(x,y){ return x-y; });
+    if (!v.length) return null;
+    var m = Math.floor(v.length/2);
+    return v.length % 2 ? v[m] : Math.round((v[m-1]+v[m])/2);
+  }
+
+  function renderStats(rows){
+    var active = rows.filter(function(l){ return !removedOf(l); });
+    var gone = rows.length - active.length;
+    var working = active.filter(function(l){ return statusOf(l) !== "Needs Comps"; }).length;
+    var over = active.filter(function(l){ return l.dom != null && l.dom > 45; }).length;
+    var med = median(active.map(function(l){ return l.ppsf; }));
+    var cells = [
+      ["In this view", rows.length, "", "c-teal"],
+      ["Active", active.length, "", "c-blue"],
+      ["Worked", working, "status set", "c-green"],
+      ["Removed", gone, "", "c-violet"],
+      ["Median $/SqFt", med == null ? "—" : "$" + med.toLocaleString("en-US"), "", "c-amber"],
+      ["Over 45 DOM", over, "buy-box limit", "c-red"]
+    ];
+    $("stats").innerHTML = cells.map(function(c){
+      return '<div class="stat ' + c[3] + '"><dt>' + esc(c[0]) + '</dt><dd>' + esc(String(c[1])) +
+             (c[2] ? '<small>' + esc(c[2]) + '</small>' : '') + '</dd></div>';
+    }).join("");
+  }
+
+  function domClass(d){
+    if (d == null) return "dom-none";
+    if (d > 45) return "dom-over";
+    if (d > 30) return "dom-warn";
+    return "dom-ok";
+  }
+
+  function head(){ return '<thead><tr>' +
+    '<th class="plain">Status</th>' +
+    '<th class="plain">Address / MLS #</th>' +
+    '<th data-s="price">Price<span class="arrow">▾</span></th>' +
+    '<th data-s="ppsf">$/SqFt<span class="arrow">▾</span></th>' +
+    '<th data-s="sqft">SqFt<span class="arrow">▾</span></th>' +
+    '<th data-s="beds">Beds<span class="arrow">▾</span></th>' +
+    '<th data-s="year">Built<span class="arrow">▾</span></th>' +
+    '<th data-s="dom">DOM<span class="arrow">▾</span></th>' +
+    (view === "__all__" ? '<th data-s="date">Pulled<span class="arrow">▾</span></th>' : '') +
+    '<th class="plain"></th></tr></thead>'; }
+
+  var sortKey = "ppsf", sortDir = 1;
+
+  function sortRows(rows){
+    return rows.sort(function(a,b){
+      var x = a[sortKey], y = b[sortKey];
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      if (x < y) return -1*sortDir;
+      if (x > y) return 1*sortDir;
+      return 0;
+    });
+  }
+
+  function rowHTML(l){
+    var st = statusOf(l), e = rec(l.date, l.mls), gone = removedOf(l);
+    var opts = STATUSES.map(function(s){
+      return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>';
+    }).join("");
+    return '<tr class="' + STRIPE[st] + (gone ? " gone" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+      '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
+        (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + '</td>' +
+      '<td data-l="Property" class="wide"><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' + esc(l.addr) + '</a>' +
+        '<span class="mls">' + esc(l.mls) + '</span>' +
+        (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + '</td>' +
+      '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
+      '<td data-l="$/SqFt" class="num">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
+      '<td data-l="SqFt" class="num">' + fmtNum(l.sqft) + '</td>' +
+      '<td data-l="Beds" class="num">' + (l.beds ? l.beds : "—") + '</td>' +
+      '<td data-l="Built" class="num">' + (l.year ? l.year : "—") + '</td>' +
+      '<td data-l="DOM"><span class="dom ' + domClass(l.dom) + '">' + (l.dom == null ? "—" : l.dom) + '</span></td>' +
+      (view === "__all__" ? '<td data-l="Pulled" class="num">' + esc(l.date) + '</td>' : '') +
+      '<td data-l="" class="act"><button class="btn tiny" data-act="' + (gone ? "restore" : "remove") + '" type="button">' +
+        (gone ? "Restore" : "Remove") + '</button></td>' +
+    '</tr>';
+  }
+
+  function render(){
+    var rows = currentRows();
+    renderStats(rows);
+
+    var active = sortRows(rows.filter(function(l){ return !removedOf(l); }));
+    var gone   = sortRows(rows.filter(function(l){ return removedOf(l); }));
+
+    $("activeLabel").textContent = view === "__all__" ? "Active — all pull dates" : "Active — " + fmtDate(view);
+    $("activeCount").textContent = active.length + (active.length === 1 ? " lead" : " leads");
+
+    $("tblActive").innerHTML = active.length
+      ? head() + "<tbody>" + active.map(rowHTML).join("") + "</tbody>"
+      : '<tbody><tr><td class="empty"><b>Nothing here</b>' +
+        ($("q").value || $("statusFilter").value ? "No lead in this view matches your filters." : "This pull date has no active leads left.") +
+        '</td></tr></tbody>';
+
+    var rh = $("removedHead"), rc = $("removedCard");
+    if (gone.length){
+      rh.hidden = false;
+      $("removedCount").textContent = gone.length + (gone.length === 1 ? " lead" : " leads");
+      $("toggleRemoved").textContent = showRemoved ? "Hide" : "Show";
+      rc.hidden = !showRemoved;
+      if (showRemoved) $("tblRemoved").innerHTML = head() + "<tbody>" + gone.map(rowHTML).join("") + "</tbody>";
+    } else {
+      rh.hidden = true; rc.hidden = true;
+    }
+
+    document.querySelectorAll("thead th[data-s]").forEach(function(th){
+      if (th.dataset.s === sortKey) th.setAttribute("aria-sort", sortDir === 1 ? "ascending" : "descending");
+      else th.removeAttribute("aria-sort");
+    });
+  }
+
+  /* ---------- persistence ---------- */
+  function applyEdit(date, mls, patch){
+    var cur = rec(date, mls) || {};
+    var next = {
+      s: cur.s || "Needs Comps",
+      r: !!cur.r,
+      by: myName || "Someone",
+      at: new Date().toISOString()
+    };
+    if ("s" in patch) next.s = patch.s;
+    if ("r" in patch) next.r = patch.r;
+    pending[date] = pending[date] || {};
+    pending[date][mls] = next;
+    render();
+    toast("r" in patch
+      ? (next.r ? "Removed — saved for the team" : "Restored — saved for the team")
+      : "Marked " + next.s + " — saved for the team");
+    flush();
+  }
+
+  // Send every change the shared board hasn't confirmed yet. Safe to call at
+  // any moment: before the connection is up it does nothing, and the queued
+  // changes go out the moment it is.
+  function flush(){
+    if (!db) return;
+    Object.keys(pending).forEach(function(date){
+      Object.keys(pending[date]).forEach(function(mls){
+        var key = date + "|" + mls;
+        if (inflight[key]) return;
+        inflight[key] = true;
+        var body = {}; body[mls] = pending[date][mls];
+        var ref = db.doc("edits/" + date);
+        // update() merges, so it can never wipe a teammate's other rows.
+        // set() runs only when the date has no document yet — the one case
+        // update rejects on.
+        ref.update(body)
+          .catch(function(){ return ref.set(body); })
+          .then(function(){ delete inflight[key]; })
+          .catch(function(){
+            delete inflight[key];
+            note("Couldn't save that change to the shared board. It is showing on this screen only — reload the page.", true);
+          });
+      });
+    });
+  }
+
+  // Drop pending rows the shared board has caught up with.
+  function reconcile(){
+    Object.keys(pending).forEach(function(date){
+      Object.keys(pending[date]).forEach(function(mls){
+        var s = server[date] && server[date][mls];
+        if (s && s.at >= pending[date][mls].at) delete pending[date][mls];
+      });
+      if (!Object.keys(pending[date]).length) delete pending[date];
+    });
+  }
+
+  function note(msg, warn){
+    var b = $("syncNote");
+    b.innerHTML = msg;
+    b.style.borderLeftColor = warn ? "var(--red-ink)" : "var(--accent)";
+  }
+
+  var toastT = null;
+  function toast(msg){
+    var t = $("toast");
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(function(){ t.hidden = true; }, 2400);
+  }
+
+  /* ---------- events ---------- */
+  sel.addEventListener("change", function(){ view = sel.value; render(); syncStep(); });
+  $("q").addEventListener("input", render);
+  $("statusFilter").addEventListener("change", render);
+  $("toggleRemoved").addEventListener("click", function(){ showRemoved = !showRemoved; render(); });
+
+  function syncStep(){
+    var i = D.dates.indexOf(view);
+    $("newer").disabled = (view === "__all__" || i <= 0);
+    $("older").disabled = (view === "__all__" || i < 0 || i >= D.dates.length - 1);
+  }
+  $("newer").addEventListener("click", function(){
+    var i = D.dates.indexOf(view); if (i > 0){ view = D.dates[i-1]; sel.value = view; render(); syncStep(); }
+  });
+  $("older").addEventListener("click", function(){
+    var i = D.dates.indexOf(view); if (i > -1 && i < D.dates.length-1){ view = D.dates[i+1]; sel.value = view; render(); syncStep(); }
+  });
+
+  document.addEventListener("click", function(ev){
+    var th = ev.target.closest("thead th[data-s]");
+    if (th){
+      var k = th.dataset.s;
+      if (k === sortKey) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+      render(); return;
+    }
+    var b = ev.target.closest("button[data-act]"); if (!b) return;
+    var tr = b.closest("tr"); if (!tr) return;
+    applyEdit(tr.dataset.date, tr.dataset.mls, {r: b.dataset.act === "remove"});
+  });
+  document.addEventListener("change", function(ev){
+    var s = ev.target.closest('select[data-act="status"]'); if (!s) return;
+    var tr = s.closest("tr"); if (!tr) return;
+    applyEdit(tr.dataset.date, tr.dataset.mls, {s: s.value});
+  });
+
+  render(); syncStep();
+
+  /* ---------- shared board (db) ---------- */
+  if (window.claude && claude.use){
+    claude.use("db").then(function(x){
+      if (!x){ note("This view is running <b>offline</b> — your changes stay in this browser only.", true); return; }
+      db = x;
+      flush();
+      db.collection("edits").onSnapshot(function(snap){
+        var next = {};
+        snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
+        server = next;
+        reconcile();
+        note("Shared board <b>connected</b>. Status changes and removals save here for the whole team and survive every sheet refresh.");
+        render();
+        flush();
+      }, function(){
+        note("Lost the connection to the shared board — changes from here may not save. Reload the page.", true);
+      });
+    }).catch(function(){ note("Shared board unavailable in this view.", true); });
+
+    claude.use("room").then(function(room){
+      if (!room) return;
+      function paint(peers){
+        $("peerList").innerHTML = (peers || [])
+          .filter(function(p){ return p.kind !== "agent"; })
+          .map(function(p){
+            var st = p.presence || {};
+            return '<span class="who' + (p.isMe ? " me" : "") + '"><span class="dot"></span>' +
+                   esc(st.name || "Teammate") + (p.isMe ? " (you)" : "") + '</span>';
+          }).join("");
+      }
+      var inp = $("nameIn");
+      inp.value = myName;
+      inp.addEventListener("change", function(){
+        myName = inp.value.trim().slice(0,24);
+        try { localStorage.setItem("flipscout.name", myName); } catch(e){}
+        room.presence({name: myName || "Teammate"});
+      });
+      room.presence({name: myName || "Teammate"});
+      room.onPeers(function(ev){ paint(ev && ev.peers ? ev.peers : []); });
+    }).catch(function(){});
+  } else {
+    note("Open this board from its published link to share edits with your team.", true);
+  }
+})();
+</script>

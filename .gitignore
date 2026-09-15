@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# board data is rebuilt from the sheet on every refresh
+flipscout-board/data.js
+*.xlsx
