@@ -220,3 +220,9 @@ __marimo__/
 # board data is rebuilt from the sheet on every refresh
 flipscout-board/data.js
 *.xlsx
+
+# signed-in MLS session + recon output: credential-equivalent, never commit
+flipscout-board/mls-session.json
+flipscout-board/recon.json
+flipscout-board/recon.png
+.mlsenv
