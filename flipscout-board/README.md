@@ -11,8 +11,24 @@ Two screens, switched in the header:
   of the working list the moment it is set, but stays visible below so it can
   be found and reopened; only Remove takes it out of the count of live leads
   alongside Pass.
-- **KPI** — the pipeline counted by status, by pull date, and by teammate.
-  Deep-links as `#kpi`, so it can be bookmarked and shared on its own.
+- **KPI** — the pipeline counted by status, by pull date, and by teammate,
+  plus every offer deadline soonest-first. Deep-links as `#kpi`, so it can be
+  bookmarked and shared on its own.
+
+### Offer deadlines
+
+The sheet has no offer-due field, so the team sets one per lead in the **Offer
+due** column on the Leads screen. It saves to the artifact database like a
+status, so it is shared and survives every refresh. Chips read from the
+viewer's own calendar — "2 days late", "due today", "in 6 days" — and the KPI
+screen lists every dated lead soonest-first.
+
+Passed and removed leads are left out of that list: neither has an offer left
+to get out the door.
+
+If an offer-due column is ever added to the Leads tab, add it to `FIELDS` in
+`build_data.py` and carry it onto the row; the board should then prefer the
+sheet's value and let a board-entered date override it.
 
 Each screen keeps its own pull-date scope: Leads opens on the newest pull, KPI
 on all dates (a single day's pull is always ~0% worked, which tells you
