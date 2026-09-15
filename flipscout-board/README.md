@@ -6,7 +6,11 @@ restore one.
 
 Two screens, switched in the header:
 
-- **Leads** — the list for the selected pull date.
+- **Leads** — the list for the selected pull date, in three parts: the working
+  list on top, then **Passed**, then **Removed**. A lead marked Pass drops out
+  of the working list the moment it is set, but stays visible below so it can
+  be found and reopened; only Remove takes it out of the count of live leads
+  alongside Pass.
 - **KPI** — the pipeline counted by status, by pull date, and by teammate.
   Deep-links as `#kpi`, so it can be bookmarked and shared on its own.
 

@@ -228,6 +228,7 @@ tbody tr.s-review td:first-child{box-shadow:inset 4px 0 0 var(--m-review)}
 tbody tr.s-offer  td:first-child{box-shadow:inset 4px 0 0 var(--m-offer)}
 tbody tr.s-won    td:first-child{box-shadow:inset 4px 0 0 var(--m-won)}
 tbody tr.s-pass   td:first-child{box-shadow:inset 4px 0 0 var(--m-pass)}
+tbody tr.passed td{opacity:.72}
 tbody tr.gone td{opacity:.45}
 tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
 
@@ -384,6 +385,11 @@ footer .num{font-size:12px}
   <div class="sechead"><span id="activeLabel">Active</span><span class="cnt" id="activeCount"></span><span class="rule"></span></div>
   <div class="tablecard"><table id="tblActive"></table></div>
 
+  <div class="sechead" id="passedHead" hidden><span>Passed</span><span class="cnt" id="passedCount"></span><span class="rule"></span>
+    <button class="btn tiny" id="togglePassed" type="button">Show</button>
+  </div>
+  <div class="tablecard" id="passedCard" hidden><table id="tblPassed"></table></div>
+
   <div class="sechead" id="removedHead" hidden><span>Removed</span><span class="cnt" id="removedCount"></span><span class="rule"></span>
     <button class="btn tiny" id="toggleRemoved" type="button">Show</button>
   </div>
@@ -440,6 +446,7 @@ footer .num{font-size:12px}
   var scopeFor = {leads: D.dates[0] || "", kpi: "__all__"};
   var view = scopeFor.leads;
   var showRemoved = true;
+  var showPassed = true;
 
   var $ = function(id){ return document.getElementById(id); };
   var fmtMoney = function(n){ return n == null ? "—" : "$" + n.toLocaleString("en-US"); };
@@ -566,7 +573,7 @@ footer .num{font-size:12px}
     var opts = STATUSES.map(function(s){
       return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>';
     }).join("");
-    return '<tr class="' + STRIPE[st] + (gone ? " gone" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+    return '<tr class="' + STRIPE[st] + (gone ? " gone" : st === "Pass" ? " passed" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
       '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + '</td>' +
       '<td data-l="Property" class="wide"><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' + esc(l.addr) + '</a>' +
@@ -592,8 +599,12 @@ footer .num{font-size:12px}
     var rows = currentRows();
     renderStats(rows);
 
-    var active = sortRows(rows.filter(function(l){ return !removedOf(l); }));
+    // A passed lead has been judged and is out of the working list, but it is
+    // not removed — it stays visible below so it can be found and reopened.
     var gone   = sortRows(rows.filter(function(l){ return removedOf(l); }));
+    var live   = rows.filter(function(l){ return !removedOf(l); });
+    var passed = sortRows(live.filter(function(l){ return statusOf(l) === "Pass"; }));
+    var active = sortRows(live.filter(function(l){ return statusOf(l) !== "Pass"; }));
 
     $("activeLabel").textContent = view === "__all__" ? "Active — all pull dates" : "Active — " + fmtDate(view);
     $("activeCount").textContent = active.length + (active.length === 1 ? " lead" : " leads");
@@ -601,8 +612,23 @@ footer .num{font-size:12px}
     $("tblActive").innerHTML = active.length
       ? head() + "<tbody>" + active.map(rowHTML).join("") + "</tbody>"
       : '<tbody><tr><td class="empty"><b>Nothing here</b>' +
-        ($("q").value || $("statusFilter").value ? "No lead in this view matches your filters." : "This pull date has no active leads left.") +
+        ($("q").value || $("statusFilter").value
+          ? "No lead in this view matches your filters."
+          : passed.length || gone.length
+            ? "Every lead on this pull date has been worked. The rest are below."
+            : "This pull date has no active leads left.") +
         '</td></tr></tbody>';
+
+    var ph = $("passedHead"), pc = $("passedCard");
+    if (passed.length){
+      ph.hidden = false;
+      $("passedCount").textContent = passed.length + (passed.length === 1 ? " lead" : " leads");
+      $("togglePassed").textContent = showPassed ? "Hide" : "Show";
+      pc.hidden = !showPassed;
+      if (showPassed) $("tblPassed").innerHTML = head() + "<tbody>" + passed.map(rowHTML).join("") + "</tbody>";
+    } else {
+      ph.hidden = true; pc.hidden = true; $("tblPassed").innerHTML = "";
+    }
 
     var rh = $("removedHead"), rc = $("removedCard");
     if (gone.length){
@@ -612,7 +638,7 @@ footer .num{font-size:12px}
       rc.hidden = !showRemoved;
       if (showRemoved) $("tblRemoved").innerHTML = head() + "<tbody>" + gone.map(rowHTML).join("") + "</tbody>";
     } else {
-      rh.hidden = true; rc.hidden = true;
+      rh.hidden = true; rc.hidden = true; $("tblRemoved").innerHTML = "";
     }
 
     document.querySelectorAll("thead th[data-s]").forEach(function(th){
@@ -637,7 +663,9 @@ footer .num{font-size:12px}
     draw();
     toast("r" in patch
       ? (next.r ? "Removed — saved for the team" : "Restored — saved for the team")
-      : "Marked " + next.s + " — saved for the team");
+      : next.s === "Pass"
+        ? "Marked Pass — moved to Passed, below the list"
+        : "Marked " + next.s + " — saved for the team");
     flush();
   }
 
@@ -702,6 +730,7 @@ footer .num{font-size:12px}
   $("q").addEventListener("input", draw);
   $("statusFilter").addEventListener("change", draw);
   $("toggleRemoved").addEventListener("click", function(){ showRemoved = !showRemoved; draw(); });
+  $("togglePassed").addEventListener("click", function(){ showPassed = !showPassed; draw(); });
 
   function syncStep(){
     var i = D.dates.indexOf(view);
@@ -774,13 +803,13 @@ footer .num{font-size:12px}
       : fmtDate(view) + " pull";
     $("kpiScopeLabel").textContent = scope;
 
-    var active = k.total - k.removed;
+    var live = k.total - k.removed - k.counts["Pass"];
     var untouched = k.total - k.touched;
     $("kpiTiles").innerHTML = [
       ['<div class="kpi"><dt>Leads</dt><dd>' + k.total + '</dd>' +
        '<div class="sub">' + scope + '</div></div>'],
-      ['<div class="kpi"><dt>Still live</dt><dd style="color:var(--t-review)">' + active + '</dd>' +
-       '<div class="sub">' + k.removed + ' removed</div></div>'],
+      ['<div class="kpi"><dt>Still live</dt><dd style="color:var(--t-review)">' + live + '</dd>' +
+       '<div class="sub">' + k.counts["Pass"] + ' passed · ' + k.removed + ' removed</div></div>'],
       ['<div class="kpi"><dt>Worked</dt><dd style="color:var(--t-won)">' + k.touched + '</dd>' +
        '<div class="sub">' + pct(k.touched, k.total) + '% of the list</div>' +
        '<div class="meter"><span style="width:' + pct(k.touched, k.total) + '%"></span></div></div>'],
