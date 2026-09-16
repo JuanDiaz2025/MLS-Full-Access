@@ -58,6 +58,7 @@ prompts/                    What to hand AI every morning and every Friday.
 
 ## Start here
 
-- Cherry, daily: `prompts/daily-artifact.md`
+- Cherry, every day: `docs/cherry-daily.md` — plain version, the whole job in order
+- Cherry, the prompt itself: `prompts/daily-artifact.md`
 - Cherry, Friday: `prompts/weekly-pulse.md`
 - Juan, this week: `docs/week-of-2026-09-16.md`
