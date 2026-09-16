@@ -1,6 +1,56 @@
-# Cherry's Daily Page
+# Cherry's Page — Week of 16 September
 
-Plain version. This is the whole job, in order.
+Run the week off this page. The week is at the top. Your day is underneath it.
+
+## This week is light. Systems only.
+
+We are not running the old machine. We are getting the house in order and
+building around San Francisco. Money goes out for three things only: materials
+already on a live job, payroll already earned, software we already pay for.
+
+**We are doing**
+
+- Hours, materials, photos and agents into one process
+- Job cards, photos and books for every live property
+- A small SF agent radar, built by hand
+- A short artifact per job, every day
+
+**We are not doing**
+
+- No ad buy, no TV, no test campaign
+- No new seller blasts out of BlackBook
+- No gifts or auto-texts to agents until the radar is clean
+- No new job starts without a close-out date
+
+REI BlackBook stays for old seller follow-up only. It is not the company brain.
+
+If someone asks what we are running this week: current jobs, proof of work, and
+the San Francisco foundation. That is the week.
+
+## Do today — three things, before anything else
+
+1. **Cap Jairo and Alex at 40 hours in the timesheet app.** Set the limit so the
+   app stops them, not you.
+2. **Cut any visit still on this week's schedule that would push either of them
+   past 40.** If you cannot cut it, tell Juan today — he decides in writing.
+3. **Get Photographer A and B named in writing for every live job.** Does not
+   have to be Cesar. One shoots, one is backup. Write it on the live job list.
+
+## Six things that must exist by Sunday
+
+Juan checks this Sunday. Flag anything stuck by Friday, not Sunday.
+
+- [ ] **Live job list** — every address with a crew or open spend, one line each
+- [ ] **Photo rule live** — A and B named in writing, arrival photo before 10:00
+- [ ] **Materials coded to the address** — no more "supplies"
+- [ ] **SF Agent Radar v1** — 25 to 50 agents, not the whole BlackBook list
+- [ ] **BlackBook frozen** — nothing new built inside it for San Francisco
+- [ ] **One-page money picture** — cash out by property, hours paid, and the $40k
+      that did not go to TV
+
+---
+
+The rest of this page is your daily job. It does not change week to week.
 
 ## What your job is here
 
