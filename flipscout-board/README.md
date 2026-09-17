@@ -47,9 +47,30 @@ confident wrong date somebody plans around. `python3 -c` the module and feed
 `parse_offer_due` new phrasings before trusting it on a new remark style.
 
 **As of now this yields nothing**, because the pull does not carry listing
-remarks into the sheet — only 4 of 800 notes mention offers and none carries a
-date. The parser is the half that cannot be done later; getting remarks into
-the Notes column is the half that unlocks it.
+remarks into the sheet. The parser is the half that cannot be done later;
+getting remarks into the Notes column is the half that unlocks it.
+
+And that half is nearly done already. `scripts/mls-profile.js` on branch
+`claude/navigation-link-training-l0d5a3` — run hourly by the "Hourly
+full-buy-box fixer scan" Routine, against a live MLS session — already scrapes
+both Public Remarks and Agent Remarks off each listing detail page:
+
+    const pub   = grab(/(?:Public Remarks?|Marketing Remarks?|...)/i);
+    const agent = grab(/(?:Agent Remarks?|Confidential Remarks?|...)/i);
+
+It then uses them only for keyword flags (TENANT?, FIRE, MULTIUNIT?) and drops
+the text. Carrying `agent` (falling back to `pub`) through to the sheet's Notes
+column is the entire remaining step: no new login automation, no new
+credentials, and deadlines start appearing on the board the next morning.
+
+That change belongs on the branch that owns the scraper, not this one.
+
+### Refresh timing
+
+The 11:00 refresh is a snapshot. The hourly scan keeps adding leads through the
+day, so anything added after 11:00 waits for the next morning — on 2026-09-16
+the run at 11:07 correctly found nothing and the day's 11 leads landed later.
+A second run in the late afternoon would close most of that gap.
 
 Each screen keeps its own pull-date scope: Leads opens on the newest pull, KPI
 on all dates (a single day's pull is always ~0% worked, which tells you
