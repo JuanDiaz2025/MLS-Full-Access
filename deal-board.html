@@ -218,6 +218,23 @@ button{cursor:pointer}
 .ndel:hover{color:var(--h-red)}
 .nempty{margin:0;color:var(--muted)}
 
+.tcell{gap:4px}
+.upd{flex:none;display:inline-flex;align-items:center;gap:4px;border:1px solid transparent;background:transparent;color:var(--muted);border-radius:6px;padding:4px 6px;font-size:12px;font-weight:700}
+.upd:hover,.upd:focus-visible{border-color:var(--line);color:var(--accent)}
+.upd.has{color:var(--accent)}
+#drawer .scrim{position:fixed;inset:0;background:rgba(10,14,24,.45);border:0;padding:0;z-index:40;cursor:default}
+#drawer .panel{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--surface);border-left:1px solid var(--line);box-shadow:var(--shadow);z-index:41;display:flex;flex-direction:column}
+.phead{display:flex;gap:12px;align-items:flex-start;padding:calc(18px + env(safe-area-inset-top,0px)) 20px 12px;border-bottom:1px solid var(--line)}
+.pmain{flex:1;min-width:0}
+.pprop{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.phead h2{margin:4px 0 0;font-family:var(--f-display);font-size:22px;line-height:1.2;text-wrap:balance}
+.px{flex:none;width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:var(--surface-2)}
+.pmeta{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.pmeta b{color:var(--muted);font-weight:600}
+.pbody{flex:1;overflow-y:auto;padding:16px 20px calc(24px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:12px}
+.ncompose.col{flex-direction:column;align-items:stretch}
+.ncompose.col .btn{align-self:flex-end}
+
 /* Task table */
 .table{overflow-x:auto;border-radius:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc)}
 .grid{display:grid;grid-template-columns:minmax(240px,1.2fr) 150px 140px 130px minmax(220px,1fr) 40px;min-width:880px}
@@ -298,6 +315,7 @@ button{cursor:pointer}
   <div class="groups" id="groups"><div class="notice">Loading the board…</div></div>
 
 </div>
+<div id="drawer" hidden></div>
 <div id="pop" class="pop" hidden></div>
 <div id="toast" class="toast" hidden></div>
 
@@ -324,7 +342,7 @@ const KIND = {buy:"Buying", sell:"Selling", rehab:"Rehab", listed:"Listed", watc
 const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
-const S = { db:null, user:null, me:null, canWrite:true, props:[], tasks:[], notes:[], ready:{p:false,t:false},
+const S = { db:null, user:null, me:null, canWrite:true, openTask:null, props:[], tasks:[], notes:[], ready:{p:false,t:false},
   sel:null, q:"", mine:false, hideDone:true, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
 try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!c.showDone; }catch(e){}
 try{ const hsh=location.hash.slice(1); S.sel = hsh || localStorage.getItem("tdb-sel") || "all"; }catch(e){ S.sel="all"; }
@@ -399,11 +417,12 @@ function propMatches(p){
 }
 function sortedChecks(p){ return Object.entries(p.checks||{}).map(([id,c])=>({id,...c})).sort((a,b)=>(a.order||0)-(b.order||0)); }
 
-function editing(){ const a=document.activeElement; return a && a.closest && a.closest("#groups") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName); }
+function editing(){ const a=document.activeElement; return a && a.closest && a.closest("#groups,#drawer") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName); }
 function flush(){ setTimeout(()=>{ if(S.pendingRender && !editing()) render(); },0); }
 
 /* ---------- render ---------- */
-async function render(){
+async function render(){ await renderMain(); if(!S.pendingRender && S.ready.p && S.ready.t){ const ids=new Set(); S.tasks.forEach(t=>t.owner&&ids.add(t.owner)); S.notes.forEach(n=>n.author&&ids.add(n.author)); const people=S.user&&ids.size?await S.user.profiles([...ids]):{}; if(!editing()) renderDrawer(people); } }
+async function renderMain(){
   if(editing()){ S.pendingRender=true; return; }
   S.pendingRender=false;
   if(!S.ready.p || !S.ready.t) return;
@@ -493,7 +512,7 @@ function renderGroup(p, people){
   g.append(h("div",{class:"table"},grid));
 
   // notes / updates
-  const notes=S.notes.filter(n=>n.property===pid).sort((a,b)=>b.createdAt-a.createdAt);
+  const notes=S.notes.filter(n=>n.property===pid && !n.taskId).sort((a,b)=>b.createdAt-a.createdAt);
   const box=h("div",{class:"notes"}, h("h3",{text:"Notes"}));
   if(!ro){
     const ta=h("textarea",{id:"note-"+pid,rows:"2",placeholder:"Write an update for the team…","aria-label":"New note for "+p.address});
@@ -561,6 +580,58 @@ function renderFacts(p){
   return box;
 }
 
+/* ---------- task updates drawer ---------- */
+function bubble(){ const s=document.createElementNS("http://www.w3.org/2000/svg","svg"); s.setAttribute("width","15");s.setAttribute("height","15");s.setAttribute("viewBox","0 0 24 24");s.setAttribute("fill","none");s.setAttribute("stroke","currentColor");s.setAttribute("stroke-width","2.2");s.setAttribute("aria-hidden","true");s.innerHTML='<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>';return s; }
+function updBtn(t){
+  const n=S.notes.filter(x=>x.taskId===t.id).length;
+  return h("button",{class:"upd"+(n?" has":""),id:"u-"+t.id,type:"button","aria-label":`Open updates for ${t.title||"task"} (${n})`,title:"Open task updates",onclick:()=>openTask(t.id)}, bubble(), n?String(n):null);
+}
+function openTask(id){ S.openTask=id; render(); setTimeout(()=>{ const ta=document.getElementById("tc-new"); if(ta) ta.focus(); },30); }
+function closeTask(){ S.openTask=null; const d=$("#drawer"); d.hidden=true; d.replaceChildren(); document.body.style.overflow=""; flush(); }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && S.openTask && $("#pop").hidden) closeTask(); });
+
+function renderDrawer(people){
+  const d=$("#drawer");
+  const t=S.openTask && S.tasks.find(x=>x.id===S.openTask);
+  if(!t){ if(S.openTask) closeTask(); return; }
+  const p=S.props.find(x=>x.id===t.property)||{};
+  const ro=!S.canWrite, doc=()=>S.db.doc("tasks/"+t.id);
+  const st=STATUS.find(x=>x.k===(t.status||"todo"))||STATUS[0];
+  const prof=t.owner?people[t.owner]:null, oname=(t.ownerName||"").trim();
+  const owner = prof?(prof.isMe?"You":(prof.name||"Teammate")):(oname||"Unassigned");
+  const thread=S.notes.filter(n=>n.taskId===t.id).sort((a,b)=>b.createdAt-a.createdAt);
+  const ta=h("textarea",{id:"tc-new",rows:"3",placeholder:"Write an update or comment…","aria-label":"New update"});
+  ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); addTaskNote(t,ta); } });
+  ta.addEventListener("blur",()=>flush());
+  const panel=h("div",{class:"panel",role:"dialog","aria-modal":"true","aria-label":"Updates for "+(t.title||"task")},
+    h("div",{class:"phead"},
+      h("div",{class:"pmain"}, h("div",{class:"pprop",text:p.address||""}), h("h2",{text:t.title||"Untitled task"})),
+      h("button",{class:"px",type:"button","aria-label":"Close",onclick:closeTask},"✕")),
+    h("div",{class:"pmeta"},
+      h("button",{class:"pill",style:`background:var(--s-${st.k});color:var(--s-${st.k}-ink);min-height:32px;width:auto;padding:0 14px;border-radius:6px`,disabled:ro||null,
+        onclick:e=>openList(e.currentTarget,STATUS.map(x=>({...x,style:`background:var(--s-${x.k});color:var(--s-${x.k}-ink)`})),k=>write(()=>doc().update({status:k,updatedAt:Date.now()})))}, st.label),
+      h("span",{}, h("b",{text:"Owner "}), owner),
+      t.due?h("span",{}, h("b",{text:"Due "}), fmtDate(t.due)):null),
+    h("div",{class:"pbody"},
+      ro?null:h("div",{class:"ncompose col"}, ta, h("button",{class:"btn",type:"button",onclick:()=>addTaskNote(t,ta)},"Post update")),
+      thread.length?null:h("p",{class:"nempty",text:"No updates yet. Be the first to post one."}),
+      ...thread.map(n=>{
+        const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(pr.name||"Teammate")):(n.authorName||"Teammate");
+        const del=(!ro && n.author && n.author===S.me)?h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ write(()=>S.db.doc("notes/"+n.id).delete(),"Update deleted"); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete"):null;
+        return h("div",{class:"note"}, pr?h("img",{src:pr.avatarUrl,alt:""}):badge(who),
+          h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), h("p",{text:n.text})));
+      })));
+  const keep = d.querySelector("#tc-new"); const draft = keep ? keep.value : "";
+  d.replaceChildren(h("button",{class:"scrim",type:"button","aria-label":"Close",onclick:closeTask}), panel);
+  if(draft) ta.value=draft;
+  d.hidden=false; document.body.style.overflow="hidden";
+}
+async function addTaskNote(t, ta){
+  const text=ta.value.trim(); if(!text) return;
+  const ok=await write(()=>S.db.collection("notes").add({property:t.property,taskId:t.id,text,author:S.me||null,createdAt:Date.now()}),"Update posted");
+  if(ok){ ta.value=""; write(()=>S.db.doc("tasks/"+t.id).update({updatedAt:Date.now()})); }
+}
+
 /* ---------- task rows ---------- */
 function initials(name){ return name.trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase(); }
 function nameColor(name){ let x=0; for(const c of name.toLowerCase()) x=(x*31+c.charCodeAt(0))>>>0; return `var(${GCOLORS[x%GCOLORS.length]})`; }
@@ -571,9 +642,9 @@ function renderRow(grid, t, people){
   const ro=!S.canWrite, doc=()=>S.db.doc("tasks/"+t.id);
   const st=STATUS.find(s=>s.k===(t.status||"todo"))||STATUS[0], pr=PRIORITY.find(x=>x.k===t.priority);
   const cls = t.status==="done" ? " row-done" : "";
-  grid.append(h("div",{class:"cell"+cls,role:"cell"},h("input",{class:"title-in",id:"t-"+t.id,value:t.title||"",readonly:ro||null,"aria-label":"Task name",
+  grid.append(h("div",{class:"cell tcell"+cls,role:"cell"},h("input",{class:"title-in",id:"t-"+t.id,value:t.title||"",readonly:ro||null,"aria-label":"Task name",
     onkeydown:e=>{ if(e.key==="Enter") e.target.blur(); if(e.key==="Escape"){ e.target.value=t.title||""; e.target.blur(); } },
-    onblur:e=>{ const v=e.target.value.trim(); if(v && v!==t.title) write(()=>doc().update({title:v,updatedAt:Date.now()})); else if(!v) e.target.value=t.title||""; flush(); }})));
+    onblur:e=>{ const v=e.target.value.trim(); if(v && v!==t.title) write(()=>doc().update({title:v,updatedAt:Date.now()})); else if(!v) e.target.value=t.title||""; flush(); }}), updBtn(t)));
 
   const prof = t.owner ? people[t.owner] : null, oname=(t.ownerName||"").trim();
   grid.append(h("div",{class:"cell center",role:"cell"},h("button",{class:"owner",id:"o-"+t.id,disabled:ro||null,"aria-label":prof?("Owner: "+(prof.name||"Someone")):oname?("Owner: "+oname):"Assign owner",onclick:e=>openOwner(e.currentTarget,t)},
