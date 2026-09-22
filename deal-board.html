@@ -74,9 +74,6 @@ button{cursor:pointer}
 .gtitle{font-family:var(--f-display);font-weight:700;font-size:18px;color:var(--gc);margin:0;letter-spacing:-.01em}
 .gcity{color:var(--muted);font-weight:500}
 .gcount{color:var(--muted);font-size:13px}
-.stage{appearance:none;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 26px 3px 10px;font-size:12px;font-weight:600;color:var(--ink-2);
-  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
-  background-position:calc(100% - 13px) 50%,calc(100% - 9px) 50%;background-size:4px 4px;background-repeat:no-repeat}
 .linkbtn{border:0;background:transparent;color:var(--accent);font-weight:600;font-size:13px;padding:2px 4px}
 .ghead .spacer{flex:1}
 .battery{display:flex;height:8px;width:160px;max-width:40vw;border-radius:4px;overflow:hidden;background:var(--line)}
@@ -181,7 +178,6 @@ const STATUS = [
   {k:"done", label:"Done"}];
 const PRIORITY = [
   {k:"low", label:"Low"},{k:"medium", label:"Medium"},{k:"high", label:"High"},{k:"critical", label:"Critical"}];
-const STAGES = ["New lead","Researching","Contacted owner","Walkthrough set","Offer sent","Negotiating","Under contract","Closed","Dead"];
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
 const S = { db:null, user:null, me:null, canWrite:true, props:[], tasks:[], ready:{p:false,t:false},
@@ -260,10 +256,6 @@ function renderGroup(p, i, people){
   const gc = `var(${GCOLORS[(p.colorIndex ?? i) % GCOLORS.length]})`;
   const g = h("section",{class:"group","data-collapsed":String(collapsed),style:`--gc:${gc}`,"aria-label":p.address});
 
-  const stageSel = h("select",{class:"stage",id:"stage-"+pid,"aria-label":"Deal stage for "+p.address,disabled:!S.canWrite||null,
-    onchange:e=>write(()=>S.db.doc("properties/"+pid).update({stage:e.target.value}),"Stage updated")},
-    ...STAGES.map(s=>h("option",{value:s,selected:(p.stage||"New lead")===s||null,text:s})));
-
   const bat = h("div",{class:"battery",title:"Status mix"});
   if(all.length) STATUS.forEach(s=>{ const n=all.filter(t=>(t.status||"todo")===s.k).length; if(n) bat.append(h("span",{style:`width:${n/all.length*100}%;background:var(--s-${s.k})`})); });
 
@@ -271,7 +263,6 @@ function renderGroup(p, i, people){
     h("button",{class:"caret","aria-label":(collapsed?"Expand ":"Collapse ")+p.address,"aria-expanded":String(!collapsed),onclick:()=>{collapsed?S.collapsed.delete(pid):S.collapsed.add(pid);saveUI();render();}},
       svgCaret()),
     h("h2",{class:"gtitle"}, p.address, h("span",{class:"gcity",text:p.city?"  · "+p.city:""})),
-    stageSel,
     h("span",{class:"gcount",text:all.length+(all.length===1?" task":" tasks")}),
     p.facts ? h("button",{class:"linkbtn","aria-expanded":String(info),onclick:()=>{info?S.info.delete(pid):S.info.add(pid);render();}}, info?"Hide details":"Property details") : null,
     h("span",{class:"spacer"}),
@@ -426,7 +417,7 @@ np.addEventListener("submit",async e=>{
   e.preventDefault();
   const address=$("#np-addr").value.trim(), city=$("#np-city").value.trim(); if(!address) return;
   const order = S.props.reduce((m,p)=>Math.max(m,p.order||0),0)+1;
-  await write(()=>S.db.collection("properties").add({address,city,stage:"New lead",order,colorIndex:S.props.length,createdAt:Date.now()}),"Property added");
+  await write(()=>S.db.collection("properties").add({address,city,order,colorIndex:S.props.length,createdAt:Date.now()}),"Property added");
   np.reset(); np.hidden=true;
 });
 
