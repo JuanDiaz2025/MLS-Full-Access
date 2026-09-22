@@ -195,11 +195,34 @@ button{cursor:pointer}
 .comps td{padding:5px 10px 5px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
 .scroll{overflow-x:auto}
 
+.sumline{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;margin:4px 0 10px;font-size:14px;color:var(--ink-2)}
+.sumline b{font-family:var(--f-display);font-size:20px;color:var(--ink)}
+.sumline .stk b{color:var(--h-red)}
+.cdate{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+.cdate input{border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:4px 6px;font-family:var(--f-mono);font-size:12px}
+.blockline{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--h-red);border-radius:10px;padding:8px 12px;margin-bottom:12px}
+.blockline label{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--h-red);flex:none}
+.blockline input{flex:1;min-width:0;border:1px solid transparent;border-radius:6px;background:transparent;padding:6px 8px;font-size:14px}
+.blockline input:focus{outline:0;border-color:var(--accent)}
+.notes{margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.notes h3{margin:0;font-family:var(--f-display);font-size:17px}
+.ncompose{display:flex;gap:8px;align-items:flex-end}
+.ncompose textarea{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);padding:8px 10px;resize:vertical;min-height:44px}
+.ncompose textarea:focus{outline:0;border-color:var(--accent);background:var(--surface)}
+.note{display:grid;grid-template-columns:28px 1fr;gap:10px;border-top:1px solid var(--line);padding-top:10px}
+.note img,.note .ini{width:28px;height:28px;border-radius:50%}
+.nhead{display:flex;gap:10px;align-items:baseline;font-size:13px}
+.nhead span{color:var(--muted);font-size:12px}
+.note p{margin:2px 0 0;white-space:pre-wrap;color:var(--ink)}
+.ndel{margin-left:auto;border:0;background:transparent;color:var(--muted);font-size:12px}
+.ndel:hover{color:var(--h-red)}
+.nempty{margin:0;color:var(--muted)}
+
 /* Task table */
 .table{overflow-x:auto;border-radius:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc)}
-.grid{display:grid;grid-template-columns:minmax(260px,1fr) 150px 140px 120px 130px minmax(180px,.8fr) 40px;min-width:1000px}
+.grid{display:grid;grid-template-columns:minmax(240px,1.2fr) 150px 140px 130px minmax(220px,1fr) 40px;min-width:880px}
 .grid > div{border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:40px;display:flex;align-items:center}
-.grid > div:nth-child(7n){border-right:0}
+.grid > div:nth-child(6n){border-right:0}
 .hcell{font-size:12px;font-weight:600;color:var(--muted);justify-content:center;background:var(--surface-2)}
 .hcell.left{justify-content:flex-start;padding-left:14px}
 .cell{padding:0 8px;min-width:0}
@@ -251,7 +274,7 @@ button{cursor:pointer}
   <header class="top">
     <div class="brand">
       <h1>Property Command Center</h1>
-      <p>Pick a property to see its blocker, what's missing, the next step and who owns it.</p>
+      <p>Tap a property to see its tasks and notes.</p>
     </div>
     <div class="tools">
       <label class="search" for="q"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search" autocomplete="off"></label>
@@ -301,7 +324,7 @@ const KIND = {buy:"Buying", sell:"Selling", rehab:"Rehab", listed:"Listed", watc
 const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
-const S = { db:null, user:null, me:null, canWrite:true, props:[], tasks:[], ready:{p:false,t:false},
+const S = { db:null, user:null, me:null, canWrite:true, props:[], tasks:[], notes:[], ready:{p:false,t:false},
   sel:null, q:"", mine:false, hideDone:true, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
 try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!c.showDone; }catch(e){}
 try{ const hsh=location.hash.slice(1); S.sel = hsh || localStorage.getItem("tdb-sel") || "all"; }catch(e){ S.sel="all"; }
@@ -387,6 +410,7 @@ async function render(){
   const ids = new Set();
   S.tasks.forEach(t=>t.owner && ids.add(t.owner));
   S.props.forEach(p=>p.updatedBy && ids.add(p.updatedBy));
+  S.notes.forEach(n=>n.author && ids.add(n.author));
   const people = S.user && ids.size ? await S.user.profiles([...ids]) : {};
   if(editing()){ S.pendingRender=true; return; }
 
@@ -413,9 +437,8 @@ async function render(){
         h("span",{class:"row1"}, h("span",{class:"health "+hk}, h("i",{class:"hdot "+hk,"aria-hidden":"true"}), HEALTH.find(x=>x.k===hk).label),
           p.closingDate?h("span",{class:"dchip"+(n<0?" past":n<=7?" soon":""),text:"Closes "+fmtDate(p.closingDate)+(n<0?" (passed)":n===0?" (today)":" ("+n+"d)")}):null),
         p.blocker?h("span",{class:"t red"}, h("b",{text:"Blocker"}), p.blocker):null,
-        p.nextAction?h("span",{class:"t"}, h("b",{text:"Next"}), p.nextAction+(p.nextOwner?" — "+p.nextOwner:"")):null,
         (()=>{ const ot=openTasks(p.id).length, oc=sortedChecks(p).filter(c=>c.state!=="done"&&c.state!=="na").length;
-          return h("span",{class:"t"}, h("b",{text:"Not done"}), `${ot} task${ot===1?"":"s"} · ${oc} checklist item${oc===1?"":"s"}`); })(),
+          return h("span",{class:"t"}, h("b",{text:"Not done"}), `${ot} task${ot===1?"":"s"}`); })(),
         h("span",{class:"go",text:"Open property →"}));
     })));
 }
@@ -440,97 +463,65 @@ function dateChips(p){
 }
 
 function renderGroup(p, people){
-  const pid=p.id, collapsed=S.collapsed.has(pid), info=S.info.has(pid);
+  const pid=p.id, info=S.info.has(pid), ro=!S.canWrite;
   const all=S.tasks.filter(t=>t.property===pid), rows=visibleTasks(pid);
   const gc = `var(${GCOLORS[(p.colorIndex ?? 0) % GCOLORS.length]})`;
-  const g = h("section",{class:"group",id:"p-"+pid,"data-collapsed":String(collapsed),style:`--gc:${gc}`,"aria-label":p.address});
-  const bat = h("div",{class:"battery",title:"Task status mix"});
-  if(all.length) STATUS.forEach(s=>{ const n=all.filter(t=>(t.status||"todo")===s.k).length; if(n) bat.append(h("span",{style:`width:${n/all.length*100}%;background:var(--s-${s.k})`})); });
+  const g = h("section",{class:"group",id:"p-"+pid,style:`--gc:${gc}`,"aria-label":p.address});
+  const open=openTasks(pid).length, stuck=all.filter(t=>t.status==="stuck").length;
 
   g.append(h("div",{class:"ghead"},
-    h("button",{class:"caret","aria-label":(collapsed?"Expand ":"Collapse ")+p.address,"aria-expanded":String(!collapsed),onclick:()=>{collapsed?S.collapsed.delete(pid):S.collapsed.add(pid);saveUI();render();}}, svgCaret()),
     h("h2",{class:"gtitle"}, p.address, h("span",{class:"gcity",text:p.city?"  · "+p.city:""})),
-    h("span",{class:"kind",text:KIND[p.kind]||"Property"}),
-    healthBtn(p),
-    ...dateChips(p),
-    h("span",{class:"spacer"}),
-    h("span",{class:"gcount",text:openTasks(pid).length+" open task"+(openTasks(pid).length===1?"":"s")}),
-    bat));
-  if(collapsed) return g;
+    healthBtn(p), ...dateChips(p)));
+  g.append(h("div",{class:"sumline"},
+    h("span",{}, h("b",{text:String(open)}), " not done"),
+    stuck?h("span",{class:"stk"}, h("b",{text:String(stuck)}), " stuck"):null,
+    isDeal(p)?h("label",{class:"cdate"}, "Closing ", h("input",{type:"date",id:"f-closingDate-"+pid,value:p.closingDate||"",readonly:ro||null,
+      onchange:e=>saveProp(pid,{closingDate:e.target.value||null}), onblur:()=>flush()})):null));
+  g.append(h("div",{class:"blockline"}, h("label",{for:"f-blocker-"+pid,text:"Blocker"}),
+    h("input",{id:"f-blocker-"+pid,value:p.blocker||"",placeholder:ro?"None":"None. Type what's stopping this deal, if anything.",readonly:ro||null,
+      onkeydown:e=>{ if(e.key==="Enter") e.target.blur(); },
+      onblur:e=>{ const v=e.target.value.trim(); if(v!==(p.blocker||"")) saveProp(pid,{blocker:v}); flush(); }})));
 
-  // brief card
-  const ro=!S.canWrite;
-  const ta=(field,ph,label,cls)=>{
-    const id="f-"+field+"-"+pid;
-    return h("div",{class:"bcell "+(cls||"")}, h("label",{for:id,text:label}),
-      h("textarea",{class:"ta",id,rows:"3",placeholder:ro?"":ph,readonly:ro||null,value:p[field]||"",
-        onblur:e=>{ const v=e.target.value.trim(); if(v!==(p[field]||"")) saveProp(pid,{[field]:v}); flush(); }}));
-  };
-  const txt=(field,ph,type)=>h("input",{type:type||"text",id:"f-"+field+"-"+pid,placeholder:ro?"":ph,readonly:ro||null,value:p[field]||"","aria-label":ph,
-    onkeydown:e=>{ if(e.key==="Enter") e.target.blur(); },
-    onchange:type==="date"?e=>saveProp(pid,{[field]:e.target.value||null}):null,
-    onblur:type==="date"?()=>flush():e=>{ const v=e.target.value.trim(); if(v!==(p[field]||"")) saveProp(pid,{[field]:v}); flush(); }});
-
-  const next=h("div",{class:"bcell next"}, h("label",{for:"f-nextAction-"+pid,text:"Next action"}),
-    h("textarea",{class:"ta",id:"f-nextAction-"+pid,rows:"2",placeholder:ro?"":"What happens next?",readonly:ro||null,value:p.nextAction||"",
-      onblur:e=>{ const v=e.target.value.trim(); if(v!==(p.nextAction||"")) saveProp(pid,{nextAction:v}); flush(); }}),
-    h("div",{class:"mini"}, txt("nextOwner","Who"), txt("nextDue","Due","date")));
-  const dates=h("div",{class:"bcell"}, h("span",{class:"lab",text:"Key dates & deal"}),
-    h("div",{class:"kv"},
-      h("span",{text:"Stage"}), txt("stageLabel","e.g. Under contract"),
-      isDeal(p)?[h("span",{text:"Closing"}), txt("closingDate","Closing date","date")]:null,
-      isDeal(p)?[h("span",{text:"Juan signs"}), txt("signDate","Signing date","date")]:null,
-      h("span",{text:"Title/escrow"}), txt("escrow","Company + file #"),
-      h("span",{text:"Price"}), txt("price","Price")));
-  const card=h("div",{class:"card"},
-    h("div",{class:"brief"}, ta("blocker","What's stopping this deal?","Current blocker","blocker"), ta("missing","What information don't we have yet?","What's missing"), next, dates));
-
-  // checklist
-  const checks=sortedChecks(p);
-  const cnt=CHECK.reduce((m,c)=>(m[c.k]=checks.filter(x=>x.state===c.k).length,m),{});
-  const cl=h("div",{class:"clist"});
-  checks.filter(c=>!(S.hideDone && c.state==="done")).forEach(c=>{
-    const st=CHECK.find(x=>x.k===c.state)||CHECK[3];
-    cl.append(h("div",{class:"citem"},
-      h("button",{class:"cstate",id:"c-"+pid+"-"+c.id,disabled:ro||null,style:`background:var(--c-${st.k});color:var(--c-${st.k}-ink)`,"aria-label":c.label+": "+st.label+". Change",
-        onclick:e=>openList(e.currentTarget, CHECK.map(x=>({...x,style:`background:var(--c-${x.k});color:var(--c-${x.k}-ink)`})).concat(ro?[]:[{k:"__remove",label:"Remove item",style:"background:transparent;color:var(--muted);font-weight:500"}]),
-          k=>{ if(k==="__remove") return removeCheck(pid,c.id); return saveProp(pid,{checks:{[c.id]:{state:k}}}); })}, st.label),
-      h("div",{class:"cbody"}, h("div",{class:"clabel",text:c.label}),
-        h("textarea",{class:"cnote",id:"cn-"+pid+"-"+c.id,rows:"1",placeholder:ro?"":"Add detail",readonly:ro||null,value:c.note||"","aria-label":"Detail for "+c.label,
-          onblur:e=>{ const v=e.target.value.trim(); if(v!==(c.note||"")) saveProp(pid,{checks:{[c.id]:{note:v}}}); flush(); }}))));
-  });
-  const checksEl=h("div",{class:"checks"},
-    h("div",{class:"checks-head"}, h("span",{class:"lab",text:isDeal(p)?"Before closing":"Checklist"}),
-      h("span",{class:"tally",text:checks.length?`${cnt.done} done${S.hideDone&&cnt.done?" (hidden)":""} · ${cnt.waiting} in progress · ${cnt.missing} missing · ${cnt.unknown} to confirm`:"No items yet"})),
-    cl,
-    ro?null:h("div",{class:"cadd"}, h("input",{id:"cadd-"+pid,placeholder:"+ Add checklist item (e.g. Well inspection)",autocomplete:"off","aria-label":"Add checklist item",
-      onkeydown:e=>{ if(e.key==="Enter"){ e.preventDefault(); addCheck(p,e.target); } },
-      onblur:e=>{ if(e.target.value.trim()) addCheck(p,e.target); else flush(); }})));
-  card.append(checksEl);
-
-  // stamp
-  const who = p.updatedBy ? (people[p.updatedBy] ? (people[p.updatedBy].isMe?"you":(people[p.updatedBy].name||"a teammate")) : "a teammate") : (p.updatedByName||"");
-  card.append(h("div",{class:"stamp"},
-    p.updatedAt?h("span",{text:`Last update ${ago(p.updatedAt)}${who?" by "+who:""}`}):h("span",{text:"Not updated yet"}),
-    ...(p.links||[]).filter(l=>l.board).map(l=>h("a",{href:l.url,target:"_blank",rel:"noopener",text:l.label+" ↗"})),
-    p.facts?h("button",{class:"linkbtn","aria-expanded":String(info),onclick:()=>{info?S.info.delete(pid):S.info.add(pid);render();}}, info?"Hide property details":"Property details"):null));
-  g.append(card);
-  if(info && p.facts) g.append(renderFacts(p));
-
-  // tasks
+  // tasks (monday style)
   const grid=h("div",{class:"grid",role:"table","aria-label":"Tasks for "+p.address});
-  ["Task","Owner","Status","Priority","Due","Notes",""].forEach((t,ix)=>grid.append(h("div",{class:"hcell"+(ix===0||ix===5?" left":""),role:"columnheader",text:t})));
-  if(!rows.length) grid.append(h("div",{class:"empty-row",text: all.length ? (S.hideDone && all.every(t=>t.status==="done") ? "All tasks done. Tap “Show done” to see them." : "No tasks match the current filters.") : "No tasks yet. Add the first one below."}));
+  ["Task","Owner","Status","Due","Notes",""].forEach((t,ix)=>grid.append(h("div",{class:"hcell"+(ix===0||ix===4?" left":""),role:"columnheader",text:t})));
+  if(!rows.length) grid.append(h("div",{class:"empty-row",text: all.length ? (S.hideDone && all.every(t=>t.status==="done") ? "All tasks done. Tap “Show done” to see them." : "No tasks match your search.") : "No tasks yet. Add the first one below."}));
   rows.forEach(t=>renderRow(grid,t,people));
-  if(S.canWrite){
-    grid.append(h("div",{class:"addrow"},h("input",{id:"add-"+pid,placeholder:"+ Add task",autocomplete:"off","aria-label":"Add task to "+p.address,
-      onkeydown:e=>{ if(e.key==="Enter"){ e.preventDefault(); addTask(pid,e.target); } },
-      onblur:e=>{ if(e.target.value.trim()) addTask(pid,e.target); else flush(); }})));
-  }
-  const done=all.filter(t=>t.status==="done").length, stuck=all.filter(t=>t.status==="stuck").length;
-  grid.append(h("div",{class:"foot"}, `${done} of ${all.length} tasks done`, stuck?h("span",{style:"color:var(--s-stuck);font-weight:600",text:stuck+" stuck"}):null));
+  if(!ro) grid.append(h("div",{class:"addrow"},h("input",{id:"add-"+pid,placeholder:"+ Add task",autocomplete:"off","aria-label":"Add task to "+p.address,
+    onkeydown:e=>{ if(e.key==="Enter"){ e.preventDefault(); addTask(pid,e.target); } },
+    onblur:e=>{ if(e.target.value.trim()) addTask(pid,e.target); else flush(); }})));
   g.append(h("div",{class:"table"},grid));
+
+  // notes / updates
+  const notes=S.notes.filter(n=>n.property===pid).sort((a,b)=>b.createdAt-a.createdAt);
+  const box=h("div",{class:"notes"}, h("h3",{text:"Notes"}));
+  if(!ro){
+    const ta=h("textarea",{id:"note-"+pid,rows:"2",placeholder:"Write an update for the team…","aria-label":"New note for "+p.address});
+    const post=h("button",{class:"btn",type:"button",onclick:()=>addNote(pid,ta)},"Post note");
+    ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); addNote(pid,ta); } });
+    ta.addEventListener("blur",()=>flush());
+    box.append(h("div",{class:"ncompose"}, ta, post));
+  }
+  if(!notes.length) box.append(h("p",{class:"nempty",text:"No notes yet."}));
+  notes.forEach(n=>{
+    const prof=n.author?people[n.author]:null;
+    const who=prof?(prof.isMe?"You":(prof.name||"Teammate")):(n.authorName||"Teammate");
+    const del = (!ro && n.author && n.author===S.me) ? h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ write(()=>S.db.doc("notes/"+n.id).delete(),"Note deleted"); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete") : null;
+    box.append(h("div",{class:"note"},
+      prof?h("img",{src:prof.avatarUrl,alt:""}):badge(who),
+      h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), h("p",{text:n.text}))));
+  });
+  g.append(box);
+
+  if(p.facts || (p.links||[]).length) g.append(h("button",{class:"linkbtn",style:"margin-top:10px","aria-expanded":String(info),onclick:()=>{info?S.info.delete(pid):S.info.add(pid);render();}}, info?"Hide property details":"Property details"));
+  if(info) g.append(renderFacts(p));
   return g;
+}
+
+async function addNote(pid, ta){
+  const text=ta.value.trim(); if(!text) return;
+  const ok=await write(()=>S.db.collection("notes").add({property:pid,text,author:S.me||null,createdAt:Date.now()}),"Note posted");
+  if(ok){ ta.value=""; saveProp(pid,{}); }
 }
 
 async function removeCheck(pid, cid){
@@ -592,8 +583,6 @@ function renderRow(grid, t, people){
   grid.append(h("div",{class:"cell center",role:"cell"}, h("button",{class:"pill",id:"s-"+t.id,disabled:ro||null,style:`background:var(--s-${st.k});color:var(--s-${st.k}-ink)`,
     onclick:e=>openList(e.currentTarget,STATUS.map(x=>({...x,style:`background:var(--s-${x.k});color:var(--s-${x.k}-ink)`})),k=>write(()=>doc().update({status:k,updatedAt:Date.now()}), k==="done"?"Marked done":null))}, st.label)));
 
-  grid.append(h("div",{class:"cell center",role:"cell"}, h("button",{class:"pill"+(pr?"":" empty"),id:"p-"+t.id+"-pri",disabled:ro||null,style:pr?`background:var(--p-${pr.k});color:var(--p-${pr.k}-ink)`:"",
-    onclick:e=>openList(e.currentTarget,PRIORITY.map(x=>({...x,style:`background:var(--p-${x.k});color:var(--p-${x.k}-ink)`})).concat([{k:null,label:"Clear",style:"background:transparent;color:var(--muted);font-weight:500"}]),k=>write(()=>doc().update({priority:k})))}, pr?pr.label:"Set")));
 
   const overdue = t.due && t.status!=="done" && t.due < today();
   grid.append(h("div",{class:"cell center",role:"cell"}, h("input",{type:"date",class:"due"+(overdue?" overdue":""),id:"d-"+t.id,value:t.due||"",readonly:ro||null,"aria-label":"Due date",
@@ -692,6 +681,7 @@ np.addEventListener("submit",async e=>{
   const onErr = e=>{ if(e && e.code!=="revoked") notice("Live updates stopped. Reload the page to reconnect."); };
   db.collection("properties").orderBy("order").onSnapshot(snap=>{ S.props=snap.docs.map(d=>({id:d.id,...d.data()})); S.ready.p=true; render(); }, onErr);
   db.collection("tasks").orderBy("createdAt").onSnapshot(snap=>{ S.tasks=snap.docs.map(d=>({id:d.id,...d.data()})); S.ready.t=true; render(); }, onErr);
+  db.collection("notes").orderBy("createdAt","desc").limit(500).onSnapshot(snap=>{ S.notes=snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, onErr);
   setInterval(()=>{ if(!editing() && pop.hidden) render(); }, 60000);
 })();
 </script>
