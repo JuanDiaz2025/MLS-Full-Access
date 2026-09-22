@@ -99,18 +99,18 @@ button{cursor:pointer}
 .jump button{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--ink-2);font-size:15px;font-weight:700}
 .jump button:hover{border-color:var(--line-strong);color:var(--ink)}
 .jump button[aria-selected="true"]{background:var(--ink);border-color:var(--ink);color:var(--ground)}
-.ov{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.ovrow{display:grid;grid-template-columns:minmax(230px,1.3fr) 170px 150px minmax(200px,1.6fr) minmax(200px,1.4fr);gap:14px;align-items:start;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);padding:13px 16px}
-.ovrow:last-child{border-bottom:0}
-.ovrow:hover{background:var(--surface-2)}
-.ovrow.head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding-block:9px;background:var(--surface-2);cursor:default}
-.ovrow .a{font-family:var(--f-display);font-weight:800;font-size:21px;line-height:1.2;letter-spacing:-.01em}
-.ovrow .a small{display:block;font-family:var(--f-body);font-weight:500;color:var(--muted);font-size:13px;letter-spacing:0;margin-top:2px}
-.ovrow .t{font-size:13px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.ovrow .t.red{color:var(--h-red-ink)}
-.ovrow .who{display:block;margin-top:3px;font-size:12px;color:var(--muted)}
-.ovrow .health{pointer-events:none}
-@media (max-width:860px){.ovrow{grid-template-columns:1fr 1fr}.ovrow.head{display:none}.ovrow .t{grid-column:1/-1}}
+.ov{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+.pbox{--gc:var(--g1);display:flex;flex-direction:column;gap:10px;text-align:left;width:100%;min-height:190px;background:var(--surface);border:1px solid var(--line);border-top:6px solid var(--gc);border-radius:14px;padding:16px 18px;transition:transform .12s,box-shadow .12s,border-color .12s}
+.pbox:hover,.pbox:focus-visible{transform:translateY(-2px);box-shadow:var(--shadow);border-color:var(--gc)}
+.pbox .a{font-family:var(--f-display);font-weight:800;font-size:24px;line-height:1.15;letter-spacing:-.01em;color:var(--ink);text-wrap:balance}
+.pbox .a small{display:block;font-family:var(--f-body);font-weight:500;color:var(--muted);font-size:13px;letter-spacing:0;margin-top:3px}
+.pbox .row1{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pbox .health{pointer-events:none}
+.pbox .t{font-size:13px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pbox .t b{font-weight:700;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-right:4px}
+.pbox .t.red{color:var(--h-red-ink)}
+.pbox .go{margin-top:auto;font-weight:700;color:var(--accent);font-size:13px}
+@media (prefers-reduced-motion: reduce){.pbox:hover{transform:none}}
 .back{border:0;background:transparent;color:var(--accent);font-weight:600;padding:0;margin:0 0 10px}
 
 /* Groups */
@@ -407,15 +407,16 @@ async function render(){
   if(!act.length){ root.replaceChildren(h("div",{class:"notice",text:"No properties yet. Use “+ Property” to add the first one."})); return; }
   if(!shown.length){ root.replaceChildren(h("div",{class:"notice",text:"No properties match this filter."})); return; }
   root.replaceChildren(h("div",{class:"ov",role:"list"},
-    h("div",{class:"ovrow head","aria-hidden":"true"}, h("span",{text:"Property"}),h("span",{text:"Status"}),h("span",{text:"Closing"}),h("span",{text:"Blocker"}),h("span",{text:"Next step"})),
     ...shown.map(p=>{
       const hk=p.health||"grey", n=p.closingDate?daysUntil(p.closingDate):null;
-      return h("button",{class:"ovrow",role:"listitem",onclick:()=>select(p.id),"aria-label":"Open "+p.address},
+      const gc=`var(${GCOLORS[(p.colorIndex ?? 0) % GCOLORS.length]})`;
+      return h("button",{class:"pbox",role:"listitem",style:`--gc:${gc}`,onclick:()=>select(p.id),"aria-label":"Open "+p.address},
         h("span",{class:"a"}, p.address, h("small",{text:(KIND[p.kind]||"")+(p.city?" · "+p.city:"")})),
-        h("span",{}, h("span",{class:"health "+hk}, h("i",{class:"hdot "+hk,"aria-hidden":"true"}), HEALTH.find(x=>x.k===hk).label)),
-        h("span",{class:"t",text:p.closingDate?(fmtDate(p.closingDate)+(n<0?" (passed)":n===0?" (today)":" ("+n+"d)")):"—"}),
-        h("span",{class:"t"+(p.blocker?" red":""),text:p.blocker||"None"}),
-        h("span",{class:"t"}, p.nextAction||"—", (p.nextOwner||p.nextDue)?h("span",{class:"who",text:[p.nextOwner,p.nextDue?"due "+fmtDate(p.nextDue):""].filter(Boolean).join(" · ")}):null));
+        h("span",{class:"row1"}, h("span",{class:"health "+hk}, h("i",{class:"hdot "+hk,"aria-hidden":"true"}), HEALTH.find(x=>x.k===hk).label),
+          p.closingDate?h("span",{class:"dchip"+(n<0?" past":n<=7?" soon":""),text:"Closes "+fmtDate(p.closingDate)+(n<0?" (passed)":n===0?" (today)":" ("+n+"d)")}):null),
+        p.blocker?h("span",{class:"t red"}, h("b",{text:"Blocker"}), p.blocker):null,
+        p.nextAction?h("span",{class:"t"}, h("b",{text:"Next"}), p.nextAction+(p.nextOwner?" — "+p.nextOwner:"")):null,
+        h("span",{class:"go",text:"Open property →"}));
     })));
 }
 
