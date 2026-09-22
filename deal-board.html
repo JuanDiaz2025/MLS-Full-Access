@@ -229,19 +229,6 @@ button{cursor:pointer}
 .empty-row{grid-column:1 / -1;border-right:0 !important;padding:0 16px;color:var(--muted);font-size:13px}
 .ini{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:700;color:#fff;letter-spacing:.02em}
 
-/* SF pipeline */
-.sfsec{margin-top:40px}
-.sfsec h2{font-family:var(--f-display);font-weight:800;font-size:20px;margin:0;letter-spacing:-.01em}
-.sfsec > p{margin:2px 0 10px;color:var(--muted)}
-.sft{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--g5);border-radius:10px}
-.sfgrid{display:grid;grid-template-columns:minmax(200px,1.1fr) minmax(200px,1.2fr) minmax(220px,1.3fr) 130px 40px;min-width:860px}
-.sfgrid > div{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:4px 6px;display:flex;align-items:center;min-height:40px}
-.sfgrid > div:nth-child(5n){border-right:0}
-.sfgrid input,.sfgrid textarea{width:100%;border:1px solid transparent;border-radius:6px;background:transparent;padding:5px 7px;min-width:0;resize:none;field-sizing:content;line-height:1.35}
-.sfgrid input:hover,.sfgrid textarea:hover{border-color:var(--line)}
-.sfgrid input:focus,.sfgrid textarea:focus{outline:0;border-color:var(--accent);background:var(--surface)}
-.sfgrid .addr{font-weight:600}
-
 /* New property form */
 .newprop{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
 .newprop input,.newprop select{flex:1 1 200px;height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:var(--surface-2);min-width:0}
@@ -280,7 +267,7 @@ button{cursor:pointer}
     <input id="np-addr" placeholder="Street address, e.g. 820 28th St" autocomplete="off" required>
     <input id="np-city" placeholder="City, State ZIP" autocomplete="off">
     <select id="np-kind" aria-label="Type of deal">
-      <option value="buy">Buying</option><option value="sell">Selling</option><option value="rehab">Rehab</option><option value="listed">Listed</option><option value="watch">SF opportunity</option>
+      <option value="buy">Buying</option><option value="sell">Selling</option><option value="rehab">Rehab</option><option value="listed">Listed</option>
     </select>
     <button class="btn" type="submit">Add property</button>
     <button class="btn ghost" type="button" id="np-cancel">Cancel</button>
@@ -288,11 +275,6 @@ button{cursor:pointer}
   <nav class="jump" id="jump" role="tablist" aria-label="Properties"></nav>
   <div class="groups" id="groups"><div class="notice">Loading the board…</div></div>
 
-  <section class="sfsec" id="sf" aria-labelledby="sf-title" hidden>
-    <h2 id="sf-title">San Francisco pipeline</h2>
-    <p>SF properties we own or are chasing. Check each one against the spreadsheet and Genesis.</p>
-    <div class="sft"><div class="sfgrid" id="sfgrid"></div></div>
-  </section>
 </div>
 <div id="pop" class="pop" hidden></div>
 <div id="toast" class="toast" hidden></div>
@@ -395,7 +377,7 @@ function propMatches(p){
 }
 function sortedChecks(p){ return Object.entries(p.checks||{}).map(([id,c])=>({id,...c})).sort((a,b)=>(a.order||0)-(b.order||0)); }
 
-function editing(){ const a=document.activeElement; return a && a.closest && a.closest("#groups,#sfgrid") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName); }
+function editing(){ const a=document.activeElement; return a && a.closest && a.closest("#groups") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName); }
 function flush(){ setTimeout(()=>{ if(S.pendingRender && !editing()) render(); },0); }
 
 /* ---------- render ---------- */
@@ -417,10 +399,8 @@ async function render(){
   });
   const tab=(id,label,dot)=>h("button",{role:"tab","aria-selected":String((S.sel||"all")===id),onclick:()=>select(id)},
     dot?h("i",{class:"hdot "+dot,"aria-hidden":"true"}):null, label);
-  $("#jump").replaceChildren(tab("all","All properties"), ...act.map(p=>tab(p.id,p.address,p.health||"grey")), tab("sf","SF pipeline"));
+  $("#jump").replaceChildren(tab("all","All properties"), ...act.map(p=>tab(p.id,p.address,p.health||"grey")));
   const root=$("#groups");
-  $("#sf").hidden = S.sel!=="sf";
-  if(S.sel==="sf"){ root.replaceChildren(); renderSF(); return; }
   const one = S.sel && S.sel!=="all" ? act.find(p=>p.id===S.sel) : null;
   if(one){ S.collapsed.delete(one.id); root.replaceChildren(h("button",{class:"back",onclick:()=>select("all")},"← All properties"), renderGroup(one,people)); return; }
   const shown = act.filter(propMatches);
@@ -647,39 +627,6 @@ async function addTask(pid, input){
   input.value="";
   await write(()=>S.db.collection("tasks").add({property:pid,title,status:"todo",priority:null,owner:null,ownerName:null,due:null,notes:"",createdBy:S.me||null,createdAt:Date.now()}));
   const again=document.getElementById("add-"+pid); if(again) again.focus();
-}
-
-/* ---------- SF pipeline ---------- */
-function renderSF(){
-  const sf=S.props.filter(p=>p.kind==="watch").sort((a,b)=>(a.order||0)-(b.order||0));
-  const sec=$("#sf"); sec.hidden=false;
-  const ro=!S.canWrite, grid=$("#sfgrid");
-  const q=S.q.trim().toLowerCase();
-  const rows=sf.filter(p=>!q || [p.address,p.city,p.stageLabel,p.nextAction,p.nextOwner].join(" ").toLowerCase().includes(q));
-  const cell=(p,field,ph,cls)=>h("div",{}, h("textarea",{class:cls||"",id:"sf-"+field+"-"+p.id,rows:"1",placeholder:ro?"":ph,readonly:ro||null,value:p[field]||"","aria-label":ph,
-    onkeydown:e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); e.target.blur(); } },
-    onblur:e=>{ const v=e.target.value.trim(); if(v!==(p[field]||"")) saveProp(p.id,{[field]:v}); flush(); }}));
-  grid.replaceChildren(
-    ...["Property","Where it stands","Next action","Owner",""].map(t=>h("div",{class:"hcell"+(t==="Owner"||t===""?"":" left"),text:t})),
-    ...rows.flatMap(p=>{
-      const del=h("button",{class:"del",id:"sfx-"+p.id,disabled:ro||null,"aria-label":"Remove "+p.address,title:"Remove"},"✕");
-      del.addEventListener("click",()=>{
-        if(del.classList.contains("confirm")){ write(()=>S.db.doc("properties/"+p.id).delete(),"Removed"); return; }
-        del.classList.add("confirm"); del.textContent="Sure?"; del.style.fontSize="11px";
-        setTimeout(()=>{ if(del.isConnected){ del.classList.remove("confirm"); del.textContent="✕"; del.style.fontSize=""; } },3000);
-      });
-      return [cell(p,"address","Address","addr"), cell(p,"stageLabel","Status"), cell(p,"nextAction","Next action"), cell(p,"nextOwner","Who"), h("div",{style:"padding:0;justify-content:center"},del)];
-    }),
-    rows.length?null:h("div",{class:"empty-row",style:"grid-column:1/-1;border-right:0",text:sf.length?"No SF entries match your search.":"No SF opportunities yet."}),
-    ro?null:h("div",{class:"addrow",style:"grid-column:1/-1;border-right:0"}, h("input",{id:"sf-add",placeholder:"+ Add an SF property or lead (address)",autocomplete:"off","aria-label":"Add SF property",
-      onkeydown:e=>{ if(e.key==="Enter"){ e.preventDefault(); addSF(e.target); } }, onblur:e=>{ if(e.target.value.trim()) addSF(e.target); else flush(); }}))
-  );
-}
-async function addSF(input){
-  const address=input.value.trim(); if(!address) return; input.value="";
-  const order=S.props.reduce((m,p)=>Math.max(m,p.order||0),0)+1;
-  await write(()=>S.db.collection("properties").add({address,city:"San Francisco, CA",kind:"watch",stageLabel:"",nextAction:"",nextOwner:"",order,createdAt:Date.now(),...stampFields()}));
-  const again=document.getElementById("sf-add"); if(again) again.focus();
 }
 
 /* ---------- popovers ---------- */
