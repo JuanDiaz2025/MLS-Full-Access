@@ -256,7 +256,7 @@ button{cursor:pointer}
     <div class="tools">
       <label class="search" for="q"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search" autocomplete="off"></label>
       <button class="chip" id="f-mine" aria-pressed="false">My tasks</button>
-      <button class="chip" id="f-done" aria-pressed="false">Hide done</button>
+      <button class="chip" id="f-done" aria-pressed="false">Show done</button>
       <button class="btn" id="add-prop">+ Property</button>
     </div>
   </header>
@@ -302,10 +302,10 @@ const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
 const S = { db:null, user:null, me:null, canWrite:true, props:[], tasks:[], ready:{p:false,t:false},
-  sel:null, q:"", mine:false, hideDone:false, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
-try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!!c.hideDone; }catch(e){}
+  sel:null, q:"", mine:false, hideDone:true, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
+try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!c.showDone; }catch(e){}
 try{ const hsh=location.hash.slice(1); S.sel = hsh || localStorage.getItem("tdb-sel") || "all"; }catch(e){ S.sel="all"; }
-function saveUI(){ try{ localStorage.setItem("tdb-ui", JSON.stringify({collapsed:[...S.collapsed], hideDone:S.hideDone})); }catch(e){} }
+function saveUI(){ try{ localStorage.setItem("tdb-ui", JSON.stringify({collapsed:[...S.collapsed], showDone:!S.hideDone})); }catch(e){} }
 
 const $ = (s,r=document)=>r.querySelector(s);
 function h(tag, attrs={}, ...kids){
@@ -414,6 +414,8 @@ async function render(){
           p.closingDate?h("span",{class:"dchip"+(n<0?" past":n<=7?" soon":""),text:"Closes "+fmtDate(p.closingDate)+(n<0?" (passed)":n===0?" (today)":" ("+n+"d)")}):null),
         p.blocker?h("span",{class:"t red"}, h("b",{text:"Blocker"}), p.blocker):null,
         p.nextAction?h("span",{class:"t"}, h("b",{text:"Next"}), p.nextAction+(p.nextOwner?" — "+p.nextOwner:"")):null,
+        (()=>{ const ot=openTasks(p.id).length, oc=sortedChecks(p).filter(c=>c.state!=="done"&&c.state!=="na").length;
+          return h("span",{class:"t"}, h("b",{text:"Not done"}), `${ot} task${ot===1?"":"s"} · ${oc} checklist item${oc===1?"":"s"}`); })(),
         h("span",{class:"go",text:"Open property →"}));
     })));
 }
@@ -487,7 +489,7 @@ function renderGroup(p, people){
   const checks=sortedChecks(p);
   const cnt=CHECK.reduce((m,c)=>(m[c.k]=checks.filter(x=>x.state===c.k).length,m),{});
   const cl=h("div",{class:"clist"});
-  checks.forEach(c=>{
+  checks.filter(c=>!(S.hideDone && c.state==="done")).forEach(c=>{
     const st=CHECK.find(x=>x.k===c.state)||CHECK[3];
     cl.append(h("div",{class:"citem"},
       h("button",{class:"cstate",id:"c-"+pid+"-"+c.id,disabled:ro||null,style:`background:var(--c-${st.k});color:var(--c-${st.k}-ink)`,"aria-label":c.label+": "+st.label+". Change",
@@ -499,7 +501,7 @@ function renderGroup(p, people){
   });
   const checksEl=h("div",{class:"checks"},
     h("div",{class:"checks-head"}, h("span",{class:"lab",text:isDeal(p)?"Before closing":"Checklist"}),
-      h("span",{class:"tally",text:checks.length?`${cnt.done} done · ${cnt.waiting} in progress · ${cnt.missing} missing · ${cnt.unknown} to confirm`:"No items yet"})),
+      h("span",{class:"tally",text:checks.length?`${cnt.done} done${S.hideDone&&cnt.done?" (hidden)":""} · ${cnt.waiting} in progress · ${cnt.missing} missing · ${cnt.unknown} to confirm`:"No items yet"})),
     cl,
     ro?null:h("div",{class:"cadd"}, h("input",{id:"cadd-"+pid,placeholder:"+ Add checklist item (e.g. Well inspection)",autocomplete:"off","aria-label":"Add checklist item",
       onkeydown:e=>{ if(e.key==="Enter"){ e.preventDefault(); addCheck(p,e.target); } },
@@ -518,7 +520,7 @@ function renderGroup(p, people){
   // tasks
   const grid=h("div",{class:"grid",role:"table","aria-label":"Tasks for "+p.address});
   ["Task","Owner","Status","Priority","Due","Notes",""].forEach((t,ix)=>grid.append(h("div",{class:"hcell"+(ix===0||ix===5?" left":""),role:"columnheader",text:t})));
-  if(!rows.length) grid.append(h("div",{class:"empty-row",text: all.length ? "No tasks match the current filters." : "No tasks yet. Add the first one below."}));
+  if(!rows.length) grid.append(h("div",{class:"empty-row",text: all.length ? (S.hideDone && all.every(t=>t.status==="done") ? "All tasks done. Tap “Show done” to see them." : "No tasks match the current filters.") : "No tasks yet. Add the first one below."}));
   rows.forEach(t=>renderRow(grid,t,people));
   if(S.canWrite){
     grid.append(h("div",{class:"addrow"},h("input",{id:"add-"+pid,placeholder:"+ Add task",autocomplete:"off","aria-label":"Add task to "+p.address,
@@ -665,9 +667,9 @@ async function openOwner(anchor, t){
 $("#q").addEventListener("input",e=>{ S.q=e.target.value; render(); });
 $("#q").addEventListener("keydown",e=>{ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } });
 const fm=$("#f-mine"), fd=$("#f-done");
-fd.setAttribute("aria-pressed",String(S.hideDone));
+fd.setAttribute("aria-pressed",String(!S.hideDone));
 fm.addEventListener("click",()=>{ S.mine=!S.mine; fm.setAttribute("aria-pressed",String(S.mine)); render(); });
-fd.addEventListener("click",()=>{ S.hideDone=!S.hideDone; fd.setAttribute("aria-pressed",String(S.hideDone)); saveUI(); render(); });
+fd.addEventListener("click",()=>{ S.hideDone=!S.hideDone; fd.setAttribute("aria-pressed",String(!S.hideDone)); saveUI(); render(); });
 const np=$("#newprop");
 $("#add-prop").addEventListener("click",()=>{ np.hidden=false; $("#np-addr").focus(); });
 $("#np-cancel").addEventListener("click",()=>{ np.hidden=true; np.reset(); });
