@@ -1,11 +1,11 @@
-<title>Twin Deal Board</title>
+<title>Property Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 :root{
   --ground:#eef0f4; --surface:#ffffff; --surface-2:#f6f7fa; --line:#dde1e9; --line-strong:#c7cdd8;
-  --ink:#18202d; --ink-2:#3b4556; --muted:#6b7487; --accent:#2f4bd8; --accent-ink:#ffffff; --accent-soft:#e3e8ff;
+  --ink:#18202d; --ink-2:#3b4556; --muted:#646d80; --accent:#2f4bd8; --accent-ink:#ffffff; --accent-soft:#e3e8ff;
   --s-todo:#c4c9d4; --s-todo-ink:#2a3140;
   --s-working:#f2a93b; --s-working-ink:#2b1c02;
   --s-stuck:#e2445c; --s-stuck-ink:#ffffff;
@@ -14,6 +14,17 @@
   --p-medium:#6b7fe0; --p-medium-ink:#ffffff;
   --p-high:#8a3ffc; --p-high-ink:#ffffff;
   --p-critical:#3a1d6e; --p-critical-ink:#ffffff;
+  /* property health */
+  --h-green:#1fa872; --h-green-soft:#dff5ea; --h-green-ink:#0d5a3b;
+  --h-yellow:#e79a1c; --h-yellow-soft:#fdf0d8; --h-yellow-ink:#6b4200;
+  --h-red:#d8334d; --h-red-soft:#fce3e7; --h-red-ink:#8a1427;
+  --h-grey:#8a93a5; --h-grey-soft:#eceef2; --h-grey-ink:#3b4556;
+  /* checklist states */
+  --c-done:#1fa872; --c-done-ink:#fff;
+  --c-waiting:#f2a93b; --c-waiting-ink:#2b1c02;
+  --c-missing:#e2445c; --c-missing-ink:#fff;
+  --c-unknown:#dfe3ea; --c-unknown-ink:#3b4556;
+  --c-na:#f1f2f5; --c-na-ink:#8a93a5;
   --g1:#0f8b8d; --g2:#8a3ffc; --g3:#d97706; --g4:#d6336c; --g5:#2f4bd8; --g6:#4d7c0f;
   --shadow:0 8px 28px rgba(20,28,45,.16);
   --f-display:"Schibsted Grotesk",ui-sans-serif,system-ui,sans-serif;
@@ -24,8 +35,11 @@
   :root:not([data-theme="light"]){
     color-scheme:dark;
     --ground:#10141c; --surface:#181e29; --surface-2:#1e2532; --line:#2a3342; --line-strong:#3a4558;
-    --ink:#e8ecf3; --ink-2:#c3cad6; --muted:#8c96a8; --accent:#7b91ff; --accent-ink:#0c1230; --accent-soft:#232c52;
+    --ink:#e8ecf3; --ink-2:#c3cad6; --muted:#939cae; --accent:#7b91ff; --accent-ink:#0c1230; --accent-soft:#232c52;
     --s-todo:#4a5263; --s-todo-ink:#e8ecf3;
+    --h-green-soft:#12301f; --h-green-ink:#7fe0b0; --h-yellow-soft:#35280f; --h-yellow-ink:#f5c46b;
+    --h-red-soft:#3a1720; --h-red-ink:#ff9aab; --h-grey-soft:#242b38; --h-grey-ink:#c3cad6;
+    --c-unknown:#2f3746; --c-unknown-ink:#c3cad6; --c-na:#1e2532; --c-na-ink:#6f788a;
     --g1:#2cc3c5; --g2:#a878ff; --g3:#f59e0b; --g4:#f06595; --g5:#7b91ff; --g6:#84cc16;
     --shadow:0 10px 30px rgba(0,0,0,.5);
   }
@@ -33,51 +47,121 @@
 :root[data-theme="dark"]{
   color-scheme:dark;
   --ground:#10141c; --surface:#181e29; --surface-2:#1e2532; --line:#2a3342; --line-strong:#3a4558;
-  --ink:#e8ecf3; --ink-2:#c3cad6; --muted:#8c96a8; --accent:#7b91ff; --accent-ink:#0c1230; --accent-soft:#232c52;
+  --ink:#e8ecf3; --ink-2:#c3cad6; --muted:#939cae; --accent:#7b91ff; --accent-ink:#0c1230; --accent-soft:#232c52;
   --s-todo:#4a5263; --s-todo-ink:#e8ecf3;
+  --h-green-soft:#12301f; --h-green-ink:#7fe0b0; --h-yellow-soft:#35280f; --h-yellow-ink:#f5c46b;
+  --h-red-soft:#3a1720; --h-red-ink:#ff9aab; --h-grey-soft:#242b38; --h-grey-ink:#c3cad6;
+  --c-unknown:#2f3746; --c-unknown-ink:#c3cad6; --c-na:#1e2532; --c-na-ink:#6f788a;
   --g1:#2cc3c5; --g2:#a878ff; --g3:#f59e0b; --g4:#f06595; --g5:#7b91ff; --g6:#84cc16;
   --shadow:0 10px 30px rgba(0,0,0,.5);
 }
 *{box-sizing:border-box}
 body{background:var(--ground);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
-.wrap{max-width:1240px;margin:0 auto;padding:20px 16px 64px}
+.wrap{max-width:1240px;margin:0 auto;padding-inline:16px;padding-block:20px 72px}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* Top bar */
-.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px;margin-bottom:18px}
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px;margin-bottom:16px}
 .brand h1{font-family:var(--f-display);font-weight:800;font-size:26px;letter-spacing:-.02em;margin:0;text-wrap:balance}
-.brand p{margin:2px 0 0;color:var(--muted)}
+.brand p{margin:2px 0 0;color:var(--muted);max-width:62ch}
 .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .search{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:0 10px;height:36px;min-width:0}
-.search input{border:0;background:transparent;outline:0;width:180px;max-width:48vw}
+.search input{border:0;background:transparent;outline:0;width:170px;max-width:44vw}
 .chip{height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);font-weight:500;display:inline-flex;align-items:center;gap:6px}
 .chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--ink)}
 .btn{height:36px;padding:0 14px;border-radius:8px;border:0;background:var(--accent);color:var(--accent-ink);font-weight:600}
 .btn.ghost{background:transparent;color:var(--ink-2);border:1px solid var(--line)}
-
 .notice{background:var(--surface);border:1px dashed var(--line-strong);border-radius:10px;padding:14px 16px;color:var(--ink-2);margin-bottom:16px}
 .notice[data-tone="warn"]{border-style:solid;border-color:var(--s-working)}
 
-/* Summary strip */
-.summary{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-bottom:22px;color:var(--muted);font-size:13px}
-.summary b{font-family:var(--f-mono);font-weight:500;color:var(--ink)}
-.dot{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+/* KPI tiles */
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.kpi{--k:var(--accent);text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px 12px;display:flex;flex-direction:column;gap:2px;transition:border-color .12s,box-shadow .12s}
+.kpi b{font-family:var(--f-display);font-weight:800;font-size:34px;line-height:1;letter-spacing:-.02em;color:var(--k);font-variant-numeric:tabular-nums}
+.kpi span{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.kpi small{font-size:12px;color:var(--muted);min-height:1.2em}
+.kpi:hover{border-color:var(--k)}
+.kpi[aria-pressed="true"]{border-color:var(--k);box-shadow:0 0 0 2px color-mix(in srgb,var(--k) 25%,transparent)}
+.kpi.k-active{--k:var(--ink)} .kpi.k-week{--k:var(--accent)} .kpi.k-blocked{--k:var(--h-red)} .kpi.k-overdue{--k:var(--h-yellow)}
+@media (max-width:720px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi b{font-size:28px}}
+
+/* Jump bar */
+.jump{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:22px}
+.jump a{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--ink-2);text-decoration:none;font-size:13px;font-weight:500}
+.jump a:hover{border-color:var(--line-strong);color:var(--ink)}
+.hdot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--h-grey)}
+.hdot.green{background:var(--h-green)} .hdot.yellow{background:var(--h-yellow)} .hdot.red{background:var(--h-red)}
 
 /* Groups */
-.groups{display:flex;flex-direction:column;gap:28px}
-.group{--gc:var(--g1)}
-.ghead{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:8px}
+.groups{display:flex;flex-direction:column;gap:30px}
+.group{--gc:var(--g1);scroll-margin-top:16px}
+.ghead{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-bottom:8px}
 .caret{width:26px;height:26px;border-radius:6px;border:0;background:transparent;color:var(--gc);display:grid;place-items:center;transition:transform .15s}
 .group[data-collapsed="true"] .caret{transform:rotate(-90deg)}
-.gtitle{font-family:var(--f-display);font-weight:700;font-size:18px;color:var(--gc);margin:0;letter-spacing:-.01em}
-.gcity{color:var(--muted);font-weight:500}
+.gtitle{font-family:var(--f-display);font-weight:700;font-size:19px;color:var(--gc);margin:0;letter-spacing:-.01em}
+.gcity{color:var(--muted);font-weight:500;font-size:15px}
+.kind{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:2px 7px;background:var(--surface)}
+.health{border:0;border-radius:999px;padding:4px 11px 4px 9px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:6px;background:var(--h-grey-soft);color:var(--h-grey-ink)}
+.health.green{background:var(--h-green-soft);color:var(--h-green-ink)}
+.health.yellow{background:var(--h-yellow-soft);color:var(--h-yellow-ink)}
+.health.red{background:var(--h-red-soft);color:var(--h-red-ink)}
+.health[disabled]{cursor:default}
+.dchip{font-family:var(--f-mono);font-size:12px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap}
+.dchip.soon{border-color:var(--accent);color:var(--accent)}
+.dchip.past{border-color:var(--h-red);color:var(--h-red)}
 .gcount{color:var(--muted);font-size:13px}
 .linkbtn{border:0;background:transparent;color:var(--accent);font-weight:600;font-size:13px;padding:2px 4px}
 .ghead .spacer{flex:1}
-.battery{display:flex;height:8px;width:160px;max-width:40vw;border-radius:4px;overflow:hidden;background:var(--line)}
+.battery{display:flex;height:8px;width:140px;max-width:36vw;border-radius:4px;overflow:hidden;background:var(--line)}
 .battery span{display:block;height:100%}
+
+.card{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc);border-radius:10px;margin-bottom:10px}
+/* brief: blocker / missing / next / dates */
+.brief{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--line)}
+.bcell{padding:12px 14px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px;min-width:0}
+.bcell:last-child{border-right:0}
+.bcell label,.lab{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.bcell.blocker label{color:var(--h-red)}
+.bcell.next label{color:var(--accent)}
+.ta{width:100%;border:1px solid transparent;border-radius:6px;background:transparent;padding:5px 7px;margin:0 -7px;resize:none;min-height:56px;line-height:1.4;color:var(--ink);field-sizing:content;max-height:220px}
+.ta:hover{border-color:var(--line)}
+.ta:focus{outline:0;border-color:var(--accent);background:var(--surface)}
+.ta::placeholder{color:var(--muted)}
+.mini{display:flex;flex-wrap:wrap;gap:6px}
+.mini input{border:1px solid var(--line);border-radius:6px;background:var(--surface-2);padding:4px 7px;font-size:13px;min-width:0}
+.mini input[type=text]{flex:1 1 110px}
+.mini input[type=date]{font-family:var(--f-mono);font-size:12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;font-size:13px}
+.kv span{color:var(--muted);font-size:12px}
+.kv input{width:100%;border:1px solid transparent;border-radius:5px;background:transparent;padding:3px 5px;min-width:0}
+.kv input:hover{border-color:var(--line)}
+.kv input:focus{outline:0;border-color:var(--accent);background:var(--surface)}
+.kv input[type=date]{font-family:var(--f-mono);font-size:12px}
+@media (max-width:900px){.brief{grid-template-columns:repeat(2,minmax(0,1fr))}.bcell:nth-child(2){border-right:0}.bcell:nth-child(-n+2){border-bottom:1px solid var(--line)}}
+@media (max-width:560px){.brief{grid-template-columns:1fr}.bcell{border-right:0;border-bottom:1px solid var(--line)}.bcell:last-child{border-bottom:0}}
+
+/* checklist */
+.checks{padding:12px 14px 6px}
+.checks-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.checks-head .tally{font-size:12px;color:var(--muted)}
+.clist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}
+@media (max-width:760px){.clist{grid-template-columns:1fr}}
+.citem{display:grid;grid-template-columns:104px minmax(0,1fr);gap:4px 10px;align-items:start;padding:7px 0;border-top:1px solid var(--line)}
+.cstate{border:0;border-radius:5px;font-size:11px;font-weight:700;padding:4px 6px;text-align:center;text-transform:uppercase;letter-spacing:.04em;width:100%}
+.cstate[disabled]{cursor:default}
+.cbody{min-width:0}
+.clabel{font-weight:600;font-size:13.5px}
+.cnote{width:100%;border:1px solid transparent;border-radius:5px;background:transparent;padding:2px 5px;margin:1px -5px 0;font-size:12.5px;color:var(--ink-2);resize:none;field-sizing:content;min-height:1.6em;line-height:1.4}
+.cnote:hover{border-color:var(--line)}
+.cnote:focus{outline:0;border-color:var(--accent);background:var(--surface)}
+.cnote::placeholder{color:var(--muted)}
+.cadd{display:flex;gap:8px;padding:8px 0 6px;border-top:1px solid var(--line)}
+.cadd input{flex:1;border:1px solid transparent;border-radius:6px;background:transparent;padding:6px 8px;min-width:0}
+.cadd input:focus{outline:0;border-color:var(--accent);background:var(--surface)}
+.stamp{padding:8px 14px 10px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:4px 14px}
+.stamp a{color:var(--accent)}
 
 .facts{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc);border-radius:10px;padding:14px 16px;margin:0 0 10px;display:grid;gap:12px}
 .facts dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px 18px;margin:0}
@@ -92,7 +176,7 @@ button{cursor:pointer}
 .comps td{padding:5px 10px 5px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
 .scroll{overflow-x:auto}
 
-/* Table */
+/* Task table */
 .table{overflow-x:auto;border-radius:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc)}
 .grid{display:grid;grid-template-columns:minmax(260px,1fr) 150px 140px 120px 130px minmax(180px,.8fr) 40px;min-width:1000px}
 .grid > div{border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:40px;display:flex;align-items:center}
@@ -124,18 +208,32 @@ button{cursor:pointer}
 .addrow input::placeholder{color:var(--muted)}
 .foot{grid-column:1 / -1;border-bottom:0 !important;border-right:0 !important;min-height:34px !important;padding:0 14px;font-size:12px;color:var(--muted);gap:14px;background:var(--surface-2)}
 .empty-row{grid-column:1 / -1;border-right:0 !important;padding:0 16px;color:var(--muted);font-size:13px}
+.ini{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:700;color:#fff;letter-spacing:.02em}
+
+/* SF pipeline */
+.sfsec{margin-top:40px}
+.sfsec h2{font-family:var(--f-display);font-weight:800;font-size:20px;margin:0;letter-spacing:-.01em}
+.sfsec > p{margin:2px 0 10px;color:var(--muted)}
+.sft{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--g5);border-radius:10px}
+.sfgrid{display:grid;grid-template-columns:minmax(200px,1.1fr) minmax(200px,1.2fr) minmax(220px,1.3fr) 130px 40px;min-width:860px}
+.sfgrid > div{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:4px 6px;display:flex;align-items:center;min-height:40px}
+.sfgrid > div:nth-child(5n){border-right:0}
+.sfgrid input,.sfgrid textarea{width:100%;border:1px solid transparent;border-radius:6px;background:transparent;padding:5px 7px;min-width:0;resize:none;field-sizing:content;line-height:1.35}
+.sfgrid input:hover,.sfgrid textarea:hover{border-color:var(--line)}
+.sfgrid input:focus,.sfgrid textarea:focus{outline:0;border-color:var(--accent);background:var(--surface)}
+.sfgrid .addr{font-weight:600}
 
 /* New property form */
-.newprop{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.newprop input{flex:1 1 240px;height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:var(--surface-2);min-width:0}
+.newprop{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
+.newprop input,.newprop select{flex:1 1 200px;height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:var(--surface-2);min-width:0}
+.newprop select{flex:0 1 170px}
 
 /* Popover */
-.pop{position:fixed;z-index:50;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:8px;width:220px;max-width:calc(100vw - 32px)}
+.pop{position:fixed;z-index:50;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:8px;width:230px;max-width:calc(100vw - 32px)}
 .pop .opt{display:block;width:100%;border:0;border-radius:6px;padding:8px 10px;margin:3px 0;font-weight:600;text-align:center}
 .pop .person{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;border-radius:6px;padding:6px 8px;text-align:left}
 .pop .person:hover,.pop .person:focus-visible{background:var(--surface-2)}
 .pop .person img{width:24px;height:24px;border-radius:50%}
-.ini{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:700;color:#fff;letter-spacing:.02em}
 .pop input{width:100%;height:32px;border:1px solid var(--line);border-radius:6px;padding:0 8px;background:var(--surface-2);margin-bottom:6px}
 .pop .hint{color:var(--muted);font-size:12px;padding:6px 8px}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:9px 14px;border-radius:8px;font-weight:500;z-index:60;max-width:calc(100vw - 32px)}
@@ -146,11 +244,11 @@ button{cursor:pointer}
 <div class="wrap">
   <header class="top">
     <div class="brand">
-      <h1>Twin Deal Board</h1>
-      <p>One group per property. Add a task, assign it, move its status.</p>
+      <h1>Property Command Center</h1>
+      <p>Every active deal in one place: where it stands, what's blocking it, what's missing, the next step and who owns it. Anyone on the team can update it live.</p>
     </div>
     <div class="tools">
-      <label class="search" for="q"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search tasks" autocomplete="off"></label>
+      <label class="search" for="q"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search" autocomplete="off"></label>
       <button class="chip" id="f-mine" aria-pressed="false">My tasks</button>
       <button class="chip" id="f-done" aria-pressed="false">Hide done</button>
       <button class="btn" id="add-prop">+ Property</button>
@@ -158,14 +256,24 @@ button{cursor:pointer}
   </header>
 
   <div id="notice" class="notice" hidden></div>
-  <div class="summary" id="summary"></div>
+  <div class="kpis" id="kpis"></div>
   <form class="newprop" id="newprop" hidden>
     <input id="np-addr" placeholder="Street address, e.g. 820 28th St" autocomplete="off" required>
     <input id="np-city" placeholder="City, State ZIP" autocomplete="off">
+    <select id="np-kind" aria-label="Type of deal">
+      <option value="buy">Buying</option><option value="sell">Selling</option><option value="rehab">Rehab</option><option value="listed">Listed</option><option value="watch">SF opportunity</option>
+    </select>
     <button class="btn" type="submit">Add property</button>
     <button class="btn ghost" type="button" id="np-cancel">Cancel</button>
   </form>
+  <nav class="jump" id="jump" aria-label="Jump to property"></nav>
   <div class="groups" id="groups"><div class="notice">Loading the board…</div></div>
+
+  <section class="sfsec" id="sf" aria-labelledby="sf-title" hidden>
+    <h2 id="sf-title">San Francisco pipeline</h2>
+    <p>SF properties we own, are chasing or should check. Confirm each one against the spreadsheet and Genesis.</p>
+    <div class="sft"><div class="sfgrid" id="sfgrid"></div></div>
+  </section>
 </div>
 <div id="pop" class="pop" hidden></div>
 <div id="toast" class="toast" hidden></div>
@@ -178,10 +286,23 @@ const STATUS = [
   {k:"done", label:"Done"}];
 const PRIORITY = [
   {k:"low", label:"Low"},{k:"medium", label:"Medium"},{k:"high", label:"High"},{k:"critical", label:"Critical"}];
+const HEALTH = [
+  {k:"green", label:"On track"},
+  {k:"yellow", label:"Needs action"},
+  {k:"red", label:"Blocked — do not proceed"},
+  {k:"grey", label:"Needs update"}];
+const CHECK = [
+  {k:"done", label:"Done"},
+  {k:"waiting", label:"In progress"},
+  {k:"missing", label:"Missing"},
+  {k:"unknown", label:"Confirm"},
+  {k:"na", label:"N/A"}];
+const KIND = {buy:"Buying", sell:"Selling", rehab:"Rehab", listed:"Listed", watch:"SF opportunity"};
+const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
 const S = { db:null, user:null, me:null, canWrite:true, props:[], tasks:[], ready:{p:false,t:false},
-  q:"", mine:false, hideDone:false, collapsed:new Set(), info:new Set(), pendingRender:false };
+  q:"", mine:false, hideDone:false, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
 try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!!c.hideDone; }catch(e){}
 function saveUI(){ try{ localStorage.setItem("tdb-ui", JSON.stringify({collapsed:[...S.collapsed], hideDone:S.hideDone})); }catch(e){} }
 
@@ -193,6 +314,7 @@ function h(tag, attrs={}, ...kids){
     if(k==="class") el.className=v;
     else if(k==="text") el.textContent=v;
     else if(k==="style") el.style.cssText=v;
+    else if(k==="value") el.value=v;
     else if(k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v===true?"":v);
   }
@@ -201,98 +323,234 @@ function h(tag, attrs={}, ...kids){
 }
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true, 2600); }
 function notice(msg, tone){ const n=$("#notice"); if(!msg){n.hidden=true;return;} n.textContent=msg; n.dataset.tone=tone||""; n.hidden=false; }
-function money(n){ return (typeof n==="number") ? "$"+n.toLocaleString("en-US") : (n||"—"); }
-function today(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function ymd(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function today(){ return ymd(new Date()); }
+function daysUntil(iso){ const [y,m,d]=iso.split("-").map(Number); const t=new Date(); const a=Date.UTC(y,m-1,d), b=Date.UTC(t.getFullYear(),t.getMonth(),t.getDate()); return Math.round((a-b)/86400000); }
+function fmtDate(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(Date.UTC(y,m-1,d)).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:"UTC"}); }
+function ago(ms){ if(!ms) return ""; const s=(Date.now()-ms)/1000; if(s<90) return "just now"; if(s<3600) return Math.round(s/60)+" min ago"; if(s<86400) return Math.round(s/3600)+" h ago"; return new Date(ms).toLocaleDateString("en-US",{month:"short",day:"numeric"}); }
+const isDeal = p => p.kind==="buy" || p.kind==="sell";
 
 async function write(fn, okMsg){
-  try{ await fn(); if(okMsg) toast(okMsg); }
+  try{ await fn(); if(okMsg) toast(okMsg); return true; }
   catch(e){
     const code = e && e.code;
-    if(code==="invalid_argument" && S.canWrite){ S.canWrite=false; notice("You can view this board but not change it. Ask the board owner for “Can interact” access.", "warn"); render(); }
+    if(code==="invalid_argument" && S.canWrite){ S.canWrite=false; notice("You can view this board but not change it. Ask Bryan for “Can interact” access.", "warn"); render(); }
     else if(code==="quota_exceeded") toast("The board is full. Delete finished tasks to make room.");
     else if(code==="resource_exhausted") toast("Too many changes at once. Wait a moment and try again.");
     else toast("That change didn't save. Check your connection and try again.");
+    return false;
   }
 }
+function stampFields(){ return {updatedAt:Date.now(), updatedBy:S.me||null, updatedByName:null}; }
+function saveProp(pid, fields, msg){ return write(()=>S.db.doc("properties/"+pid).update({...fields, ...stampFields()}), msg); }
 
-/* ---------- rendering ---------- */
+/* ---------- derived ---------- */
+function openTasks(pid){ return S.tasks.filter(t=>t.property===pid && t.status!=="done"); }
+function overdueTasks(){ const d=today(); return S.tasks.filter(t=>t.due && t.due<d && t.status!=="done" && S.props.some(p=>p.id===t.property)); }
+function closingSoon(p){ return isDeal(p) && p.closingDate && daysUntil(p.closingDate)>=0 && daysUntil(p.closingDate)<=7; }
+function activeProps(){ return S.props.filter(p=>p.kind!=="watch" && !p.closed); }
 function visibleTasks(pid){
   const q = S.q.trim().toLowerCase();
   return S.tasks.filter(t=>{
     if(t.property!==pid) return false;
     if(S.hideDone && t.status==="done") return false;
     if(S.mine && (!S.me || t.owner!==S.me)) return false;
+    if(S.kpi==="overdue" && !(t.due && t.due<today() && t.status!=="done")) return false;
     if(q && !((t.title||"")+" "+(t.notes||"")+" "+(t.ownerName||"")).toLowerCase().includes(q)) return false;
     return true;
   });
 }
-function editing(){ const a=document.activeElement; return a && a.closest && a.closest("#groups") && (a.tagName==="INPUT"||a.tagName==="SELECT"); }
+function propMatches(p){
+  if(S.kpi==="week" && !closingSoon(p)) return false;
+  if(S.kpi==="blocked" && p.health!=="red") return false;
+  if(S.kpi==="overdue" && !overdueTasks().some(t=>t.property===p.id)) return false;
+  const q=S.q.trim().toLowerCase();
+  if(q){
+    const hay=[p.address,p.city,p.blocker,p.missing,p.nextAction,p.nextOwner,p.stageLabel,p.escrow,
+      ...Object.values(p.checks||{}).map(c=>(c.label||"")+" "+(c.note||"")),
+      ...S.tasks.filter(t=>t.property===p.id).map(t=>(t.title||"")+" "+(t.notes||"")+" "+(t.ownerName||""))].join(" ").toLowerCase();
+    if(!hay.includes(q)) return false;
+  }
+  return true;
+}
+function sortedChecks(p){ return Object.entries(p.checks||{}).map(([id,c])=>({id,...c})).sort((a,b)=>(a.order||0)-(b.order||0)); }
 
+function editing(){ const a=document.activeElement; return a && a.closest && a.closest("#groups,#sfgrid") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName); }
+function flush(){ setTimeout(()=>{ if(S.pendingRender && !editing()) render(); },0); }
+
+/* ---------- render ---------- */
 async function render(){
   if(editing()){ S.pendingRender=true; return; }
   S.pendingRender=false;
   if(!S.ready.p || !S.ready.t) return;
-  const ownerIds = [...new Set(S.tasks.map(t=>t.owner).filter(Boolean))];
-  const people = S.user && ownerIds.length ? await S.user.profiles(ownerIds) : {};
+  const ids = new Set();
+  S.tasks.forEach(t=>t.owner && ids.add(t.owner));
+  S.props.forEach(p=>p.updatedBy && ids.add(p.updatedBy));
+  const people = S.user && ids.size ? await S.user.profiles([...ids]) : {};
   if(editing()){ S.pendingRender=true; return; }
 
-  // summary
-  const counts = {todo:0,working:0,stuck:0,done:0};
-  S.tasks.forEach(t=>counts[t.status||"todo"]++);
-  const sum=$("#summary"); sum.replaceChildren(
-    h("span",{}, h("b",{text:String(S.props.length)}), " properties"),
-    h("span",{}, h("b",{text:String(S.tasks.length)}), " tasks"),
-    ...STATUS.map(s=>h("span",{}, h("i",{class:"dot",style:`background:var(--s-${s.k})`}), s.label+" ", h("b",{text:String(counts[s.k])})))
-  );
-
+  renderKpis();
+  const act = activeProps().slice().sort((a,b)=>{
+    const r=(HRANK[a.health]??2)-(HRANK[b.health]??2); if(r) return r;
+    const da=a.closingDate||"9999", db=b.closingDate||"9999"; if(da!==db) return da<db?-1:1;
+    return (a.order||0)-(b.order||0);
+  });
+  $("#jump").replaceChildren(...act.map(p=>h("a",{href:"#p-"+p.id,onclick:e=>{e.preventDefault(); const el=document.getElementById("p-"+p.id); if(el){ S.collapsed.delete(p.id); el.scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"}); } }},
+    h("i",{class:"hdot "+(p.health||"grey"),"aria-hidden":"true"}), p.address)));
+  const shown = act.filter(propMatches);
   const root=$("#groups");
-  if(!S.props.length){ root.replaceChildren(h("div",{class:"notice",text:"No properties yet. Use “+ Property” to add the first one."})); return; }
-  root.replaceChildren(...S.props.map((p,i)=>renderGroup(p,i,people)));
+  if(!act.length) root.replaceChildren(h("div",{class:"notice",text:"No properties yet. Use “+ Property” to add the first one."}));
+  else if(!shown.length) root.replaceChildren(h("div",{class:"notice",text:"No properties match this filter."}));
+  else root.replaceChildren(...shown.map(p=>renderGroup(p,people)));
+  renderSF();
 }
 
-function renderGroup(p, i, people){
+function renderKpis(){
+  const act=activeProps(), week=act.filter(closingSoon), blocked=act.filter(p=>p.health==="red"), od=overdueTasks();
+  const tile=(k,cls,n,label,sub)=>h("button",{class:"kpi "+cls,"aria-pressed":String(S.kpi===k),disabled:k===null?true:null,
+    onclick:()=>{ S.kpi = S.kpi===k?null:k; render(); }}, h("b",{text:String(n)}), h("span",{text:label}), h("small",{text:sub}));
+  $("#kpis").replaceChildren(
+    h("div",{class:"kpi k-active"}, h("b",{text:String(act.length)}), h("span",{text:"Active properties"}), h("small",{text:act.filter(p=>p.kind==="buy").length+" buying · "+act.filter(p=>p.kind==="sell").length+" selling · "+act.filter(p=>p.kind==="rehab"||p.kind==="listed").length+" rehab/listed"})),
+    tile("week","k-week",week.length,"Closing this week", week.map(p=>p.address.split(" ").slice(0,2).join(" ")).join(", ")||"Next 7 days"),
+    tile("blocked","k-blocked",blocked.length,"Blocked", blocked.map(p=>p.address.split(" ").slice(0,2).join(" ")).join(", ")||"Nothing blocked"),
+    tile("overdue","k-overdue",od.length,"Overdue tasks", od.length?"Tap to see them":"Nothing past due"));
+}
+
+function healthBtn(p){
+  const hk=p.health||"grey", hl=HEALTH.find(x=>x.k===hk);
+  return h("button",{class:"health "+hk,id:"h-"+p.id,disabled:!S.canWrite||null,"aria-label":"Status: "+hl.label+". Change status",
+    onclick:e=>openList(e.currentTarget, HEALTH.map(x=>({...x, style:`background:var(--h-${x.k}-soft);color:var(--h-${x.k}-ink)`})), k=>saveProp(p.id,{health:k},"Status updated"))},
+    h("i",{class:"hdot "+hk,"aria-hidden":"true"}), hl.label);
+}
+
+function dateChips(p){
+  const out=[];
+  if(p.closingDate){
+    const n=daysUntil(p.closingDate);
+    out.push(h("span",{class:"dchip"+(n<0?" past":n<=7?" soon":""),text:(n<0?"Closing date passed · ":"Closes ")+fmtDate(p.closingDate)+(n>=0?" · "+(n===0?"today":n===1?"tomorrow":n+" days"):"")}));
+  }
+  if(p.signDate) out.push(h("span",{class:"dchip",text:"Juan signs "+fmtDate(p.signDate)}));
+  return out;
+}
+
+function renderGroup(p, people){
   const pid=p.id, collapsed=S.collapsed.has(pid), info=S.info.has(pid);
   const all=S.tasks.filter(t=>t.property===pid), rows=visibleTasks(pid);
-  const gc = `var(${GCOLORS[(p.colorIndex ?? i) % GCOLORS.length]})`;
-  const g = h("section",{class:"group","data-collapsed":String(collapsed),style:`--gc:${gc}`,"aria-label":p.address});
-
-  const bat = h("div",{class:"battery",title:"Status mix"});
+  const gc = `var(${GCOLORS[(p.colorIndex ?? 0) % GCOLORS.length]})`;
+  const g = h("section",{class:"group",id:"p-"+pid,"data-collapsed":String(collapsed),style:`--gc:${gc}`,"aria-label":p.address});
+  const bat = h("div",{class:"battery",title:"Task status mix"});
   if(all.length) STATUS.forEach(s=>{ const n=all.filter(t=>(t.status||"todo")===s.k).length; if(n) bat.append(h("span",{style:`width:${n/all.length*100}%;background:var(--s-${s.k})`})); });
 
   g.append(h("div",{class:"ghead"},
-    h("button",{class:"caret","aria-label":(collapsed?"Expand ":"Collapse ")+p.address,"aria-expanded":String(!collapsed),onclick:()=>{collapsed?S.collapsed.delete(pid):S.collapsed.add(pid);saveUI();render();}},
-      svgCaret()),
+    h("button",{class:"caret","aria-label":(collapsed?"Expand ":"Collapse ")+p.address,"aria-expanded":String(!collapsed),onclick:()=>{collapsed?S.collapsed.delete(pid):S.collapsed.add(pid);saveUI();render();}}, svgCaret()),
     h("h2",{class:"gtitle"}, p.address, h("span",{class:"gcity",text:p.city?"  · "+p.city:""})),
-    h("span",{class:"gcount",text:all.length+(all.length===1?" task":" tasks")}),
-    p.facts ? h("button",{class:"linkbtn","aria-expanded":String(info),onclick:()=>{info?S.info.delete(pid):S.info.add(pid);render();}}, info?"Hide details":"Property details") : null,
+    h("span",{class:"kind",text:KIND[p.kind]||"Property"}),
+    healthBtn(p),
+    ...dateChips(p),
     h("span",{class:"spacer"}),
-    bat
-  ));
-
-  if(info && p.facts) g.append(renderFacts(p));
+    h("span",{class:"gcount",text:openTasks(pid).length+" open task"+(openTasks(pid).length===1?"":"s")}),
+    bat));
   if(collapsed) return g;
 
+  // brief card
+  const ro=!S.canWrite;
+  const ta=(field,ph,label,cls)=>{
+    const id="f-"+field+"-"+pid;
+    return h("div",{class:"bcell "+(cls||"")}, h("label",{for:id,text:label}),
+      h("textarea",{class:"ta",id,rows:"3",placeholder:ro?"":ph,readonly:ro||null,value:p[field]||"",
+        onblur:e=>{ const v=e.target.value.trim(); if(v!==(p[field]||"")) saveProp(pid,{[field]:v}); flush(); }}));
+  };
+  const txt=(field,ph,type)=>h("input",{type:type||"text",id:"f-"+field+"-"+pid,placeholder:ro?"":ph,readonly:ro||null,value:p[field]||"","aria-label":ph,
+    onkeydown:e=>{ if(e.key==="Enter") e.target.blur(); },
+    onchange:type==="date"?e=>saveProp(pid,{[field]:e.target.value||null}):null,
+    onblur:type==="date"?()=>flush():e=>{ const v=e.target.value.trim(); if(v!==(p[field]||"")) saveProp(pid,{[field]:v}); flush(); }});
+
+  const next=h("div",{class:"bcell next"}, h("label",{for:"f-nextAction-"+pid,text:"Next action"}),
+    h("textarea",{class:"ta",id:"f-nextAction-"+pid,rows:"2",placeholder:ro?"":"What happens next?",readonly:ro||null,value:p.nextAction||"",
+      onblur:e=>{ const v=e.target.value.trim(); if(v!==(p.nextAction||"")) saveProp(pid,{nextAction:v}); flush(); }}),
+    h("div",{class:"mini"}, txt("nextOwner","Who"), txt("nextDue","Due","date")));
+  const dates=h("div",{class:"bcell"}, h("span",{class:"lab",text:"Key dates & deal"}),
+    h("div",{class:"kv"},
+      h("span",{text:"Stage"}), txt("stageLabel","e.g. Under contract"),
+      isDeal(p)?[h("span",{text:"Closing"}), txt("closingDate","Closing date","date")]:null,
+      isDeal(p)?[h("span",{text:"Juan signs"}), txt("signDate","Signing date","date")]:null,
+      h("span",{text:"Title/escrow"}), txt("escrow","Company + file #"),
+      h("span",{text:"Price"}), txt("price","Price")));
+  const card=h("div",{class:"card"},
+    h("div",{class:"brief"}, ta("blocker","What's stopping this deal?","Current blocker","blocker"), ta("missing","What information don't we have yet?","What's missing"), next, dates));
+
+  // checklist
+  const checks=sortedChecks(p);
+  const cnt=CHECK.reduce((m,c)=>(m[c.k]=checks.filter(x=>x.state===c.k).length,m),{});
+  const cl=h("div",{class:"clist"});
+  checks.forEach(c=>{
+    const st=CHECK.find(x=>x.k===c.state)||CHECK[3];
+    cl.append(h("div",{class:"citem"},
+      h("button",{class:"cstate",id:"c-"+pid+"-"+c.id,disabled:ro||null,style:`background:var(--c-${st.k});color:var(--c-${st.k}-ink)`,"aria-label":c.label+": "+st.label+". Change",
+        onclick:e=>openList(e.currentTarget, CHECK.map(x=>({...x,style:`background:var(--c-${x.k});color:var(--c-${x.k}-ink)`})).concat(ro?[]:[{k:"__remove",label:"Remove item",style:"background:transparent;color:var(--muted);font-weight:500"}]),
+          k=>{ if(k==="__remove") return removeCheck(pid,c.id); return saveProp(pid,{checks:{[c.id]:{state:k}}}); })}, st.label),
+      h("div",{class:"cbody"}, h("div",{class:"clabel",text:c.label}),
+        h("textarea",{class:"cnote",id:"cn-"+pid+"-"+c.id,rows:"1",placeholder:ro?"":"Add detail",readonly:ro||null,value:c.note||"","aria-label":"Detail for "+c.label,
+          onblur:e=>{ const v=e.target.value.trim(); if(v!==(c.note||"")) saveProp(pid,{checks:{[c.id]:{note:v}}}); flush(); }}))));
+  });
+  const checksEl=h("div",{class:"checks"},
+    h("div",{class:"checks-head"}, h("span",{class:"lab",text:isDeal(p)?"Before closing":"Checklist"}),
+      h("span",{class:"tally",text:checks.length?`${cnt.done} done · ${cnt.waiting} in progress · ${cnt.missing} missing · ${cnt.unknown} to confirm`:"No items yet"})),
+    cl,
+    ro?null:h("div",{class:"cadd"}, h("input",{id:"cadd-"+pid,placeholder:"+ Add checklist item (e.g. Well inspection)",autocomplete:"off","aria-label":"Add checklist item",
+      onkeydown:e=>{ if(e.key==="Enter"){ e.preventDefault(); addCheck(p,e.target); } },
+      onblur:e=>{ if(e.target.value.trim()) addCheck(p,e.target); else flush(); }})));
+  card.append(checksEl);
+
+  // stamp
+  const who = p.updatedBy ? (people[p.updatedBy] ? (people[p.updatedBy].isMe?"you":(people[p.updatedBy].name||"a teammate")) : "a teammate") : (p.updatedByName||"");
+  card.append(h("div",{class:"stamp"},
+    p.updatedAt?h("span",{text:`Last update ${ago(p.updatedAt)}${who?" by "+who:""}`}):h("span",{text:"Not updated yet"}),
+    ...(p.links||[]).filter(l=>l.board).map(l=>h("a",{href:l.url,target:"_blank",rel:"noopener",text:l.label+" ↗"})),
+    p.facts?h("button",{class:"linkbtn","aria-expanded":String(info),onclick:()=>{info?S.info.delete(pid):S.info.add(pid);render();}}, info?"Hide property details":"Property details"):null));
+  g.append(card);
+  if(info && p.facts) g.append(renderFacts(p));
+
+  // tasks
   const grid=h("div",{class:"grid",role:"table","aria-label":"Tasks for "+p.address});
   ["Task","Owner","Status","Priority","Due","Notes",""].forEach((t,ix)=>grid.append(h("div",{class:"hcell"+(ix===0||ix===5?" left":""),role:"columnheader",text:t})));
-  if(!rows.length) grid.append(h("div",{class:"empty-row",text: all.length ? "No tasks match the current filters." : "No tasks yet — add the first one below."}));
+  if(!rows.length) grid.append(h("div",{class:"empty-row",text: all.length ? "No tasks match the current filters." : "No tasks yet. Add the first one below."}));
   rows.forEach(t=>renderRow(grid,t,people));
   if(S.canWrite){
-    const inp=h("input",{id:"add-"+pid,placeholder:"+ Add task",autocomplete:"off","aria-label":"Add task to "+p.address,
+    grid.append(h("div",{class:"addrow"},h("input",{id:"add-"+pid,placeholder:"+ Add task",autocomplete:"off","aria-label":"Add task to "+p.address,
       onkeydown:e=>{ if(e.key==="Enter"){ e.preventDefault(); addTask(pid,e.target); } },
-      onblur:e=>{ if(e.target.value.trim()) addTask(pid,e.target); else flush(); }});
-    grid.append(h("div",{class:"addrow"},inp));
+      onblur:e=>{ if(e.target.value.trim()) addTask(pid,e.target); else flush(); }})));
   }
-  const done=all.filter(t=>t.status==="done").length;
-  grid.append(h("div",{class:"foot"}, `${done} of ${all.length} done`, all.some(t=>t.status==="stuck")?h("span",{style:"color:var(--s-stuck);font-weight:600",text:all.filter(t=>t.status==="stuck").length+" stuck"}):null));
+  const done=all.filter(t=>t.status==="done").length, stuck=all.filter(t=>t.status==="stuck").length;
+  grid.append(h("div",{class:"foot"}, `${done} of ${all.length} tasks done`, stuck?h("span",{style:"color:var(--s-stuck);font-weight:600",text:stuck+" stuck"}):null));
   g.append(h("div",{class:"table"},grid));
   return g;
+}
+
+async function removeCheck(pid, cid){
+  await write(async()=>{
+    const ref=S.db.doc("properties/"+pid), snap=await ref.get();
+    if(!snap.exists) return;
+    const d=JSON.parse(JSON.stringify(snap.data()));
+    if(d.checks) delete d.checks[cid];
+    await ref.set({...d, ...stampFields()});
+  },"Item removed");
+}
+
+async function addCheck(p, input){
+  const label=input.value.trim(); if(!label) return;
+  input.value="";
+  const id="c"+Date.now().toString(36);
+  const order=sortedChecks(p).reduce((m,c)=>Math.max(m,c.order||0),0)+1;
+  await saveProp(p.id,{checks:{[id]:{label,state:"missing",note:"",order}}});
+  const again=document.getElementById("cadd-"+p.id); if(again) again.focus();
 }
 
 function svgCaret(){ const s=document.createElementNS("http://www.w3.org/2000/svg","svg"); s.setAttribute("width","14");s.setAttribute("height","14");s.setAttribute("viewBox","0 0 24 24");s.setAttribute("fill","none");s.setAttribute("stroke","currentColor");s.setAttribute("stroke-width","3");s.innerHTML='<path d="m6 9 6 6 6-6"/>';return s; }
 
 function renderFacts(p){
   const f=p.facts||{};
-  const items=[["Type",f.type],["Beds / Baths",f.bedsBaths],["Living area",f.sqft],["Lot",f.lot],["Year built",f.yearBuilt],["Status",f.status],["Last sale",f.lastSale],["Estimate",f.estimate],["Assessed",f.assessed]].filter(x=>x[1]);
+  const items=[["Type",f.type],["Beds / Baths",f.bedsBaths],["Living area",f.sqft],["Lot",f.lot],["Year built",f.yearBuilt],["Public record",f.status],["Last sale",f.lastSale],["Estimate",f.estimate],["Assessed",f.assessed]].filter(x=>x[1]);
   const box=h("div",{class:"facts"}, h("dl",{}, ...items.map(([k,v])=>h("div",{}, h("dt",{text:k}), h("dd",{text:v})))));
   if(f.notes) box.append(h("p",{class:"fnote",text:f.notes}));
   if(Array.isArray(f.comps) && f.comps.length){
@@ -300,32 +558,36 @@ function renderFacts(p){
       h("thead",{},h("tr",{},...["Address","Sold","Price","Bd/Ba","Sq ft"].map(x=>h("th",{text:x})))),
       h("tbody",{},...f.comps.map(c=>h("tr",{},h("td",{text:c.address||""}),h("td",{text:c.date||""}),h("td",{text:c.price||""}),h("td",{text:c.bb||""}),h("td",{text:c.sqft||""})))))));
   }
-  if(Array.isArray(p.links) && p.links.length) box.append(h("div",{class:"flinks"}, ...p.links.map(l=>h("a",{href:l.url,target:"_blank",rel:"noopener",text:l.label}))));
-  if(f.asOf) box.append(h("p",{class:"fnote",style:"font-size:12px;color:var(--muted)",text:"Public-record snapshot as of "+f.asOf+". Verify on the MLS before making an offer."}));
+  const links=(p.links||[]).filter(l=>!l.board);
+  if(links.length) box.append(h("div",{class:"flinks"}, ...links.map(l=>h("a",{href:l.url,target:"_blank",rel:"noopener",text:l.label}))));
+  if(f.asOf) box.append(h("p",{class:"fnote",style:"font-size:12px;color:var(--muted)",text:"Public-record snapshot as of "+f.asOf+"."}));
   return box;
 }
 
+/* ---------- task rows ---------- */
+function initials(name){ return name.trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase(); }
+function nameColor(name){ let x=0; for(const c of name.toLowerCase()) x=(x*31+c.charCodeAt(0))>>>0; return `var(${GCOLORS[x%GCOLORS.length]})`; }
+function badge(name){ return h("i",{class:"ini",style:`background:${nameColor(name)}`,text:initials(name)||"?","aria-hidden":"true"}); }
+function knownNames(){ const m=new Map(); S.tasks.forEach(t=>{ const n=(t.ownerName||"").trim(); if(n) m.set(n.toLowerCase(), n); }); return [...m.values()].sort((a,b)=>a.localeCompare(b)); }
+
 function renderRow(grid, t, people){
   const ro=!S.canWrite, doc=()=>S.db.doc("tasks/"+t.id);
-  const st=STATUS.find(s=>s.k===(t.status||"todo")), pr=PRIORITY.find(x=>x.k===t.priority);
+  const st=STATUS.find(s=>s.k===(t.status||"todo"))||STATUS[0], pr=PRIORITY.find(x=>x.k===t.priority);
   const cls = t.status==="done" ? " row-done" : "";
-  const title=h("input",{class:"title-in",id:"t-"+t.id,value:t.title||"",readonly:ro||null,"aria-label":"Task name",
+  grid.append(h("div",{class:"cell"+cls,role:"cell"},h("input",{class:"title-in",id:"t-"+t.id,value:t.title||"",readonly:ro||null,"aria-label":"Task name",
     onkeydown:e=>{ if(e.key==="Enter") e.target.blur(); if(e.key==="Escape"){ e.target.value=t.title||""; e.target.blur(); } },
-    onblur:e=>{ const v=e.target.value.trim(); if(v && v!==t.title) write(()=>doc().update({title:v})); else if(!v) e.target.value=t.title||""; flush(); }});
-  grid.append(h("div",{class:"cell"+cls,role:"cell"},title));
+    onblur:e=>{ const v=e.target.value.trim(); if(v && v!==t.title) write(()=>doc().update({title:v,updatedAt:Date.now()})); else if(!v) e.target.value=t.title||""; flush(); }})));
 
-  // owner
   const prof = t.owner ? people[t.owner] : null, oname=(t.ownerName||"").trim();
-  const ob=h("button",{class:"owner",id:"o-"+t.id,disabled:ro||null,"aria-label":prof?("Owner: "+(prof.name||"Someone")):oname?("Owner: "+oname):"Assign owner",onclick:e=>openOwner(e.currentTarget,t)},
+  grid.append(h("div",{class:"cell center",role:"cell"},h("button",{class:"owner",id:"o-"+t.id,disabled:ro||null,"aria-label":prof?("Owner: "+(prof.name||"Someone")):oname?("Owner: "+oname):"Assign owner",onclick:e=>openOwner(e.currentTarget,t)},
     prof ? [h("img",{src:prof.avatarUrl,alt:""}), h("span",{text:prof.isMe?"You":(prof.name||"Someone")})]
-         : oname ? [badge(oname), h("span",{text:oname})] : h("span",{class:"plus",text:"+"}));
-  grid.append(h("div",{class:"cell center",role:"cell"},ob));
+         : oname ? [badge(oname), h("span",{text:oname})] : h("span",{class:"plus",text:"+"}))));
 
   grid.append(h("div",{class:"cell center",role:"cell"}, h("button",{class:"pill",id:"s-"+t.id,disabled:ro||null,style:`background:var(--s-${st.k});color:var(--s-${st.k}-ink)`,
-    onclick:e=>openOptions(e.currentTarget,STATUS,"s",k=>write(()=>doc().update({status:k,updatedAt:Date.now()}), k==="done"?"Marked done":null))}, st.label)));
+    onclick:e=>openList(e.currentTarget,STATUS.map(x=>({...x,style:`background:var(--s-${x.k});color:var(--s-${x.k}-ink)`})),k=>write(()=>doc().update({status:k,updatedAt:Date.now()}), k==="done"?"Marked done":null))}, st.label)));
 
-  grid.append(h("div",{class:"cell center",role:"cell"}, h("button",{class:"pill"+(pr?"":" empty"),id:"p-"+t.id,disabled:ro||null,style:pr?`background:var(--p-${pr.k});color:var(--p-${pr.k}-ink)`:"",
-    onclick:e=>openOptions(e.currentTarget,PRIORITY,"p",k=>write(()=>doc().update({priority:k})),true)}, pr?pr.label:"Set")));
+  grid.append(h("div",{class:"cell center",role:"cell"}, h("button",{class:"pill"+(pr?"":" empty"),id:"p-"+t.id+"-pri",disabled:ro||null,style:pr?`background:var(--p-${pr.k});color:var(--p-${pr.k}-ink)`:"",
+    onclick:e=>openList(e.currentTarget,PRIORITY.map(x=>({...x,style:`background:var(--p-${x.k});color:var(--p-${x.k}-ink)`})).concat([{k:null,label:"Clear",style:"background:transparent;color:var(--muted);font-weight:500"}]),k=>write(()=>doc().update({priority:k})))}, pr?pr.label:"Set")));
 
   const overdue = t.due && t.status!=="done" && t.due < today();
   grid.append(h("div",{class:"cell center",role:"cell"}, h("input",{type:"date",class:"due"+(overdue?" overdue":""),id:"d-"+t.id,value:t.due||"",readonly:ro||null,"aria-label":"Due date",
@@ -333,7 +595,7 @@ function renderRow(grid, t, people){
 
   grid.append(h("div",{class:"cell",role:"cell"}, h("input",{class:"note-in",id:"n-"+t.id,value:t.notes||"",placeholder:ro?"":"Add a note",readonly:ro||null,"aria-label":"Notes",
     onkeydown:e=>{ if(e.key==="Enter") e.target.blur(); },
-    onblur:e=>{ const v=e.target.value; if(v!==(t.notes||"")) write(()=>doc().update({notes:v})); flush(); }})));
+    onblur:e=>{ const v=e.target.value; if(v!==(t.notes||"")) write(()=>doc().update({notes:v,updatedAt:Date.now()})); flush(); }})));
 
   const del=h("button",{class:"del",id:"x-"+t.id,disabled:ro||null,"aria-label":"Delete task "+(t.title||""),title:"Delete task"},"✕");
   del.addEventListener("click",()=>{
@@ -344,8 +606,6 @@ function renderRow(grid, t, people){
   grid.append(h("div",{class:"cell center",role:"cell"},del));
 }
 
-function flush(){ setTimeout(()=>{ if(S.pendingRender && !editing()) render(); },0); }
-
 async function addTask(pid, input){
   const title=input.value.trim(); if(!title) return;
   input.value="";
@@ -353,12 +613,45 @@ async function addTask(pid, input){
   const again=document.getElementById("add-"+pid); if(again) again.focus();
 }
 
+/* ---------- SF pipeline ---------- */
+function renderSF(){
+  const sf=S.props.filter(p=>p.kind==="watch").sort((a,b)=>(a.order||0)-(b.order||0));
+  const sec=$("#sf"); sec.hidden=false;
+  const ro=!S.canWrite, grid=$("#sfgrid");
+  const q=S.q.trim().toLowerCase();
+  const rows=sf.filter(p=>!q || [p.address,p.city,p.stageLabel,p.nextAction,p.nextOwner].join(" ").toLowerCase().includes(q));
+  const cell=(p,field,ph,cls)=>h("div",{}, h("textarea",{class:cls||"",id:"sf-"+field+"-"+p.id,rows:"1",placeholder:ro?"":ph,readonly:ro||null,value:p[field]||"","aria-label":ph,
+    onkeydown:e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); e.target.blur(); } },
+    onblur:e=>{ const v=e.target.value.trim(); if(v!==(p[field]||"")) saveProp(p.id,{[field]:v}); flush(); }}));
+  grid.replaceChildren(
+    ...["Property","Where it stands","Next action","Owner",""].map(t=>h("div",{class:"hcell"+(t==="Owner"||t===""?"":" left"),text:t})),
+    ...rows.flatMap(p=>{
+      const del=h("button",{class:"del",id:"sfx-"+p.id,disabled:ro||null,"aria-label":"Remove "+p.address,title:"Remove"},"✕");
+      del.addEventListener("click",()=>{
+        if(del.classList.contains("confirm")){ write(()=>S.db.doc("properties/"+p.id).delete(),"Removed"); return; }
+        del.classList.add("confirm"); del.textContent="Sure?"; del.style.fontSize="11px";
+        setTimeout(()=>{ if(del.isConnected){ del.classList.remove("confirm"); del.textContent="✕"; del.style.fontSize=""; } },3000);
+      });
+      return [cell(p,"address","Address","addr"), cell(p,"stageLabel","Status"), cell(p,"nextAction","Next action"), cell(p,"nextOwner","Who"), h("div",{style:"padding:0;justify-content:center"},del)];
+    }),
+    rows.length?null:h("div",{class:"empty-row",style:"grid-column:1/-1;border-right:0",text:sf.length?"No SF entries match your search.":"No SF opportunities yet."}),
+    ro?null:h("div",{class:"addrow",style:"grid-column:1/-1;border-right:0"}, h("input",{id:"sf-add",placeholder:"+ Add an SF property or lead (address)",autocomplete:"off","aria-label":"Add SF property",
+      onkeydown:e=>{ if(e.key==="Enter"){ e.preventDefault(); addSF(e.target); } }, onblur:e=>{ if(e.target.value.trim()) addSF(e.target); else flush(); }}))
+  );
+}
+async function addSF(input){
+  const address=input.value.trim(); if(!address) return; input.value="";
+  const order=S.props.reduce((m,p)=>Math.max(m,p.order||0),0)+1;
+  await write(()=>S.db.collection("properties").add({address,city:"San Francisco, CA",kind:"watch",stageLabel:"",nextAction:"",nextOwner:"",order,createdAt:Date.now(),...stampFields()}));
+  const again=document.getElementById("sf-add"); if(again) again.focus();
+}
+
 /* ---------- popovers ---------- */
 const pop=$("#pop");
 function place(anchor){
   const r=anchor.getBoundingClientRect(); pop.hidden=false;
   const w=pop.offsetWidth, hgt=pop.offsetHeight;
-  let left=Math.min(Math.max(8,r.left+r.width/2-w/2), innerWidth-w-8);
+  const left=Math.min(Math.max(8,r.left+r.width/2-w/2), innerWidth-w-8);
   let top=r.bottom+6; if(top+hgt>innerHeight-8) top=Math.max(8,r.top-hgt-6);
   pop.style.left=left+"px"; pop.style.top=top+"px";
 }
@@ -367,16 +660,10 @@ document.addEventListener("pointerdown",e=>{ if(!pop.hidden && !pop.contains(e.t
 document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !pop.hidden) closePop(); });
 addEventListener("scroll",()=>{ if(!pop.hidden) closePop(); },{passive:true,capture:true});
 
-function openOptions(anchor, list, kind, pick, allowClear){
-  pop.replaceChildren(...list.map(o=>h("button",{class:"opt",style:`background:var(--${kind}-${o.k});color:var(--${kind}-${o.k}-ink)`,onclick:()=>{closePop();pick(o.k);}},o.label)),
-    allowClear ? h("button",{class:"opt",style:"background:transparent;color:var(--muted);font-weight:500",onclick:()=>{closePop();pick(null);}},"Clear") : null);
+function openList(anchor, list, pick){
+  pop.replaceChildren(...list.map(o=>h("button",{class:"opt",style:o.style||"",onclick:()=>{closePop();pick(o.k);}},o.label)));
   place(anchor); pop.querySelector("button").focus();
 }
-
-function initials(name){ return name.trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase(); }
-function nameColor(name){ let x=0; for(const c of name.toLowerCase()) x=(x*31+c.charCodeAt(0))>>>0; return `var(${GCOLORS[x%GCOLORS.length]})`; }
-function badge(name){ return h("i",{class:"ini",style:`background:${nameColor(name)}`,text:initials(name)||"?","aria-hidden":"true"}); }
-function knownNames(){ const m=new Map(); S.tasks.forEach(t=>{ const n=(t.ownerName||"").trim(); if(n) m.set(n.toLowerCase(), n); }); return [...m.values()].sort((a,b)=>a.localeCompare(b)); }
 
 async function openOwner(anchor, t){
   const list=h("div",{});
@@ -415,22 +702,23 @@ $("#add-prop").addEventListener("click",()=>{ np.hidden=false; $("#np-addr").foc
 $("#np-cancel").addEventListener("click",()=>{ np.hidden=true; np.reset(); });
 np.addEventListener("submit",async e=>{
   e.preventDefault();
-  const address=$("#np-addr").value.trim(), city=$("#np-city").value.trim(); if(!address) return;
+  const address=$("#np-addr").value.trim(), city=$("#np-city").value.trim(), kind=$("#np-kind").value; if(!address) return;
   const order = S.props.reduce((m,p)=>Math.max(m,p.order||0),0)+1;
-  await write(()=>S.db.collection("properties").add({address,city,order,colorIndex:S.props.length,createdAt:Date.now()}),"Property added");
-  np.reset(); np.hidden=true;
+  const ok = await write(()=>S.db.collection("properties").add({address,city,kind,health:"grey",order,colorIndex:order%GCOLORS.length,createdAt:Date.now(),blocker:"",missing:"",nextAction:"",checks:{},...stampFields()}),"Property added");
+  if(ok){ np.reset(); np.hidden=true; }
 });
 
 /* ---------- boot ---------- */
 (async function boot(){
   const [db,user] = await Promise.all([claude.use("db"), claude.use("user")]);
-  if(!db){ $("#groups").replaceChildren(h("div",{class:"notice",text:"The shared board can't load in this view. Open it on claude.ai while signed in to see and edit tasks."})); $("#add-prop").hidden=true; return; }
+  if(!db){ $("#groups").replaceChildren(h("div",{class:"notice",text:"The shared board can't load in this view. Open it on claude.ai while signed in to see and edit it."})); $("#add-prop").hidden=true; return; }
   S.db=db; S.user=user;
-  if(user){ S.me = await user.id(); const cw = await user.can("data.write"); if(cw===false){ S.canWrite=false; notice("You can view this board but not change it. Ask the board owner for “Can interact” access.","warn"); } }
+  if(user){ S.me = await user.id(); const cw = await user.can("data.write"); if(cw===false){ S.canWrite=false; notice("You can view this board but not change it. Ask Bryan for “Can interact” access.","warn"); } }
   if(!S.canWrite) $("#add-prop").hidden=true;
   if(!S.me) fm.hidden=true;
   const onErr = e=>{ if(e && e.code!=="revoked") notice("Live updates stopped. Reload the page to reconnect."); };
   db.collection("properties").orderBy("order").onSnapshot(snap=>{ S.props=snap.docs.map(d=>({id:d.id,...d.data()})); S.ready.p=true; render(); }, onErr);
   db.collection("tasks").orderBy("createdAt").onSnapshot(snap=>{ S.tasks=snap.docs.map(d=>({id:d.id,...d.data()})); S.ready.t=true; render(); }, onErr);
+  setInterval(()=>{ if(!editing() && pop.hidden) render(); }, 60000);
 })();
 </script>
