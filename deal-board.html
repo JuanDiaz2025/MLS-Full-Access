@@ -262,7 +262,6 @@ button{cursor:pointer}
   </header>
 
   <div id="notice" class="notice" hidden></div>
-  <div class="kpis" id="kpis"></div>
   <form class="newprop" id="newprop" hidden>
     <input id="np-addr" placeholder="Street address, e.g. 820 28th St" autocomplete="off" required>
     <input id="np-city" placeholder="City, State ZIP" autocomplete="off">
@@ -391,7 +390,6 @@ async function render(){
   const people = S.user && ids.size ? await S.user.profiles([...ids]) : {};
   if(editing()){ S.pendingRender=true; return; }
 
-  renderKpis();
   const act = activeProps().slice().sort((a,b)=>{
     const r=(HRANK[a.health]??2)-(HRANK[b.health]??2); if(r) return r;
     const da=a.closingDate||"9999", db=b.closingDate||"9999"; if(da!==db) return da<db?-1:1;
@@ -421,17 +419,6 @@ async function render(){
 }
 
 function select(id){ S.sel=id; try{ localStorage.setItem("tdb-sel",id); }catch(e){} try{ history.replaceState(null,"",id==="all"?location.pathname+location.search:"#"+id); }catch(e){} render(); scrollTo({top:0}); }
-
-function renderKpis(){
-  const act=activeProps(), week=act.filter(closingSoon), blocked=act.filter(p=>p.health==="red"), od=overdueTasks();
-  const tile=(k,cls,n,label,sub)=>h("button",{class:"kpi "+cls,"aria-pressed":String(S.kpi===k),disabled:k===null?true:null,
-    onclick:()=>{ S.kpi = S.kpi===k?null:k; S.sel="all"; render(); }}, h("b",{text:String(n)}), h("span",{text:label}), h("small",{text:sub}));
-  $("#kpis").replaceChildren(
-    h("div",{class:"kpi k-active"}, h("b",{text:String(act.length)}), h("span",{text:"Active properties"}), h("small",{text:act.filter(p=>p.kind==="buy").length+" buying · "+act.filter(p=>p.kind==="sell").length+" selling · "+act.filter(p=>p.kind==="rehab"||p.kind==="listed").length+" rehab/listed"})),
-    tile("week","k-week",week.length,"Closing this week", week.map(p=>p.address.split(" ").slice(0,2).join(" ")).join(", ")||"Next 7 days"),
-    tile("blocked","k-blocked",blocked.length,"Blocked", blocked.map(p=>p.address.split(" ").slice(0,2).join(" ")).join(", ")||"Nothing blocked"),
-    tile("overdue","k-overdue",od.length,"Overdue tasks", od.length?"Tap to see them":"Nothing past due"));
-}
 
 function healthBtn(p){
   const hk=p.health||"grey", hl=HEALTH.find(x=>x.k===hk);
