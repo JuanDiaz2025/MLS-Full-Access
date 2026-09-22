@@ -138,6 +138,7 @@ button{cursor:pointer}
 .pop .person{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;border-radius:6px;padding:6px 8px;text-align:left}
 .pop .person:hover,.pop .person:focus-visible{background:var(--surface-2)}
 .pop .person img{width:24px;height:24px;border-radius:50%}
+.ini{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:700;color:#fff;letter-spacing:.02em}
 .pop input{width:100%;height:32px;border:1px solid var(--line);border-radius:6px;padding:0 8px;background:var(--surface-2);margin-bottom:6px}
 .pop .hint{color:var(--muted);font-size:12px;padding:6px 8px}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:9px 14px;border-radius:8px;font-weight:500;z-index:60;max-width:calc(100vw - 32px)}
@@ -225,7 +226,7 @@ function visibleTasks(pid){
     if(t.property!==pid) return false;
     if(S.hideDone && t.status==="done") return false;
     if(S.mine && (!S.me || t.owner!==S.me)) return false;
-    if(q && !((t.title||"")+" "+(t.notes||"")).toLowerCase().includes(q)) return false;
+    if(q && !((t.title||"")+" "+(t.notes||"")+" "+(t.ownerName||"")).toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -323,9 +324,10 @@ function renderRow(grid, t, people){
   grid.append(h("div",{class:"cell"+cls,role:"cell"},title));
 
   // owner
-  const prof = t.owner ? people[t.owner] : null;
-  const ob=h("button",{class:"owner",id:"o-"+t.id,disabled:ro||null,"aria-label":prof?("Owner: "+(prof.name||"Someone")):"Assign owner",onclick:e=>openOwner(e.currentTarget,t)},
-    prof ? [h("img",{src:prof.avatarUrl,alt:""}), h("span",{text:prof.isMe?"You":(prof.name||"Someone")})] : h("span",{class:"plus",text:"+"}));
+  const prof = t.owner ? people[t.owner] : null, oname=(t.ownerName||"").trim();
+  const ob=h("button",{class:"owner",id:"o-"+t.id,disabled:ro||null,"aria-label":prof?("Owner: "+(prof.name||"Someone")):oname?("Owner: "+oname):"Assign owner",onclick:e=>openOwner(e.currentTarget,t)},
+    prof ? [h("img",{src:prof.avatarUrl,alt:""}), h("span",{text:prof.isMe?"You":(prof.name||"Someone")})]
+         : oname ? [badge(oname), h("span",{text:oname})] : h("span",{class:"plus",text:"+"}));
   grid.append(h("div",{class:"cell center",role:"cell"},ob));
 
   grid.append(h("div",{class:"cell center",role:"cell"}, h("button",{class:"pill",id:"s-"+t.id,disabled:ro||null,style:`background:var(--s-${st.k});color:var(--s-${st.k}-ink)`,
@@ -356,7 +358,7 @@ function flush(){ setTimeout(()=>{ if(S.pendingRender && !editing()) render(); }
 async function addTask(pid, input){
   const title=input.value.trim(); if(!title) return;
   input.value="";
-  await write(()=>S.db.collection("tasks").add({property:pid,title,status:"todo",priority:null,owner:null,due:null,notes:"",createdBy:S.me||null,createdAt:Date.now()}));
+  await write(()=>S.db.collection("tasks").add({property:pid,title,status:"todo",priority:null,owner:null,ownerName:null,due:null,notes:"",createdBy:S.me||null,createdAt:Date.now()}));
   const again=document.getElementById("add-"+pid); if(again) again.focus();
 }
 
@@ -380,18 +382,30 @@ function openOptions(anchor, list, kind, pick, allowClear){
   place(anchor); pop.querySelector("button").focus();
 }
 
+function initials(name){ return name.trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase(); }
+function nameColor(name){ let x=0; for(const c of name.toLowerCase()) x=(x*31+c.charCodeAt(0))>>>0; return `var(${GCOLORS[x%GCOLORS.length]})`; }
+function badge(name){ return h("i",{class:"ini",style:`background:${nameColor(name)}`,text:initials(name)||"?","aria-hidden":"true"}); }
+function knownNames(){ const m=new Map(); S.tasks.forEach(t=>{ const n=(t.ownerName||"").trim(); if(n) m.set(n.toLowerCase(), n); }); return [...m.values()].sort((a,b)=>a.localeCompare(b)); }
+
 async function openOwner(anchor, t){
   const list=h("div",{});
-  const inp=h("input",{id:"owner-search",placeholder:"Search teammates",autocomplete:"off"});
+  const inp=h("input",{id:"owner-search",placeholder:"Type any name",autocomplete:"off",maxlength:"60"});
   pop.replaceChildren(inp,list); place(anchor);
   const doc=S.db.doc("tasks/"+t.id);
+  const setName=n=>{ closePop(); write(()=>doc.update({owner:null,ownerName:n})); };
+  inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); const v=inp.value.trim(); if(v) setName(v); } });
   async function paint(q){
-    if(!S.user){ list.replaceChildren(h("div",{class:"hint",text:"Teammate lookup isn't available in this view."})); return; }
-    const hits=await S.user.search(q);
+    const ql=q.trim().toLowerCase();
+    const names=knownNames().filter(n=>!ql||n.toLowerCase().includes(ql));
+    const hits=S.user ? await S.user.search(q) : [];
+    if(inp.value!==q) return;
+    const exact=names.some(n=>n.toLowerCase()===ql);
     list.replaceChildren(
-      ...hits.map(p=>h("button",{class:"person",onclick:()=>{closePop();write(()=>doc.update({owner:p.id}));}}, h("img",{src:p.avatarUrl,alt:""}), h("span",{text:(p.name||"Someone")+(p.isMe?" (you)":"")}))),
-      hits.length?null:h("div",{class:"hint",text:q?"No one in your organization matches that name.":"Type a name to find a teammate."}),
-      t.owner?h("button",{class:"person",style:"color:var(--muted)",onclick:()=>{closePop();write(()=>doc.update({owner:null}));}},"Unassign"):null);
+      q.trim() && !exact ? h("button",{class:"person",onclick:()=>setName(q.trim())}, badge(q.trim()), h("span",{}, "Assign ", h("b",{text:q.trim()}))) : null,
+      ...names.map(n=>h("button",{class:"person",onclick:()=>setName(n)}, badge(n), h("span",{text:n}))),
+      ...hits.map(p=>h("button",{class:"person",onclick:()=>{closePop();write(()=>doc.update({owner:p.id,ownerName:null}));}}, h("img",{src:p.avatarUrl,alt:""}), h("span",{text:(p.name||"Someone")+(p.isMe?" (you)":"")}))),
+      !q.trim() && !names.length && !hits.length ? h("div",{class:"hint",text:"Type a name and press Enter."}) : null,
+      (t.owner||t.ownerName)?h("button",{class:"person",style:"color:var(--muted)",onclick:()=>{closePop();write(()=>doc.update({owner:null,ownerName:null}));}},"Unassign"):null);
     place(anchor);
   }
   inp.addEventListener("input",()=>paint(inp.value));
