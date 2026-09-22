@@ -94,6 +94,25 @@ button{cursor:pointer}
 .hdot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--h-grey)}
 .hdot.green{background:var(--h-green)} .hdot.yellow{background:var(--h-yellow)} .hdot.red{background:var(--h-red)}
 
+/* Tabs + overview */
+.jump{gap:6px;margin-bottom:18px}
+.jump button{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--ink-2);font-size:13px;font-weight:600}
+.jump button:hover{border-color:var(--line-strong);color:var(--ink)}
+.jump button[aria-selected="true"]{background:var(--ink);border-color:var(--ink);color:var(--ground)}
+.ov{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.ovrow{display:grid;grid-template-columns:minmax(180px,1.1fr) 170px 150px minmax(200px,1.6fr) minmax(200px,1.4fr);gap:14px;align-items:start;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);padding:13px 16px}
+.ovrow:last-child{border-bottom:0}
+.ovrow:hover{background:var(--surface-2)}
+.ovrow.head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding-block:9px;background:var(--surface-2);cursor:default}
+.ovrow .a{font-weight:700;font-size:14.5px}
+.ovrow .a small{display:block;font-weight:500;color:var(--muted);font-size:12px}
+.ovrow .t{font-size:13px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ovrow .t.red{color:var(--h-red-ink)}
+.ovrow .who{display:block;margin-top:3px;font-size:12px;color:var(--muted)}
+.ovrow .health{pointer-events:none}
+@media (max-width:860px){.ovrow{grid-template-columns:1fr 1fr}.ovrow.head{display:none}.ovrow .t{grid-column:1/-1}}
+.back{border:0;background:transparent;color:var(--accent);font-weight:600;padding:0;margin:0 0 10px}
+
 /* Groups */
 .groups{display:flex;flex-direction:column;gap:30px}
 .group{--gc:var(--g1);scroll-margin-top:16px}
@@ -245,7 +264,7 @@ button{cursor:pointer}
   <header class="top">
     <div class="brand">
       <h1>Property Command Center</h1>
-      <p>Every active deal in one place: where it stands, what's blocking it, what's missing, the next step and who owns it. Anyone on the team can update it live.</p>
+      <p>Pick a property to see its blocker, what's missing, the next step and who owns it.</p>
     </div>
     <div class="tools">
       <label class="search" for="q"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search" autocomplete="off"></label>
@@ -266,12 +285,12 @@ button{cursor:pointer}
     <button class="btn" type="submit">Add property</button>
     <button class="btn ghost" type="button" id="np-cancel">Cancel</button>
   </form>
-  <nav class="jump" id="jump" aria-label="Jump to property"></nav>
+  <nav class="jump" id="jump" role="tablist" aria-label="Properties"></nav>
   <div class="groups" id="groups"><div class="notice">Loading the board…</div></div>
 
   <section class="sfsec" id="sf" aria-labelledby="sf-title" hidden>
     <h2 id="sf-title">San Francisco pipeline</h2>
-    <p>SF properties we own, are chasing or should check. Confirm each one against the spreadsheet and Genesis.</p>
+    <p>SF properties we own or are chasing. Check each one against the spreadsheet and Genesis.</p>
     <div class="sft"><div class="sfgrid" id="sfgrid"></div></div>
   </section>
 </div>
@@ -302,8 +321,9 @@ const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
 const S = { db:null, user:null, me:null, canWrite:true, props:[], tasks:[], ready:{p:false,t:false},
-  q:"", mine:false, hideDone:false, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
+  sel:null, q:"", mine:false, hideDone:false, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
 try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!!c.hideDone; }catch(e){}
+try{ const hsh=location.hash.slice(1); S.sel = hsh || localStorage.getItem("tdb-sel") || "all"; }catch(e){ S.sel="all"; }
 function saveUI(){ try{ localStorage.setItem("tdb-ui", JSON.stringify({collapsed:[...S.collapsed], hideDone:S.hideDone})); }catch(e){} }
 
 const $ = (s,r=document)=>r.querySelector(s);
@@ -395,20 +415,36 @@ async function render(){
     const da=a.closingDate||"9999", db=b.closingDate||"9999"; if(da!==db) return da<db?-1:1;
     return (a.order||0)-(b.order||0);
   });
-  $("#jump").replaceChildren(...act.map(p=>h("a",{href:"#p-"+p.id,onclick:e=>{e.preventDefault(); const el=document.getElementById("p-"+p.id); if(el){ S.collapsed.delete(p.id); el.scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"}); } }},
-    h("i",{class:"hdot "+(p.health||"grey"),"aria-hidden":"true"}), p.address)));
-  const shown = act.filter(propMatches);
+  const tab=(id,label,dot)=>h("button",{role:"tab","aria-selected":String((S.sel||"all")===id),onclick:()=>select(id)},
+    dot?h("i",{class:"hdot "+dot,"aria-hidden":"true"}):null, label);
+  $("#jump").replaceChildren(tab("all","All properties"), ...act.map(p=>tab(p.id,p.address,p.health||"grey")), tab("sf","SF pipeline"));
   const root=$("#groups");
-  if(!act.length) root.replaceChildren(h("div",{class:"notice",text:"No properties yet. Use “+ Property” to add the first one."}));
-  else if(!shown.length) root.replaceChildren(h("div",{class:"notice",text:"No properties match this filter."}));
-  else root.replaceChildren(...shown.map(p=>renderGroup(p,people)));
-  renderSF();
+  $("#sf").hidden = S.sel!=="sf";
+  if(S.sel==="sf"){ root.replaceChildren(); renderSF(); return; }
+  const one = S.sel && S.sel!=="all" ? act.find(p=>p.id===S.sel) : null;
+  if(one){ S.collapsed.delete(one.id); root.replaceChildren(h("button",{class:"back",onclick:()=>select("all")},"← All properties"), renderGroup(one,people)); return; }
+  const shown = act.filter(propMatches);
+  if(!act.length){ root.replaceChildren(h("div",{class:"notice",text:"No properties yet. Use “+ Property” to add the first one."})); return; }
+  if(!shown.length){ root.replaceChildren(h("div",{class:"notice",text:"No properties match this filter."})); return; }
+  root.replaceChildren(h("div",{class:"ov",role:"list"},
+    h("div",{class:"ovrow head","aria-hidden":"true"}, h("span",{text:"Property"}),h("span",{text:"Status"}),h("span",{text:"Closing"}),h("span",{text:"Blocker"}),h("span",{text:"Next step"})),
+    ...shown.map(p=>{
+      const hk=p.health||"grey", n=p.closingDate?daysUntil(p.closingDate):null;
+      return h("button",{class:"ovrow",role:"listitem",onclick:()=>select(p.id),"aria-label":"Open "+p.address},
+        h("span",{class:"a"}, p.address, h("small",{text:(KIND[p.kind]||"")+(p.city?" · "+p.city:"")})),
+        h("span",{}, h("span",{class:"health "+hk}, h("i",{class:"hdot "+hk,"aria-hidden":"true"}), HEALTH.find(x=>x.k===hk).label)),
+        h("span",{class:"t",text:p.closingDate?(fmtDate(p.closingDate)+(n<0?" (passed)":n===0?" (today)":" ("+n+"d)")):"—"}),
+        h("span",{class:"t"+(p.blocker?" red":""),text:p.blocker||"None"}),
+        h("span",{class:"t"}, p.nextAction||"—", (p.nextOwner||p.nextDue)?h("span",{class:"who",text:[p.nextOwner,p.nextDue?"due "+fmtDate(p.nextDue):""].filter(Boolean).join(" · ")}):null));
+    })));
 }
+
+function select(id){ S.sel=id; try{ localStorage.setItem("tdb-sel",id); }catch(e){} try{ history.replaceState(null,"",id==="all"?location.pathname+location.search:"#"+id); }catch(e){} render(); scrollTo({top:0}); }
 
 function renderKpis(){
   const act=activeProps(), week=act.filter(closingSoon), blocked=act.filter(p=>p.health==="red"), od=overdueTasks();
   const tile=(k,cls,n,label,sub)=>h("button",{class:"kpi "+cls,"aria-pressed":String(S.kpi===k),disabled:k===null?true:null,
-    onclick:()=>{ S.kpi = S.kpi===k?null:k; render(); }}, h("b",{text:String(n)}), h("span",{text:label}), h("small",{text:sub}));
+    onclick:()=>{ S.kpi = S.kpi===k?null:k; S.sel="all"; render(); }}, h("b",{text:String(n)}), h("span",{text:label}), h("small",{text:sub}));
   $("#kpis").replaceChildren(
     h("div",{class:"kpi k-active"}, h("b",{text:String(act.length)}), h("span",{text:"Active properties"}), h("small",{text:act.filter(p=>p.kind==="buy").length+" buying · "+act.filter(p=>p.kind==="sell").length+" selling · "+act.filter(p=>p.kind==="rehab"||p.kind==="listed").length+" rehab/listed"})),
     tile("week","k-week",week.length,"Closing this week", week.map(p=>p.address.split(" ").slice(0,2).join(" ")).join(", ")||"Next 7 days"),
