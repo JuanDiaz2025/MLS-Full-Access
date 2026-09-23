@@ -1,0 +1,490 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FlipScout</title>
+<style>
+  :root{
+    --bg:#0f1513; --panel:#161d19; --panel2:#1c2521; --ink:#e7efe9; --muted:#93a49b; --hair:#26302b;
+    --accent:#4fd1a5; --strong:#4fd1a5; --marginal:#e0ad52; --pass:#e08672;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.45}
+  .app{padding:18px;max-width:680px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 2px;letter-spacing:-.01em}
+  h1 .tag{color:var(--accent)}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 16px}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:16px;margin-bottom:14px}
+  .card h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px}
+  input[type=text],input[type=password]{width:100%;padding:9px 11px;border-radius:8px;border:1px solid var(--hair);background:var(--panel2);color:var(--ink);font-size:14px;margin-bottom:10px}
+  input:focus{outline:2px solid var(--accent);outline-offset:0}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>*{flex:1;min-width:120px}
+  button{appearance:none;border:1px solid var(--hair);background:var(--panel2);color:var(--ink);padding:9px 14px;border-radius:8px;font-size:13.5px;font-weight:600;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:var(--accent);color:#08130e;border-color:var(--accent)}
+  button.keep{background:var(--strong);color:#08130e;border-color:var(--strong)}
+  button.drop{background:transparent;color:var(--pass);border-color:var(--pass)}
+  button.ghost{padding:5px 10px;font-size:12px;font-weight:500;color:var(--muted)}
+  .status{font-size:12.5px;padding:6px 10px;border-radius:6px;background:var(--panel2);color:var(--muted)}
+  .status.good{color:var(--strong)} .status.warn{color:var(--marginal)} .status.error{color:var(--pass)}
+  #log{background:#0a0f0d;border:1px solid var(--hair);border-radius:8px;padding:10px;height:150px;overflow:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}
+  #log .good{color:var(--strong)} #log .warn{color:var(--marginal)} #log .error{color:var(--pass)} #log .info{color:var(--muted)}
+  .review{display:none}
+  .review.on{display:block}
+  .review .addr{font-size:17px;font-weight:700}
+  .review .meta{color:var(--muted);font-size:12.5px;margin:2px 0 12px}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--panel2);color:var(--muted)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:6px}
+  th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--hair);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase}
+  tr.surface td{color:var(--strong)}
+  .mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Flip<span class="tag">Scout</span></h1>
+  <p class="sub">MLS fixer-flip scanner — log in, scan your buy box, photo-verify, get a deal report.</p>
+
+  <div class="card">
+    <h2>1 · Sign in to MLS</h2>
+    <label>MLS username</label>
+    <input id="user" type="text" autocomplete="off" placeholder="MLS agent ID">
+    <label>MLS password</label>
+    <input id="pass" type="password" autocomplete="off" placeholder="••••••••">
+    <div class="row">
+      <button id="openLogin" class="primary">Open MLS sign-in</button>
+      <button id="checkSession">Check session</button>
+    </div>
+    <div class="hint">The MLS window opens so you can finish sign-in and any 2FA yourself, then click “Check session”.</div>
+    <div id="loginStatus" class="status" style="margin-top:10px">Not signed in.</div>
+  </div>
+
+  <div class="card">
+    <h2>2 · How each listing is judged</h2>
+    <div class="hint">The run decides Keep/Drop on its own and <b>never stops to ask you</b>.
+      Built-in rules read the agent remarks: they drop renovated / turnkey wording,
+      multi-unit, tenant-occupied, fire damage, and anything that isn't a quick flip
+      (foundation, structural, permits, tear-down). Rules can't see photos, so add a key
+      below and AI vision judges the pictures instead.</div>
+    <label style="margin-top:10px">When the remarks don't say either way</label>
+    <select id="whenUnsure" style="width:100%;padding:6px">
+      <option value="keep">Keep it and carry on (default)</option>
+      <option value="drop">Drop it and carry on</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:12px">
+      <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — reads every photo (needs an Anthropic API key)
+    </label>
+    <div id="aiFields" style="display:none;margin-top:10px">
+      <label>Anthropic API key</label>
+      <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
+      <label>Model</label>
+      <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3 · Scan the buy box</h2>
+    <label>Areas to scan</label>
+    <div id="areas" class="row" style="gap:14px;flex-wrap:wrap;margin:4px 0 8px">Loading…</div>
+    <div class="row" style="margin-bottom:10px">
+      <button id="areaAll" class="ghost">All</button>
+      <button id="areaNone" class="ghost">None</button>
+      <button id="areaSF" class="ghost">San Francisco only</button>
+    </div>
+    <div class="row">
+      <button id="start" class="primary" disabled>▶ Start scan</button>
+      <button id="pause" disabled>⏸ Pause</button>
+      <button id="resume" disabled>▶ Resume</button>
+      <button id="stop" disabled>⏹ Stop</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label style="display:flex;align-items:center;gap:6px;margin:0">
+        Reading time per listing
+        <input id="readSeconds" type="number" min="0" max="60" value="6" style="width:70px">
+        seconds
+      </label>
+    </div>
+    <div class="hint"><b>What it looks for</b> — Active · single-family ·
+      <b>45 days on market or less</b> · 25+ years old · <b>quick flips only</b>
+      (cosmetic work; foundation / structural / permit jobs and tear-downs are dropped) ·
+      not renovated · not multi-unit · not tenant-occupied.
+      <br><b>Only new listings.</b> Every MLS # ever checked is remembered, so today's run
+      skips everything yesterday already looked at — day two costs you only the new ones.
+      <br><b>One area at a time, in order</b> — each is finished completely, written to
+      the sheet, and only then does the next one start. Untick the ones you don't want:
+      San Francisco on its own takes minutes, the whole buy box takes hours.</div>
+    <div id="funnel" class="status" style="margin-top:10px">Idle.</div>
+    <div id="finished" class="status good" style="display:none;margin-top:10px"></div>
+  </div>
+
+  <div class="card review" id="review">
+    <h2>4 · Now reviewing</h2>
+    <div class="addr" id="rAddr">—</div>
+    <div class="meta" id="rMeta">—</div>
+    <div id="aiVerdict" class="status" style="display:none"></div>
+    <div class="hint">The gallery opens in the MLS window so you can watch, but nothing
+      waits on you — every listing is judged and the run carries on.</div>
+  </div>
+
+  <div class="card">
+    <h2>Activity</h2>
+    <div id="log"></div>
+  </div>
+
+  <div class="card" id="reportCard" style="display:none">
+    <h2>5 · Deal report</h2>
+    <div id="report"></div>
+    <div class="row" style="margin-top:12px">
+      <button id="export" class="primary">Export CSV / JSON</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>6 · Daily KPI</h2>
+    <div id="kpiToday" class="status">No runs recorded yet.</div>
+    <div id="kpiHistory" style="margin-top:12px"></div>
+    <div id="ledgerStatus" class="status" style="margin-top:10px">Ledger: —</div>
+    <div class="row" style="margin-top:12px">
+      <button id="kpiRefresh">↻ Refresh</button>
+      <button id="kpiExport">Export CSV / JSON</button>
+      <button id="ledgerClear" class="drop">Clear ledger</button>
+    </div>
+    <div class="hint">Counts accumulate per calendar day and survive closing the app. They
+      go to the sheet's KPI tab automatically at the end of each run, and the reviewer's
+      rejections come back into the ledger at the start of the next one.</div>
+  </div>
+
+  <div class="card">
+    <h2>7 · Your Google Sheet</h2>
+    <div id="gStatus" class="status">Not connected.</div>
+
+    <label style="margin-top:10px">Your spreadsheet (paste the URL)</label>
+    <input id="gSheetUrl" type="text" autocomplete="off"
+           placeholder="https://docs.google.com/spreadsheets/d/…/edit">
+
+    <div class="row" style="margin-top:10px">
+      <button id="gSignIn">Sign in with Google</button>
+      <button id="gTest">Check connection</button>
+      <button id="gSend">Send this run's leads</button>
+      <button id="gSignOut">Sign out</button>
+    </div>
+    <label style="display:flex;align-items:center;gap:6px;margin:10px 0 0">
+      <input id="gAuto" type="checkbox" checked> Write to the sheet automatically after each city
+    </label>
+    <div class="hint">Signed in with your own Google account, the app writes leads
+      straight into the spreadsheet as each city finishes — <b>Leads</b>, <b>Rejected</b>
+      (with the reason) and <b>KPI</b> tabs, created if they aren't there. Rows already on
+      the sheet are topped up, never overwritten, so anything you edit by hand survives.
+      No Apps Script, no deployment, nothing to refresh.</div>
+
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px">One-time Google setup (Client ID)</summary>
+      <div class="hint" style="margin-top:8px">Google won't let any app touch your
+        spreadsheets unless it's registered to a Google Cloud project of yours. Five
+        minutes, once:
+        <ol style="margin:6px 0 0 16px;padding:0">
+          <li><a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a> → create or pick a project</li>
+          <li>APIs &amp; Services → Library → enable <b>Google Sheets API</b></li>
+          <li>OAuth consent screen → External → add your own Gmail under <b>Test users</b></li>
+          <li>Credentials → Create credentials → OAuth client ID → <b>Desktop app</b></li>
+          <li>Paste the Client ID and secret below</li>
+        </ol>
+      </div>
+      <label style="margin-top:8px">OAuth Client ID</label>
+      <input id="gClientId" type="text" autocomplete="off" placeholder="…apps.googleusercontent.com">
+      <label>Client secret</label>
+      <input id="gClientSecret" type="password" autocomplete="off">
+    </details>
+
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px">Local backup</summary>
+      <div id="backupStatus" class="status" style="margin-top:8px">No backup yet.</div>
+      <div class="row" style="margin-top:10px">
+        <button id="openBackup">Show the backup file</button>
+      </div>
+      <div class="hint">Every reviewed city is saved here before anything else can fail,
+        so a dropped connection never loses work you have already paid for. If the sheet
+        was offline during a scan, reconnect and hit <b>Send this run's leads</b>.</div>
+    </details>
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const money = n => '$' + Math.round(n||0).toLocaleString();
+  let currentMls = null, lastLeads = [];
+
+  function setScanButtons(running){
+    $('start').disabled = running; $('pause').disabled = !running; $('resume').disabled = true; $('stop').disabled = !running;
+  }
+
+  $('openLogin').onclick = async () => {
+    await window.fs.login({ user: $('user').value, pass: $('pass').value });
+    $('loginStatus').textContent = 'Sign-in window opened — complete it, then Check session.';
+    $('loginStatus').className = 'status warn';
+  };
+  $('checkSession').onclick = async () => {
+    const r = await window.fs.checkSession();
+    $('loginStatus').textContent = r.loggedIn ? ('Signed in ✓ — ' + (r.title||'')) : ('Not signed in yet' + (r.title? ' ('+r.title+')':''));
+    $('loginStatus').className = 'status ' + (r.loggedIn ? 'good' : 'warn');
+    $('start').disabled = !r.loggedIn;
+  };
+  // --- which areas to scan ---
+  // Checkboxes over the buy box, remembered between runs. Nothing is scanned
+  // that isn't ticked, so a quick San Francisco pass costs minutes instead of
+  // waiting out the whole Bay Area.
+  let AREAS = [];
+  const areaKey = 'fs.areas';
+  function selectedAreas(){
+    return AREAS.filter(a => $('area'+a.i) && $('area'+a.i).checked).map(a => a.i);
+  }
+  function saveAreas(){
+    localStorage.setItem(areaKey, JSON.stringify(selectedAreas()));
+    const n = selectedAreas().length;
+    $('start').textContent = n === AREAS.length ? '▶ Start scan'
+      : n === 0 ? '▶ Start scan (pick an area)'
+      : `▶ Scan ${n} area${n>1?'s':''}`;
+  }
+  (async () => {
+    AREAS = await window.fs.buybox();
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(areaKey) || 'null'); } catch(_) {}
+    const box = $('areas');
+    box.innerHTML = AREAS.map(a => {
+      const on = !saved || saved.indexOf(a.i) >= 0;
+      return `<label style="display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:13px">
+        <input type="checkbox" id="area${a.i}" style="width:auto"${on?' checked':''}> ${a.label}
+        <span class="pill">$${a.maxk/1000}M</span></label>`;
+    }).join('');
+    AREAS.forEach(a => { $('area'+a.i).onchange = saveAreas; });
+    saveAreas();
+  })();
+  const setAreas = fn => { AREAS.forEach(a => { $('area'+a.i).checked = fn(a); }); saveAreas(); };
+  $('areaAll').onclick  = () => setAreas(() => true);
+  $('areaNone').onclick = () => setAreas(() => false);
+  $('areaSF').onclick   = () => setAreas(a => /san francisco/i.test(a.label));
+
+  $('start').onclick = async () => {
+    const areaIndexes = selectedAreas();
+    if (!areaIndexes.length) { log('Pick at least one area to scan.','warn'); return; }
+    setScanButtons(true);
+    $('reportCard').style.display='none';
+    $('finished').style.display='none';
+    await window.fs.startScan({ areaIndexes });
+    setScanButtons(false);
+  };
+  $('pause').onclick = () => { window.fs.pause(); $('pause').disabled=true; $('resume').disabled=false; };
+  $('resume').onclick = () => { window.fs.resume(); $('pause').disabled=false; $('resume').disabled=true; };
+  $('stop').onclick = () => { window.fs.stop(); setScanButtons(false); };
+  $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
+
+  function pushConfig(){ window.fs.setConfig({
+    useAI: $('useAI').checked,
+    apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
+    readSeconds: Number($('readSeconds').value||6),
+    whenUnsure: $('whenUnsure').value,
+    runComps: false,   // comping is off; see CLAUDE.md §5
+  }); }
+  $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
+  $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
+  $('readSeconds').oninput = pushConfig;
+  $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
+  { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
+
+  // --- direct Google Sheets connection ---
+  // Everything here lives in the main process (google-account.json), not
+  // localStorage: the refresh token has to outlive the window and must not sit
+  // in a renderer that loads remote MLS content.
+  async function refreshGoogle(){
+    const s = await window.fs.googleStatus();
+    if (document.activeElement !== $('gClientId')) $('gClientId').value = s.clientId || '';
+    if (document.activeElement !== $('gClientSecret')) $('gClientSecret').value = s.clientSecret || '';
+    $('gAuto').checked = !!s.autoSync;
+    const box = $('gStatus');
+    if (!s.hasClient) {
+      box.className = 'status warn';
+      box.textContent = 'Add your OAuth Client ID first — open "One-time Google setup" below.';
+    } else if (!s.signedIn) {
+      box.className = 'status warn';
+      box.textContent = 'Client ID saved. Click "Sign in with Google".';
+    } else if (!s.sheetId) {
+      box.className = 'status warn';
+      box.textContent = `Signed in as ${s.email || 'your Google account'} — now paste your spreadsheet URL.`;
+    } else {
+      box.className = 'status good';
+      box.innerHTML = `Connected as <b>${s.email || 'your Google account'}</b> → `
+        + `<b>${s.sheetTitle || 'your spreadsheet'}</b>, tab "${s.leadTab}". `
+        + (s.autoSync ? 'Leads are written automatically as each city finishes.'
+                      : 'Auto-write is off — use "Send this run\'s leads".');
+    }
+    return s;
+  }
+  const saveGoogle = () => window.fs.googleSave({
+    clientId: $('gClientId').value, clientSecret: $('gClientSecret').value,
+    sheetUrl: $('gSheetUrl').value, autoSync: $('gAuto').checked,
+  });
+  $('gClientId').oninput = $('gClientSecret').oninput = () => { saveGoogle().then(refreshGoogle); };
+  $('gSheetUrl').oninput = async () => {
+    const r = await saveGoogle();
+    if (!r.ok) { $('gStatus').className='status warn'; $('gStatus').textContent = r.error; return; }
+    refreshGoogle();
+  };
+  $('gAuto').onchange = () => { saveGoogle().then(refreshGoogle); };
+
+  $('gSignIn').onclick = async () => {
+    await saveGoogle();
+    const box = $('gStatus');
+    box.className='status'; box.textContent = 'Finish the sign-in in your browser…';
+    const r = await window.fs.googleSignIn();
+    if (!r.ok) { box.className='status warn'; box.textContent = 'Sign-in failed: ' + r.error; return; }
+    await refreshGoogle();
+    if ($('gSheetUrl').value) $('gTest').click();
+  };
+  $('gSignOut').onclick = async () => { await window.fs.googleSignOut(); refreshGoogle(); };
+  $('gTest').onclick = async () => {
+    await saveGoogle();
+    const box = $('gStatus'); box.className='status'; box.textContent = 'Checking…';
+    const r = await window.fs.googleTest();
+    if (r.ok) {
+      box.className='status good';
+      box.innerHTML = `Connected ✓ — <b>${r.title}</b> as ${r.email||'your account'}. Tabs: ${r.tabs.join(', ')}.`;
+    } else { box.className='status warn'; box.textContent = 'Not connected: ' + r.error; }
+  };
+  $('gSend').onclick = async () => {
+    if (!lastLeads.length) { $('gStatus').className='status warn'; $('gStatus').textContent='No leads from this run yet.'; return; }
+    const box = $('gStatus'); box.className='status'; box.textContent='Writing…';
+    const r = await window.fs.googleSync(lastLeads, []);
+    box.className = 'status ' + (r.ok ? 'good' : 'warn');
+    box.textContent = r.ok ? `Wrote ${r.leads.added} new lead(s), refreshed ${r.leads.updated}.`
+                           : 'Failed: ' + r.error;
+  };
+  (async () => {
+    const s = await refreshGoogle();
+    if (s.sheetId) $('gSheetUrl').value = 'https://docs.google.com/spreadsheets/d/' + s.sheetId + '/edit';
+  })();
+
+  // --- local backup ---
+  async function refreshBackup(){
+    const s = await window.fs.backupStatus();
+    const box = $('backupStatus');
+    box.className = 'status' + (s.exists ? ' good' : '');
+    box.innerHTML = s.exists
+      ? `${s.count} lead(s) saved locally${s.updated ? ' · ' + new Date(s.updated).toLocaleString() : ''}`
+      : 'No backup yet — it appears after your first scan.';
+  }
+  $('openBackup').onclick = async () => { const s = await window.fs.backupStatus(); if(s.path) window.fs.showFile(s.path); };
+  refreshBackup();
+
+  function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
+  function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
+
+  // The run is over: put every live panel back to rest so a finished scan can
+  // never be mistaken for one that is still going.
+  window.fs.on('done', p => {
+    setScanButtons(false);
+    $('review').classList.remove('on');
+    currentMls = null;
+    $('funnel').textContent = p.neverStarted ? 'Idle.' : 'Finished.';
+    const box = $('finished');
+    box.style.display = 'block';
+    box.className = 'status ' + (p.stopped || p.neverStarted ? 'warn' : 'good');
+    box.innerHTML = (p.neverStarted ? '' : (p.stopped ? '⏹ ' : '✓ ')) + p.summary
+      + (p.neverStarted ? '' : '<br>The MLS window is closed and nothing is running.');
+  });
+
+  window.fs.on('log', p => log(p.msg, p.level));
+  window.fs.on('funnel', p => { $('funnel').textContent = `${p.scanned} scanned → ${p.candidates} fixer candidates`; $('funnel').className='status good'; });
+  window.fs.on('review', p => {
+    currentMls = p.mls;
+    $('rAddr').textContent = `${p.addr} — ${p.city}`;
+    $('rMeta').innerHTML = `<span class="pill">#${p.i} of ${p.total}</span> &nbsp; ${money(p.price)} · ${p.sqft} sqft · $${p.ppsf}/sf · ${p.photos} photos`;
+    $('review').classList.add('on');
+    const box = $('aiVerdict');
+    box.style.display = 'block';
+    box.className = 'status ' + (p.verdict === 'keep' ? 'good' : 'warn');
+    box.textContent = `${p.verdict === 'keep' ? '✓ KEEP' : '✕ DROP'} — ${p.why || ''}`;
+    if (p.remarks) {
+      $('rMeta').innerHTML += `<div class="hint" style="margin-top:6px">${
+        String(p.remarks).slice(0,400).replace(/[<>]/g,'')}</div>`;
+    }
+  });
+  // ---------------- daily KPI ----------------
+  const KPI_COLS = [
+    ['scanned','Scanned'], ['candidates','Candidates'], ['reviewed','Reviewed'],
+    ['kept','Kept'], ['dropped','Dropped'], ['leads','Leads'],
+    ['gateCleared','Clear gate'], ['pushed','To sheet'],
+  ];
+  function renderKpi(rep){
+    if(!rep) return;
+    const t = rep.today || {};
+    const pct = (a,b) => b ? Math.round(100*a/b) + '%' : '—';
+    $('kpiToday').className = 'status ' + (t.runs ? 'good' : '');
+    $('kpiToday').innerHTML = t.runs
+      ? `<b>Today (${t.date})</b> — ${t.runs} run(s): `
+        + `${t.scanned} scanned → ${t.candidates} candidates → ${t.reviewed} reviewed → `
+        + `<b>${t.kept} kept</b> → ${t.gateCleared} clear the gate → ${t.pushed} sent to the sheet.`
+        + `<br><span class="pill">keep rate ${pct(t.kept,t.reviewed)}</span> `
+        + `<span class="pill">gate rate ${pct(t.gateCleared,t.leads)}</span>`
+        + (t.dropped ? `<br>Dropped ${t.dropped}: `
+            + `${t.droppedRenovated} renovated · ${t.droppedMultiUnit} multi-unit · `
+            + `${t.droppedFire} fire · ${t.droppedFewPhotos} too few photos · ${t.droppedOther} other` : '')
+      : `No runs recorded yet today (${t.date || ''}).`;
+
+    let html = '<table><thead><tr><th>Day</th>'
+      + KPI_COLS.map(c=>`<th>${c[1]}</th>`).join('') + '</tr></thead><tbody>';
+    for (const r of (rep.rows||[])) {
+      html += `<tr${r.date===t.date?' class="surface"':''}><td class="mono">${r.date}</td>`
+        + KPI_COLS.map(c=>`<td class="mono">${r[c[0]]||0}</td>`).join('') + '</tr>';
+    }
+    if (rep.total) {
+      html += `<tr><td class="mono"><b>${rep.total.date}</b></td>`
+        + KPI_COLS.map(c=>`<td class="mono"><b>${rep.total[c[0]]||0}</b></td>`).join('') + '</tr>';
+    }
+    $('kpiHistory').innerHTML = html + '</tbody></table>';
+  }
+  async function refreshLedger(){
+    const s = await window.fs.ledgerStats();
+    const parts = Object.entries(s.byVerdict||{}).map(([k,v])=>`${v} ${k}`).join(' · ');
+    $('ledgerStatus').textContent = s.total
+      ? `Ledger: ${s.total} listing(s) already checked — these are skipped on every future scan (${parts}).`
+      : 'Ledger: empty — the next scan reviews every candidate in the buy box.';
+  }
+  async function refreshKpi(){ renderKpi(await window.fs.kpiReport(14)); refreshLedger(); }
+  $('ledgerClear').onclick = async () => { const r = await window.fs.ledgerClear(); if(r.ok){ log('Ledger cleared.','warn'); refreshLedger(); } };
+  $('kpiRefresh').onclick = refreshKpi;
+  $('kpiExport').onclick = async () => { const r = await window.fs.kpiExport(90); if(r.ok) log('KPI exported → '+r.filePath,'good'); };
+  window.fs.on('kpi', p => renderKpi({ ...(p.history||{}), today: p.today }));
+  refreshKpi();
+
+  window.fs.on('report', p => {
+    lastLeads = p.leads || [];
+    const surf = lastLeads.filter(l => l.surface);
+    const noComps = lastLeads.length && lastLeads.every(l => l.needsComps);
+    let html = `<div class="hint">${noComps
+      ? `${lastLeads.length} condition-qualified listing(s) — comps off, so no ARV or profit yet. Cheapest $/sqft first.`
+      : `${surf.length} of ${lastLeads.length} kept leads clear the profit gate.`} Generated ${p.generatedAt}</div>`;
+    html += noComps
+      ? '<table><thead><tr><th>Property</th><th>DOM</th><th>Beds</th><th>SqFt</th><th>Price</th><th>$/sqft</th></tr></thead><tbody>'
+      : '<table><thead><tr><th>Property</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th><th>Score</th></tr></thead><tbody>';
+    for (const l of lastLeads) {
+      const head = `<td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+        `<td class="mono">${l.dom!=null&&l.dom!==''?l.dom:'—'}</td>`;
+      html += noComps
+        ? `<tr class="surface">${head}<td class="mono">${l.beds||'—'}</td><td class="mono">${l.sqft||'—'}</td>`+
+          `<td class="mono">${money(l.price)}</td><td class="mono">$${l.ppsf||'—'}</td></tr>`
+        : `<tr class="${l.surface?'surface':''}">${head}`+
+          `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
+          `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td><td class="mono">${l.score}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    $('report').innerHTML = html; $('reportCard').style.display='block';
+  });
+</script>
+</body>
+</html>
