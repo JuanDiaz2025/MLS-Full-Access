@@ -7,7 +7,7 @@
  * detects the dashboard. Scanning navigates the MLS window through Matrix and
  * runs the same extraction used by the headless pipeline.
  */
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
@@ -25,6 +25,8 @@ const cfg = {
   // anything wrong — with that rejection feeding straight back into the ledger.
   whenUnsure: 'keep',
   runComps: false,     // OFF for now — qualify on CONDITION first, comp later
+  scrollPauseMs: 700,  // pause per screen while scrolling a report — reading slowly
+  boardUrl: 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1',   // FlipScout Lead Board
 };
 
 ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
@@ -283,17 +285,39 @@ async function showGallery(mls) {
   // The Client Full report is the only place the full address, the zip, the
   // year built and the real remarks exist — the results grid has none of them.
   let meta = { remarks: '', condition: '', zip: '', address: '', yearBuilt: '', propClass: '', mismatch: false };
+  let agent = { agentRemarks: '', showing: '', offerNotes: '', offerDateField: '', labels: [] };
+  let pageText = '';
+  let info = null, carousel = [];
   try {
     await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); })()`);
     await sleep(400);
-    const selId = await js(`(() => { const s=[...document.querySelectorAll('select')].find(se=>[...se.options].some(o=>/Client Full - All Photos/i.test(o.text))); return s?s.id:null; })()`);
-    if (selId) {
-      await js(`(() => { const s=document.getElementById(${JSON.stringify(selId)}); if(!s) return; const o=[...s.options].find(o=>/Client Full - All Photos/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
-      await sleep(2600);
+    if (await showReport(/^Client Full - All Photos$/i)) {
       // Parse in Node rather than in the page: it makes the extraction testable
       // against saved report text, which is how the wrong-listing bug surfaced.
-      const raw = await js('document.body.innerText').catch(() => '');
+      const raw = await readWholePage();
+      savePage(mls, 'client', raw);
       meta = core.parseDetail(raw, mls);
+      // The photo grid is built from a media Key on this report's carousel, so
+      // take it now, before switching to the agent report.
+      info = await js(JS_PHOTO_KEY).catch(() => null);
+      carousel = await js(core.JS_PHOTOS).catch(() => []);
+
+      // The agent-side report: remarks written for other agents, showing
+      // instructions, and — when there is one — the offer deadline. The buyer
+      // report never shows any of it.
+      if (!meta.mismatch && await showReport(/^Agent Full$/i)) {
+        const rawA = await readWholePage();
+        savePage(mls, 'agent', rawA);
+        const a = core.parseAgentDetail(rawA, mls);
+        if (!a.mismatch) {
+          agent = a;
+          pageText = core.listingBlock(rawA, mls).block;
+          if (!a.labels.length) log('  agent report open, but no agent-remarks label found on it — page saved for checking', 'warn');
+        }
+      } else if (!meta.mismatch) {
+        log('  no "Agent Full" report offered — agent remarks not read for this listing', 'warn');
+      }
+      if (!pageText) pageText = core.listingBlock(raw, mls).block;
     }
   } catch (_) {}
 
@@ -307,14 +331,6 @@ async function showGallery(mls) {
   // any carousel image, so no popup window has to be driven.
   let urls = [];
   try {
-    const info = await js(`(() => {
-      const img = [...document.images].find(i => /MediaServer/i.test(i.src));
-      if (!img) return null;
-      const key = (img.src.match(/Key=(\d+)/) || [])[1];
-      const tid = (img.src.match(/TableID=(\d+)/) || [])[1] || '9';
-      const n = (document.body.innerText.match(/\b\d+\s*\/\s*(\d+)\b/) || [])[1];
-      return key ? { key: key, tid: tid, n: n || '60' } : null;
-    })()`).catch(() => null);
     if (info) {
       await nav('https://search.mlslistings.com/Matrix/Public/PhotoPopup.aspx'
         + `?n=${info.n}&i=0&L=1&tid=${info.tid}&key=${info.key}&mtid=1&View=G`, 3000);
@@ -323,7 +339,9 @@ async function showGallery(mls) {
     }
   } catch (_) {}
   // Fall back to the carousel rather than judging a listing with no photos.
-  if (!urls.length) urls = await js(core.JS_PHOTOS).catch(() => []);
+  // Read off the buyer report before the switch to the agent report, which
+  // may not carry the same images.
+  if (!urls.length) urls = carousel.length ? carousel : await js(core.JS_PHOTOS).catch(() => []);
 
   // The grid page IS the gallery, so there is nothing to rebuild — just wait
   // for the images to decode before anything judges the listing.
@@ -340,11 +358,95 @@ async function showGallery(mls) {
   const dwell = Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
   if (dwell) await sleep(dwell);
 
+  const offer = core.findOfferDue({
+    offerDateField: agent.offerDateField, offerNotes: agent.offerNotes,
+    agentRemarks: agent.agentRemarks, showing: agent.showing,
+    remarks: meta.remarks, pageText,
+  }, todayKey());
+
   return { count: urls.length, urls: urls,
     remarks: meta.remarks || '', condition: meta.condition || '',
     zip: meta.zip || '', address: meta.address || '', yearBuilt: meta.yearBuilt || '',
     propClass: meta.propClass || '',
+    agentRemarks: agent.agentRemarks || '', showingNotes: agent.showing || '',
+    offerNotes: agent.offerNotes || '', offer,
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
+}
+
+// Pick a report in the results page's Display dropdown by its exact name.
+// Exact, because "Agent Full" must not land on "Agent 1 Line" and "Client Full"
+// must not land on "Client Full - All Photos".
+async function showReport(nameRe) {
+  const re = nameRe.source, fl = nameRe.flags;
+  const ok = await js(`(() => {
+    const re = new RegExp(${JSON.stringify(re)}, ${JSON.stringify(fl)});
+    const s = [...document.querySelectorAll('select')].find(se => [...se.options].some(o => re.test(o.text.trim())));
+    if (!s) return false;
+    const o = [...s.options].find(o => re.test(o.text.trim()));
+    s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`).catch(() => false);
+  if (ok) await sleep(2600);
+  return ok;
+}
+
+// Scroll the report top to bottom, a screen at a time, before reading it.
+// Matrix builds some sections as they come into view, and it is how a person
+// reads a listing: all of it, not the first screen. The pause per screen is
+// the "take it slow" setting in section 3.
+async function readWholePage() {
+  const pause = Math.max(150, Number(cfg.scrollPauseMs != null ? cfg.scrollPauseMs : 700));
+  await js(`(async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    // The report may scroll in the window or inside its own panel; do both —
+    // but only real content panels (tall ones, the two biggest), not every
+    // dropdown and menu on the page, each of which would cost its own pauses.
+    const panels = [document.scrollingElement || document.documentElement]
+      .concat([...document.querySelectorAll('div, main, section')]
+        .filter(el => el.clientHeight > 250 && el.scrollHeight > el.clientHeight + 80
+          && /(auto|scroll)/.test(getComputedStyle(el).overflowY))
+        .sort((a, b) => b.scrollHeight - a.scrollHeight).slice(0, 2));
+    for (const el of panels) {
+      const step = Math.max(200, Math.round((el === panels[0] ? innerHeight : el.clientHeight) * 0.8));
+      for (let y = 0; y <= el.scrollHeight; y += step) { el.scrollTop = y; await wait(${pause}); }
+      el.scrollTop = el.scrollHeight; await wait(${pause});
+    }
+    for (const el of panels) el.scrollTop = 0;
+    return true;
+  })()`).catch(() => false);
+  return await js('document.body.innerText').catch(() => '');
+}
+
+const JS_PHOTO_KEY = `(() => {
+  const img = [...document.images].find(i => /MediaServer/i.test(i.src));
+  if (!img) return null;
+  const key = (img.src.match(/Key=(\\d+)/) || [])[1];
+  const tid = (img.src.match(/TableID=(\\d+)/) || [])[1] || '9';
+  // The carousel counter reads "1 / 29", spaced. Beds/baths ("3/0") and
+  // Age/Yr Blt ("122/1904") are not, so they cannot be taken for the count.
+  const n = (document.body.innerText.match(/\\b1 \\/ (\\d{1,3})\\b/) || [])[1];
+  return key ? { key: key, tid: tid, n: n || '60' } : null;
+})()`;
+
+// Every report page the app reads is kept, one folder per day, so what the
+// parser made of a listing can always be checked against what the page said.
+// Nobody had seen an Agent Full page when its parser was written; these files
+// are how it gets verified. Pruned to the last 14 days.
+const PAGES_DIR = () => path.join(app.getPath('userData'), 'listing-pages');
+function savePage(mls, kind, text) {
+  try {
+    const dir = path.join(PAGES_DIR(), todayKey());
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${String(mls).replace(/[^A-Za-z0-9]/g, '')}-${kind}.txt`), String(text || ''));
+  } catch (_) { /* a failed save must never cost a listing */ }
+}
+function prunePages() {
+  try {
+    const keep = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+    for (const d of fs.readdirSync(PAGES_DIR())) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d < keep) fs.rmSync(path.join(PAGES_DIR(), d), { recursive: true, force: true });
+    }
+  } catch (_) {}
 }
 
 async function compFor(mls, zip, sqft) {
@@ -371,12 +473,17 @@ async function compFor(mls, zip, sqft) {
 
 // ---------- AI auto-verify (Claude vision applies the buy-box rules) ----------
 function rulesPrompt(c, photoCount, gal) {
-  const remarks = ((gal && gal.remarks) || '').slice(0, 700);
+  // The whole description, not the first 700 characters: "sold in its present
+  // as-is condition" sat at character 1,106 of 347 Faxon's remarks and the
+  // model never saw it. The agent's own remarks go in too.
+  const remarks = ((gal && gal.remarks) || '').slice(0, 3000);
+  const agentSaid = [gal && gal.agentRemarks, gal && gal.showingNotes].filter(Boolean).join(' | ').slice(0, 2000);
   return `You are screening a real-estate listing for a house-FLIPPING buy box.
 
 Listing: ${c.addr}, ${c._cityKey} — ${c._sqft} sqft, $${c._price.toLocaleString()}.
 You have been given ${photoCount} SEPARATE photos of this listing (every photo the MLS has, up to 20).
-${remarks ? `Agent remarks: "${remarks}"` : 'No agent remarks available.'}
+${remarks ? `Public remarks: "${remarks}"` : 'No public remarks available.'}
+${agentSaid ? `Agent-only remarks / showing instructions: "${agentSaid}"` : 'No agent-only remarks available.'}
 
 Work through the photos ONE BY ONE before answering. For each, note what room it is
 and the state of the finishes. Pay closest attention to the KITCHEN and BATHROOMS —
@@ -491,6 +598,10 @@ async function autoDecide(c) {
   } catch (e) { return { decision: 'drop', reason: 'AI call failed: ' + e.message }; }
 }
 
+/** What the listing said, as it rides on a lead: remarks, offer deadline,
+ *  and why the review kept it. */
+const said = c => Object.assign({ why: c._why || '' }, c._said || {});
+
 // ---------- full run ----------
 /** The buy box as pickable areas, for the checkboxes in section 3. */
 ipcMain.handle('buybox', () => core.DEFAULT_BUYBOX.map((a, i) => ({
@@ -604,7 +715,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         if (control.stopped) break;
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
-        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false }));
+        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false, offer: {} }));
         // Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT
         // listing on screen. Judging that would put another property's photos,
         // remarks and address onto this lead, so skip it — deliberately without
@@ -619,9 +730,20 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         if (gal.zip) c.zip = gal.zip;
         if (gal.address) c.fullAddr = gal.address;
         if (gal.yearBuilt) c._yearBuilt = Number(gal.yearBuilt);
+        // Everything the listing SAYS travels with the lead to the Lead Board:
+        // both sets of remarks, the showing notes, and the offer deadline with
+        // the words it was read from, so a person can check it.
+        const offer = gal.offer || {};
+        c._said = {
+          remarks: gal.remarks || '', agentRemarks: gal.agentRemarks || '',
+          showing: gal.showingNotes || '', offerNotes: gal.offerNotes || '',
+          offerDue: offer.due || '', offerFrom: offer.from || '', offerPhrase: offer.phrase || '',
+        };
+        if (offer.due) log(`  offer deadline ${offer.due.replace(/^~/, '≈ ')} — from ${offer.from}: "${offer.phrase}"`, 'good');
         const base = { i: i + 1, total: fresh.length, city: cityOf(c), mls: c.mls, addr: c.addr,
           price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n,
-          remarks: gal.remarks || '', details: gal.details || {} };
+          remarks: gal.remarks || '', agentRemarks: gal.agentRemarks || '',
+          showingNotes: gal.showingNotes || '', offer, details: gal.details || {} };
         // The run NEVER stops to ask. AI vision when a key is configured,
         // otherwise the text rules; when the rules genuinely cannot tell
         // (they read remarks, they never see a photo) the fallback in
@@ -640,6 +762,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
         } else {
           const v = core.rulesDecide({ addr: c.addr, photos: n, remarks: gal.remarks,
+            agentRemarks: gal.agentRemarks, showing: gal.showingNotes,
             condition: gal.condition, propClass: gal.propClass });
           const settled = v.decision === 'manual' ? (cfg.whenUnsure === 'drop' ? 'drop' : 'keep') : v.decision;
           decision = settled;
@@ -650,7 +773,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         }
         if (control.stopped) break;
         runKpi.reviewed++;
-        if (decision === 'keep') { kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
+        if (decision === 'keep') { c._why = dropReason || ''; kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
         else {
           runKpi.dropped++; runKpi[dropBucket(dropReason)]++;
           log(`  dropped ${c.addr} — ${dropReason || 'no reason given'}`);
@@ -691,6 +814,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             // Push these: with no ARV there is no gate to clear, and the point
             // of this mode is to get the qualified list in front of you.
             surface: true, needsComps: true,
+            ...said(c),
           });
         }
         log(`[${label}] comps skipped — ${cityLeads.length} condition-qualified listing(s)`, 'good');
@@ -710,7 +834,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
           arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
           link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
-          ...deal });
+          ...deal, ...said(c) });
       }
       }
 
@@ -735,16 +859,22 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         if (googleReady() && googleCfg().autoSync) {
           const s = await googleSync(rows, cityRejects);
           if (s.ok) {
-            runKpi.pushed += s.leads.added;
+            // "pushed" now counts leads handed to the Lead Board (below); the
+            // old sheet path, if anyone still has it connected, is logged only.
             runKpi.pushSkipped += s.leads.updated;
             log(`[${label}] sheet updated: ${s.leads.added} new lead(s), ${s.leads.updated} refreshed, `
               + `${s.rejects.added} rejection(s) logged`, 'good');
           } else {
             log(`[${label}] sheet write failed: ${s.error} — kept in the local backup`, 'warn');
           }
-        } else {
-          log(`[${label}] Google Sheet not connected — ${cityWinners.length} lead(s) held in the `
-            + 'local backup. Connect it in section 7 and hit "Send this run\'s leads".', 'warn');
+        }
+        // The Lead Board's copy of this city. Written before anything else can
+        // fail, and merged into the day's file, so a later city or a second run
+        // today adds to it rather than replacing it.
+        if (cityWinners.length) {
+          const b = writeBoardScan(cityWinners);
+          if (b.ok) { runKpi.pushed += b.added; log(`[${label}] ${cityWinners.length} lead(s) added to today's Lead Board file`, 'good'); }
+          else log(`[${label}] could not write the Lead Board file: ${b.error}`, 'warn');
         }
         // Written either way: a failed API call, or a disconnected sheet, must
         // never lose a city that has already been reviewed.
@@ -762,8 +892,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       return { ok: true, leads: [] };
     }
     // Leads were already written city by city above — don't re-send them here.
-    log(`Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate`
-      + (googleReady() ? `; ${runKpi.pushed} written to the sheet.` : '.'), 'good');
+    log(`Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate.`, 'good');
     return { ok: true, leads };
   } catch (e) {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
@@ -788,12 +917,23 @@ ipcMain.handle('start-scan', async (_e, opts) => {
 function finishRun(runKpi, day, started) {
   if (!started) { send('done', { neverStarted: true, summary: 'Not signed in — nothing scanned.' }); return; }
   closeMlsWindow();
+  prunePages();
   const line = control.stopped
-    ? `Scan STOPPED early — ${runKpi.reviewed} reviewed, ${runKpi.kept} kept, ${runKpi.pushed} written to the sheet.`
+    ? `Scan STOPPED early — ${runKpi.reviewed} reviewed, ${runKpi.kept} kept, ${runKpi.pushed} new for the Lead Board.`
     : `Scan COMPLETE — ${runKpi.scanned} scanned · ${runKpi.skippedAlreadyChecked} already checked (skipped) · `
       + `${runKpi.reviewed} reviewed · ${runKpi.kept} kept · ${runKpi.dropped} dropped · `
-      + `${runKpi.pushed} written to the sheet.`;
+      + `${runKpi.pushed} new for the Lead Board.`;
   log(line, 'good');
+  // Hand today's leads to the Lead Board: on the clipboard, ready to paste.
+  const board = boardStatus();
+  if (board.count) {
+    try {
+      clipboard.writeText(fs.readFileSync(board.file, 'utf8'));
+      log(`Today's ${board.count} lead(s) are copied — open the Lead Board, click "Add scan", and paste.`
+        + (board.offers ? ` ${board.offers} have an offer deadline.` : ''), 'good');
+    } catch (e) { log('Could not copy the leads: ' + e.message + ' — use "Copy for the board" in section 7.', 'warn'); }
+  }
+  send('board', board);
   log('Nothing else is running. Start scan again whenever you want the next pass.', 'good');
   send('done', {
     stopped: control.stopped, summary: line,
@@ -813,6 +953,87 @@ function closeMlsWindow() {
 ipcMain.on('pause', () => { control.paused = true; log('Paused.', 'warn'); });
 ipcMain.on('resume', () => { control.paused = false; log('Resumed.', 'good'); });
 ipcMain.on('stop', () => { control.stopped = true; control.paused = false; });
+
+// ---------- the Lead Board hand-off ----------
+// One file per day, in Documents/FlipScout, holding every lead the day's runs
+// kept — with its remarks and offer deadline. The Lead Board's "Add scan"
+// button takes this file (or the same text pasted), so leads go from the scan
+// to the board with no spreadsheet in between. An artifact's shared data can
+// only be written from the board page itself, which is why this is a paste and
+// not a push.
+const BOARD_DIR = () => path.join(app.getPath('documents'), 'FlipScout');
+const BOARD_FILE = (d = todayKey()) => path.join(BOARD_DIR(), `FlipScout-scan-${d}.json`);
+const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+
+/** One lead as the board stores it. Short keys are not worth the confusion;
+ *  lengths are capped so a pasted file can never blow the board's storage. */
+function boardLead(l) {
+  const num = v => (v === '' || v == null || !isFinite(Number(v))) ? null : Number(v);
+  return {
+    mls: clip(l.mls, 20).toUpperCase(),
+    addr: clip(fullAddress(l.address, l.city, l.zip), 160),
+    city: clip(l.city, 60), zip: clip(l.zip, 10),
+    price: num(l.price), ppsf: num(l.ppsf), sqft: num(l.sqft),
+    beds: num(l.beds), baths: num(l.baths), year: num(l.yearBuilt), dom: num(l.dom),
+    remarks: clip(l.remarks, 2000), agentRemarks: clip(l.agentRemarks, 1500),
+    showing: clip(l.showing, 600),
+    offerDue: /^~?\d{4}-\d{2}-\d{2}$/.test(l.offerDue || '') ? l.offerDue : '',
+    offerFrom: clip(l.offerFrom, 40), offerPhrase: clip(l.offerPhrase, 200),
+    why: clip(l.why, 240),
+  };
+}
+
+function readBoardScan(d) {
+  try {
+    const j = JSON.parse(fs.readFileSync(BOARD_FILE(d), 'utf8'));
+    if (j && j.kind === 'flipscout-scan' && Array.isArray(j.leads)) return j;
+  } catch (_) {}
+  return null;
+}
+
+function writeBoardScan(leads) {
+  try {
+    const d = todayKey();
+    const prev = readBoardScan(d);
+    const by = {};
+    ((prev && prev.leads) || []).forEach(l => { if (l.mls) by[l.mls] = l; });
+    const before = Object.keys(by).length;
+    (leads || []).map(boardLead).forEach(l => { if (l.mls) by[l.mls] = l; });
+    const out = {
+      kind: 'flipscout-scan', v: 1, app: app.getVersion(), pulled: d,
+      made: new Date().toISOString(), leads: Object.keys(by).map(k => by[k]),
+    };
+    fs.mkdirSync(BOARD_DIR(), { recursive: true });
+    fs.writeFileSync(BOARD_FILE(d), JSON.stringify(out, null, 1));
+    return { ok: true, added: out.leads.length - before, total: out.leads.length };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function boardStatus() {
+  const j = readBoardScan();
+  const leads = (j && j.leads) || [];
+  return { file: BOARD_FILE(), exists: !!j, pulled: todayKey(), count: leads.length,
+    offers: leads.filter(l => l.offerDue).length, made: (j && j.made) || '', url: cfg.boardUrl };
+}
+
+ipcMain.handle('board-status', () => boardStatus());
+ipcMain.handle('board-copy', () => {
+  const b = boardStatus();
+  if (!b.count) return { ok: false, error: 'no leads kept today yet' };
+  clipboard.writeText(fs.readFileSync(b.file, 'utf8'));
+  log(`Copied today's ${b.count} lead(s) — paste them into the Lead Board with "Add scan".`, 'good');
+  return { ok: true, count: b.count };
+});
+ipcMain.handle('board-open', () => {
+  const u = String(cfg.boardUrl || '');
+  if (!/^https:\/\/claude\.ai\//.test(u)) return { ok: false, error: 'the Lead Board link must start with https://claude.ai/' };
+  shell.openExternal(u);
+  return { ok: true };
+});
+ipcMain.on('board-show', () => {
+  const b = boardStatus();
+  try { b.exists ? shell.showItemInFolder(b.file) : shell.openPath(BOARD_DIR()); } catch (_) {}
+});
 
 // ---------- local backup ----------
 // A copy of every reviewed city, written before anything else can fail. It is

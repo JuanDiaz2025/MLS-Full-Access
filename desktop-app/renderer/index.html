@@ -44,6 +44,8 @@
   tr.surface td{color:var(--strong)}
   .mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
   .hint{font-size:11.5px;color:var(--muted);margin-top:8px}
+  .said{background:var(--panel2);border:1px solid var(--hair);border-radius:8px;padding:8px 10px;margin-top:6px;font-size:12.5px;max-height:140px;overflow:auto;white-space:pre-wrap}
+  .said b{display:block;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
 </style>
 </head>
 <body>
@@ -68,7 +70,10 @@
   <div class="card">
     <h2>2 · How each listing is judged</h2>
     <div class="hint">The run decides Keep/Drop on its own and <b>never stops to ask you</b>.
-      Built-in rules read the agent remarks: they drop renovated / turnkey wording,
+      Every listing is scrolled top to bottom and read twice — the buyer report for the
+      public remarks, and the <b>Agent Full</b> report for the agent-only remarks and
+      showing instructions, which is where tenants and offer deadlines are written.
+      Built-in rules read all of it: they drop renovated / turnkey wording,
       multi-unit, tenant-occupied, fire damage, and anything that isn't a quick flip
       (foundation, structural, permits, tear-down). Rules can't see photos, so add a key
       below and AI vision judges the pictures instead.</div>
@@ -109,6 +114,11 @@
         <input id="readSeconds" type="number" min="0" max="60" value="6" style="width:70px">
         seconds
       </label>
+      <label style="display:flex;align-items:center;gap:6px;margin:0">
+        Scroll pause per screen
+        <input id="scrollPause" type="number" min="0.2" max="5" step="0.1" value="0.7" style="width:70px">
+        seconds
+      </label>
     </div>
     <div class="hint"><b>What it looks for</b> — Active · single-family ·
       <b>45 days on market or less</b> · 25+ years old · <b>quick flips only</b>
@@ -116,8 +126,8 @@
       not renovated · not multi-unit · not tenant-occupied.
       <br><b>Only new listings.</b> Every MLS # ever checked is remembered, so today's run
       skips everything yesterday already looked at — day two costs you only the new ones.
-      <br><b>One area at a time, in order</b> — each is finished completely, written to
-      the sheet, and only then does the next one start. Untick the ones you don't want:
+      <br><b>One area at a time, in order</b> — each is finished completely, added to
+      today's Lead Board file, and only then does the next one start. Untick the ones you don't want:
       San Francisco on its own takes minutes, the whole buy box takes hours.</div>
     <div id="funnel" class="status" style="margin-top:10px">Idle.</div>
     <div id="finished" class="status good" style="display:none;margin-top:10px"></div>
@@ -128,6 +138,8 @@
     <div class="addr" id="rAddr">—</div>
     <div class="meta" id="rMeta">—</div>
     <div id="aiVerdict" class="status" style="display:none"></div>
+    <div id="rOffer" class="status" style="display:none;margin-top:8px"></div>
+    <div id="rSaid" style="margin-top:8px"></div>
     <div class="hint">The gallery opens in the MLS window so you can watch, but nothing
       waits on you — every listing is judged and the run carries on.</div>
   </div>
@@ -155,13 +167,28 @@
       <button id="kpiExport">Export CSV / JSON</button>
       <button id="ledgerClear" class="drop">Clear ledger</button>
     </div>
-    <div class="hint">Counts accumulate per calendar day and survive closing the app. They
-      go to the sheet's KPI tab automatically at the end of each run, and the reviewer's
-      rejections come back into the ledger at the start of the next one.</div>
+    <div class="hint">Counts accumulate per calendar day and survive closing the app.</div>
   </div>
 
   <div class="card">
-    <h2>7 · Your Google Sheet</h2>
+    <h2>7 · FlipScout Lead Board</h2>
+    <div id="boardStatus" class="status">No leads kept today yet.</div>
+    <div class="row" style="margin-top:10px">
+      <button id="boardCopy" class="primary">Copy for the board</button>
+      <button id="boardOpen">Open Lead Board</button>
+      <button id="boardShow">Show scan file</button>
+    </div>
+    <div class="hint">Every lead the scan keeps goes into today's scan file — with its
+      public and agent remarks and any <b>offer deadline</b> read from them. When a run
+      finishes the leads are already copied: open the Lead Board, click <b>Add scan</b>,
+      and paste (or drop the file in). The board skips anything it already has.</div>
+    <label style="margin-top:10px">Lead Board link</label>
+    <input id="boardUrl" type="text" autocomplete="off">
+  </div>
+
+  <details class="card">
+    <summary style="cursor:pointer;color:var(--muted);font-size:11px;letter-spacing:.12em;text-transform:uppercase">8 · Google Sheet (old — optional)</summary>
+    <div style="margin-top:12px"></div>
     <div id="gStatus" class="status">Not connected.</div>
 
     <label style="margin-top:10px">Your spreadsheet (paste the URL)</label>
@@ -212,7 +239,7 @@
         so a dropped connection never loses work you have already paid for. If the sheet
         was offline during a scan, reconnect and hit <b>Send this run's leads</b>.</div>
     </details>
-  </div>
+  </details>
 </div>
 
 <script>
@@ -288,12 +315,16 @@
     useAI: $('useAI').checked,
     apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
     readSeconds: Number($('readSeconds').value||6),
+    scrollPauseMs: Math.round(Number($('scrollPause').value||0.7) * 1000),
+    boardUrl: ($('boardUrl').value||'').trim() || BOARD_URL,
     whenUnsure: $('whenUnsure').value,
     runComps: false,   // comping is off; see CLAUDE.md §5
   }); }
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
   $('readSeconds').oninput = pushConfig;
+  $('scrollPause').oninput = () => { localStorage.setItem('fs.scrollPause', $('scrollPause').value); pushConfig(); };
+  { const v = localStorage.getItem('fs.scrollPause'); if (v) $('scrollPause').value = v; }
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
 
@@ -369,6 +400,34 @@
     if (s.sheetId) $('gSheetUrl').value = 'https://docs.google.com/spreadsheets/d/' + s.sheetId + '/edit';
   })();
 
+  // --- the Lead Board hand-off ---
+  const BOARD_URL = 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1';
+  $('boardUrl').value = localStorage.getItem('fs.boardUrl') || BOARD_URL;
+  $('boardUrl').oninput = () => { localStorage.setItem('fs.boardUrl', $('boardUrl').value.trim()); pushConfig(); };
+  function paintBoard(b){
+    const box = $('boardStatus');
+    box.className = 'status' + (b.count ? ' good' : '');
+    box.textContent = b.count
+      ? `Today (${b.pulled}): ${b.count} lead(s) ready for the board`
+        + (b.offers ? `, ${b.offers} with an offer deadline` : '') + '.'
+      : `No leads kept today (${b.pulled}) yet.`;
+  }
+  async function refreshBoard(){ paintBoard(await window.fs.boardStatus()); }
+  $('boardCopy').onclick = async () => {
+    const r = await window.fs.boardCopy();
+    if (!r.ok) { $('boardStatus').className='status warn'; $('boardStatus').textContent = 'Nothing to copy — ' + r.error + '.'; return; }
+    $('boardStatus').className='status good';
+    $('boardStatus').textContent = `Copied ${r.count} lead(s). Open the Lead Board, click "Add scan", paste.`;
+  };
+  $('boardOpen').onclick = async () => { const r = await window.fs.boardOpen(); if (!r.ok) log(r.error, 'warn'); };
+  $('boardShow').onclick = () => window.fs.boardShow();
+  window.fs.on('board', paintBoard);
+  refreshBoard();
+  // Send the saved settings once at start. Before this, what the screen showed
+  // (a remembered "when unsure" choice, say) did not reach the scan until a
+  // setting was touched.
+  pushConfig();
+
   // --- local backup ---
   async function refreshBackup(){
     const s = await window.fs.backupStatus();
@@ -409,16 +468,28 @@
     box.style.display = 'block';
     box.className = 'status ' + (p.verdict === 'keep' ? 'good' : 'warn');
     box.textContent = `${p.verdict === 'keep' ? '✓ KEEP' : '✕ DROP'} — ${p.why || ''}`;
-    if (p.remarks) {
-      $('rMeta').innerHTML += `<div class="hint" style="margin-top:6px">${
-        String(p.remarks).slice(0,400).replace(/[<>]/g,'')}</div>`;
-    }
+    // Show what was READ, in full, so you can see the app actually read it.
+    const off = p.offer || {};
+    const ob = $('rOffer');
+    ob.style.display = 'block';
+    ob.className = 'status' + (off.due ? ' good' : '');
+    ob.textContent = off.due
+      ? `Offer deadline: ${off.due.replace(/^~/, '≈ ')}${off.due[0] === '~' ? ' (weekday only — confirm)' : ''} — from ${off.from}: “${off.phrase}”`
+      : 'No offer deadline found in the remarks.';
+    const said = $('rSaid'); said.textContent = '';
+    [['Public remarks', p.remarks], ['Agent-only remarks', p.agentRemarks], ['Showing instructions', p.showingNotes]]
+      .forEach(([h, t]) => {
+        const d = document.createElement('div'); d.className = 'said';
+        const b = document.createElement('b'); b.textContent = h;
+        d.appendChild(b); d.appendChild(document.createTextNode(t || '— none on the listing —'));
+        said.appendChild(d);
+      });
   });
   // ---------------- daily KPI ----------------
   const KPI_COLS = [
     ['scanned','Scanned'], ['candidates','Candidates'], ['reviewed','Reviewed'],
     ['kept','Kept'], ['dropped','Dropped'], ['leads','Leads'],
-    ['gateCleared','Clear gate'], ['pushed','To sheet'],
+    ['gateCleared','Clear gate'], ['pushed','To board'],
   ];
   function renderKpi(rep){
     if(!rep) return;
@@ -428,7 +499,7 @@
     $('kpiToday').innerHTML = t.runs
       ? `<b>Today (${t.date})</b> — ${t.runs} run(s): `
         + `${t.scanned} scanned → ${t.candidates} candidates → ${t.reviewed} reviewed → `
-        + `<b>${t.kept} kept</b> → ${t.gateCleared} clear the gate → ${t.pushed} sent to the sheet.`
+        + `<b>${t.kept} kept</b> → ${t.gateCleared} clear the gate → ${t.pushed} new for the Lead Board.`
         + `<br><span class="pill">keep rate ${pct(t.kept,t.reviewed)}</span> `
         + `<span class="pill">gate rate ${pct(t.gateCleared,t.leads)}</span>`
         + (t.dropped ? `<br>Dropped ${t.dropped}: `

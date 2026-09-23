@@ -318,7 +318,11 @@ const FINISH_KW = [
 // house with a 1950s kitchen is exactly what we are hunting.
 
 function rulesDecide(meta) {
-  const t = ((meta.remarks || '') + ' ' + (meta.condition || '')).toLowerCase();
+  // Agent-only remarks and showing instructions are where "tenant occupied, do
+  // not disturb" and "sold as-is" actually get written — the public remarks
+  // are marketing copy. Judge on everything the listing says.
+  const t = [meta.remarks, meta.agentRemarks, meta.showing, meta.condition]
+    .filter(Boolean).join(' ').toLowerCase();
   const photos = meta.photos || 0;
   if (isConfirmed(meta.addr)) return { decision: 'keep', reason: 'confirmed deal — Bryan wants this one' };
   if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
@@ -405,21 +409,25 @@ function fullAddress(street, city, zip) {
  * The full address lives here and nowhere else — the results grid has no zip
  * column at all, which is why zip used to reach the sheet blank.
  */
-function parseDetail(text, wantMls) {
+/** The part of a report page that belongs to one MLS #, or '' if that listing
+ *  is not on the page. Shared by every parser so none of them can read a
+ *  neighbouring listing by accident. */
+function listingBlock(text, wantMls) {
   const t = String(text || '').replace(/\r/g, '');
   const want = String(wantMls || '').trim().toUpperCase();
   const marks = [...t.matchAll(/MLS\s*#:?\s*([A-Z0-9]{6,})/gi)];
   const seen = marks.map(m => m[1].toUpperCase());
-
-  let block = '';
   for (let i = 0; i < marks.length; i++) {
     if (seen[i] !== want) continue;
-    const from = marks[i].index;
     const to = i + 1 < marks.length ? marks[i + 1].index : t.length;
-    block = t.slice(from, to);
-    break;
+    return { block: t.slice(marks[i].index, to), showing: seen[0] || '', want };
   }
-  if (!block) return { mismatch: true, showing: seen[0] || '', want: want };
+  return { block: '', showing: seen[0] || '', want };
+}
+
+function parseDetail(text, wantMls) {
+  const { block, showing, want } = listingBlock(text, wantMls);
+  if (!block) return { mismatch: true, showing: showing, want: want };
 
   const grab = re => { const m = block.match(re); return m ? m[1].replace(/\s+/g, ' ').trim() : ''; };
   // "814 Potrero Avenue, San Francisco 94110" — street, city and zip on one
@@ -435,14 +443,187 @@ function parseDetail(text, wantMls) {
     // /Remarks:/ picked up the truncated Open House teaser instead of the real
     // description — which is what the rules engine was judging condition on.
     remarks: grab(/(?:^|\n)\s*(?:Public|Public Remarks?|Marketing Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i),
-    condition: grab(/Prop(?:erty)? Condition:?\s*([^\n]{0,60})/i),
+    // Stop at the tab. The report lays two fields to a line, so when Prop
+    // Condition is blank a greedy read ran on into the NEXT field and recorded
+    // "Flooring: Roof: Other" as the condition.
+    condition: grab(/Prop(?:erty)? Condition:?[ \t]*([^\t\n]{0,60})/i),
     // The MLS's own classification — "Res. Single Family / Attached, Single
     // Family". It outranks any keyword in the remarks about second units.
     propClass: grab(/Class:?\s*([^\n\t]{0,80})/i),
   };
 }
 
+/**
+ * Read the agent-only side of a listing off its Agent Full report text.
+ *
+ * The Client Full report is written for buyers and leaves out everything the
+ * listing agent says to other agents — and that is where "tenant occupied, do
+ * not disturb", showing instructions and "offers due Tuesday 5pm" live. Nobody
+ * has captured an Agent Full page yet, so fields are found by their LABEL
+ * rather than by position, and every page read is saved to disk (see main.js)
+ * so this can be checked against the real thing.
+ *
+ * A value runs until a blank line or the next "Label:" — the report puts two
+ * fields to a line separated by tabs, so a tab followed by a label ends it too.
+ */
+const AGENT_LABEL = String.raw`(?:(?:Agent|Confidential|Private|Broker|REALTOR®?|Realtor|Member|Special)[ \t]*(?:Only[ \t]*)?(?:Remarks?|Notes?|Comments?|Instructions?)|Showing[ \t]*(?:Instructions?|Info(?:rmation)?|Remarks?|Notes?|Comments?)|Offer[ \t]*(?:Instructions?|Info(?:rmation)?|Remarks?|Notes?|Details?))`;
+const NEXT_LABEL = String.raw`(?=\n[ \t]*\n|\n[ \t]*[A-Z][A-Za-z0-9 .#/&'()-]{0,40}:|\t[A-Z][A-Za-z0-9 .#/&'()-]{0,40}:|$)`;
+const OFFER_DATE_FIELD = /Offers?[ \t]*(?:Review[ \t]*)?(?:Date|Due(?:[ \t]*Date)?|Deadline)[ \t]*:[ \t]*([^\t\n]{1,60})/i;
+
+function parseAgentDetail(text, wantMls) {
+  const { block, showing, want } = listingBlock(text, wantMls);
+  if (!block) return { mismatch: true, showing: showing, want: want };
+  const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const out = { mismatch: false, agentRemarks: '', showing: '', offerNotes: '', offerDateField: '', labels: [] };
+  const re = new RegExp(String.raw`(?:^|\n|\t)[ \t]*(${AGENT_LABEL})[ \t]*:[ \t]*([\s\S]{0,1500}?)` + NEXT_LABEL, 'gi');
+  for (const m of block.matchAll(re)) {
+    const label = clean(m[1]);
+    const value = clean(m[2]);
+    if (!value) continue;
+    out.labels.push(label);
+    const key = /^showing/i.test(label) ? 'showing' : /^offer/i.test(label) ? 'offerNotes' : 'agentRemarks';
+    // A label can appear twice (a header and a repeat); keep both, once each.
+    if (out[key].indexOf(value) < 0) out[key] = out[key] ? out[key] + ' | ' + value : value;
+  }
+  const f = block.match(OFFER_DATE_FIELD);
+  if (f && clean(f[1])) out.offerDateField = clean(f[1]);
+  return out;
+}
+
+// ---- offer deadlines out of listing remarks ----
+//
+// A straight port of parse_offer_due() in flipscout-board/build_data.py, so the
+// app and the board read a deadline the same way. The two rules that keep it
+// from inventing deadlines are the part to preserve:
+//
+//   * a date counts only when it FOLLOWS a phrase about offers, so a closing
+//     date or an open-house time elsewhere in the remarks is never taken;
+//   * a weekday with no date ("offers due Tuesday") is resolved against the
+//     pull date and returned with a leading "~" — the board shows that as
+//     approximate. It is a reading, not a fact, and is labelled as one.
+//
+// One deliberate difference: every offer phrase is tried in turn, not just the
+// first, because agent remarks often say "offers reviewed as received" early
+// and give the real date later.
+//
+// Anything ambiguous returns '' — an empty box a person fills in beats a
+// confident wrong date somebody plans around.
+const OFFER_CUE = /\b(?:offers?\s+(?:are\s+|will\s+be\s+|to\s+be\s+)?(?:due|reviewed|review|presented|presentation|accepted)|offer\s+deadline|deadline\s+for\s+offers|review(?:ing)?\s+offers|present(?:ing)?\s+offers)\b/gi;
+const NO_DEADLINE = /\b(?:no\s+(?:set\s+|offer\s+)?deadline|offers?\s+as\s+(?:they\s+are\s+)?received|as\s+they\s+come|no\s+preemptive)\b/i;
+const MDY = /\b(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?\b/;
+const MONTH_DAY = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i;
+const WEEKDAY = /\b(mon|tues?|wed(?:nes)?|thur?s?|fri|sat|sun)[a-z]*\b/i;
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+// Monday = 0, as in Python's weekday(), so the table matches build_data.py.
+const WEEKDAYS = { mon: 0, tue: 1, tues: 1, wed: 2, wednes: 2, thu: 3, thur: 3, thurs: 3, fri: 4, sat: 5, sun: 6 };
+const OFFER_WINDOW = 70;   // how far past the phrase a date still belongs to it
+
+const utcDate = (y, m, d) => {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? dt : null;
+};
+const iso = dt => dt.toISOString().slice(0, 10);
+
+function offerAnchor(pulled) {
+  const m = String(pulled || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = m && utcDate(+m[1], +m[2], +m[3]);
+  if (d) return d;
+  const n = new Date();
+  return utcDate(n.getFullYear(), n.getMonth() + 1, n.getDate());
+}
+
+/** The year that puts this month/day nearest the pull date, not before it.
+ *
+ *  Differs from build_data.py in one way: a date more than ~4 months out is
+ *  refused. Without a year, "offers accepted 9/1" on a listing pulled 23 Sep
+ *  rolled forward to 1 Sep NEXT year — an offer window has already passed, it
+ *  is not eleven months away. */
+const MAX_AHEAD_DAYS = 120;
+function pickYear(month, day, anchor) {
+  const y = anchor.getUTCFullYear();
+  for (const year of [y, y + 1, y - 1]) {
+    const cand = utcDate(year, month, day);
+    if (!cand) continue;
+    const days = (cand - anchor) / 86400000;
+    if (days >= -14) return days <= MAX_AHEAD_DAYS ? cand : null;
+  }
+  return null;
+}
+
+/** A date written in `s` (the text just after an offer phrase, or the value of
+ *  an offer-date field), as 'YYYY-MM-DD', '~YYYY-MM-DD' for a bare weekday, or ''. */
+function dateIn(s, anchor) {
+  let m = s.match(MDY);
+  if (m) {
+    const month = +m[1], day = +m[2];
+    if (m[3]) {
+      let year = +m[3];
+      if (year < 100) year += 2000;
+      const d = utcDate(year, month, day);
+      return d ? iso(d) : '';
+    }
+    const d = pickYear(month, day, anchor);
+    return d ? iso(d) : '';
+  }
+  m = s.match(MONTH_DAY);
+  if (m) {
+    const d = pickYear(MONTHS[m[1].toLowerCase().slice(0, 3)], +m[2], anchor);
+    return d ? iso(d) : '';
+  }
+  m = s.match(WEEKDAY);
+  if (m) {
+    const key = m[1].toLowerCase();
+    const want = WEEKDAYS[key] != null ? WEEKDAYS[key] : WEEKDAYS[key.slice(0, 3)];
+    if (want == null) return '';
+    const have = (anchor.getUTCDay() + 6) % 7;          // JS Sunday=0 -> Monday=0
+    const ahead = ((want - have) % 7 + 7) % 7 || 7;
+    return '~' + iso(new Date(anchor.getTime() + ahead * 86400000));
+  }
+  return '';
+}
+
+/** An offer deadline out of free text: { due, phrase } or { due: '' }. */
+function parseOfferDue(text, pulled) {
+  const t = String(text || '');
+  if (!t) return { due: '', phrase: '' };
+  const anchor = offerAnchor(pulled);
+  for (const cue of t.matchAll(OFFER_CUE)) {
+    const end = cue.index + cue[0].length;
+    if (NO_DEADLINE.test(t.slice(Math.max(0, cue.index - 20), end + OFFER_WINDOW))) continue;
+    const due = dateIn(t.slice(end, end + OFFER_WINDOW), anchor);
+    if (due) return { due, phrase: t.slice(cue.index, end + OFFER_WINDOW).replace(/\s+/g, ' ').trim() };
+  }
+  return { due: '', phrase: '' };
+}
+
+/**
+ * The listing's offer deadline, looking where it is most likely to be written
+ * first: a dedicated offer-date field, then the agent's own words, then the
+ * public remarks, then anywhere else on the page (an open-house note, say).
+ * Returns { due, from, phrase } — `from` names where it was read, so the board
+ * can say so and a person can check it.
+ */
+function findOfferDue(src, pulled) {
+  const s = src || {};
+  if (s.offerDateField) {
+    const due = dateIn(s.offerDateField, offerAnchor(pulled));
+    if (due) return { due, from: 'offer date field', phrase: 'Offer date: ' + s.offerDateField };
+  }
+  const places = [
+    ['offer notes', s.offerNotes], ['agent remarks', s.agentRemarks],
+    ['showing instructions', s.showing], ['public remarks', s.remarks],
+    ['listing page', s.pageText],
+  ];
+  for (const [from, text] of places) {
+    if (!text) continue;
+    const r = parseOfferDue(text, pulled);
+    if (r.due) return { due: r.due, from, phrase: r.phrase };
+  }
+  return { due: '', from: '', phrase: '' };
+}
+
 module.exports = {
+  listingBlock, parseAgentDetail, parseOfferDue, findOfferDue,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,

@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('fs', {
   googleSignOut: () => ipcRenderer.invoke('google-signout'),
   googleTest: () => ipcRenderer.invoke('google-test'),
   googleSync: (leads, rejects) => ipcRenderer.invoke('google-sync', { leads, rejects }),
+  // The FlipScout Lead Board hand-off
+  boardStatus: () => ipcRenderer.invoke('board-status'),
+  boardCopy: () => ipcRenderer.invoke('board-copy'),
+  boardOpen: () => ipcRenderer.invoke('board-open'),
+  boardShow: () => ipcRenderer.send('board-show'),
   backupStatus: () => ipcRenderer.invoke('backup-status'),
   showFile: (p) => ipcRenderer.send('show-file', p),
   on: (channel, fn) => ipcRenderer.on(channel, (_e, payload) => fn(payload)),

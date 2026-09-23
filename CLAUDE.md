@@ -405,6 +405,31 @@ reading whatever is displayed; the app skips that listing **without a ledger
 entry**, so the next run retries instead of writing it off. Never read "the
 first address on the page."
 
+**The agent-only side comes off the `Agent Full` report** (same Display
+dropdown), read right after Client Full by `core.parseAgentDetail(text, mls)`.
+It holds what the buyer report never shows: agent remarks, showing
+instructions, tenant notes and — usually — the **offer deadline**. No Agent Full
+page had been captured when the parser was written, so it finds fields by LABEL
+(`Agent Remarks:`, `Confidential Remarks:`, `Showing Instructions:`, an
+`Offer Date:` field…), and the app saves every report page it reads to
+`listing-pages/<date>/<MLS>-client.txt` / `-agent.txt` in its data folder
+(14 days kept). **Check the parser against those files** before trusting it.
+Both reports are scrolled top to bottom before being read.
+
+**Offer deadlines** — `core.findOfferDue()` looks in order: an offer-date field,
+agent/offer notes, showing instructions, public remarks, then anywhere on the
+page. The phrase parser is a port of `parse_offer_due()` in the Lead Board's
+`build_data.py` (a date counts only AFTER an offer phrase; a bare weekday is
+returned as `~YYYY-MM-DD`, shown as approximate). One deliberate difference:
+a year-less date more than 120 days out is refused — "offers accepted 9/1" on a
+23 Sep listing is not a deadline next September. `test-remarks.js` pins all of it.
+
+**Leads go to the FlipScout Lead Board artifact, not the Google Sheet.** Each
+kept lead — with both remarks, the offer deadline and the phrase it was read
+from — is merged into `Documents/FlipScout/FlipScout-scan-<date>.json`, copied
+to the clipboard when a run ends, and added on the board with **Add scan**. An
+artifact's shared data can only be written from the page, hence the paste.
+
 `core.fullAddress()` composes the sheet value, stripping a trailing zip/state
 off the street line before recomposing — appending blindly gave
 "…San Francisco 94112, CA". Fixtures of real report text live in

@@ -53,11 +53,28 @@ install (creates a desktop shortcut) or run the portable exe directly.
      decides Keep/Drop on its own — no clicking. Model defaults to
      `claude-opus-5`; switch to `claude-sonnet-5` or `claude-haiku-4-5` for lower
      cost. Your key and the listing photos are sent to Anthropic for this.
-4. **Report** — kept candidates get size-matched sold comps → ARV (what it's worth
+   Every listing is **scrolled top to bottom and read twice**: the buyer report
+   (Client Full) for the public remarks, then the **Agent Full** report for the
+   agent-only remarks and showing instructions. Both feed the rules and the AI,
+   and the "Now reviewing" panel shows exactly what was read. Section 3's
+   *Scroll pause per screen* sets how slowly it reads (0.7 s by default).
+   Each page read is saved to `listing-pages/<date>/` in the app's data folder
+   for 14 days, so what the app made of a listing can be checked.
+4. **Offer deadlines** — read out of the agent remarks, an offer-date field,
+   showing instructions or the public remarks, and only when the date follows
+   an offer phrase ("Offers due Tue 9/30 5pm"). A bare weekday ("offers due
+   Friday") is marked approximate. The deadline and the words it came from go
+   to the Lead Board with the lead.
+5. **The FlipScout Lead Board** — section 7. Kept leads are merged into
+   `Documents/FlipScout/FlipScout-scan-<date>.json`, and when a run ends they're
+   already on the clipboard: open the board, click **Add scan**, paste (or drop
+   the file in). The board skips any MLS # it already has, so pasting twice is
+   harmless. **Copy for the board** copies today's file again at any time.
+6. **Report** — kept candidates get size-matched sold comps → ARV (what it's worth
    after repair), Light/Heavy rehab, holding, days on market, and the dollar profit
    gate (Strong Deal / Marginal / Pass, with a Flip Quality label). **Export** to
    CSV or JSON.
-5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
+7. **Google Sheet (old, optional)** — section 8, folded away. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,
    nothing to refresh. Three tabs are created if they don't exist:

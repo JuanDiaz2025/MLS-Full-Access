@@ -9,6 +9,7 @@ on:
     branches:
       - claude/navigation-link-training-l0d5a3
       - claude/memory-context-4u5cx1
+      - claude/inspiring-ride-6er6pe
     paths:
       - 'desktop-app/**'
       - '.github/workflows/build-desktop.yml'
@@ -29,6 +30,12 @@ jobs:
       - name: Install dependencies
         working-directory: desktop-app
         run: npm install
+
+      # The listing-reading and sheet tests are plain node. A reader that no
+      # longer finds the remarks or an offer deadline must not ship as an .exe.
+      - name: Run tests
+        working-directory: desktop-app
+        run: npm test
 
       - name: Build Windows .exe (installer + portable)
         working-directory: desktop-app
