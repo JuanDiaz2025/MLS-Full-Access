@@ -249,6 +249,29 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   display:block; font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
   letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
 }
+.team-note{
+  display:block; margin-top:6px; max-width:52ch; font-size:12.5px; line-height:1.4;
+  border-left:3px solid var(--brand-2); padding:2px 0 2px 8px; color:var(--ink);
+}
+.team-note b{font-weight:600; color:var(--teal-ink)}
+.team-note .when{color:var(--muted); font-size:11px}
+.notes{margin-top:5px; max-width:52ch; font-size:12.5px}
+.notes summary{
+  cursor:pointer; color:var(--teal-ink); font-family:Archivo,sans-serif; font-size:11px;
+  font-weight:600; letter-spacing:.04em; list-style-position:inside;
+}
+.notes ol{list-style:none; margin:6px 0 0; padding:0; display:flex; flex-direction:column; gap:6px}
+.notes li{background:var(--surface-2); border:1px solid var(--line-soft); border-radius:7px; padding:6px 8px}
+.notes li p{margin:0; white-space:pre-wrap; overflow-wrap:anywhere}
+.notes .meta{display:flex; justify-content:space-between; gap:8px; margin-top:3px; font-size:11px; color:var(--muted)}
+.notes .meta button{border:0; background:none; padding:0; font:inherit; color:var(--muted); cursor:pointer; text-decoration:underline}
+.notes .meta button.sure{color:var(--t-pass); font-weight:600}
+.note-in{
+  display:block; width:100%; margin-top:6px; font-family:inherit; font-size:13px; color:var(--ink);
+  background:var(--surface); border:1px solid var(--line); border-radius:7px; padding:7px 9px; resize:vertical;
+}
+.note-row{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:6px}
+.note-row .hint{font-size:11px; color:var(--muted)}
 .note{
   display:block; margin-top:4px; font-size:12.5px;
   background:var(--amber-bg); color:var(--amber-ink); border-radius:5px;
@@ -417,7 +440,7 @@ footer .num{font-size:12px}
       </div>
       <div class="field grow">
         <label for="q">Search this view</label>
-        <input type="search" id="q" placeholder="Address, MLS #, city, note…">
+        <input type="search" id="q" placeholder="Address, MLS #, city, notes, remarks…">
       </div>
       <div class="field">
         <label for="statusFilter">Status</label>
@@ -512,7 +535,13 @@ footer .num{font-size:12px}
   "use strict";
   var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
   var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue"];
-  var LINK = "https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=";
+  // Addresses link to Redfin. The MLS link only works for someone signed in to
+  // MLSListings, and Redfin's own page addresses need an id the MLS doesn't
+  // give us, so the link searches redfin.com for the exact address — the
+  // listing's Redfin page is the first result.
+  function redfinLink(addr){
+    return "https://www.google.com/search?q=" + encodeURIComponent('"' + addr + '" site:redfin.com');
+  }
 
   // Two sources of leads. data.js is the old sheet export — frozen history now
   // that the scan no longer writes a sheet. Everything since arrives through
@@ -520,10 +549,15 @@ footer .num{font-size:12px}
   // under scans/, one document per batch of leads.
   var SHEET_LEADS = D.rows.map(function(r){
     var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i];
-    o.link = LINK + o.mls;
+    o.link = redfinLink(o.addr || o.mls);
     return o;
   });
   var scans = {};     // scan document id -> body, as the shared board has it
+  // Team notes, keyed by MLS # so they follow the property, not the pull date:
+  // notes/<MLS> holds {entries: {id: {t, by, at, del}}}. Adding a note merges one
+  // entry, so two people writing at once never overwrite each other.
+  var notes = {};     // MLS # -> entries, as the shared board has them
+  var openNotes = {}, drafts = {}, pendingNotes = {};
   var LEADS = [], BY_DATE = {}, BY_MLS = {}, DATES = [], LAST_PULL = "";
 
   function str(v, n){ return typeof v === "string" ? v.slice(0, n) : ""; }
@@ -544,7 +578,7 @@ footer .num{font-size:12px}
       remarks: str(x.remarks, 2000), agentRemarks: str(x.agentRemarks, 1500),
       showing: str(x.showing, 600), offerFrom: str(x.offerFrom, 40),
       offerPhrase: str(x.offerPhrase, 200), why: str(x.why, 240),
-      fromScan: true, link: LINK + mls
+      fromScan: true, link: redfinLink(str(x.addr, 160) || mls)
     };
   }
 
@@ -696,7 +730,8 @@ footer .num{font-size:12px}
       if (st && statusOf(l) !== st) return false;
       if (!q) return true;
       return (l.addr + " " + l.mls + " " + (l.note || "") + " " + (l.remarks || "") + " " +
-              (l.agentRemarks || "") + " " + (l.showing || "")).toLowerCase().indexOf(q) !== -1;
+              (l.agentRemarks || "") + " " + (l.showing || "") + " " +
+              noteList(l.mls).map(function(n){ return n.t + " " + n.by; }).join(" ")).toLowerCase().indexOf(q) !== -1;
     });
   }
 
@@ -775,9 +810,9 @@ footer .num{font-size:12px}
     return '<tr class="' + STRIPE[st] + (gone ? " gone" : st === "Pass" ? " passed" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
       '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + '</td>' +
-      '<td data-l="Property" class="wide"><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' + esc(l.addr) + '</a>' +
+      '<td data-l="Property" class="wide"><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener" title="Find on Redfin">' + esc(l.addr) + '</a>' +
         '<span class="mls">' + esc(l.mls) + '</span>' +
-        (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + saidHTML(l) + '</td>' +
+        (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + saidHTML(l) + '</td>' +
       '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
       '<td data-l="$/SqFt" class="num">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
       '<td data-l="SqFt" class="num">' + fmtNum(l.sqft) + '</td>' +
@@ -799,6 +834,72 @@ footer .num{font-size:12px}
     '</tr>';
   }
 
+  function noteList(mls){
+    var all = {}, k;
+    var e = notes[mls] || {}, p = pendingNotes[mls] || {};
+    for (k in e) all[k] = e[k];
+    for (k in p) all[k] = p[k];
+    return Object.keys(all).map(function(id){
+      var n = all[id];
+      if (!n || typeof n !== "object" || n.del || typeof n.t !== "string" || !n.t.trim()) return null;
+      return {id: id, t: n.t.slice(0, 2000), by: str(n.by, 40) || "Someone", at: str(n.at, 40)};
+    }).filter(Boolean).sort(function(a, b){ return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
+  }
+  function noteWhen(at){
+    var d = new Date(at);
+    if (isNaN(d)) return "";
+    return d.toLocaleDateString("en-US", {month: "short", day: "numeric"}) + " " +
+           d.toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit"});
+  }
+
+  // Notes under the address: the latest one always showing, the full list and
+  // the box to add one folded underneath.
+  function notesHTML(l){
+    var list = noteList(l.mls), last = list[list.length - 1];
+    var m = esc(l.mls);
+    return (last ? '<span class="team-note"><b>' + esc(last.by) + '</b> <span class="when">' + esc(noteWhen(last.at)) +
+        '</span><br>' + esc(last.t.length > 160 ? last.t.slice(0, 160) + "…" : last.t) + '</span>' : '') +
+      '<details class="notes" data-notes="' + m + '"' + (openNotes[l.mls] ? ' open' : '') + '>' +
+      '<summary>' + (list.length ? 'Notes · ' + list.length : '＋ Add a note') + '</summary>' +
+      (list.length ? '<ol>' + list.map(function(n){
+        return '<li><p>' + esc(n.t) + '</p><div class="meta"><span>' + esc(n.by) + ' · ' + esc(noteWhen(n.at)) +
+          '</span><button type="button" data-note-del="' + esc(n.id) + '" data-mls="' + m + '">Delete</button></div></li>';
+      }).join("") + '</ol>' : '') +
+      '<textarea class="note-in" rows="2" data-mls="' + m + '" aria-label="New note for ' + m +
+        '" placeholder="Seller motivated? Talked to agent? Write it here…">' + esc(drafts[l.mls] || "") + '</textarea>' +
+      '<div class="note-row"><span class="hint">Saved with your name for the whole team</span>' +
+      '<button type="button" class="btn tiny" data-note-save="' + m + '">Save note</button></div>' +
+      '</details>';
+  }
+
+  function saveNote(mls){
+    var t = (drafts[mls] || "").trim();
+    if (!t) return;
+    if (!myName){
+      toast("Type your name in the box at the top first, so the team knows who wrote it");
+      $("nameIn").focus();
+      return;
+    }
+    var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    var entry = {t: t.slice(0, 2000), by: myName, at: new Date().toISOString()};
+    pendingNotes[mls] = pendingNotes[mls] || {};
+    pendingNotes[mls][id] = entry;
+    drafts[mls] = "";
+    draw();
+    writeNote(mls, id, entry, "Note saved for the team");
+  }
+
+  function writeNote(mls, id, entry, done){
+    if (!db){ note("The shared board isn't connected, so this note is on this screen only. Reload the page.", true); return; }
+    var body = {entries: {}}; body.entries[id] = entry;
+    var ref = db.doc("notes/" + mls);
+    // update() merges into the existing entries; set() only when this
+    // property has no notes document yet.
+    ref.update(body).catch(function(){ return ref.set(body); })
+      .then(function(){ toast(done); })
+      .catch(function(){ note("Couldn't save that note to the shared board. It is showing on this screen only — reload the page.", true); });
+  }
+
   // What the listing said, folded under the address. Only scan leads carry it:
   // the old sheet rows never had the remarks.
   function saidHTML(l){
@@ -817,6 +918,20 @@ footer .num{font-size:12px}
   }
 
   function render(){
+    // A teammate's change re-draws the table; keep whoever is typing a note
+    // right where they were.
+    var act = document.activeElement, keep = null;
+    if (act && act.classList && act.classList.contains("note-in")) {
+      keep = {mls: act.dataset.mls, a: act.selectionStart, b: act.selectionEnd};
+    }
+    renderRows();
+    if (keep) {
+      var ta = document.querySelector('textarea.note-in[data-mls="' + keep.mls + '"]');
+      if (ta) { ta.focus(); try { ta.setSelectionRange(keep.a, keep.b); } catch (e) {} }
+    }
+  }
+
+  function renderRows(){
     var rows = currentRows();
     renderStats(rows);
 
@@ -955,6 +1070,19 @@ footer .num{font-size:12px}
     draw(); syncStep();
   });
   $("q").addEventListener("input", draw);
+  document.addEventListener("input", function(ev){
+    if (ev.target.classList && ev.target.classList.contains("note-in")) drafts[ev.target.dataset.mls] = ev.target.value;
+  });
+  document.addEventListener("keydown", function(ev){
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && ev.target.classList && ev.target.classList.contains("note-in")) {
+      ev.preventDefault(); saveNote(ev.target.dataset.mls);
+    }
+  });
+  // <details> toggles don't bubble; listen in the capture phase.
+  document.addEventListener("toggle", function(ev){
+    var d = ev.target;
+    if (d && d.dataset && d.dataset.notes) { if (d.open) openNotes[d.dataset.notes] = true; else delete openNotes[d.dataset.notes]; }
+  }, true);
   $("statusFilter").addEventListener("change", draw);
   $("toggleRemoved").addEventListener("click", function(){ showRemoved = !showRemoved; draw(); });
   $("togglePassed").addEventListener("click", function(){ showPassed = !showPassed; draw(); });
@@ -977,6 +1105,20 @@ footer .num{font-size:12px}
       var k = th.dataset.s;
       if (k === sortKey) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
       draw(); return;
+    }
+    var ns = ev.target.closest("button[data-note-save]");
+    if (ns){ saveNote(ns.dataset.noteSave); return; }
+    var nd = ev.target.closest("button[data-note-del]");
+    if (nd){
+      // Two clicks: the first arms it, the second deletes.
+      if (!nd.classList.contains("sure")) { nd.classList.add("sure"); nd.textContent = "Click again to delete"; return; }
+      // Marked, not erased: the note keeps who wrote it and when.
+      var entry = {del: true, delBy: myName || "Someone", delAt: new Date().toISOString()};
+      pendingNotes[nd.dataset.mls] = pendingNotes[nd.dataset.mls] || {};
+      pendingNotes[nd.dataset.mls][nd.dataset.noteDel] = entry;
+      draw();
+      writeNote(nd.dataset.mls, nd.dataset.noteDel, entry, "Note deleted");
+      return;
     }
     var b = ev.target.closest("button[data-act]"); if (!b) return;
     var tr = b.closest("tr"); if (!tr) return;
@@ -1309,12 +1451,35 @@ footer .num{font-size:12px}
     readFile(ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]);
   });
 
+  // Your name signs statuses and notes. It works whether or not the "who's
+  // here" presence connects.
+  $("nameIn").value = myName;
+  $("nameIn").addEventListener("change", function(){
+    myName = $("nameIn").value.trim().slice(0, 24);
+    try { localStorage.setItem("flipscout.name", myName); } catch(e){}
+  });
+
   /* ---------- shared board (db) ---------- */
   if (window.claude && claude.use){
     claude.use("db").then(function(x){
       if (!x){ note("This view is running <b>offline</b> — your changes stay in this browser only.", true); return; }
       db = x;
       flush();
+      db.collection("notes").onSnapshot(function(snap){
+        var next = {};
+        snap.docs.forEach(function(d){ var b = d.data() || {}; next[d.id] = b.entries && typeof b.entries === "object" ? b.entries : {}; });
+        notes = next;
+        // Drop local notes the shared board now has.
+        Object.keys(pendingNotes).forEach(function(m){
+          Object.keys(pendingNotes[m]).forEach(function(id){
+            var got = notes[m] && notes[m][id];
+            if (got && !!got.del === !!pendingNotes[m][id].del) delete pendingNotes[m][id];
+          });
+        });
+        draw();
+      }, function(){
+        note("Lost the connection to the shared board — notes from others may not show. Reload the page.", true);
+      });
       db.collection("scans").onSnapshot(function(snap){
         var next = {};
         snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
@@ -1329,7 +1494,7 @@ footer .num{font-size:12px}
         snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
         server = next;
         reconcile();
-        note("Shared board <b>connected</b>. Status changes, removals and scans added with <b>Add scan</b> save here for the whole team.");
+        note("Shared board <b>connected</b>. Status changes, notes, removals and scans added with <b>Add scan</b> save here for the whole team.");
         draw();
         flush();
       }, function(){
@@ -1348,13 +1513,7 @@ footer .num{font-size:12px}
                    esc(st.name || "Teammate") + (p.isMe ? " (you)" : "") + '</span>';
           }).join("");
       }
-      var inp = $("nameIn");
-      inp.value = myName;
-      inp.addEventListener("change", function(){
-        myName = inp.value.trim().slice(0,24);
-        try { localStorage.setItem("flipscout.name", myName); } catch(e){}
-        room.presence({name: myName || "Teammate"});
-      });
+      $("nameIn").addEventListener("change", function(){ room.presence({name: myName || "Teammate"}); });
       room.presence({name: myName || "Teammate"});
       room.onPeers(function(ev){ paint(ev && ev.peers ? ev.peers : []); });
     }).catch(function(){});
