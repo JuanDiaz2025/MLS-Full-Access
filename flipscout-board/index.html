@@ -1,0 +1,1365 @@
+<title>FlipScout Lead Board</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme: light;               /* keep form controls light on dark OS */
+  --ground:#EDF2F8; --surface:#FFFFFF; --surface-2:#F5F9FD;
+  --ink:#14202E; --muted:#57687C; --line:#D3DEEB; --line-soft:#E6EDF6;
+
+  --brand:#0D5A87; --brand-2:#0E8585;
+  --accent:#0B6FB0; --accent-soft:#DAEBFA;
+
+  /* Status colours. --m-* are the chart marks: checked for colour-blind
+     separation, so no two adjacent pipeline segments collapse together.
+     --t-* are the darker inks their labels wear (a mark colour is rarely
+     legible as text), --b-* the soft pill grounds. Needs Comps is
+     deliberately neutral: no one has assigned it a state yet. */
+  --m-none:#5C6B7E;    --t-none:#4A5767;    --b-none:#E4E9F0;
+  --m-review:#0F6FB5;  --t-review:#0B5A94;  --b-review:#D9EAFA;
+  --m-offer:#9A5F00;   --t-offer:#7D4D00;   --b-offer:#FBEBC8;
+  --m-won:#26A574;     --t-won:#146B4C;     --b-won:#D5F2E6;
+  --m-pass:#9E1E3E;    --t-pass:#8B1A36;    --b-pass:#FBDCE3;
+  --m-removed:#36414F; --t-removed:#36414F; --b-removed:#DFE4EB;
+
+  --violet-ink:var(--t-none);   --violet-bg:var(--b-none);
+  --blue-ink:var(--t-review);   --blue-bg:var(--b-review);
+  --amber-ink:var(--t-offer);   --amber-bg:var(--b-offer);
+  --green-ink:var(--t-won);     --green-bg:var(--b-won);
+  --red-ink:var(--t-pass);      --red-bg:var(--b-pass);
+  --teal-ink:#0A6E6E;           --teal-bg:#D2EFEF;
+  --slate-ink:var(--t-none);    --slate-bg:var(--b-none);
+  --shadow:0 1px 2px rgba(18,40,70,.07), 0 10px 28px -18px rgba(18,40,70,.38);
+}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:"Public Sans","Helvetica Neue",Arial,sans-serif;
+  font-size:14px; line-height:1.45; margin:0;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1400px; margin:0 auto; padding:0 20px; padding-block:0 56px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+@media (prefers-reduced-motion: reduce){*{animation:none!important; transition:none!important}}
+
+/* ---------- masthead ---------- */
+header.top{
+  background:linear-gradient(100deg,var(--brand) 0%,#0A6E93 52%,var(--brand-2) 100%);
+  position:sticky; top:0; z-index:30;
+  box-shadow:0 2px 14px rgba(10,60,92,.25);
+}
+header.top h1{color:#FFFFFF}
+header.top .src{color:#B9D9EC}
+header.top .src b{color:#FFFFFF}
+header.top .field label{color:#B9D9EC}
+header.top .btn{background:rgba(255,255,255,.94); border-color:rgba(255,255,255,.5); color:var(--brand)}
+header.top .btn:hover{background:#FFFFFF; border-color:#FFFFFF; color:var(--brand)}
+header.top .btn[disabled]{background:rgba(255,255,255,.35); color:#DCEAF4; border-color:transparent}
+.top .wrap{padding-block:14px}
+.brandrow{display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px}
+h1{
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif; font-weight:700;
+  font-size:19px; letter-spacing:-.015em; margin:0; text-wrap:balance;
+}
+.src{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px;
+  color:var(--muted); letter-spacing:.02em;
+}
+.src b{color:var(--ink); font-weight:500}
+
+/* controls */
+.controls{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:14px}
+.field{display:flex; flex-direction:column; gap:5px}
+.field label{
+  font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted);
+}
+select,input[type=text],input[type=search],input[type=date]{
+  font-family:inherit; font-size:14px; color:var(--ink);
+  background:var(--surface-2); border:1px solid var(--line);
+  border-radius:7px; padding:8px 10px; min-height:38px;
+}
+#dateSel{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-weight:600;
+  min-width:230px; background:#FFFFFF; color:var(--brand);
+  border:2px solid #FFFFFF; box-shadow:0 2px 8px rgba(6,40,62,.22);
+}
+#q,#statusFilter{background:#FFFFFF; border-color:rgba(255,255,255,.55)}
+#q{min-width:230px}
+.field.grow{flex:1 1 230px}
+.field.grow #q{width:100%}
+.stepper{display:flex; gap:6px}
+.btn{
+  font-family:inherit; font-size:13px; font-weight:500; color:var(--ink);
+  background:var(--surface-2); border:1px solid var(--line);
+  border-radius:7px; padding:8px 12px; min-height:38px; cursor:pointer;
+}
+.btn:hover{border-color:var(--accent); color:var(--accent)}
+.btn[disabled]{opacity:.4; cursor:default; border-color:var(--line); color:var(--muted)}
+.btn.tiny{min-height:0; padding:4px 9px; font-size:12px; border-radius:6px}
+
+/* presence */
+.presence{display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-left:auto}
+.who{
+  display:inline-flex; align-items:center; gap:6px; font-size:12px;
+  background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.32);
+  border-radius:999px; padding:4px 10px 4px 6px; color:#DCEBF6;
+}
+.who .dot{width:7px; height:7px; border-radius:50%; background:#7FE3C4; flex:none}
+.who.me{border-color:#FFFFFF; color:#FFFFFF}
+.who.me .dot{background:#FFD36B}
+#nameIn{
+  min-height:0; padding:4px 10px; font-size:12px; width:120px; border-radius:999px;
+  background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.32); color:#FFFFFF;
+}
+#nameIn::placeholder{color:#BBD9EC}
+
+/* view switcher */
+.viewnav{
+  display:flex; gap:3px; padding:3px; border-radius:999px;
+  background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.3);
+}
+.viewnav button{
+  font-family:Archivo,sans-serif; font-size:12px; font-weight:600; letter-spacing:.05em;
+  color:#DCEBF6; background:transparent; border:0; border-radius:999px;
+  padding:6px 16px; cursor:pointer;
+}
+.viewnav button[aria-current="true"]{background:#FFFFFF; color:var(--brand)}
+
+/* ---------- KPI screen ---------- */
+.kpi-head{
+  display:flex; align-items:baseline; gap:10px; margin:22px 0 0;
+  font-family:Archivo,sans-serif; font-size:12px; font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+}
+.kpi-head .rule{flex:1; height:2px; border-radius:2px;
+  background:linear-gradient(90deg,var(--accent),var(--brand-2) 60%,transparent)}
+.kpi-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:12px; margin-top:14px}
+.kpi{background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  padding:14px 16px; box-shadow:var(--shadow)}
+.kpi dt{
+  font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0;
+}
+.kpi dd{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums;
+  font-size:34px; font-weight:500; letter-spacing:-.03em; margin:2px 0 0; line-height:1.1;
+}
+.kpi .sub{font-size:12px; color:var(--muted); margin-top:3px}
+.meter{height:7px; border-radius:999px; background:var(--line); overflow:hidden; margin-top:9px}
+.meter span{display:block; height:100%; border-radius:999px; background:var(--brand-2)}
+
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  box-shadow:var(--shadow); padding:16px; margin-top:14px}
+.pipe{display:flex; gap:2px; height:40px; margin:2px 0 0}
+.pipe .seg{min-width:3px; border-radius:2px; cursor:default}
+.pipe .seg:first-child{border-radius:6px 2px 2px 6px}
+.pipe .seg:last-child{border-radius:2px 6px 6px 2px}
+.legend{display:flex; flex-wrap:wrap; gap:8px 22px; margin-top:14px}
+.legend .item{display:flex; align-items:baseline; gap:8px; font-size:13px}
+.legend .sw{width:11px; height:11px; border-radius:3px; flex:none; transform:translateY(1px)}
+.legend .n{font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-variant-numeric:tabular-nums; font-weight:600}
+.legend .pct{color:var(--muted); font-size:12px}
+#kpiTip{
+  position:fixed; z-index:70; pointer-events:none; background:var(--ink); color:#FFFFFF;
+  font-size:12px; padding:6px 10px; border-radius:7px; box-shadow:0 6px 20px rgba(10,30,50,.35);
+  white-space:nowrap;
+}
+#kpiTip b{font-family:"IBM Plex Mono",ui-monospace,monospace; font-weight:600}
+.kpi-table{margin-top:14px; overflow-x:auto}
+.kpi-table table{min-width:640px}
+.kpi-table td, .kpi-table th{padding:8px 12px}
+.kpi-table tbody tr td:first-child{box-shadow:none}
+.kpi-table td.n{font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap}
+.kpi-table th.n{text-align:right}
+.kpi-table td.zero{color:var(--muted)}
+.kpi-table td:first-child, .kpi-table th:first-child{white-space:nowrap}
+.kpi-note{font-size:12px; color:var(--muted); margin-top:10px}
+
+/* ---------- stat strip ---------- */
+.stats{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr));
+  gap:1px; background:var(--line); border:1px solid var(--line);
+  border-radius:10px; overflow:hidden; margin:20px 0 0;
+}
+.stat{background:var(--surface); padding:12px 14px; border-top:3px solid var(--line)}
+.stat.c-blue  {border-top-color:var(--blue-ink)}   .stat.c-blue dd  {color:var(--blue-ink)}
+.stat.c-green {border-top-color:var(--green-ink)}  .stat.c-green dd {color:var(--green-ink)}
+.stat.c-amber {border-top-color:var(--amber-ink)}  .stat.c-amber dd {color:var(--amber-ink)}
+.stat.c-red   {border-top-color:var(--red-ink)}    .stat.c-red dd   {color:var(--red-ink)}
+.stat.c-teal  {border-top-color:var(--teal-ink)}   .stat.c-teal dd  {color:var(--teal-ink)}
+.stat.c-violet{border-top-color:var(--violet-ink)} .stat.c-violet dd{color:var(--violet-ink)}
+.stat dt{
+  font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0;
+}
+.stat dd{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums;
+  font-size:22px; font-weight:500; margin:3px 0 0; letter-spacing:-.02em;
+}
+.stat dd small{font-size:12px; color:var(--muted); font-weight:400; margin-left:3px}
+
+/* ---------- table ---------- */
+.tablecard{
+  background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  box-shadow:var(--shadow); margin-top:16px; overflow-x:auto;
+}
+table{border-collapse:collapse; width:100%; min-width:1080px}
+thead th{
+  position:sticky; top:0; z-index:5; background:var(--accent-soft); color:var(--brand);
+  font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase;
+  text-align:left; padding:10px 12px; border-bottom:2px solid var(--accent);
+  white-space:nowrap; cursor:pointer; user-select:none;
+}
+thead th.plain{cursor:default}
+thead th .arrow{opacity:0; margin-left:4px}
+thead th[aria-sort] .arrow{opacity:1; color:var(--accent)}
+tbody td{padding:10px 12px; border-bottom:1px solid var(--line-soft); vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--accent-soft)}
+tbody tr td:first-child{box-shadow:inset 4px 0 0 var(--line)}
+tbody tr.s-needs  td:first-child{box-shadow:inset 4px 0 0 var(--m-none)}
+tbody tr.s-review td:first-child{box-shadow:inset 4px 0 0 var(--m-review)}
+tbody tr.s-offer  td:first-child{box-shadow:inset 4px 0 0 var(--m-offer)}
+tbody tr.s-won    td:first-child{box-shadow:inset 4px 0 0 var(--m-won)}
+tbody tr.s-pass   td:first-child{box-shadow:inset 4px 0 0 var(--m-pass)}
+tbody tr.passed td{opacity:.72}
+tbody tr.gone td{opacity:.45}
+tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
+
+.num{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+.addr{font-weight:500; display:block; max-width:34ch; text-decoration:none; color:var(--brand)}
+.addr:hover{text-decoration:underline}
+.mls{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px;
+  color:var(--muted); letter-spacing:.01em;
+}
+.said{margin-top:5px; max-width:52ch; font-size:12.5px}
+.said summary{
+  cursor:pointer; color:var(--accent); font-family:Archivo,sans-serif; font-size:11px;
+  font-weight:600; letter-spacing:.04em; list-style-position:inside;
+}
+.said p{margin:6px 0 0; line-height:1.45; color:var(--ink); white-space:normal}
+.said p b{
+  display:block; font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
+}
+.note{
+  display:block; margin-top:4px; font-size:12.5px;
+  background:var(--amber-bg); color:var(--amber-ink); border-radius:5px;
+  padding:3px 7px; max-width:38ch;
+}
+.due-in{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
+  padding:5px 7px; min-height:0; border-radius:6px; width:142px;
+}
+.due-chip{
+  display:inline-block; margin-top:4px; font-family:Archivo,sans-serif;
+  font-size:11px; font-weight:700; letter-spacing:.03em;
+  border-radius:999px; padding:2px 8px; white-space:nowrap;
+}
+.due-src{display:block; margin-top:3px; font-size:10.5px; color:var(--muted); letter-spacing:.02em}
+.due-src.approx{color:var(--t-offer); font-weight:600}
+.due-over {background:var(--b-pass);   color:var(--t-pass)}
+.due-now  {background:var(--b-offer);  color:var(--t-offer)}
+.due-soon {background:var(--b-review); color:var(--t-review)}
+.due-later{background:var(--b-none);   color:var(--t-none)}
+.pill{
+  display:inline-block; font-family:Archivo,sans-serif; font-size:11px; font-weight:600;
+  letter-spacing:.03em; border-radius:999px; padding:3px 9px; white-space:nowrap;
+}
+.st-sel{
+  font-family:Archivo,sans-serif; font-size:11.5px; font-weight:600; letter-spacing:.02em;
+  border-radius:999px; padding:5px 8px; min-height:0; border:1px solid transparent;
+  appearance:none; cursor:pointer; min-width:108px;
+}
+.st-needs{background:var(--slate-bg); color:var(--slate-ink)}
+.st-review{background:var(--blue-bg); color:var(--blue-ink)}
+.st-offer{background:var(--amber-bg); color:var(--amber-ink)}
+.st-won{background:var(--green-bg); color:var(--green-ink)}
+.st-pass{background:var(--red-bg); color:var(--red-ink)}
+.dom{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; border-radius:5px; padding:2px 7px; font-size:12.5px}
+.dom-ok{background:var(--green-bg); color:var(--green-ink)}
+.dom-none{background:transparent; color:var(--muted)}
+.dom-warn{background:var(--amber-bg); color:var(--amber-ink)}
+.dom-over{background:var(--red-bg); color:var(--red-ink)}
+td.act{white-space:nowrap; text-align:right}
+.by{display:block; font-size:11px; color:var(--muted); margin-top:4px; font-style:italic}
+.empty{padding:44px 20px; text-align:center; color:var(--muted)}
+.empty b{display:block; font-family:Archivo,sans-serif; color:var(--ink); font-size:15px; margin-bottom:4px}
+
+/* section heads */
+.sechead{
+  display:flex; align-items:baseline; gap:10px; margin:26px 0 0;
+  font-family:Archivo,sans-serif; font-size:12px; font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+}
+.sechead .rule{flex:1; height:2px; border-radius:2px;
+  background:linear-gradient(90deg,var(--accent),var(--brand-2) 60%,transparent)}
+.sechead .cnt{font-family:"IBM Plex Mono",monospace; letter-spacing:0}
+
+.banner{
+  margin-top:16px; border:1px solid var(--line); border-left:4px solid var(--brand-2);
+  background:var(--surface); border-radius:8px; padding:10px 14px;
+  font-size:12.5px; color:var(--muted);
+}
+.banner b{color:var(--ink); font-weight:600}
+footer{margin-top:28px; font-size:12px; color:var(--muted)}
+footer .num{font-size:12px}
+
+/* ---------- add scan ---------- */
+#scanDlg{
+  border:1px solid var(--line); border-radius:12px; padding:0; width:min(640px, calc(100% - 32px));
+  background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55);
+}
+#scanDlg::backdrop{background:rgba(14,32,46,.45)}
+.dlg{padding:20px}
+.dlg h2{font-family:Archivo,sans-serif; font-size:17px; margin:0; letter-spacing:-.01em}
+.dlg-sub{font-size:13px; color:var(--muted); margin:6px 0 12px}
+.dlg-sub b{color:var(--ink); font-weight:600}
+#scanText{
+  width:100%; font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
+  background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:10px;
+  color:var(--ink); resize:vertical;
+}
+#scanText.over{border-color:var(--accent); background:var(--accent-soft)}
+.dlg-row{display:flex; align-items:center; gap:10px; margin-top:8px}
+.dlg-hint{font-size:12px; color:var(--muted)}
+.dlg-preview{margin-top:12px; font-size:13px}
+.dlg-preview .err{color:var(--t-pass); font-weight:600}
+.dlg-preview .sum b{font-family:"IBM Plex Mono",ui-monospace,monospace; font-weight:600}
+.dlg-preview ul{margin:8px 0 0; padding:0; list-style:none; max-height:210px; overflow:auto;
+  border:1px solid var(--line-soft); border-radius:8px}
+.dlg-preview li{padding:7px 10px; border-bottom:1px solid var(--line-soft); display:flex; gap:10px;
+  justify-content:space-between; align-items:baseline}
+.dlg-preview li:last-child{border-bottom:0}
+.dlg-preview li .p{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; color:var(--muted); white-space:nowrap}
+.dlg-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:16px}
+.btn.go{background:var(--brand); border-color:var(--brand); color:#FFFFFF}
+.btn.go:hover{background:var(--accent); border-color:var(--accent); color:#FFFFFF}
+.btn.go[disabled]{background:var(--surface-2); color:var(--muted); border-color:var(--line)}
+
+#toast{
+  position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:60;
+  background:var(--brand); color:#FFFFFF; box-shadow:0 6px 22px rgba(10,50,80,.4);
+  font-family:Archivo,sans-serif; font-size:13px; font-weight:600;
+  padding:9px 16px; border-radius:999px; text-align:center;
+  max-width:calc(100% - 32px);
+}
+
+/* ---------- phone ---------- */
+@media (max-width:760px){
+  header.top{position:static}
+  .wrap{padding:0 16px; padding-block:0 40px}
+  .presence{margin-left:0; width:100%}
+  #dateSel,#q,.field.grow{min-width:0; width:100%}
+  .field{flex:1 1 100%}
+  .stepper{flex:1 1 auto}
+  .stepper .btn{flex:1}
+  #viewLeads .tablecard{overflow-x:visible; background:transparent; border:0; box-shadow:none}
+  #viewLeads table, #viewLeads tbody, #viewLeads tr, #viewLeads td{display:block; width:auto; min-width:0}
+  #viewLeads thead{display:none}
+  #viewLeads tbody tr{
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    margin-bottom:10px; padding:4px 2px; box-shadow:var(--shadow);
+  }
+  #viewLeads tbody tr:hover td{background:transparent}
+  #viewLeads tbody td{
+    border-bottom:1px solid var(--line-soft); padding:7px 12px;
+    display:flex; gap:12px; align-items:baseline; justify-content:space-between;
+  }
+  #viewLeads tbody td:last-child{border-bottom:0}
+  #viewLeads tbody td::before{
+    content:attr(data-l); font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--muted); flex:none;
+  }
+  #viewLeads tbody td.wide{display:block}
+  #viewLeads tbody td.wide::before{display:block; margin-bottom:3px}
+  /* KPI tables keep their columns and scroll sideways in their own card */
+  .kpi-table{-webkit-overflow-scrolling:touch}
+  .kpi-table table{min-width:560px}
+  .kpi-row{grid-template-columns:repeat(auto-fit,minmax(132px,1fr)); gap:10px}
+  .kpi dd{font-size:28px}
+  .addr,.note{max-width:none}
+  td.act{text-align:left}
+}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brandrow">
+      <h1>FlipScout Lead Board</h1>
+      <span class="src">Latest pull <b id="pulledAt">—</b> · <b id="totAll">0</b> leads · <b id="totDates">0</b> pull dates</span>
+      <div class="viewnav" role="group" aria-label="Screen">
+        <button type="button" id="navLeads" aria-current="true">Leads</button>
+        <button type="button" id="navKpi" aria-current="false">KPI</button>
+      </div>
+      <button type="button" class="btn" id="addScan">＋ Add scan</button>
+      <div class="presence"><span id="peerList"></span><input type="text" id="nameIn" placeholder="Your name" aria-label="Your name on this board"></div>
+    </div>
+
+    <div class="controls">
+      <div class="field">
+        <label for="dateSel">Pull date</label>
+        <select id="dateSel"></select>
+      </div>
+      <div class="field">
+        <label>Step</label>
+        <div class="stepper">
+          <button class="btn" id="newer" type="button">← Newer</button>
+          <button class="btn" id="older" type="button">Older →</button>
+        </div>
+      </div>
+      <div class="field grow">
+        <label for="q">Search this view</label>
+        <input type="search" id="q" placeholder="Address, MLS #, city, note…">
+      </div>
+      <div class="field">
+        <label for="statusFilter">Status</label>
+        <select id="statusFilter">
+          <option value="">All statuses</option>
+          <option>Needs Comps</option>
+          <option>Reviewing</option>
+          <option>Offer Sent</option>
+          <option>Won</option>
+          <option>Pass</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="viewLeads">
+  <dl class="stats" id="stats"></dl>
+  <div class="banner" id="syncNote">Connecting to the shared board…</div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <div class="sechead"><span id="activeLabel">Active</span><span class="cnt" id="activeCount"></span><span class="rule"></span></div>
+  <div class="tablecard"><table id="tblActive"></table></div>
+
+  <div class="sechead" id="passedHead" hidden><span>Passed</span><span class="cnt" id="passedCount"></span><span class="rule"></span>
+    <button class="btn tiny" id="togglePassed" type="button">Show</button>
+  </div>
+  <div class="tablecard" id="passedCard" hidden><table id="tblPassed"></table></div>
+
+  <div class="sechead" id="removedHead" hidden><span>Removed</span><span class="cnt" id="removedCount"></span><span class="rule"></span>
+    <button class="btn tiny" id="toggleRemoved" type="button">Show</button>
+  </div>
+  <div class="tablecard" id="removedCard" hidden><table id="tblRemoved"></table></div>
+  </div><!-- /viewLeads -->
+
+  <div id="viewKpi" hidden>
+    <div class="kpi-head"><span id="kpiScopeLabel">Pipeline</span><span class="rule"></span></div>
+    <dl class="kpi-row" id="kpiTiles"></dl>
+
+    <div class="kpi-head"><span>Offer deadlines</span><span class="rule"></span></div>
+    <div class="tablecard kpi-table"><table id="kpiDue"></table></div>
+    <p class="kpi-note">Dates marked <span class="due-src approx" style="display:inline">≈</span> were read
+      from a weekday in the MLS remarks (&ldquo;offers due Thursday&rdquo;) and resolved against the pull
+      date — confirm them before planning around one. Typing a date on the Leads screen replaces whatever
+      was read.</p>
+
+    <div class="panel">
+      <div class="kpi-head" style="margin:0"><span>Status mix</span><span class="rule"></span></div>
+      <div class="pipe" id="kpiPipe"></div>
+      <div class="legend" id="kpiLegend"></div>
+    </div>
+
+    <div class="kpi-head"><span>By pull date</span><span class="rule"></span></div>
+    <div class="tablecard kpi-table"><table id="kpiByDate"></table></div>
+
+    <div class="kpi-head"><span>Who worked what</span><span class="rule"></span></div>
+    <div class="tablecard kpi-table"><table id="kpiByPerson"></table></div>
+    <p class="kpi-note" id="kpiPersonNote"></p>
+  </div>
+
+  <dialog id="scanDlg" aria-labelledby="scanTitle">
+    <div class="dlg">
+      <h2 id="scanTitle">Add a FlipScout scan</h2>
+      <p class="dlg-sub">When a scan finishes, FlipScout copies the day's leads — remarks and offer
+        deadlines included. Paste them here, or drop in the scan file from
+        <b>Documents › FlipScout</b>. Anything already on the board is skipped.</p>
+      <textarea id="scanText" rows="6" spellcheck="false" aria-label="Paste the scan"
+        placeholder='Paste here — it starts with {"kind": "flipscout-scan"'></textarea>
+      <div class="dlg-row">
+        <label class="btn tiny" for="scanFile">Choose file…</label>
+        <input type="file" id="scanFile" accept=".json,application/json" hidden>
+        <span class="dlg-hint">or drag the file onto this box</span>
+      </div>
+      <div id="scanPreview" class="dlg-preview" aria-live="polite"></div>
+      <div class="dlg-actions">
+        <button type="button" class="btn" id="scanCancel">Cancel</button>
+        <button type="button" class="btn go" id="scanGo" disabled>Add leads</button>
+      </div>
+    </div>
+  </dialog>
+
+  <footer>
+    Status changes, removals and scans added here are saved on this board and shared with everyone who opens this link.
+    New leads arrive from the FlipScout app with <b>Add scan</b>; leads from before that came from the old MLS sheet.
+  </footer>
+</div>
+
+<script src="data.js"></script>
+<script>
+(function(){
+  "use strict";
+  var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
+  var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue"];
+  var LINK = "https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=";
+
+  // Two sources of leads. data.js is the old sheet export — frozen history now
+  // that the scan no longer writes a sheet. Everything since arrives through
+  // "Add scan": the FlipScout app's scan file, stored in the shared board
+  // under scans/, one document per batch of leads.
+  var SHEET_LEADS = D.rows.map(function(r){
+    var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i];
+    o.link = LINK + o.mls;
+    return o;
+  });
+  var scans = {};     // scan document id -> body, as the shared board has it
+  var LEADS = [], BY_DATE = {}, BY_MLS = {}, DATES = [], LAST_PULL = "";
+
+  function str(v, n){ return typeof v === "string" ? v.slice(0, n) : ""; }
+  function num(v){ return typeof v === "number" && isFinite(v) ? v : null; }
+  var ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+  // One lead as a scan stored it. The shared board is written by whoever
+  // pastes, so every field is checked here rather than trusted.
+  function scanLead(x, pulled){
+    if (!x || typeof x !== "object") return null;
+    var mls = str(x.mls, 20).toUpperCase();
+    if (!/^[A-Z0-9]{5,20}$/.test(mls)) return null;
+    var due = str(x.offerDue, 11);
+    return {
+      mls: mls, addr: str(x.addr, 160) || mls, price: num(x.price), ppsf: num(x.ppsf),
+      sqft: num(x.sqft), beds: num(x.beds), year: num(x.year), dom: num(x.dom),
+      note: "", date: pulled, sdue: /^~?\d{4}-\d{2}-\d{2}$/.test(due) ? due : "",
+      remarks: str(x.remarks, 2000), agentRemarks: str(x.agentRemarks, 1500),
+      showing: str(x.showing, 600), offerFrom: str(x.offerFrom, 40),
+      offerPhrase: str(x.offerPhrase, 200), why: str(x.why, 240),
+      fromScan: true, link: LINK + mls
+    };
+  }
+
+  // Rebuild the lead list from both sources. An MLS # appears once: the sheet
+  // history wins, then the earliest scan, so a listing pasted twice keeps the
+  // day it first reached the board — and the team's status on it, which is
+  // keyed by that day.
+  function rebuild(){
+    var seen = {};
+    LEADS = [];
+    LAST_PULL = D.pulled || "";
+    SHEET_LEADS.forEach(function(l){ if (!seen[l.mls]) { seen[l.mls] = true; LEADS.push(l); } });
+    Object.keys(scans).map(function(k){ return scans[k]; })
+      .filter(function(sc){ return sc && ISO.test(sc.pulled || ""); })
+      .sort(function(a, b){ return a.pulled < b.pulled ? -1 : a.pulled > b.pulled ? 1 : (a.made || "") < (b.made || "") ? -1 : 1; })
+      .forEach(function(sc){
+        if (sc.pulled > LAST_PULL) LAST_PULL = sc.pulled;
+        var leads = sc.leads && typeof sc.leads === "object" ? sc.leads : {};
+        Object.keys(leads).forEach(function(k){
+          var l = scanLead(leads[k], sc.pulled);
+          if (l && !seen[l.mls]) { seen[l.mls] = true; LEADS.push(l); }
+        });
+      });
+    BY_DATE = {}; BY_MLS = {};
+    LEADS.forEach(function(l){
+      (BY_DATE[l.date] = BY_DATE[l.date] || []).push(l);
+      BY_MLS[l.mls] = l;
+    });
+    DATES = Object.keys(BY_DATE).sort().reverse();
+  }
+  rebuild();
+
+  var STATUSES = ["Needs Comps","Reviewing","Offer Sent","Won","Pass"];
+  var STCLASS = {"Needs Comps":"st-needs","Reviewing":"st-review","Offer Sent":"st-offer","Won":"st-won","Pass":"st-pass"};
+  var STRIPE  = {"Needs Comps":"s-needs","Reviewing":"s-review","Offer Sent":"s-offer","Won":"s-won","Pass":"s-pass"};
+
+  // A record is {s:status, r:removed, by:name, at:iso}.
+  var server   = {};  // date -> mls -> record, as the shared board has it
+  var pending  = {};  // date -> mls -> record, changed here, not confirmed yet
+  var inflight = {};  // "date|mls" -> true while a write is in the air
+  var db = null;
+  var scopeFor = {leads: DATES[0] || "", kpi: "__all__"};
+  var view = scopeFor.leads;
+  var showRemoved = true;
+  var showPassed = true;
+
+  var $ = function(id){ return document.getElementById(id); };
+  var fmtMoney = function(n){ return n == null ? "—" : "$" + n.toLocaleString("en-US"); };
+  var fmtNum = function(n){ return n == null ? "—" : n.toLocaleString("en-US"); };
+  function fmtDate(d){
+    var p = d.split("-");
+    var dt = new Date(Date.UTC(+p[0], +p[1]-1, +p[2]));
+    return dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",timeZone:"UTC"});
+  }
+  function fmtShort(d){
+    var p = d.split("-");
+    var dt = new Date(Date.UTC(+p[0], +p[1]-1, +p[2]));
+    return dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:"UTC"});
+  }
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function rec(date, mls){
+    var p = pending[date] && pending[date][mls];
+    if (p) return p;
+    return (server[date] && server[date][mls]) || null;
+  }
+  function statusOf(l){ var e = rec(l.date, l.mls); return (e && e.s) || "Needs Comps"; }
+  function removedOf(l){ var e = rec(l.date, l.mls); return !!(e && e.r); }
+  function teamDue(l){ var e = rec(l.date, l.mls); return (e && e.d) || ""; }
+  function sheetDue(l){ return l.sdue || ""; }
+  function dueOf(l){
+    var t = teamDue(l);
+    if (t === "-") return "";
+    if (t) return t;
+    return sheetDue(l).replace(/^~/, "");
+  }
+  function dueIsRead(l){ return !teamDue(l) && !!sheetDue(l); }
+  function dueIsApprox(l){ return dueIsRead(l) && sheetDue(l).charAt(0) === "~"; }
+
+  function todayISO(){
+    var n = new Date();
+    return n.getFullYear() + "-" +
+           String(n.getMonth() + 1).padStart(2, "0") + "-" +
+           String(n.getDate()).padStart(2, "0");
+  }
+  // whole days from today, read in the viewer's own calendar — a deadline is
+  // "tomorrow" or "today" to the person looking at it, not to a clock in UTC
+  function daysUntil(iso){
+    if (!iso) return null;
+    var a = new Date(iso + "T00:00:00"), b = new Date(todayISO() + "T00:00:00");
+    if (isNaN(a)) return null;
+    return Math.round((a - b) / 86400000);
+  }
+  function dueClass(n){
+    if (n === null) return "";
+    if (n < 0) return "due-over";
+    if (n <= 1) return "due-now";
+    if (n <= 3) return "due-soon";
+    return "due-later";
+  }
+  function dueLabel(n){
+    if (n === null) return "";
+    if (n < 0) return Math.abs(n) + (Math.abs(n) === 1 ? " day late" : " days late");
+    if (n === 0) return "due today";
+    if (n === 1) return "due tomorrow";
+    return "in " + n + " days";
+  }
+
+  var myName = "";
+  try { myName = localStorage.getItem("flipscout.name") || ""; } catch(e){}
+
+  /* ---------- build the date dropdown ---------- */
+  // Rebuilt whenever a scan lands, keeping whatever date each screen was on.
+  var sel = $("dateSel");
+  function buildDateMenu(){
+    sel.innerHTML = "";
+    DATES.forEach(function(d, i){
+      var n = (BY_DATE[d] || []).length;
+      var o = document.createElement("option");
+      o.value = d;
+      o.textContent = fmtDate(d) + "  ·  " + n + (n === 1 ? " lead" : " leads") + (i === 0 ? "  ·  latest" : "");
+      sel.appendChild(o);
+    });
+    var allOpt = document.createElement("option");
+    allOpt.value = "__all__";
+    allOpt.textContent = "All pull dates  ·  " + LEADS.length + " leads";
+    sel.appendChild(allOpt);
+    ["leads", "kpi"].forEach(function(k){
+      if (scopeFor[k] !== "__all__" && !BY_DATE[scopeFor[k]]) scopeFor[k] = DATES[0] || "__all__";
+    });
+    if (view !== "__all__" && !BY_DATE[view]) view = DATES[0] || "__all__";
+    sel.value = view;
+
+    $("pulledAt").textContent = LAST_PULL ? fmtDate(LAST_PULL) : "—";
+    $("totAll").textContent = LEADS.length;
+    $("totDates").textContent = DATES.length;
+  }
+  buildDateMenu();
+
+  /* ---------- rows for the current view ---------- */
+  function currentRows(){
+    var base = view === "__all__" ? LEADS.slice() : (BY_DATE[view] || []).slice();
+    var q = $("q").value.trim().toLowerCase();
+    var st = $("statusFilter").value;
+    return base.filter(function(l){
+      if (st && statusOf(l) !== st) return false;
+      if (!q) return true;
+      return (l.addr + " " + l.mls + " " + (l.note || "") + " " + (l.remarks || "") + " " +
+              (l.agentRemarks || "") + " " + (l.showing || "")).toLowerCase().indexOf(q) !== -1;
+    });
+  }
+
+  function median(a){
+    var v = a.filter(function(x){ return typeof x === "number"; }).sort(function(x,y){ return x-y; });
+    if (!v.length) return null;
+    var m = Math.floor(v.length/2);
+    return v.length % 2 ? v[m] : Math.round((v[m-1]+v[m])/2);
+  }
+
+  function renderStats(rows){
+    var active = rows.filter(function(l){ return !removedOf(l); });
+    var gone = rows.length - active.length;
+    var working = active.filter(function(l){ return statusOf(l) !== "Needs Comps"; }).length;
+    var over = active.filter(function(l){ return l.dom != null && l.dom > 45; }).length;
+    var med = median(active.map(function(l){ return l.ppsf; }));
+    var cells = [
+      ["In this view", rows.length, "", "c-teal"],
+      ["Active", active.length, "", "c-blue"],
+      ["Worked", working, "status set", "c-green"],
+      ["Removed", gone, "", "c-violet"],
+      ["Median $/SqFt", med == null ? "—" : "$" + med.toLocaleString("en-US"), "", "c-amber"],
+      ["Over 45 DOM", over, "buy-box limit", "c-red"]
+    ];
+    $("stats").innerHTML = cells.map(function(c){
+      return '<div class="stat ' + c[3] + '"><dt>' + esc(c[0]) + '</dt><dd>' + esc(String(c[1])) +
+             (c[2] ? '<small>' + esc(c[2]) + '</small>' : '') + '</dd></div>';
+    }).join("");
+  }
+
+  function domClass(d){
+    if (d == null) return "dom-none";
+    if (d > 45) return "dom-over";
+    if (d > 30) return "dom-warn";
+    return "dom-ok";
+  }
+
+  function head(){ return '<thead><tr>' +
+    '<th class="plain">Status</th>' +
+    '<th class="plain">Address / MLS #</th>' +
+    '<th data-s="price">Price<span class="arrow">▾</span></th>' +
+    '<th data-s="ppsf">$/SqFt<span class="arrow">▾</span></th>' +
+    '<th data-s="sqft">SqFt<span class="arrow">▾</span></th>' +
+    '<th data-s="beds">Beds<span class="arrow">▾</span></th>' +
+    '<th data-s="year">Built<span class="arrow">▾</span></th>' +
+    '<th data-s="dom">DOM<span class="arrow">▾</span></th>' +
+    '<th data-s="due">Offer due<span class="arrow">▾</span></th>' +
+    (view === "__all__" ? '<th data-s="date">Pulled<span class="arrow">▾</span></th>' : '') +
+    '<th class="plain"></th></tr></thead>'; }
+
+  var sortKey = "ppsf", sortDir = 1;
+
+  function sortVal(l){
+    if (sortKey === "due") return dueOf(l) || null;
+    return l[sortKey];
+  }
+
+  function sortRows(rows){
+    return rows.sort(function(a,b){
+      var x = sortVal(a), y = sortVal(b);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      if (x < y) return -1*sortDir;
+      if (x > y) return 1*sortDir;
+      return 0;
+    });
+  }
+
+  function rowHTML(l){
+    var st = statusOf(l), e = rec(l.date, l.mls), gone = removedOf(l);
+    var due = dueOf(l), dd = daysUntil(due);
+    var opts = STATUSES.map(function(s){
+      return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>';
+    }).join("");
+    return '<tr class="' + STRIPE[st] + (gone ? " gone" : st === "Pass" ? " passed" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+      '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
+        (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + '</td>' +
+      '<td data-l="Property" class="wide"><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' + esc(l.addr) + '</a>' +
+        '<span class="mls">' + esc(l.mls) + '</span>' +
+        (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + saidHTML(l) + '</td>' +
+      '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
+      '<td data-l="$/SqFt" class="num">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
+      '<td data-l="SqFt" class="num">' + fmtNum(l.sqft) + '</td>' +
+      '<td data-l="Beds" class="num">' + (l.beds ? l.beds : "—") + '</td>' +
+      '<td data-l="Built" class="num">' + (l.year ? l.year : "—") + '</td>' +
+      '<td data-l="DOM"><span class="dom ' + domClass(l.dom) + '">' + (l.dom == null ? "—" : l.dom) + '</span></td>' +
+      '<td data-l="Offer due" class="wide"><input type="date" class="due-in" value="' + esc(due) +
+        '" aria-label="Offer due date for ' + esc(l.mls) + '">' +
+        (dd === null ? '' : '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>') +
+        (dueIsRead(l)
+          ? '<span class="due-src' + (dueIsApprox(l) ? ' approx' : '') + '"' +
+            (l.offerPhrase ? ' title="' + esc('“' + l.offerPhrase + '”') + '"' : '') + '>' +
+            (dueIsApprox(l) ? '≈ ' : '') + 'read from ' + esc(l.offerFrom || 'MLS remarks') +
+            (dueIsApprox(l) ? ' — confirm' : '') + '</span>'
+          : '') + '</td>' +
+      (view === "__all__" ? '<td data-l="Pulled" class="num">' + esc(l.date) + '</td>' : '') +
+      '<td data-l="" class="act"><button class="btn tiny" data-act="' + (gone ? "restore" : "remove") + '" type="button">' +
+        (gone ? "Restore" : "Remove") + '</button></td>' +
+    '</tr>';
+  }
+
+  // What the listing said, folded under the address. Only scan leads carry it:
+  // the old sheet rows never had the remarks.
+  function saidHTML(l){
+    if (!l.remarks && !l.agentRemarks && !l.showing && !l.why) return "";
+    var parts = [["Offer deadline", l.offerPhrase ? "“" + l.offerPhrase + "” — " + (l.offerFrom || "") : ""],
+                 ["Agent-only remarks", l.agentRemarks], ["Showing", l.showing],
+                 ["Public remarks", l.remarks], ["Why FlipScout kept it", l.why]];
+    return '<details class="said"><summary>Remarks' + (l.agentRemarks ? ' · agent notes' : '') + '</summary>' +
+      parts.filter(function(p){ return p[1]; }).map(function(p){
+        return '<p><b>' + esc(p[0]) + '</b>' + esc(p[1]) + '</p>';
+      }).join("") + '</details>';
+  }
+
+  function draw(){
+    if (activeScreen === "kpi") renderKpi(); else render();
+  }
+
+  function render(){
+    var rows = currentRows();
+    renderStats(rows);
+
+    // A passed lead has been judged and is out of the working list, but it is
+    // not removed — it stays visible below so it can be found and reopened.
+    var gone   = sortRows(rows.filter(function(l){ return removedOf(l); }));
+    var live   = rows.filter(function(l){ return !removedOf(l); });
+    var passed = sortRows(live.filter(function(l){ return statusOf(l) === "Pass"; }));
+    var active = sortRows(live.filter(function(l){ return statusOf(l) !== "Pass"; }));
+
+    $("activeLabel").textContent = view === "__all__" ? "Active — all pull dates" : "Active — " + fmtDate(view);
+    $("activeCount").textContent = active.length + (active.length === 1 ? " lead" : " leads");
+
+    $("tblActive").innerHTML = active.length
+      ? head() + "<tbody>" + active.map(rowHTML).join("") + "</tbody>"
+      : '<tbody><tr><td class="empty"><b>Nothing here</b>' +
+        ($("q").value || $("statusFilter").value
+          ? "No lead in this view matches your filters."
+          : passed.length || gone.length
+            ? "Every lead on this pull date has been worked. The rest are below."
+            : "This pull date has no active leads left.") +
+        '</td></tr></tbody>';
+
+    var ph = $("passedHead"), pc = $("passedCard");
+    if (passed.length){
+      ph.hidden = false;
+      $("passedCount").textContent = passed.length + (passed.length === 1 ? " lead" : " leads");
+      $("togglePassed").textContent = showPassed ? "Hide" : "Show";
+      pc.hidden = !showPassed;
+      if (showPassed) $("tblPassed").innerHTML = head() + "<tbody>" + passed.map(rowHTML).join("") + "</tbody>";
+    } else {
+      ph.hidden = true; pc.hidden = true; $("tblPassed").innerHTML = "";
+    }
+
+    var rh = $("removedHead"), rc = $("removedCard");
+    if (gone.length){
+      rh.hidden = false;
+      $("removedCount").textContent = gone.length + (gone.length === 1 ? " lead" : " leads");
+      $("toggleRemoved").textContent = showRemoved ? "Hide" : "Show";
+      rc.hidden = !showRemoved;
+      if (showRemoved) $("tblRemoved").innerHTML = head() + "<tbody>" + gone.map(rowHTML).join("") + "</tbody>";
+    } else {
+      rh.hidden = true; rc.hidden = true; $("tblRemoved").innerHTML = "";
+    }
+
+    document.querySelectorAll("thead th[data-s]").forEach(function(th){
+      if (th.dataset.s === sortKey) th.setAttribute("aria-sort", sortDir === 1 ? "ascending" : "descending");
+      else th.removeAttribute("aria-sort");
+    });
+  }
+
+  /* ---------- persistence ---------- */
+  function applyEdit(date, mls, patch){
+    var cur = rec(date, mls) || {};
+    var next = {
+      s: cur.s || "Needs Comps",
+      r: !!cur.r,
+      d: cur.d || "",
+      by: myName || "Someone",
+      at: new Date().toISOString()
+    };
+    if ("s" in patch) next.s = patch.s;
+    if ("r" in patch) next.r = patch.r;
+    if ("d" in patch) next.d = patch.d;
+    pending[date] = pending[date] || {};
+    pending[date][mls] = next;
+    draw();
+    toast("d" in patch
+      ? (next.d === "-" ? "Marked no deadline — saved for the team"
+         : next.d ? "Offer due " + next.d + " — saved for the team"
+         : "Deadline cleared")
+      : "r" in patch
+        ? (next.r ? "Removed — saved for the team" : "Restored — saved for the team")
+        : next.s === "Pass"
+          ? "Marked Pass — moved to Passed, below the list"
+          : "Marked " + next.s + " — saved for the team");
+    flush();
+  }
+
+  // Send every change the shared board hasn't confirmed yet. Safe to call at
+  // any moment: before the connection is up it does nothing, and the queued
+  // changes go out the moment it is.
+  function flush(){
+    if (!db) return;
+    Object.keys(pending).forEach(function(date){
+      Object.keys(pending[date]).forEach(function(mls){
+        var key = date + "|" + mls;
+        if (inflight[key]) return;
+        inflight[key] = true;
+        var body = {}; body[mls] = pending[date][mls];
+        var ref = db.doc("edits/" + date);
+        // update() merges, so it can never wipe a teammate's other rows.
+        // set() runs only when the date has no document yet — the one case
+        // update rejects on.
+        ref.update(body)
+          .catch(function(){ return ref.set(body); })
+          .then(function(){ delete inflight[key]; })
+          .catch(function(){
+            delete inflight[key];
+            note("Couldn't save that change to the shared board. It is showing on this screen only — reload the page.", true);
+          });
+      });
+    });
+  }
+
+  // Drop pending rows the shared board has caught up with.
+  function reconcile(){
+    Object.keys(pending).forEach(function(date){
+      Object.keys(pending[date]).forEach(function(mls){
+        var s = server[date] && server[date][mls];
+        if (s && s.at >= pending[date][mls].at) delete pending[date][mls];
+      });
+      if (!Object.keys(pending[date]).length) delete pending[date];
+    });
+  }
+
+  function note(msg, warn){
+    var b = $("syncNote");
+    b.innerHTML = msg;
+    b.style.borderLeftColor = warn ? "var(--red-ink)" : "var(--accent)";
+  }
+
+  var toastT = null;
+  function toast(msg){
+    var t = $("toast");
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(function(){ t.hidden = true; }, 2400);
+  }
+
+  /* ---------- events ---------- */
+  sel.addEventListener("change", function(){
+    view = sel.value;
+    scopeFor[activeScreen] = view;
+    draw(); syncStep();
+  });
+  $("q").addEventListener("input", draw);
+  $("statusFilter").addEventListener("change", draw);
+  $("toggleRemoved").addEventListener("click", function(){ showRemoved = !showRemoved; draw(); });
+  $("togglePassed").addEventListener("click", function(){ showPassed = !showPassed; draw(); });
+
+  function syncStep(){
+    var i = DATES.indexOf(view);
+    $("newer").disabled = (view === "__all__" || i <= 0);
+    $("older").disabled = (view === "__all__" || i < 0 || i >= DATES.length - 1);
+  }
+  $("newer").addEventListener("click", function(){
+    var i = DATES.indexOf(view); if (i > 0){ view = DATES[i-1]; sel.value = view; scopeFor[activeScreen] = view; draw(); syncStep(); }
+  });
+  $("older").addEventListener("click", function(){
+    var i = DATES.indexOf(view); if (i > -1 && i < DATES.length-1){ view = DATES[i+1]; sel.value = view; scopeFor[activeScreen] = view; draw(); syncStep(); }
+  });
+
+  document.addEventListener("click", function(ev){
+    var th = ev.target.closest("thead th[data-s]");
+    if (th){
+      var k = th.dataset.s;
+      if (k === sortKey) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+      draw(); return;
+    }
+    var b = ev.target.closest("button[data-act]"); if (!b) return;
+    var tr = b.closest("tr"); if (!tr) return;
+    applyEdit(tr.dataset.date, tr.dataset.mls, {r: b.dataset.act === "remove"});
+  });
+  document.addEventListener("change", function(ev){
+    var tr, s = ev.target.closest('select[data-act="status"]');
+    if (s){
+      tr = s.closest("tr");
+      if (tr) applyEdit(tr.dataset.date, tr.dataset.mls, {s: s.value});
+      return;
+    }
+    var dueIn = ev.target.closest("input.due-in");
+    if (dueIn){
+      tr = dueIn.closest("tr");
+      if (!tr) return;
+      var lead = BY_MLS[tr.dataset.mls];
+      // clearing the box when the remarks supplied a date means "no deadline",
+      // not "fall back to the remarks again"
+      var v = dueIn.value || (lead && sheetDue(lead) ? "-" : "");
+      applyEdit(tr.dataset.date, tr.dataset.mls, {d: v});
+    }
+  });
+
+  /* ---------- KPI screen ---------- */
+  // Pipeline order, each with its validated mark colour. "Removed" sits apart
+  // from the statuses: it is where a lead leaves the pipeline, not a state in it.
+  var PIPE = [
+    ["Needs Comps", "--m-none"],
+    ["Reviewing",   "--m-review"],
+    ["Offer Sent",  "--m-offer"],
+    ["Won",         "--m-won"],
+    ["Pass",        "--m-pass"]
+  ];
+  var REMOVED_MARK = "--m-removed";
+
+  function tally(list){
+    var counts = {}, removed = 0, touched = 0, people = {};
+    PIPE.forEach(function(p){ counts[p[0]] = 0; });
+    list.forEach(function(l){
+      var e = rec(l.date, l.mls);
+      if (e && e.r) removed++;
+      else counts[statusOf(l)]++;
+      if (!e) return;
+      touched++;
+      var who = e.by || "Someone";
+      people[who] = people[who] || {touched: 0, removals: 0, statuses: 0};
+      people[who].touched++;
+      if (e.r) people[who].removals++;
+      else if (e.s && e.s !== "Needs Comps") people[who].statuses++;
+    });
+    return {counts: counts, removed: removed, touched: touched,
+            people: people, total: list.length};
+  }
+
+  function pct(n, of){ return of ? Math.round(n / of * 1000) / 10 : 0; }
+  function tdN(n){ return '<td class="n' + (n ? '' : ' zero') + '">' + n + '</td>'; }
+
+  function renderKpi(){
+    var list = view === "__all__" ? LEADS : (BY_DATE[view] || []);
+    var k = tally(list);
+    var scope = view === "__all__"
+      ? "All " + DATES.length + " pull dates"
+      : fmtDate(view) + " pull";
+    $("kpiScopeLabel").textContent = scope;
+
+    var live = k.total - k.removed - k.counts["Pass"];
+    var untouched = k.total - k.touched;
+
+    // deadlines only matter on leads still in play: a passed or removed lead
+    // has no offer to get out the door
+    var dues = list.filter(function(l){
+      return dueOf(l) && !removedOf(l) && statusOf(l) !== "Pass";
+    }).sort(function(a, b){ return dueOf(a) < dueOf(b) ? -1 : dueOf(a) > dueOf(b) ? 1 : 0; });
+    var late = dues.filter(function(l){ return daysUntil(dueOf(l)) < 0; }).length;
+    var week = dues.filter(function(l){
+      var n = daysUntil(dueOf(l)); return n >= 0 && n <= 7;
+    }).length;
+    $("kpiTiles").innerHTML = [
+      ['<div class="kpi"><dt>Leads</dt><dd>' + k.total + '</dd>' +
+       '<div class="sub">' + scope + '</div></div>'],
+      ['<div class="kpi"><dt>Still live</dt><dd style="color:var(--t-review)">' + live + '</dd>' +
+       '<div class="sub">' + k.counts["Pass"] + ' passed · ' + k.removed + ' removed</div></div>'],
+      ['<div class="kpi"><dt>Worked</dt><dd style="color:var(--t-won)">' + k.touched + '</dd>' +
+       '<div class="sub">' + pct(k.touched, k.total) + '% of the list</div>' +
+       '<div class="meter"><span style="width:' + pct(k.touched, k.total) + '%"></span></div></div>'],
+      ['<div class="kpi"><dt>Untouched</dt><dd style="color:var(--t-none)">' + untouched + '</dd>' +
+       '<div class="sub">nobody has opened these yet</div></div>'],
+      ['<div class="kpi"><dt>Offers out</dt><dd style="color:var(--t-offer)">' +
+       k.counts["Offer Sent"] + '</dd><div class="sub">' + k.counts["Won"] + ' won</div></div>'],
+      ['<div class="kpi"><dt>Passed</dt><dd style="color:var(--t-pass)">' + k.counts["Pass"] + '</dd>' +
+       '<div class="sub">ruled out on review</div></div>'],
+      ['<div class="kpi"><dt>Deadlines</dt><dd style="color:var(--t-offer)">' + dues.length + '</dd>' +
+       '<div class="sub">' + (dues.length
+          ? late + ' late · ' + week + ' due within 7 days'
+          : 'set an offer due date on the Leads screen') + '</div></div>']
+    ].join("");
+
+    $("kpiDue").innerHTML = dues.length
+      ? '<thead><tr><th class="plain">Offer due</th><th class="plain">When</th>' +
+        '<th class="plain">Property</th><th class="plain">Status</th>' +
+        '<th class="plain n">Price</th><th class="plain n">$/SqFt</th></tr></thead><tbody>' +
+        dues.map(function(l){
+          var dd = daysUntil(dueOf(l));
+          return '<tr><td class="n">' + esc(dueOf(l)) +
+            (dueIsApprox(l) ? ' <span class="due-src approx">≈</span>' : '') + '</td>' +
+            '<td><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span></td>' +
+            '<td><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' +
+              esc(l.addr) + '</a><span class="mls">' + esc(l.mls) + '</span></td>' +
+            '<td><span class="pill ' + STCLASS[statusOf(l)] + '">' + esc(statusOf(l)) + '</span></td>' +
+            '<td class="n">' + fmtMoney(l.price) + '</td>' +
+            '<td class="n">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td></tr>';
+        }).join("") + '</tbody>'
+      : '<tbody><tr><td class="empty"><b>No deadlines set</b>' +
+        'Put a date in the Offer due column on the Leads screen and every deadline lands here, soonest first.' +
+        '</td></tr></tbody>';
+
+    // one stacked bar; numbers live in the legend and the tables, never inside
+    // a segment, where they would sit on a fill that cannot carry text safely
+    var segs = PIPE.map(function(p){ return [p[0], k.counts[p[0]], p[1]]; });
+    segs.push(["Removed", k.removed, REMOVED_MARK]);
+    $("kpiPipe").innerHTML = segs.map(function(sg){
+      if (!sg[1]) return "";
+      return '<div class="seg" style="flex:' + sg[1] + ' 0 0; background:var(' + sg[2] + ')" ' +
+             'data-label="' + esc(sg[0]) + '" data-n="' + sg[1] +
+             '" data-pct="' + pct(sg[1], k.total) + '"></div>';
+    }).join("");
+    $("kpiLegend").innerHTML = segs.map(function(sg){
+      return '<span class="item"><span class="sw" style="background:var(' + sg[2] + ')"></span>' +
+             esc(sg[0]) + ' <span class="n">' + sg[1] + '</span>' +
+             '<span class="pct">' + pct(sg[1], k.total) + '%</span></span>';
+    }).join("");
+
+    var cols = PIPE.map(function(p){ return p[0]; });
+    var headCells = '<th class="plain">Pulled</th><th class="plain n">Leads</th>' +
+      cols.map(function(c){ return '<th class="plain n">' + c + '</th>'; }).join("") +
+      '<th class="plain n">Removed</th><th class="plain n">Worked</th>';
+    var dates = view === "__all__" ? DATES : [view];
+    var body = dates.map(function(d){
+      var kd = tally(BY_DATE[d] || []);
+      return '<tr><td>' + fmtShort(d) + '</td>' + tdN(kd.total) +
+        cols.map(function(c){ return tdN(kd.counts[c]); }).join("") +
+        tdN(kd.removed) +
+        '<td class="n">' + pct(kd.touched, kd.total) + '%</td></tr>';
+    }).join("");
+    var totalRow = '<tr><td><b>Total</b></td>' + tdN(k.total) +
+      cols.map(function(c){ return tdN(k.counts[c]); }).join("") +
+      tdN(k.removed) + '<td class="n">' + pct(k.touched, k.total) + '%</td></tr>';
+    $("kpiByDate").innerHTML = '<thead><tr>' + headCells + '</tr></thead><tbody>' +
+      body + totalRow + '</tbody>';
+
+    var names = Object.keys(k.people).sort(function(a, b){
+      return k.people[b].touched - k.people[a].touched;
+    });
+    $("kpiByPerson").innerHTML = names.length
+      ? '<thead><tr><th class="plain">Who</th><th class="plain n">Leads worked</th>' +
+        '<th class="plain n">Statuses set</th><th class="plain n">Removed</th></tr></thead><tbody>' +
+        names.map(function(n){
+          var pp = k.people[n];
+          return '<tr><td>' + esc(n) + '</td>' + tdN(pp.touched) +
+                 tdN(pp.statuses) + tdN(pp.removals) + '</tr>';
+        }).join("") + '</tbody>'
+      : '<tbody><tr><td class="empty"><b>Nothing worked yet</b>' +
+        'Set a status or remove a lead on the Leads screen and it shows up here.</td></tr></tbody>';
+
+    var anon = names.indexOf("Someone") !== -1 ? k.people["Someone"].touched : 0;
+    $("kpiPersonNote").textContent = anon
+      ? anon + ' of these are logged as "Someone" — that teammate had not typed a name in the box beside the Leads/KPI switch when they made the edit.'
+      : "";
+  }
+
+  var tip = null;
+  document.addEventListener("mouseover", function(ev){
+    var sg = ev.target.closest(".pipe .seg");
+    if (!sg) return;
+    if (!tip){ tip = document.createElement("div"); tip.id = "kpiTip"; document.body.appendChild(tip); }
+    tip.innerHTML = esc(sg.dataset.label) + ' &nbsp;<b>' + sg.dataset.n + '</b> · ' + sg.dataset.pct + '%';
+    tip.hidden = false;
+  });
+  document.addEventListener("mousemove", function(ev){
+    if (!tip || tip.hidden) return;
+    tip.style.left = Math.min(ev.clientX + 14, window.innerWidth - tip.offsetWidth - 10) + "px";
+    tip.style.top = Math.max(ev.clientY - 38, 8) + "px";
+  });
+  document.addEventListener("mouseout", function(ev){
+    if (tip && ev.target.closest(".pipe .seg")) tip.hidden = true;
+  });
+
+  var activeScreen = "leads";
+  function showScreen(next, push){
+    scopeFor[activeScreen] = view;
+    activeScreen = next === "kpi" ? "kpi" : "leads";
+    var onKpi = activeScreen === "kpi";
+    view = scopeFor[activeScreen];
+    sel.value = view;
+    $("viewLeads").hidden = onKpi;
+    $("viewKpi").hidden = !onKpi;
+    $("navLeads").setAttribute("aria-current", String(!onKpi));
+    $("navKpi").setAttribute("aria-current", String(onKpi));
+    // search and status filter belong to the lead list, not the numbers
+    $("q").closest(".field").hidden = onKpi;
+    $("statusFilter").closest(".field").hidden = onKpi;
+    syncStep();
+    if (push) {
+      try {
+        history.replaceState(null, "", onKpi ? "#kpi" : location.pathname + location.search);
+      } catch (e) { /* sandboxed frame: the switch still works, the URL just won't carry it */ }
+    }
+    draw();
+  }
+  $("navLeads").addEventListener("click", function(){ showScreen("leads", true); });
+  $("navKpi").addEventListener("click", function(){ showScreen("kpi", true); });
+  window.addEventListener("hashchange", function(){
+    showScreen(location.hash === "#kpi" ? "kpi" : "leads", false);
+  });
+
+  showScreen(location.hash === "#kpi" ? "kpi" : "leads", false);
+  syncStep();
+
+  /* ---------- add scan ---------- */
+  // The FlipScout app cannot write to this board itself — only the page can —
+  // so its scan file comes in here, by paste or by file, and is stored under
+  // scans/ in batches small enough for one document each.
+  var dlg = $("scanDlg"), parsed = null;
+  var BATCH = 40;
+
+  function parseScan(text){
+    var t = String(text || "").trim();
+    if (!t) return null;
+    var j;
+    try { j = JSON.parse(t); } catch (e) {
+      return {error: "That isn't a FlipScout scan. Paste the whole thing — it starts with {\"kind\": \"flipscout-scan\"."};
+    }
+    if (!j || j.kind !== "flipscout-scan" || !Array.isArray(j.leads)) {
+      return {error: "That isn't a FlipScout scan file. Use “Copy for the board” in the app, or the file in Documents › FlipScout."};
+    }
+    var pulled = ISO.test(j.pulled || "") ? j.pulled : todayISO();
+    var fresh = [], dup = 0, bad = 0, inThis = {};
+    j.leads.forEach(function(x){
+      var l = scanLead(x, pulled);
+      if (!l) { bad++; return; }
+      if (BY_MLS[l.mls] || inThis[l.mls]) { dup++; return; }
+      inThis[l.mls] = true;
+      fresh.push(l);
+    });
+    return {pulled: pulled, fresh: fresh, dup: dup, bad: bad, app: str(j.app, 20), made: str(j.made, 40)};
+  }
+
+  function showPreview(){
+    var box = $("scanPreview"), go = $("scanGo");
+    parsed = parseScan($("scanText").value);
+    go.disabled = true;
+    if (!parsed) { box.innerHTML = ""; return; }
+    if (parsed.error) { box.innerHTML = '<span class="err">' + esc(parsed.error) + '</span>'; return; }
+    var offers = parsed.fresh.filter(function(l){ return l.sdue; }).length;
+    var html = '<div class="sum">Scan of <b>' + esc(fmtDate(parsed.pulled)) + '</b>: <b>' + parsed.fresh.length +
+      '</b> new' + (parsed.dup ? ' · <b>' + parsed.dup + '</b> already on the board' : '') +
+      (parsed.bad ? ' · <b>' + parsed.bad + '</b> unreadable, skipped' : '') +
+      (offers ? ' · <b>' + offers + '</b> with an offer deadline' : '') + '</div>';
+    if (parsed.fresh.length) {
+      html += '<ul>' + parsed.fresh.map(function(l){
+        return '<li><span>' + esc(l.addr) + '</span><span class="p">' + fmtMoney(l.price) +
+          (l.sdue ? ' · offers ' + esc(l.sdue.replace(/^~/, "≈ ")) : '') + '</span></li>';
+      }).join("") + '</ul>';
+    }
+    box.innerHTML = html;
+    go.disabled = !parsed.fresh.length || !db;
+    go.textContent = parsed.fresh.length ? "Add " + parsed.fresh.length + (parsed.fresh.length === 1 ? " lead" : " leads") : "Nothing new to add";
+    if (parsed.fresh.length && !db) box.innerHTML += '<p class="err">The shared board isn\'t connected in this view, so nothing can be saved. Open the board from its link.</p>';
+  }
+
+  function stored(l){
+    return {mls: l.mls, addr: l.addr, price: l.price, ppsf: l.ppsf, sqft: l.sqft, beds: l.beds,
+            year: l.year, dom: l.dom, remarks: l.remarks, agentRemarks: l.agentRemarks,
+            showing: l.showing, offerDue: l.sdue, offerFrom: l.offerFrom,
+            offerPhrase: l.offerPhrase, why: l.why};
+  }
+
+  function addScan(){
+    if (!parsed || parsed.error || !parsed.fresh.length || !db) return;
+    var go = $("scanGo"); go.disabled = true; go.textContent = "Adding…";
+    var stamp = new Date().toISOString(), run = Date.now().toString(36), writes = [];
+    for (var i = 0; i < parsed.fresh.length; i += BATCH) {
+      var leads = {};
+      parsed.fresh.slice(i, i + BATCH).forEach(function(l){ leads[l.mls] = stored(l); });
+      var id = parsed.pulled + "_" + run + "_" + (i / BATCH);
+      var body = {pulled: parsed.pulled, made: parsed.made, app: parsed.app,
+                  by: myName || "Someone", at: stamp, leads: leads};
+      scans[id] = body;                              // show it now; the snapshot confirms it
+      writes.push(db.doc("scans/" + id).set(body));
+    }
+    var n = parsed.fresh.length, day = parsed.pulled;
+    rebuild(); buildDateMenu();
+    Promise.all(writes).then(function(){
+      dlg.close();
+      view = day; scopeFor[activeScreen] = day; sel.value = day;
+      draw(); syncStep();
+      toast("Added " + n + (n === 1 ? " lead" : " leads") + " to " + fmtShort(day) + " — saved for the team");
+    }).catch(function(){
+      go.disabled = false; go.textContent = "Try again";
+      $("scanPreview").innerHTML += '<p class="err">Couldn\'t save to the shared board. Nothing was lost — try again, or reload the page.</p>';
+    });
+  }
+
+  function readFile(f){
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function(){ $("scanText").value = String(r.result || ""); showPreview(); };
+    r.readAsText(f);
+  }
+
+  $("addScan").addEventListener("click", function(){
+    $("scanText").value = ""; $("scanPreview").innerHTML = ""; $("scanGo").disabled = true;
+    $("scanGo").textContent = "Add leads";
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", "");
+    $("scanText").focus();
+  });
+  $("scanCancel").addEventListener("click", function(){ dlg.close(); });
+  $("scanGo").addEventListener("click", addScan);
+  $("scanText").addEventListener("input", showPreview);
+  $("scanFile").addEventListener("change", function(ev){ readFile(ev.target.files && ev.target.files[0]); ev.target.value = ""; });
+  ["dragenter", "dragover"].forEach(function(t){
+    $("scanText").addEventListener(t, function(ev){ ev.preventDefault(); $("scanText").classList.add("over"); });
+  });
+  ["dragleave", "drop"].forEach(function(t){
+    $("scanText").addEventListener(t, function(){ $("scanText").classList.remove("over"); });
+  });
+  $("scanText").addEventListener("drop", function(ev){
+    ev.preventDefault();
+    readFile(ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]);
+  });
+
+  /* ---------- shared board (db) ---------- */
+  if (window.claude && claude.use){
+    claude.use("db").then(function(x){
+      if (!x){ note("This view is running <b>offline</b> — your changes stay in this browser only.", true); return; }
+      db = x;
+      flush();
+      db.collection("scans").onSnapshot(function(snap){
+        var next = {};
+        snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
+        scans = next;
+        rebuild(); buildDateMenu();
+        draw(); syncStep();
+      }, function(){
+        note("Lost the connection to the shared board — scans added elsewhere may not show. Reload the page.", true);
+      });
+      db.collection("edits").onSnapshot(function(snap){
+        var next = {};
+        snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
+        server = next;
+        reconcile();
+        note("Shared board <b>connected</b>. Status changes, removals and scans added with <b>Add scan</b> save here for the whole team.");
+        draw();
+        flush();
+      }, function(){
+        note("Lost the connection to the shared board — changes from here may not save. Reload the page.", true);
+      });
+    }).catch(function(){ note("Shared board unavailable in this view.", true); });
+
+    claude.use("room").then(function(room){
+      if (!room) return;
+      function paint(peers){
+        $("peerList").innerHTML = (peers || [])
+          .filter(function(p){ return p.kind !== "agent"; })
+          .map(function(p){
+            var st = p.presence || {};
+            return '<span class="who' + (p.isMe ? " me" : "") + '"><span class="dot"></span>' +
+                   esc(st.name || "Teammate") + (p.isMe ? " (you)" : "") + '</span>';
+          }).join("");
+      }
+      var inp = $("nameIn");
+      inp.value = myName;
+      inp.addEventListener("change", function(){
+        myName = inp.value.trim().slice(0,24);
+        try { localStorage.setItem("flipscout.name", myName); } catch(e){}
+        room.presence({name: myName || "Teammate"});
+      });
+      room.presence({name: myName || "Teammate"});
+      room.onPeers(function(ev){ paint(ev && ev.peers ? ev.peers : []); });
+    }).catch(function(){});
+  } else {
+    note("Open this board from its published link to share edits with your team.", true);
+  }
+})();
+</script>
