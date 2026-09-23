@@ -180,7 +180,7 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(rules('Tear-down opportunity, value is in the land.'), 'drop', 'tear-down dropped');
   eq(rules('Probate sale. Property is red-tagged and uninhabitable.'), 'drop', 'red-tagged dropped');
   eq(rules('Bring your contractor \u2014 needs a full gut.'), 'drop', 'full gut dropped');
-  eq(rules('Fixer upper. This level is currently tenant-occupied.'), 'drop', 'tenant-occupied dropped');
+  eq(rules('Fixer upper. This level is currently tenant-occupied.'), 'keep', 'tenant-occupied is no longer a drop');
   eq(rules('Beautifully updated with quartz counters and stainless appliances.'), 'drop', 'renovated dropped');
   eq(rules('Lovely garden, three bedrooms, close to transit.'), 'manual', 'silent remarks go to the fallback');
 
@@ -254,7 +254,46 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   await gs.ensureTab('tok', 'ID', 'KPI', NEWK);
   eq(tabs.KPI[0], NEWK, 'a correct header row is left alone');
 
-  // 13. The composed sheet value, end to end.
+  // 13. The qualification gate — Opportunity Score and A / B / C bucket.
+  const { qualify } = require('./scan-core');
+  const Q = (m) => qualify(Object.assign({ photos: 20, photosReliable: true }, m));
+  eq(Q({ remarks: 'Beautifully renovated turnkey home.' }).bucket, 'C', 'renovated is C — auto-pass');
+  eq(Q({ remarks: 'Beautifully renovated turnkey home.' }).score <= 15, true, 'and scores low');
+  eq(Q({ remarks: 'Fixer. Foundation repair needed.' }).bucket, 'C', 'structural work is still C');
+  eq(Q({ remarks: 'Rare duplex, two separate units, each with a full kitchen.' }).bucket, 'C', 'an actual duplex is still C');
+  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant occupied, do not disturb.' }).decision, 'keep',
+    'tenant-occupied is kept');
+  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant occupied, do not disturb.' }).why.includes('tenant'), true,
+    'and named as a signal');
+  eq(Q({ remarks: 'Fixer upper, sold as-is.', origPrice: 1000000, price: 900000, ppsfRatio: 0.7 }).bucket, 'A',
+    'fixer + 10% price cut + cheap $/sqft is A — work now');
+  eq(Q({ remarks: 'Fixer upper, sold as-is.' }).bucket, 'B', 'fixer language alone is B — needs a deeper look');
+  eq(Q({ remarks: 'Lovely garden, three bedrooms, close to transit.' }).bucket, 'B', 'silent remarks are B, not dropped');
+  eq(Q({ remarks: 'Lovely garden, three bedrooms, close to transit.', whenUnsure: 'drop' }).bucket, 'C',
+    'unless "when unsure" is set to drop');
+  eq(Q({ remarks: 'Professionally staged, quartz counters.', ppsfRatio: 1.3 }).bucket, 'C',
+    'staged + a finish + priced above the area is C');
+  eq(Q({ remarks: 'Charming 1904 home with granite counters in the kitchen.' }).bucket, 'B',
+    'one updated finish alone is not an auto-pass (844 Brunswick)');
+  eq(Q({ remarks: 'Nice home.', privateRemarks: 'Probate sale, cash only, sold as-is.' }).score >= 70, true,
+    'private remarks count toward the score');
+  eq(Q({ addr: '21 College Terrace', remarks: 'Beautifully renovated.' }).bucket, 'A', 'a confirmed deal is always A');
+  eq(Q({ remarks: 'Lovely home.', photos: 4, photosReliable: true }).bucket, 'C', '4 photos off the full grid is C');
+  eq(Q({ remarks: 'Lovely home.', photos: 4, photosReliable: false }).bucket, 'B',
+    'but 4 carousel photos (grid failed) prove nothing');
+  //     Real reports: the original price and the listing agent are read off
+  //     them, and Faxon's $99k cut plus its as-is remarks make it an A.
+  const fx = parseDetail(fixture('SF426134156'), 'SF426134156');
+  eq([fx.origPrice, fx.listPrice], [998000, 899000], 'original and list price read off the report');
+  eq(fx.listedBy, 'Jonathan Crossley, eXp Realty of California, Inc', 'listing agent read off the report');
+  eq(Q({ addr: '347 Faxon Avenue', remarks: fx.remarks, propClass: fx.propClass, price: fx.listPrice,
+    origPrice: fx.origPrice, yearBuilt: fx.yearBuilt }).bucket, 'A', '347 Faxon is an A');
+  eq(require('./scan-core').privateRemarks('Public:\tNice.\nPrivate:\tTenant pays $2,400. Cash only.\n\nFeatures'),
+    'Tenant pays $2,400. Cash only.', 'a "Private:" block is read');
+  eq(require('./scan-core').privateRemarks('Listing Agent:\tJane Doe\nPublic:\tNice.'), '',
+    'a contact line is not mistaken for remarks');
+
+  // 14. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
 

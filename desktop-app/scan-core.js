@@ -249,8 +249,10 @@ const SLOW_KW = new RegExp([
   '\\bmold\\b', 'dry ?rot throughout', 'sinking', 'landslide', 'slide zone',
 ].join('|'), 'i');
 
-// Tenant-occupied is a hard exclusion in the SOP: no vacant possession, no
-// access for trades, and a timeline nobody controls.
+// Tenant-occupied is NO LONGER a drop (Seth, 23 Sep). An occupied house is
+// harder to show and slower to deliver, but a seller stuck with a tenant is
+// often a motivated one — so it now scores as an opportunity signal in
+// qualify() instead of being thrown away here.
 const TENANT_KW = new RegExp([
   'tenant[- ]occupied', 'occupied by (?:a )?tenant', 'tenants? in place',
   'currently rented', 'lease in place', 'subject to (?:a )?lease',
@@ -329,7 +331,6 @@ function rulesDecide(meta) {
   if (!saysSingle && MULTI_KW.test(t) && !POTENTIAL_RE.test(t)) {
     return { decision: 'drop', reason: `remarks indicate an existing second dwelling — "${(t.match(MULTI_KW) || [''])[0]}"` };
   }
-  if (TENANT_KW.test(t)) return { decision: 'drop', reason: 'remarks say tenant-occupied (hard exclusion)' };
   if (SLOW_KW.test(t)) {
     const hit = (t.match(SLOW_KW) || [''])[0];
     return { decision: 'drop', reason: `not a quick flip — remarks mention "${hit}" (structural/permit work, not cosmetic)` };
@@ -353,12 +354,116 @@ function rulesDecide(meta) {
   if (finishes.length >= 2) {
     return { decision: 'drop', reason: `${finishes.length} finishes already done — "${finishes.slice(0, 3).join('", "')}" (Rule #0)` };
   }
-  if (photos > 0 && photos <= 4) return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access (tenant?)` };
+  // Only trust a low count that came off the full photo grid. When the grid
+  // fails to load the app falls back to the carousel, which only ever has ~4
+  // preloaded — that dropped 844 Brunswick (29 photos) as "exterior-only".
+  if (photos > 0 && photos <= 4 && meta.photosReliable !== false) {
+    return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access` };
+  }
   // Remarks say nothing either way. This engine reads TEXT only — it has not
   // looked at a single photo — so "no renovated keyword" is not evidence the
   // house is a fixer. Auto-keeping here is what let renovated listings through.
   // Hand it to a human (or to AI vision, which does look) instead of guessing.
   return { decision: 'manual', reason: 'remarks are silent on condition — photos must be judged by eye' };
+}
+
+// ---- qualification gate: Opportunity Score 0-100 and an A / B / C bucket ----
+//
+//   A — WORK NOW        score >= 70: strong distress / value-add signals
+//   B — AI REVIEW ONLY  score 35-69: plausible, not obvious — needs a deeper look
+//   C — AUTO-PASS       score < 35, or a hard exclusion: never reaches the board
+//
+// A listing cannot enter the working queue until something here says there is
+// a plausible value-add opportunity. Hard exclusions (renovated, multi-unit,
+// fire, structural / permit-heavy, too few photos) come straight from
+// rulesDecide, so the two can never disagree about what is disqualifying.
+// Everything else is scored from the listing text and data — public AND
+// private remarks, price cuts, $/sqft against the area, age and DOM. Photos are
+// not scored yet; AI vision still decides keep/drop when it is switched on.
+const BUCKET_A = 70, BUCKET_B = 35;
+const BUCKET_LABEL = { A: 'A — Work Now', B: 'B — AI Review', C: 'C — Auto-Pass' };
+
+// Fixer language for SCORING. KEEP_KW also carries probate / estate / first
+// time on market, which score under their own signals below — counting them
+// twice would inflate the score.
+const FIXER_KW = /(fixer|\bas[- ]is\b|\btlc\b|handyman|contractor special|needs work|needs updating|diamond in the rough|great potential|investor special)/i;
+const DISTRESS_KW = /(probate|trust sale|estate sale|court confirmation|conservatorship|administrator|executor|heirs?\b|inherited)/i;
+const ORIGINAL_KW = /((?:first|1st) time on (?:the )?market|same (?:owner|family) (?:for|since)|(?:long[- ]?time|original) owners?|in the (?:same )?family for|original condition|untouched|time capsule|never (?:been )?(?:updated|renovated|remodel))/i;
+const VACANT_KW = /\bvacant\b|delivered vacant|no one living/i;
+const HOARD_KW = /(hoarder|clutter(?:ed)?|needs (?:a )?(?:good )?clean[- ]?out|full of (?:contents|belongings)|sold with contents)/i;
+const MOTIVATED_KW = /(cash only|cash offers?|investor special|investors? welcome|bring (?:all )?offers|motivated seller|priced to sell|quick close|no repairs will be made|seller will not make any repairs)/i;
+const STAGED_KW = /(professionally staged|virtually staged|staged to perfection|beautifully staged)/i;
+
+/**
+ * Score one listing. `m` carries what the report and the grid gave us:
+ *   remarks, privateRemarks, condition, propClass, addr, photos, photosReliable,
+ *   dom, yearBuilt, price, origPrice, ppsfRatio (listing $/sqft ÷ area median),
+ *   whenUnsure ('keep' | 'drop').
+ * Returns { bucket, label, score, decision: 'keep'|'drop', why, hard, signals }.
+ */
+function qualify(m) {
+  m = m || {};
+  const text = [m.remarks, m.privateRemarks].filter(Boolean).join(' ');
+  if (isConfirmed(m.addr)) {
+    return { bucket: 'A', label: BUCKET_LABEL.A, score: 100, decision: 'keep', hard: false,
+      why: 'confirmed deal — kept regardless of the rules', signals: [] };
+  }
+
+  const r = rulesDecide({ ...m, remarks: text });
+  const signals = [];
+  const add = (pts, what) => { signals.push({ pts, what }); };
+  const t = (text + ' ' + (m.condition || '')).toLowerCase();
+  const hit = re => (t.match(re) || [''])[0];
+
+  // Opportunity signals.
+  if (NEEDS_WORK_KW.test(t)) add(20, `needs work — "${hit(NEEDS_WORK_KW)}"`);
+  else if (FIXER_KW.test(t)) add(20, `fixer / as-is — "${hit(FIXER_KW)}"`);
+  if (DISTRESS_KW.test(t)) add(10, `probate / trust / estate — "${hit(DISTRESS_KW)}"`);
+  if (ORIGINAL_KW.test(t)) add(10, `original / long-held — "${hit(ORIGINAL_KW)}"`);
+  if (TENANT_KW.test(t)) add(5, 'tenant occupied — possible motivated seller');
+  if (VACANT_KW.test(t)) add(5, 'vacant');
+  if (HOARD_KW.test(t)) add(10, `clutter / hoarder — "${hit(HOARD_KW)}"`);
+  if (MOTIVATED_KW.test(t)) add(5, `motivated seller — "${hit(MOTIVATED_KW)}"`);
+
+  const orig = num(m.origPrice), list = num(m.price);
+  const cut = orig > list && list > 0 ? (orig - list) / orig : 0;
+  if (cut >= 0.08) add(15, `price cut ${Math.round(cut * 100)}% ($${Math.round((orig - list) / 1000)}k)`);
+  else if (cut >= 0.02) add(10, `price cut ${Math.round(cut * 100)}% ($${Math.round((orig - list) / 1000)}k)`);
+
+  const ratio = Number(m.ppsfRatio) || 0;
+  if (ratio > 0 && ratio < 0.75) add(15, `$/sqft ${Math.round(ratio * 100)}% of the area median`);
+  else if (ratio > 0 && ratio < 0.9) add(8, `$/sqft ${Math.round(ratio * 100)}% of the area median`);
+  else if (ratio > 1.2) add(-10, `$/sqft ${Math.round(ratio * 100)}% of the area median — priced above the area`);
+
+  const yb = Number(m.yearBuilt) || 0;
+  if (yb >= 1850 && yb <= 1960) add(5, `built ${yb}`);
+  const dom = Number(m.dom) || 0;
+  if (dom >= 21) add(5, `${dom} days on market`);
+
+  // Retail-ready signals that are not disqualifying on their own.
+  const finishes = FINISH_KW.map(re => (t.match(re) || [''])[0]).filter(Boolean);
+  if (finishes.length === 1 && !NEEDS_WORK_KW.test(t)) add(-5, `one updated finish — "${finishes[0]}"`);
+  if (STAGED_KW.test(t)) add(-5, `staged — "${hit(STAGED_KW)}"`);
+  if (!text.trim()) signals.push({ pts: 0, what: 'no remarks — nothing to read, needs a look' });
+
+  const raw = 40 + signals.reduce((s, x) => s + x.pts, 0);
+  let score = Math.max(0, Math.min(100, raw));
+  const top = signals.filter(x => x.pts > 0).sort((a, b) => b.pts - a.pts).map(x => x.what);
+  const neg = signals.filter(x => x.pts < 0).map(x => x.what);
+
+  // Hard exclusions: auto-pass whatever the score would have been.
+  if (r.decision === 'drop') {
+    score = Math.min(score, 15);
+    return { bucket: 'C', label: BUCKET_LABEL.C, score, decision: 'drop', hard: true,
+      why: r.reason, signals };
+  }
+
+  let bucket = score >= BUCKET_A ? 'A' : score >= BUCKET_B ? 'B' : 'C';
+  // Remarks silent on condition and the reviewer asked for unsure = drop.
+  if (r.decision === 'manual' && m.whenUnsure === 'drop' && bucket === 'B' && !top.length) bucket = 'C';
+  const why = [...top, ...neg].join(' + ') || r.reason;
+  return { bucket, label: BUCKET_LABEL[bucket], score, decision: bucket === 'C' ? 'drop' : 'keep',
+    hard: false, why, signals };
 }
 
 /**
@@ -439,7 +544,26 @@ function parseDetail(text, wantMls) {
     // The MLS's own classification — "Res. Single Family / Attached, Single
     // Family". It outranks any keyword in the remarks about second units.
     propClass: grab(/Class:?\s*([^\n\t]{0,80})/i),
+    // "Orig Price: $998,000 ... List Price: $899,000" — a cut is a signal.
+    origPrice: num(grab(/Orig(?:inal)?\s*Price:?\s*(\$?[\d,]+)/i)) || '',
+    listPrice: num(grab(/List\s*Price:?\s*(\$?[\d,]+)/i)) || '',
+    // "Listed By: Daniel K. Cheng, Coldwell Banker Realty" — who to call.
+    listedBy: grab(/Listed\s*By:?\s*([^\n]{0,120})/i),
+    privateRemarks: privateRemarks(block),
   };
+}
+
+/**
+ * Private / agent-only remarks. The Client Full report does not carry them;
+ * the Agent Full report does, and the label varies ("Private:", "Agent
+ * Remarks:", "Confidential Remarks:"), so several are accepted. "Agent:" on
+ * its own is deliberately NOT one — it also labels contact lines.
+ * UNVERIFIED against a live Agent Full page: the app saves sample report text
+ * (report-samples/ under userData) so the label can be confirmed.
+ */
+function privateRemarks(text) {
+  const m = String(text || '').match(/(?:^|\n)\s*(?:Private(?:\s*Remarks?)?|(?:Agent|Realtor|Broker|Confidential)\s*(?:Only\s*)?Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
 }
 
 module.exports = {
@@ -447,4 +571,5 @@ module.exports = {
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
+  qualify, privateRemarks, BUCKET_LABEL,
 };

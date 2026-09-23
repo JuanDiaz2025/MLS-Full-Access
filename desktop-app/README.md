@@ -42,17 +42,17 @@ install (creates a desktop shortcut) or run the portable exe directly.
    Single-Family · **45 days on market or less** · 25+ years old). After the first
    pass each run is incremental — listings already checked are skipped outright,
    so day two only costs you the new ones.
-3. **Photo review** — for each candidate the MLS window shows the full photo
-   gallery. Two ways to judge:
-   - **Manual (default):** click **Keep** (genuine dated fixer) or **Drop**
-     (renovated / multi-unit / exterior-only). Clean-but-dated = **Keep**;
-     judge the finishes, not the staging. **Pause/Resume** anytime.
-   - **Auto-verify (AI):** tick the box in step 2 and paste an Anthropic API key.
-     Claude looks at each listing's photos, applies the buy-box rules (Rule #0
-     renovated / Rule #2 review-every-photo / multi-unit / exterior-only), and
-     decides Keep/Drop on its own — no clicking. Model defaults to
-     `claude-opus-5`; switch to `claude-sonnet-5` or `claude-haiku-4-5` for lower
-     cost. Your key and the listing photos are sent to Anthropic for this.
+3. **Qualification gate** — each candidate's report (public + private remarks,
+   original vs list price, listing agent) and full photo gallery are read, and it
+   gets an **Opportunity Score (0–100)** and a bucket:
+   - **A — Work Now** (70+): strong distress / value-add signals
+   - **B — AI Review** (35–69): plausible, not obvious — worth a deeper look
+   - **C — Auto-Pass** (under 35, or renovated / multi-unit / fire / structural /
+     too few photos): never reaches the board; logged on **Rejected** with the
+     score and the reason.
+   Tenant-occupied is **not** a drop — it counts toward the score. The run never
+   stops to ask. With an Anthropic API key and **Use AI vision** ticked, Claude
+   also judges the photos and can turn a keep into a C.
 4. **Report** — kept candidates get size-matched sold comps → ARV (what it's worth
    after repair), Light/Heavy rehab, holding, days on market, and the dollar profit
    gate (Strong Deal / Marginal / Pass, with a Flip Quality label). **Export** to
@@ -61,7 +61,8 @@ install (creates a desktop shortcut) or run the portable exe directly.
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,
    nothing to refresh. Three tabs are created if they don't exist:
-   - **Leads** — the qualifying properties. **Address is one column with the whole
+   - **Leads** — the A and B properties, A first, with **Bucket · Opportunity Score ·
+     Why · Price Cut · Listing Agent** at the end of each row. **Address is one column with the whole
      thing** — `1326 Palou Avenue, San Francisco, CA 94124` — not split across
      City and Zip.
    - **Rejected** — everything dropped, with the reason and the stage it fell out at

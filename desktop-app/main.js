@@ -36,7 +36,8 @@ ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
 const KPI_FILE = () => path.join(app.getPath('userData'), 'kpi-history.json');
 const KPI_FIELDS = ['runs', 'scanned', 'candidates', 'skippedAlreadyChecked', 'reviewed', 'kept',
   'dropped', 'droppedRenovated', 'droppedMultiUnit', 'droppedFire',
-  'droppedFewPhotos', 'droppedOther', 'leads', 'gateCleared', 'pushed', 'pushSkipped'];
+  'droppedFewPhotos', 'droppedOther', 'leads', 'gateCleared', 'pushed', 'pushSkipped',
+  'bucketA', 'bucketB', 'bucketC'];
 const todayKey = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -294,6 +295,7 @@ async function showGallery(mls) {
       // against saved report text, which is how the wrong-listing bug surfaced.
       const raw = await js('document.body.innerText').catch(() => '');
       meta = core.parseDetail(raw, mls);
+      saveReportSample(mls, 'client', raw);
     }
   } catch (_) {}
 
@@ -305,25 +307,57 @@ async function showGallery(mls) {
   // exactly the "you are not analysing the images" complaint. PhotoPopup.aspx
   // with View=G is a grid of the lot; the URL is built from the media Key on
   // any carousel image, so no popup window has to be driven.
-  let urls = [];
+  let urls = [], gridOk = false, info = null;
   try {
-    const info = await js(`(() => {
+    info = await js(`(() => {
       const img = [...document.images].find(i => /MediaServer/i.test(i.src));
       if (!img) return null;
-      const key = (img.src.match(/Key=(\d+)/) || [])[1];
-      const tid = (img.src.match(/TableID=(\d+)/) || [])[1] || '9';
-      const n = (document.body.innerText.match(/\b\d+\s*\/\s*(\d+)\b/) || [])[1];
+      // Double backslashes: this is a template string, and a single \d here
+      // reaches the page as a bare "d" — the regex never matched, so the full
+      // photo grid was never opened and every listing fell back to the ~4
+      // photos the carousel preloads.
+      const key = (img.src.match(/Key=(\\d+)/) || [])[1];
+      const tid = (img.src.match(/TableID=(\\d+)/) || [])[1] || '9';
+      const n = (document.body.innerText.match(/\\b\\d+\\s*\\/\\s*(\\d+)\\b/) || [])[1];
       return key ? { key: key, tid: tid, n: n || '60' } : null;
     })()`).catch(() => null);
+  } catch (_) {}
+  // Carousel fallback, read NOW while the report is still on screen — once we
+  // leave for the Agent Full report or the photo grid it is gone.
+  const carousel = await js(core.JS_PHOTOS).catch(() => []);
+
+  // Private / agent-only remarks live on the Agent Full report, not Client
+  // Full. Same results page, different display — switch, read, move on.
+  try {
+    const agentSel = await js(`(() => { const s=[...document.querySelectorAll('select')].find(se=>[...se.options].some(o=>/^\\s*Agent Full\\s*$/i.test(o.text))); return s?s.id:null; })()`);
+    if (agentSel) {
+      await js(`(() => { const s=document.getElementById(${JSON.stringify(agentSel)}); if(!s) return; const o=[...s.options].find(o=>/^\\s*Agent Full\\s*$/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
+      await sleep(2600);
+      const rawAgent = await js('document.body.innerText').catch(() => '');
+      saveReportSample(mls, 'agent', rawAgent);
+      const agent = core.parseDetail(rawAgent, mls);
+      if (!agent.mismatch) {
+        meta.privateRemarks = agent.privateRemarks || '';
+        // Agent Full may carry facts Client Full left blank.
+        ['origPrice', 'listPrice', 'listedBy', 'remarks', 'address', 'zip', 'yearBuilt', 'propClass', 'condition']
+          .forEach(k => { if (!meta[k] && agent[k]) meta[k] = agent[k]; });
+      }
+    }
+  } catch (_) {}
+
+  try {
     if (info) {
       await nav('https://search.mlslistings.com/Matrix/Public/PhotoPopup.aspx'
         + `?n=${info.n}&i=0&L=1&tid=${info.tid}&key=${info.key}&mtid=1&View=G`, 3000);
       urls = await js(`[...document.images].map(i => i.src).filter(u => /MediaServer/i.test(u))`)
         .catch(() => []);
+      gridOk = urls.length > 0;
     }
   } catch (_) {}
   // Fall back to the carousel rather than judging a listing with no photos.
-  if (!urls.length) urls = await js(core.JS_PHOTOS).catch(() => []);
+  // Its count is NOT the listing's photo count (only ~4 are ever preloaded),
+  // so gridOk=false tells the rules not to read "few photos" into it.
+  if (!urls.length) urls = carousel || [];
 
   // The grid page IS the gallery, so there is nothing to rebuild — just wait
   // for the images to decode before anything judges the listing.
@@ -340,11 +374,27 @@ async function showGallery(mls) {
   const dwell = Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
   if (dwell) await sleep(dwell);
 
-  return { count: urls.length, urls: urls,
+  return { count: urls.length, urls: urls, gridOk: gridOk,
     remarks: meta.remarks || '', condition: meta.condition || '',
     zip: meta.zip || '', address: meta.address || '', yearBuilt: meta.yearBuilt || '',
     propClass: meta.propClass || '',
+    privateRemarks: meta.privateRemarks || '', origPrice: meta.origPrice || '',
+    listPrice: meta.listPrice || '', listedBy: meta.listedBy || '',
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
+}
+
+/** Keep the raw report text for the first few listings of each run, so the
+ *  Agent Full layout (private-remarks label) can be checked against the real
+ *  page instead of guessed. userData/report-samples/<MLS#>-<kind>.txt */
+let samplesThisRun = 0;
+function saveReportSample(mls, kind, text) {
+  try {
+    if (!text || samplesThisRun >= 10) return;
+    if (kind === 'agent') samplesThisRun++;
+    const dir = path.join(app.getPath('userData'), 'report-samples');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${String(mls).replace(/[^A-Z0-9]/gi, '')}-${kind}.txt`), text);
+  } catch (_) {}
 }
 
 async function compFor(mls, zip, sqft) {
@@ -383,7 +433,7 @@ and the state of the finishes. Pay closest attention to the KITCHEN and BATHROOM
 that is where renovation shows first, and a listing is often photographed to hide it.
 Do not answer from the exterior shots alone.
 
-KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
+KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, tenant-occupied (NOT a reason to drop), old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
 
 The ONLY question that matters is: HAS WORK BEEN DONE TO THIS HOUSE? Judge the FINISHES, not the housekeeping or the staging. A house that is tidy, empty, swept, or professionally staged but still has ORIGINAL DATED FINISHES is a KEEP — "clean" is not "renovated". When torn between "clean but dated" and "lightly updated", choose KEEP.
 
@@ -394,7 +444,6 @@ DROP if ANY of:
 - Newer build that looks modern.
 - Exterior-only / too few interior photos to judge condition (then DROP, reason "insufficient photos").
 - NOT A QUICK FLIP. We want a COSMETIC job — paint, floors, kitchen, bath, done in one pass without drawings or engineers. DROP if the photos or remarks show work that is structural or permit-heavy: foundation cracks, visible settlement or a sloping/sagging floor, jacked-up posts or shoring, an open framed shell / stripped down to studs, a collapsed or missing roof, extensive water damage or mould, or a tear-down / land-value listing. A dated house needing everything cosmetically is EXACTLY what we want; a house needing an engineer is not.
-- Tenant-occupied: remarks say tenant/lease in place, or the photos show a lived-in unit the seller cannot deliver vacant.
 
 If you saw NO kitchen photo and NO bathroom photo, you cannot judge condition: DROP with
 reason "no kitchen/bath photos".
@@ -508,6 +557,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     : core.DEFAULT_BUYBOX;
   if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
   control.running = true; control.stopped = false; control.paused = false;
+  samplesThisRun = 0;
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
   // Only a run that actually started closes the browser window at the end.
   // Bailing out for "not signed in" and then shutting the window the user is
@@ -554,7 +604,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
 
       // Medians are per-city anyway, so filtering a city on its own gives the
       // same answer as filtering the whole batch — without the wait.
-      const { candidates: cityCands, rejected: cityFiltered } = core.filterCandidates({ [label]: scanned });
+      const { candidates: cityCands, rejected: cityFiltered, medians: cityMedians } = core.filterCandidates({ [label]: scanned });
       runKpi.candidates += cityCands.length;
 
       // Log why listings failed the buy-box filter. Capped, near-misses first —
@@ -622,34 +672,41 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const base = { i: i + 1, total: fresh.length, city: cityOf(c), mls: c.mls, addr: c.addr,
           price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n,
           remarks: gal.remarks || '', details: gal.details || {} };
-        // The run NEVER stops to ask. AI vision when a key is configured,
-        // otherwise the text rules; when the rules genuinely cannot tell
-        // (they read remarks, they never see a photo) the fallback in
-        // section 2 settles it. There is no approval step to click through.
-        let decision, dropReason = '';
-        if (core.isConfirmed(c.addr)) {
-          // A deal Bryan has already confirmed. No screen, and no model, gets
-          // to overrule that.
-          decision = 'keep'; dropReason = '';
-          send('review', { ...base, verdict: 'keep', why: 'Confirmed deal — kept regardless of the rules' });
-          log(`  KEEP ${c.addr} — confirmed deal`, 'good');
-        } else if (cfg.useAI && cfg.apiKey) {
+        // THE QUALIFICATION GATE. Every listing gets an Opportunity Score and a
+        // bucket — A work now, B AI review, C auto-pass. C never reaches the
+        // board; it goes to the Rejected tab with its score and why. Hard
+        // exclusions (renovated, multi-unit, fire, structural, too few photos)
+        // are always C. The run never stops to ask.
+        const q = core.qualify({
+          addr: c.addr, remarks: gal.remarks, privateRemarks: gal.privateRemarks,
+          condition: gal.condition, propClass: gal.propClass,
+          photos: n, photosReliable: gal.gridOk,
+          dom: domOf(c), yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
+          price: gal.listPrice || c._price, origPrice: gal.origPrice,
+          ppsfRatio: cityMedians && cityMedians[c._cityKey] ? c._ppsf / cityMedians[c._cityKey] : 0,
+          whenUnsure: cfg.whenUnsure,
+        });
+        if (!gal.gridOk && n) log(`  photo grid did not load — only ${n} carousel photo(s) seen, photo count not used`, 'warn');
+        if (gal.privateRemarks) log(`  private remarks read (${gal.privateRemarks.length} chars)`);
+        if (cfg.useAI && cfg.apiKey && !core.isConfirmed(c.addr) && !q.hard) {
+          // AI vision still has the final say on condition when it is on: a
+          // DROP from the photos is an auto-pass whatever the text scored.
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
-          decision = v.decision; dropReason = v.reason;
-          send('review', { ...base, verdict: v.decision, why: 'AI (vision): ' + v.reason });
-          log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
-        } else {
-          const v = core.rulesDecide({ addr: c.addr, photos: n, remarks: gal.remarks,
-            condition: gal.condition, propClass: gal.propClass });
-          const settled = v.decision === 'manual' ? (cfg.whenUnsure === 'drop' ? 'drop' : 'keep') : v.decision;
-          decision = settled;
-          dropReason = v.decision === 'manual' ? v.reason + ' (auto-' + settled + ')' : v.reason;
-          const tag = v.decision === 'manual' ? `Rules unsure → ${settled.toUpperCase()}` : `Rules ${settled.toUpperCase()}`;
-          send('review', { ...base, verdict: settled, why: tag + ': ' + v.reason });
-          log(`  ${tag}: ${v.reason}`, settled === 'keep' ? 'good' : 'info');
+          if (v.decision !== 'keep') {
+            Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop',
+              score: Math.min(q.score, 15), why: 'AI (vision): ' + v.reason });
+          } else {
+            q.why = q.why + ' + AI (vision) keep: ' + v.reason;
+          }
         }
+        c._q = q; c._gal = { origPrice: gal.origPrice, listPrice: gal.listPrice, listedBy: gal.listedBy };
+        const decision = q.decision;
+        const dropReason = q.decision === 'drop' ? `Auto-pass (score ${q.score}): ${q.why}` : '';
+        send('review', { ...base, verdict: decision, why: `${q.label} · score ${q.score} — ${q.why}` });
+        log(`  ${q.label} · score ${q.score} — ${q.why}`, decision === 'keep' ? 'good' : 'info');
         if (control.stopped) break;
         runKpi.reviewed++;
+        runKpi['bucket' + q.bucket]++;
         if (decision === 'keep') { kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
         else {
           runKpi.dropped++; runKpi[dropBucket(dropReason)]++;
@@ -658,7 +715,8 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           cityRejects.push({
             mls: c.mls, addr: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
             price: c._price, ppsf: c._ppsf, sqft: c._sqft, dom: domOf(c),
-            reason: dropReason || 'dropped at photo review', stage: 'Photo review',
+            reason: dropReason || 'dropped at photo review',
+            stage: c._q && !c._q.hard && !/^AI/.test(c._q.why) ? 'Qualification gate' : 'Photo review',
             link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
           });
         }
@@ -687,6 +745,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             arv: 0, arvBasis: 'not comped yet',
             recommendation: 'Needs Comps', flipQuality: '', score: '',
             risks: 'Condition-qualified only — ARV and profit not yet calculated',
+            ...gateFields(c),
             link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
             // Push these: with no ARV there is no gate to clear, and the point
             // of this mode is to get the qualified list in front of you.
@@ -710,16 +769,18 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
           arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
           link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
-          ...deal });
+          ...deal, ...gateFields(c) });
       }
       }
 
       leads.push(...cityLeads);
       // Without comps there is no profit to rank by — fall back to the best
       // value signal we do have, cheapest $/sqft first.
-      leads.sort(cfg.runComps
-        ? (a, b) => b.grossLight - a.grossLight
-        : (a, b) => (a.ppsf || Infinity) - (b.ppsf || Infinity));
+      // A before B, then the higher Opportunity Score; profit (with comps) or
+      // cheapest $/sqft (without) breaks ties.
+      leads.sort((a, b) => String(a.bucket || 'Z').localeCompare(String(b.bucket || 'Z'))
+        || (b.oppScore || 0) - (a.oppScore || 0)
+        || (cfg.runComps ? b.grossLight - a.grossLight : (a.ppsf || Infinity) - (b.ppsf || Infinity)));
       runKpi.leads = leads.length;
       runKpi.gateCleared = leads.filter(l => l.surface).length;
       send('report', { leads, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
@@ -751,7 +812,9 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const d = writeBackup(rows, cityRejects);
         if (!d.ok) log(`[${label}] could not write the local backup: ${d.error}`, 'warn');
       }
-      log(`━━━ ${label} done: ${kept.length} kept, ${cityWinners.length} clear the gate ━━━`, 'good');
+      const cityA = cityLeads.filter(l => l.bucket === 'A').length;
+      log(`━━━ ${label} done: ${cityA} A — Work Now · ${cityLeads.length - cityA} B — AI Review · `
+        + `${cityRejects.filter(r => r.stage !== 'Buy-box filter').length} C — Auto-Pass ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'done',
         kept: kept.length, winners: cityWinners.length });
     }
@@ -762,8 +825,9 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       return { ok: true, leads: [] };
     }
     // Leads were already written city by city above — don't re-send them here.
-    log(`Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate`
-      + (googleReady() ? `; ${runKpi.pushed} written to the sheet.` : '.'), 'good');
+    log(cfg.runComps
+      ? `Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate.`
+      : `Done. ${leads.length} lead(s) on the board — comps are off, so no profit figures yet.`, 'good');
     return { ok: true, leads };
   } catch (e) {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
@@ -791,8 +855,8 @@ function finishRun(runKpi, day, started) {
   const line = control.stopped
     ? `Scan STOPPED early — ${runKpi.reviewed} reviewed, ${runKpi.kept} kept, ${runKpi.pushed} written to the sheet.`
     : `Scan COMPLETE — ${runKpi.scanned} scanned · ${runKpi.skippedAlreadyChecked} already checked (skipped) · `
-      + `${runKpi.reviewed} reviewed · ${runKpi.kept} kept · ${runKpi.dropped} dropped · `
-      + `${runKpi.pushed} written to the sheet.`;
+      + `${runKpi.reviewed} reviewed → ${runKpi.bucketA} A — Work Now · ${runKpi.bucketB} B — AI Review · `
+      + `${runKpi.bucketC} C — Auto-Pass · sheet: ${runKpi.pushed} new, ${runKpi.pushSkipped} updated.`;
   log(line, 'good');
   log('Nothing else is running. Start scan again whenever you want the next pass.', 'good');
   send('done', {
@@ -925,7 +989,12 @@ const LEAD_HEADERS = [
   'Status', 'MLS #', 'Address',
   'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
   'Purchase Price', '$/SqFt', 'Notes', 'MLS Link', 'First Added',
+  // Qualification gate — appended at the END so every existing row and the
+  // reviewer script (which reads by header name) keep lining up.
+  'Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Listing Agent',
 ];
+// Computed by the gate on every review, so a re-score replaces them.
+const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut'];
 const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
@@ -949,6 +1018,8 @@ const leadRecord = r => ({
   'Beds': r.beds, 'Baths': r.baths, 'SqFt': r.sqft, 'Lot SqFt': r.lotSqft,
   'Year Built': r.yearBuilt, 'DOM': r.dom, 'Purchase Price': r.price, '$/SqFt': r.ppsf,
   'Notes': r.notes, 'MLS Link': r.link || mlsLink(r.mls), 'First Added': today(),
+  'Bucket': r.bucket || '', 'Opportunity Score': r.oppScore != null ? r.oppScore : '',
+  'Why': r.why || '', 'Price Cut': r.priceCut || '', 'Listing Agent': r.listedBy || '',
 });
 
 const rejectRecord = r => ({
@@ -992,7 +1063,7 @@ async function googleSync(leads, rejects) {
     leads = fresh;
 
     const L = (leads && leads.length)
-      ? await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', leads.map(leadRecord))
+      ? await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', leads.map(leadRecord), { overwrite: GATE_HEADERS })
       : blank;
     // Rejections can repeat an MLS # across stages; key on it anyway so the tab
     // holds one row per property rather than growing a row per scan.
@@ -1095,6 +1166,18 @@ ipcMain.handle('google-sync', async (_e, { leads, rejects }) => {
   return r;
 });
 
+/** The qualification-gate fields carried on every lead. */
+function gateFields(c) {
+  const q = c._q || {}, g = c._gal || {};
+  // Same list price the score used — the report's, falling back to the grid's.
+  const orig = core.num(g.origPrice), list = core.num(g.listPrice) || c._price;
+  return {
+    bucket: q.bucket || '', bucketLabel: q.label || '', oppScore: q.score != null ? q.score : '',
+    why: q.why || '', listedBy: g.listedBy || '',
+    priceCut: orig > list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
+  };
+}
+
 /** One lead in the shape the sheet expects. Shared by the sheet writer and the
  *  local backup so the two can never drift apart. */
 function toSheetRow(l) {
@@ -1108,6 +1191,8 @@ function toSheetRow(l) {
     rehabLight: l.rehabLight || '', rehabHeavy: l.rehabHeavy || '',
     holding: l.holding || '', maxOffer: l.recommendedMaxOffer || '',
     score: l.score || '', recommendation: l.recommendation || '', flipQuality: l.flipQuality || '',
+    bucket: l.bucketLabel || '', oppScore: l.oppScore, why: l.why || '',
+    priceCut: l.priceCut || '', listedBy: l.listedBy || '',
   };
 }
 

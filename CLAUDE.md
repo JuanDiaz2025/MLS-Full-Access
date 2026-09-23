@@ -310,9 +310,27 @@ headless-scrape workflow):
   buy box now reaches photo review, so photo review is the real filter and the
   volume is far higher.
 - **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
-  **tenant-occupied**, multi-unit, vacant lot, **fire-damaged** (any listing noting a
+  multi-unit, vacant lot, **fire-damaged** (any listing noting a
   past fire / fire damage / fire-gutted interior — drop even if it reads as a genuine
   as-is fixer).
+- **Tenant-occupied is NOT a drop any more** (Seth, 23 Sep). It scores as an
+  opportunity signal (a seller stuck with a tenant is often motivated) in the
+  qualification gate below. Foundation / roof / fire / water / non-permitted, DOM
+  over 45 and too few interior photos all stay auto-passed.
+- **🚦 Qualification gate — Opportunity Score + A / B / C** (Seth, 23 Sep).
+  Nothing enters the working board until the gate finds a plausible value-add
+  opportunity. `core.qualify()` in `scan-core.js` scores every reviewed listing
+  0–100 (base 40) from the public **and private** remarks, the price cut
+  (`Orig Price` vs `List Price` on the report), $/sqft against the area median,
+  age and DOM, and returns a bucket:
+  **A — Work Now** (70+) · **B — AI Review** (35–69) · **C — Auto-Pass** (<35 or
+  any hard exclusion from `rulesDecide`). A and B go to `Leads` sorted A first,
+  highest score first; C goes to `Rejected` with the score and the why (stage
+  *Qualification gate*, or *Photo review* for a hard exclusion). Photos are not
+  scored yet — AI vision, when on, can still turn a keep into a C.
+  Private remarks come from the **Agent Full** report (Client Full does not have
+  them); the label is **unverified** against a live page — the app saves raw
+  report text to `report-samples/` under userData so it can be checked.
 - **⚡ QUICK FLIPS ONLY** (Bryan, 1 Aug). A quick flip is a **cosmetic** job — paint,
   floors, kitchen, bath, done in one pass without drawings or engineers. **Drop**
   anything structural or permit-heavy even when it is a genuine fixer: foundation
@@ -373,8 +391,12 @@ The desktop app writes here **directly over the Sheets API** (§7) — there is 
 web app, no deployment and no shared secret any more. Three tabs:
 
 - **`Leads`** — `Status · MLS # · Address · Beds · Baths · SqFt · Lot SqFt ·
-  Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added`.
-  Keyed on `MLS #`; rows are append-or-backfill.
+  Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added ·
+  Bucket · Opportunity Score · Why · Price Cut · Listing Agent`.
+  Keyed on `MLS #`; rows are append-or-backfill. The gate columns were added at
+  the **end** so existing rows and the reject script (which reads by header
+  name) keep lining up; `Bucket`, `Opportunity Score`, `Why` and `Price Cut`
+  are app-owned and replaced on a re-score, everything else is never overwritten.
 - **`Rejected`** — `Rejected On · MLS # · Address · Price · $/SqFt · SqFt · DOM ·
   Reason · Stage · By · MLS Link`. Everything dropped lands here with the reason
   and the stage it fell out at.
@@ -479,6 +501,14 @@ window, clears "Now reviewing", resets the buttons and prints
 written to the sheet`. Nothing is left running. A run that never started (not
 signed in) leaves the browser window alone, so it cannot shut the window you are
 about to log in through. `finishRun()` in `main.js`.
+
+**The photo grid never actually opened until 23 Sep.** The snippet that reads
+the media `Key` sits inside a template string, and its single-backslash `\d`
+reached the page as a bare `d`, so the regex never matched and every listing
+fell back to the ~4-photo carousel — which is what dropped 844 Brunswick (29
+photos) as "exterior-only". Fixed (`\\d`), and `gridOk` now tells the rules
+whether a low photo count came off the real grid; a carousel count is never
+read as "no interior access".
 
 **The AI sees EVERY photo now.** `showGallery()` used to read the Client Full
 carousel, which yields ~4 of 26 and starts with the exterior — so vision was

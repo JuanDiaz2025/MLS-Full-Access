@@ -67,11 +67,14 @@
 
   <div class="card">
     <h2>2 · How each listing is judged</h2>
-    <div class="hint">The run decides Keep/Drop on its own and <b>never stops to ask you</b>.
-      Built-in rules read the agent remarks: they drop renovated / turnkey wording,
-      multi-unit, tenant-occupied, fire damage, and anything that isn't a quick flip
-      (foundation, structural, permits, tear-down). Rules can't see photos, so add a key
-      below and AI vision judges the pictures instead.</div>
+    <div class="hint">Every listing gets an <b>Opportunity Score (0–100)</b> and a bucket, and the
+      run <b>never stops to ask you</b>:
+      <b>A — Work Now</b> (70+) · <b>B — AI Review</b> (35–69) · <b>C — Auto-Pass</b> (under 35, hidden on the Rejected tab).
+      The score reads the public and private remarks, price cuts, $/sqft against the area, age and
+      days on market. Always auto-passed: renovated / turnkey, multi-unit, fire damage, and anything
+      that isn't a quick flip (foundation, structural, permits, tear-down). Tenant-occupied is
+      <b>not</b> dropped — it counts as an opportunity. Rules can't see photos; add a key below and
+      AI vision judges the pictures too.</div>
     <label style="margin-top:10px">When the remarks don't say either way</label>
     <select id="whenUnsure" style="width:100%;padding:6px">
       <option value="keep">Keep it and carry on (default)</option>
@@ -113,7 +116,7 @@
     <div class="hint"><b>What it looks for</b> — Active · single-family ·
       <b>45 days on market or less</b> · 25+ years old · <b>quick flips only</b>
       (cosmetic work; foundation / structural / permit jobs and tear-downs are dropped) ·
-      not renovated · not multi-unit · not tenant-occupied.
+      not renovated · not multi-unit.
       <br><b>Only new listings.</b> Every MLS # ever checked is remembered, so today's run
       skips everything yesterday already looked at — day two costs you only the new ones.
       <br><b>One area at a time, in order</b> — each is finished completely, written to
@@ -417,8 +420,8 @@
   // ---------------- daily KPI ----------------
   const KPI_COLS = [
     ['scanned','Scanned'], ['candidates','Candidates'], ['reviewed','Reviewed'],
-    ['kept','Kept'], ['dropped','Dropped'], ['leads','Leads'],
-    ['gateCleared','Clear gate'], ['pushed','To sheet'],
+    ['bucketA','A'], ['bucketB','B'], ['bucketC','C'],
+    ['pushed','To sheet'],
   ];
   function renderKpi(rep){
     if(!rep) return;
@@ -428,7 +431,7 @@
     $('kpiToday').innerHTML = t.runs
       ? `<b>Today (${t.date})</b> — ${t.runs} run(s): `
         + `${t.scanned} scanned → ${t.candidates} candidates → ${t.reviewed} reviewed → `
-        + `<b>${t.kept} kept</b> → ${t.gateCleared} clear the gate → ${t.pushed} sent to the sheet.`
+        + `<b>${t.bucketA||0} A — Work Now</b> · ${t.bucketB||0} B — AI Review · ${t.bucketC||0} C — Auto-Pass → ${t.pushed} new on the sheet.`
         + `<br><span class="pill">keep rate ${pct(t.kept,t.reviewed)}</span> `
         + `<span class="pill">gate rate ${pct(t.gateCleared,t.leads)}</span>`
         + (t.dropped ? `<br>Dropped ${t.dropped}: `
@@ -467,20 +470,23 @@
     const surf = lastLeads.filter(l => l.surface);
     const noComps = lastLeads.length && lastLeads.every(l => l.needsComps);
     let html = `<div class="hint">${noComps
-      ? `${lastLeads.length} condition-qualified listing(s) — comps off, so no ARV or profit yet. Cheapest $/sqft first.`
+      ? `${lastLeads.length} listing(s) on the board — A before B, highest Opportunity Score first. Comps off, so no ARV or profit yet.`
       : `${surf.length} of ${lastLeads.length} kept leads clear the profit gate.`} Generated ${p.generatedAt}</div>`;
     html += noComps
-      ? '<table><thead><tr><th>Property</th><th>DOM</th><th>Beds</th><th>SqFt</th><th>Price</th><th>$/sqft</th></tr></thead><tbody>'
-      : '<table><thead><tr><th>Property</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th><th>Score</th></tr></thead><tbody>';
+      ? '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>DOM</th><th>SqFt</th><th>Price</th><th>$/sqft</th><th>Why</th></tr></thead><tbody>'
+      : '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th></tr></thead><tbody>';
     for (const l of lastLeads) {
-      const head = `<td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+      const esc = t => String(t == null ? '' : t).replace(/[<>&]/g, '');
+      const head = `<td><b>${esc(l.bucket)||'—'}</b></td><td class="mono">${l.oppScore!=null&&l.oppScore!==''?l.oppScore:'—'}</td>`+
+        `<td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
         `<td class="mono">${l.dom!=null&&l.dom!==''?l.dom:'—'}</td>`;
       html += noComps
-        ? `<tr class="surface">${head}<td class="mono">${l.beds||'—'}</td><td class="mono">${l.sqft||'—'}</td>`+
-          `<td class="mono">${money(l.price)}</td><td class="mono">$${l.ppsf||'—'}</td></tr>`
+        ? `<tr class="surface">${head}<td class="mono">${l.sqft||'—'}</td>`+
+          `<td class="mono">${money(l.price)}</td><td class="mono">$${l.ppsf||'—'}</td>`+
+          `<td class="hint">${esc(l.why)}</td></tr>`
         : `<tr class="${l.surface?'surface':''}">${head}`+
           `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
-          `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td><td class="mono">${l.score}</td></tr>`;
+          `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td></tr>`;
     }
     html += '</tbody></table>';
     $('report').innerHTML = html; $('reportCard').style.display='block';
