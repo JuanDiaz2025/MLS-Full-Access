@@ -194,6 +194,16 @@ async function waitIfPaused() {
   if (control.stopped) throw new Error('stopped');
 }
 
+/** Like waitIfPaused, but a Stop is an answer, not an exception. Loops that
+ *  have already read listings use it so a Stop BREAKS out and the work done
+ *  so far is still written to the sheet — throwing skipped that write, so a
+ *  Stop mid-refresh lost the last unsaved leads and a Stop mid-scan lost
+ *  reviewed leads the ledger already counted as checked. */
+async function stopRequested() {
+  try { await waitIfPaused(); } catch (_) { /* stopped */ }
+  return control.stopped;
+}
+
 // ---------- login ----------
 ipcMain.handle('login', async (_e, { user, pass }) => {
   ensureMlsWindow();
@@ -665,8 +675,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       // Seeded with the buy-box filter failures so both stages are represented.
       const cityRejects = filterRejects.map(r => ({ ...r, stage: 'Buy-box filter' }));
       for (let i = 0; i < fresh.length; i++) {
-        await waitIfPaused();
-        if (control.stopped) break;
+        if (await stopRequested()) break;   // save what was read, then stop
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
         const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false }));
@@ -778,8 +787,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       } else {
       send('city', { label, index: ai + 1, total: areas.length, phase: 'comping', count: kept.length });
       for (const c of kept) {
-        await waitIfPaused();
-        if (control.stopped) break;
+        if (await stopRequested()) break;   // save what was read, then stop
         log(`[${label}] Comping ${c.addr}…`);
         const zip = (c.zip || '').match(/9\d{4}/) ? c.zip : await js(`(() => { const m=document.body.innerText.match(/\\b(9[45]\\d{3})\\b/); return m?m[1]:''; })()`).catch(() => '');
         let comp = { arv: 0, medianPpsf: 0, band: 'n/a', n: 0 };
@@ -1360,8 +1368,7 @@ ipcMain.handle('refresh-board', async () => {
       log(`  fixed ${skipped.length} old MLS link(s) on closed / passed rows`);
     }
     for (let i = 0; i < todo.length; i++) {
-      await waitIfPaused();
-      if (control.stopped) break;
+      if (await stopRequested()) break;   // flush + Board rebuild below still run
       const r = todo[i], mls = val(r, 'MLS #');
       log(`  [${i + 1}/${todo.length}] ${val(r, 'Address') || mls}`);
       const gal = await showGallery(mls, { factsOnly: true }).catch(() => ({ mismatch: true }));

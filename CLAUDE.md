@@ -610,6 +610,15 @@ tab once and writes every changed row in one `values:batchUpdate` (90 rows = 4
 calls, tested), and `api()` waits out a quota refusal (20 s, 40 s, 65 s) before
 giving up. Never reintroduce a per-row read or write loop against the sheet.
 
+**Stop saves first.** `waitIfPaused()` THROWS on Stop, which skipped every
+write after the loop: a Stop mid-Refresh lost the unsaved leads (up to 9 — it
+flushes every 10) and never rebuilt the Board (live, 23 Sep: leads 21–29 lost
+their phones), and a Stop mid-Scan lost reviewed leads the ledger already
+marked checked, so they were never looked at again. Loops that have read
+listings use `stopRequested()` instead, which breaks out, so the flush / sheet
+write / Board rebuild still run. Only the search-paging steps (nothing
+reviewed yet) still throw.
+
 **A rejected lead never comes back.** Two guards, because the ledger alone is
 not enough: every scan starts by pulling the `Rejected` tab into the seen-ledger,
 and the writer re-checks that tab before appending. The second guard is the one
