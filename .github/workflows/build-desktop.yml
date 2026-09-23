@@ -7,8 +7,7 @@ on:
   workflow_dispatch: {}
   push:
     branches:
-      - claude/navigation-link-training-l0d5a3
-      - claude/memory-context-4u5cx1
+      - Flip-scout-Filters
     paths:
       - 'desktop-app/**'
       - '.github/workflows/build-desktop.yml'
@@ -41,15 +40,24 @@ jobs:
           path: desktop-app/dist/*.exe
           if-no-files-found: error
 
+      # One release per version, named for this branch, so a Flip Scout Filters
+      # build never lands in (or overwrites) the older FlipScout Desktop release.
+      - name: Read the app version
+        id: ver
+        shell: bash
+        run: echo "version=$(node -p "require('./desktop-app/package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Publish downloadable release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: flipscout-desktop
-          name: FlipScout Desktop (Windows)
+          tag_name: flip-scout-filters-v${{ steps.ver.outputs.version }}
+          name: Flip Scout Filters v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.sha }}
           body: |
+            **Flip Scout Filters v${{ steps.ver.outputs.version }}** — built from the `Flip-scout-Filters` branch.
             Download **FlipScout** below and run it — no Node, no build, no setup.
-            - the `FlipScout-<version>.exe` — installer (creates a desktop shortcut)
-            - the `...portable.exe` — single-file, no install
+            - `FlipScout-Filters-<version>-setup.exe` — installer (creates a desktop shortcut)
+            - `FlipScout-Filters-<version>-portable.exe` — single-file, no install
             Includes optional AI auto-verify (paste an Anthropic API key to have
             Claude judge Keep/Drop from the photos).
             Unsigned build, so Windows SmartScreen may say "unknown publisher" —

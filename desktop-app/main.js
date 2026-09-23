@@ -143,9 +143,12 @@ const log = (msg, level = 'info') => send('log', { msg, level, t: Date.now() });
 
 function createControlWindow() {
   controlWin = new BrowserWindow({
-    width: 720, height: 860, title: 'FlipScout',
+    width: 720, height: 860, title: `FlipScout Filters v${app.getVersion()}`,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
+  // Keep the build name and version in the title bar, so it is always clear
+  // which build is running. The page's own <title> would replace it.
+  controlWin.on('page-title-updated', e => e.preventDefault());
   controlWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   controlWin.on('closed', () => { controlWin = null; });
 }
