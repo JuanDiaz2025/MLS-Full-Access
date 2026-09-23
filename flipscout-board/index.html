@@ -250,6 +250,7 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
 }
 .addr.nolink{color:var(--ink)}
+.rf-wait{display:block; font-size:11px; color:var(--muted); font-style:italic}
 .team-note{
   display:block; margin-top:6px; max-width:52ch; font-size:12.5px; line-height:1.4;
   border-left:3px solid var(--brand-2); padding:2px 0 2px 8px; color:var(--ink);
@@ -562,7 +563,7 @@ footer .num{font-size:12px}
   var links = {}, pendingLinks = {};   // MLS # -> Redfin page
   // links/_found holds the Redfin pages looked up in bulk for the older leads,
   // as {map: {MLS #: url}} — one document instead of hundreds.
-  var foundLinks = {};
+  var foundLinks = {}, triedLinks = {};
   var LEADS = [], BY_DATE = {}, BY_MLS = {}, DATES = [], LAST_PULL = "";
 
   function str(v, n){ return typeof v === "string" ? v.slice(0, n) : ""; }
@@ -851,7 +852,8 @@ footer .num{font-size:12px}
     var u = redfinOf(l);
     return u
       ? '<a class="addr" href="' + esc(u) + '" target="_blank" rel="noopener" title="Open on Redfin">' + esc(l.addr) + '</a>'
-      : '<span class="addr nolink" title="Redfin link not found yet">' + esc(l.addr) + '</span>';
+      : '<span class="addr nolink">' + esc(l.addr) + '</span><span class="rf-wait">' +
+        (triedLinks[l.mls] ? 'Not listed on Redfin' : 'Finding Redfin link…') + '</span>';
   }
 
   function noteList(mls){
@@ -1489,7 +1491,11 @@ footer .num{font-size:12px}
         var next = {}, found = {};
         snap.docs.forEach(function(d){
           var b = d.data() || {};
-          if (d.id === "_found") { if (b.map && typeof b.map === "object") found = b.map; }
+          if (d.id === "_found") {
+            if (b.map && typeof b.map === "object") found = b.map;
+            triedLinks = {};
+            (Array.isArray(b.tried) ? b.tried : []).forEach(function(m){ if (typeof m === "string") triedLinks[m] = true; });
+          }
           else next[d.id] = b;
         });
         links = next; foundLinks = found;
