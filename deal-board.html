@@ -258,6 +258,19 @@ button{cursor:pointer}
 .iw{font-size:12px;color:var(--muted)}
 .ix{font-size:13px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap}
 
+.bighead{display:flex;align-items:center;gap:10px;margin:8px 0 12px}
+.bighead h2{margin:0;font-family:var(--f-display);font-weight:800;font-size:15px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.bighead::after{content:"";flex:1;height:1px;background:var(--line-strong)}
+.bighead.acq{margin-top:34px}
+.osec{margin-bottom:22px}
+.osh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.osh h3{margin:0;font-family:var(--f-display);font-weight:800;font-size:20px}
+.osh span{color:var(--muted);font-size:14px;font-weight:600}
+.osh .oc{margin-left:auto;font-family:var(--f-mono);font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:1px 9px}
+.osec.hot{background:var(--h-yellow-soft);border:2px solid var(--h-yellow);border-radius:16px;padding:14px 14px 16px}
+.osec.hot .osh h3{color:var(--h-yellow-ink)}
+.osec.hot .osh span{color:var(--h-yellow-ink)}
+
 /* Task table */
 .table{overflow-x:auto;border-radius:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc)}
 .grid{display:grid;grid-template-columns:minmax(240px,1.2fr) 150px 140px 130px minmax(220px,1fr) 40px;min-width:880px}
@@ -330,7 +343,7 @@ button{cursor:pointer}
     <input id="np-addr" placeholder="Street address, e.g. 820 28th St" autocomplete="off" required>
     <input id="np-city" placeholder="City, State ZIP" autocomplete="off">
     <select id="np-kind" aria-label="Type of deal">
-      <option value="buy">Buying</option><option value="sell">Selling</option><option value="rehab">Rehab</option><option value="listed">Listed</option>
+      <option value="sell">Pending to close</option><option value="rehab">Under construction</option><option value="listed">Active (no buyer yet)</option><option value="buy">Acquisition</option>
     </select>
     <button class="btn" type="submit">Add property</button>
     <button class="btn ghost" type="button" id="np-cancel">Cancel</button>
@@ -362,7 +375,7 @@ const CHECK = [
   {k:"missing", label:"Missing"},
   {k:"unknown", label:"Confirm"},
   {k:"na", label:"N/A"}];
-const KIND = {buy:"Buying", sell:"Selling", rehab:"Rehab", listed:"Listed", watch:"SF opportunity"};
+const KIND = {buy:"Acquisition", sell:"Pending to close", rehab:"Under construction", listed:"Active (no buyer yet)", watch:"SF opportunity"};
 const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
@@ -457,7 +470,9 @@ async function renderMain(){
   const people = S.user && ids.size ? await S.user.profiles([...ids]) : {};
   if(editing()){ S.pendingRender=true; return; }
 
+  const KORD={sell:0,rehab:1,listed:2,buy:3};
   const act = activeProps().slice().sort((a,b)=>{
+    const kk=(KORD[a.kind]??9)-(KORD[b.kind]??9); if(kk) return kk;
     const r=(HRANK[a.health]??2)-(HRANK[b.health]??2); if(r) return r;
     const da=a.closingDate||"9999", db=b.closingDate||"9999"; if(da!==db) return da<db?-1:1;
     return (a.order||0)-(b.order||0);
@@ -471,20 +486,29 @@ async function renderMain(){
   const shown = act.filter(propMatches);
   if(!act.length){ root.replaceChildren(h("div",{class:"notice",text:"No properties yet. Use “+ Property” to add the first one."})); return; }
   if(!shown.length){ root.replaceChildren(h("div",{class:"notice",text:"No properties match this filter."})); return; }
-  root.replaceChildren(h("div",{class:"ov",role:"list"},
-    ...shown.map(p=>{
+  const card=p=>{
       const hk=p.health||"grey", n=p.closingDate?daysUntil(p.closingDate):null;
       const gc=`var(${GCOLORS[(p.colorIndex ?? 0) % GCOLORS.length]})`;
       return h("button",{class:"pbox",role:"listitem",style:`--gc:${gc}`,onclick:()=>select(p.id),"aria-label":"Open "+p.address},
-        h("span",{class:"a"}, p.address, h("small",{text:(KIND[p.kind]||"")+(p.city?" · "+p.city:"")})),
+        h("span",{class:"a"}, p.address, h("small",{text:p.city||""})),
         h("span",{class:"row1"}, h("span",{class:"health "+hk}, h("i",{class:"hdot "+hk,"aria-hidden":"true"}), HEALTH.find(x=>x.k===hk).label),
           (()=>{ const nu=unread().filter(x=>x.property===p.id).length; return nu?h("span",{class:"newpill big",text:nu+" new comment"+(nu===1?"":"s")}):null; })(),
           p.closingDate?h("span",{class:"dchip"+(n<0?" past":n<=7?" soon":""),text:"Closes "+fmtDate(p.closingDate)+(n<0?" (passed)":n===0?" (today)":" ("+n+"d)")}):null),
         p.blocker?h("span",{class:"t red"}, h("b",{text:"Blocker"}), p.blocker):null,
-        (()=>{ const ot=openTasks(p.id).length, oc=sortedChecks(p).filter(c=>c.state!=="done"&&c.state!=="na").length;
-          return h("span",{class:"t"}, h("b",{text:"Not done"}), `${ot} task${ot===1?"":"s"}`); })(),
+        (()=>{ const ot=openTasks(p.id).length; return h("span",{class:"t"}, h("b",{text:"Not done"}), `${ot} task${ot===1?"":"s"}`); })(),
         h("span",{class:"go",text:"Open property →"}));
-    })));
+  };
+  const sec=(cls,title,sub,list)=>list.length?h("section",{class:"osec "+cls},
+      h("div",{class:"osh"}, h("h3",{text:title}), sub?h("span",{text:sub}):null, h("span",{class:"oc",text:String(list.length)})),
+      h("div",{class:"ov",role:"list"}, ...list.map(card))):null;
+  const of=k=>shown.filter(p=>p.kind===k);
+  root.replaceChildren(
+    h("div",{class:"bighead disp"}, h("h2",{text:"Disposition"})),
+    sec("hot","High priority · Pending to close","Money to collect",of("sell")),
+    sec("","Under construction","",of("rehab")),
+    sec("","Active","No buyer yet",of("listed")),
+    of("buy").length?h("div",{class:"bighead acq"}, h("h2",{text:"Acquisition"})):null,
+    sec("","Acquisition","",of("buy")));
 }
 
 function select(id){ S.sel=id; try{ localStorage.setItem("tdb-sel",id); }catch(e){} try{ history.replaceState(null,"",id==="all"?location.pathname+location.search:"#"+id); }catch(e){} render(); scrollTo({top:0}); }
@@ -549,7 +573,7 @@ function renderGroup(p, people){
   if(!notes.length) box.append(h("p",{class:"nempty",text:"No notes yet."}));
   notes.forEach(n=>{
     const prof=n.author?people[n.author]:null;
-    const who=prof?(prof.isMe?"You":(prof.name||"Teammate")):(n.authorName||"Teammate");
+    const who=prof?(prof.isMe?"You":(first(prof.name)||"Teammate")):(n.authorName||"Teammate");
     const del = (!ro && n.author && n.author===S.me) ? h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ write(()=>S.db.doc("notes/"+n.id).delete(),"Note deleted"); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete") : null;
     box.append(h("div",{class:"note"},
       prof?h("img",{src:prof.avatarUrl,alt:""}):badge(who),
@@ -629,7 +653,7 @@ function renderInbox(people){
     h("div",{class:"pbody"},
       items.length?null:h("p",{class:"nempty",text:"No comments yet."}),
       ...items.map(n=>{
-        const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(pr.name||"Teammate")):(n.authorName||"Teammate");
+        const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(first(pr.name)||"Teammate")):(n.authorName||"Teammate");
         const prop=S.props.find(x=>x.id===n.property), task=n.taskId?S.tasks.find(x=>x.id===n.taskId):null;
         const isNew=n.createdAt>S.inboxSeen && n.author!==S.me;
         return h("button",{class:"inb"+(isNew?" new":""),type:"button",onclick:()=>{ S.inbox=false; const dd=$("#drawer"); dd.hidden=true; dd.replaceChildren(); document.body.style.overflow=""; if(prop) select(prop.id); if(task) openTask(task.id); }},
@@ -671,7 +695,7 @@ function renderDrawer(people){
       ro?null:h("div",{class:"ncompose col"}, ta, notifyRow("t-"+t.id), h("button",{class:"btn",type:"button",onclick:()=>addTaskNote(t,ta)},"Post update")),
       thread.length?null:h("p",{class:"nempty",text:"No updates yet. Be the first to post one."}),
       ...thread.map(n=>{
-        const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(pr.name||"Teammate")):(n.authorName||"Teammate");
+        const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(first(pr.name)||"Teammate")):(n.authorName||"Teammate");
         const del=(!ro && n.author && n.author===S.me)?h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ write(()=>S.db.doc("notes/"+n.id).delete(),"Update deleted"); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete"):null;
         return h("div",{class:"note"}, pr?h("img",{src:pr.avatarUrl,alt:""}):badge(who),
           h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), h("p",{text:n.text})));
@@ -726,7 +750,7 @@ async function openNotify(anchor,key){
     if(inp.value!==q) return;
     const qt=q.trim(), isEm=EMAIL_RE.test(qt);
     list.replaceChildren(
-      ...hits.filter(x=>!x.isMe).map(x=>h("button",{class:"person",onclick:()=>add({id:x.id,email:x.email||null,label:x.name||x.email||"Teammate"})}, h("img",{src:x.avatarUrl,alt:""}), h("span",{text:x.name+(x.email?" · "+x.email:"")}))),
+      ...hits.filter(x=>!x.isMe).map(x=>h("button",{class:"person",onclick:()=>add({id:x.id,email:x.email||null,label:first(x.name)||x.email||"Teammate"})}, h("img",{src:x.avatarUrl,alt:""}), h("span",{text:first(x.name)}))),
       isEm?h("button",{class:"person",onclick:()=>add({id:null,email:qt,label:qt})}, badge(qt), h("span",{}, "Email ", h("b",{text:qt}))):null,
       (!hits.filter(x=>!x.isMe).length && !isEm)?h("div",{class:"hint",text:qt?"No teammate found. Type their full email address.":"Type a teammate's name or an email address."}):null);
     place(anchor);
@@ -827,18 +851,21 @@ async function openOwner(anchor, t){
   const inp=h("input",{id:"owner-search",placeholder:"Type any name",autocomplete:"off",maxlength:"60"});
   pop.replaceChildren(inp,list); place(anchor);
   const doc=S.db.doc("tasks/"+t.id);
-  const setName=n=>{ closePop(); write(()=>doc.update({owner:null,ownerName:n})); };
+  const setName=n=>{ n=first(n); if(!n) return; closePop(); write(()=>doc.update({owner:null,ownerName:n})); };
   inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); const v=inp.value.trim(); if(v) setName(v); } });
   async function paint(q){
     const ql=q.trim().toLowerCase();
     const names=knownNames().filter(n=>!ql||n.toLowerCase().includes(ql));
     const hits=S.user ? await S.user.search(q) : [];
     if(inp.value!==q) return;
-    const exact=names.some(n=>n.toLowerCase()===ql);
+    const hitFirst=new Set(hits.map(p=>first(p.name).toLowerCase()));
+    const typed=names.filter(n=>!hitFirst.has(first(n).toLowerCase()));
+    const qf=first(q).toLowerCase();
+    const exact=qf && (typed.some(n=>first(n).toLowerCase()===qf) || hitFirst.has(qf));
     list.replaceChildren(
-      q.trim() && !exact ? h("button",{class:"person",onclick:()=>setName(q.trim())}, badge(q.trim()), h("span",{}, "Assign ", h("b",{text:q.trim()}))) : null,
-      ...names.map(n=>h("button",{class:"person",onclick:()=>setName(n)}, badge(n), h("span",{text:n}))),
-      ...hits.map(p=>h("button",{class:"person",onclick:()=>{closePop();write(()=>doc.update({owner:p.id,ownerName:null}));}}, h("img",{src:p.avatarUrl,alt:""}), h("span",{text:(p.name||"Someone")+(p.isMe?" (you)":"")}))),
+      q.trim() && !exact ? h("button",{class:"person",onclick:()=>setName(first(q))}, badge(first(q)), h("span",{}, "Assign ", h("b",{text:first(q)}))) : null,
+      ...hits.map(p=>h("button",{class:"person",title:p.name||"",onclick:()=>{closePop();write(()=>doc.update({owner:p.id,ownerName:null}));}}, h("img",{src:p.avatarUrl,alt:""}), h("span",{text:(first(p.name)||"Someone")+(p.isMe?" (you)":"")}))),
+      ...typed.map(n=>h("button",{class:"person",onclick:()=>setName(first(n))}, badge(n), h("span",{text:first(n)}))),
       !q.trim() && !names.length && !hits.length ? h("div",{class:"hint",text:"Type a name and press Enter."}) : null,
       (t.owner||t.ownerName)?h("button",{class:"person",style:"color:var(--muted)",onclick:()=>{closePop();write(()=>doc.update({owner:null,ownerName:null}));}},"Unassign"):null);
     place(anchor);
@@ -873,7 +900,7 @@ np.addEventListener("submit",async e=>{
   try{ S.lastSeen=Number(localStorage.getItem("tdb-seen"))||0; }catch(e){}
   if(!db){ $("#groups").replaceChildren(h("div",{class:"notice",text:"The shared board can't load in this view. Open it on claude.ai while signed in to see and edit it."})); $("#add-prop").hidden=true; return; }
   S.db=db; S.user=user;
-  if(user){ S.me = await user.id(); try{ S.meName=(await user.me()).name||"A teammate"; }catch(e){}
+  if(user){ S.me = await user.id(); try{ S.meName=first((await user.me()).name)||"A teammate"; }catch(e){}
     if(S.me){ try{ const st=await db.doc("data/users/"+S.me+"/state").get(); if(st.exists) S.lastSeen=Math.max(S.lastSeen, st.data().lastSeen||0); }catch(e){} } const cw = await user.can("data.write"); if(cw===false){ S.canWrite=false; notice("You can view this board but not change it. Ask Bryan for “Can interact” access.","warn"); } }
   if(!S.canWrite) $("#add-prop").hidden=true;
   if(!S.me) fm.hidden=true;
