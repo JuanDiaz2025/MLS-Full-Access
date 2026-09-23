@@ -271,6 +271,18 @@ button{cursor:pointer}
 .osec.hot .osh h3{color:var(--h-yellow-ink)}
 .osec.hot .osh span{color:var(--h-yellow-ink)}
 
+.pbox.closing{position:relative;border:2px solid transparent;border-top:6px solid transparent;
+  background:linear-gradient(var(--surface),var(--surface)) padding-box,
+             linear-gradient(120deg,#f59e0b,#ef4444,#f59e0b,#fde047,#f59e0b) border-box;
+  background-size:100% 100%,300% 300%;animation:shimmer 3.2s linear infinite, glow 2s ease-in-out infinite}
+.pbox.closing .a{color:var(--ink)}
+.ribbon{align-self:flex-start;display:inline-flex;align-items:center;gap:7px;background:linear-gradient(90deg,#ef4444,#f59e0b);color:#fff;font-weight:800;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:5px 12px;box-shadow:0 4px 14px rgba(239,68,68,.35)}
+.spark{width:8px;height:8px;border-radius:50%;background:#fff;animation:blink 1s ease-in-out infinite}
+@keyframes shimmer{0%{background-position:0 0,0% 50%}100%{background-position:0 0,300% 50%}}
+@keyframes glow{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.0),0 6px 18px rgba(245,158,11,.18)}50%{box-shadow:0 0 0 6px rgba(245,158,11,.18),0 10px 28px rgba(239,68,68,.25)}}
+@keyframes blink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+@media (prefers-reduced-motion: reduce){.pbox.closing,.spark{animation:none}}
+
 /* Task table */
 .table{overflow-x:auto;border-radius:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc)}
 .grid{display:grid;grid-template-columns:minmax(240px,1.2fr) 150px 140px 130px minmax(220px,1fr) 40px;min-width:880px}
@@ -489,7 +501,9 @@ async function renderMain(){
   const card=p=>{
       const hk=p.health||"grey", n=p.closingDate?daysUntil(p.closingDate):null;
       const gc=`var(${GCOLORS[(p.colorIndex ?? 0) % GCOLORS.length]})`;
-      return h("button",{class:"pbox",role:"listitem",style:`--gc:${gc}`,onclick:()=>select(p.id),"aria-label":"Open "+p.address},
+      const closing = p.kind==="sell";
+      return h("button",{class:"pbox"+(closing?" closing":""),role:"listitem",style:`--gc:${gc}`,onclick:()=>select(p.id),"aria-label":"Open "+p.address},
+        closing?h("span",{class:"ribbon"}, h("i",{class:"spark","aria-hidden":"true"}), n==null?"Closing":n<0?"Closing date passed":n===0?"Closing today":n===1?"Closing tomorrow":`Closing in ${n} days`):null,
         h("span",{class:"a"}, p.address, h("small",{text:p.city||""})),
         h("span",{class:"row1"}, h("span",{class:"health "+hk}, h("i",{class:"hdot "+hk,"aria-hidden":"true"}), HEALTH.find(x=>x.k===hk).label),
           (()=>{ const nu=unread().filter(x=>x.property===p.id).length; return nu?h("span",{class:"newpill big",text:nu+" new comment"+(nu===1?"":"s")}):null; })(),
