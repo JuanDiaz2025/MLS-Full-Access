@@ -473,12 +473,13 @@
       ? `${lastLeads.length} listing(s) on the board — A before B, highest Opportunity Score first. Comps off, so no ARV or profit yet.`
       : `${surf.length} of ${lastLeads.length} kept leads clear the profit gate.`} Generated ${p.generatedAt}</div>`;
     html += noComps
-      ? '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>DOM</th><th>SqFt</th><th>Price</th><th>$/sqft</th><th>Why</th></tr></thead><tbody>'
-      : '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th></tr></thead><tbody>';
+      ? '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>Offer due</th><th>DOM</th><th>SqFt</th><th>Price</th><th>$/sqft</th><th>Why</th></tr></thead><tbody>'
+      : '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>Offer due</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th></tr></thead><tbody>';
     for (const l of lastLeads) {
       const esc = t => String(t == null ? '' : t).replace(/[<>&]/g, '');
       const head = `<td><b>${esc(l.bucket)||'—'}</b></td><td class="mono">${l.oppScore!=null&&l.oppScore!==''?l.oppScore:'—'}</td>`+
         `<td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+        `<td class="mono"><b>${esc(l.offerDue)||'—'}</b></td>`+
         `<td class="mono">${l.dom!=null&&l.dom!==''?l.dom:'—'}</td>`;
       html += noComps
         ? `<tr class="surface">${head}<td class="mono">${l.sqft||'—'}</td>`+

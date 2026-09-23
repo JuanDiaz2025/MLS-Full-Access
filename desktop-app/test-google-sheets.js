@@ -311,6 +311,26 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     'Fixer Upper', 'a filled Prop Condition is read');
   eq(Q({ remarks: 'Nice.', occupiedBy: 'Tenant' }).why.includes('tenant'), true, 'Occupied By: Tenant counts');
 
+  //     Offer deadline — the MLS has no field for it, agents write it into
+  //     the remarks. Shapes seen on live Agent Full pages (23 Sep).
+  const { offerDue } = require('./scan-core');
+  const OD = t => offerDue(t, '2026-09-23T09:00:00');
+  eq(OD('No inspections done. All offers due Monday 9/21/26 6:00 PM. Disclosures online.'),
+    '2026-09-21 (Mon) 6:00 PM', '"All offers due Monday 9/21/26 6:00 PM"');
+  eq(OD('Go direct. Offers welcome on Wednesday, September 23rd by 10:00 am to the agent.'),
+    '2026-09-23 (Wed) 10:00 AM', '"Offers welcome on Wednesday, September 23rd by 10:00 am"');
+  eq(OD('Sold as-is. Offer date: 9/30/26 by Noon - please email offers.'), '2026-09-30 (Wed) 12:00 PM',
+    '"Offer date: 9/30/26 by Noon"');
+  eq(OD('Trust sale. Offers welcome Wednesday, 9/23, at 12 pm.'), '2026-09-23 (Wed) 12:00 PM',
+    'a date with no year takes this year');
+  eq(OD('Offers are due by Wed 9/23/26 at 4:00 pm.'), '2026-09-23 (Wed) 4:00 PM', '"Offers are due by … at 4:00 pm"');
+  eq(OD('Call agent with questions. Offer Date TBD. Disclosure link to follow.'), 'TBD', '"Offer Date TBD"');
+  eq(OD('Offer to include a copy of the 10% deposit check. Buyer to sign addenda w/ offer.'), '',
+    'an offer instruction is not a deadline');
+  eq(OD('Seller reserves the right to accept, counter or reject any offer.'), '', 'boilerplate is not a deadline');
+  eq(OD('OFFERS to be submitted through the online portal.'), '', 'how to submit is not when');
+  eq(OD('Offers due January 5th at 5pm.'), '2027-01-05 (Tue) 5:00 PM', 'a January date in September is next year');
+
   // 14. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');

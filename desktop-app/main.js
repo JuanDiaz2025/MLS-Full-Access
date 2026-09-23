@@ -702,7 +702,12 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             q.why = q.why + ' + AI (vision) keep: ' + v.reason;
           }
         }
-        c._q = q; c._gal = { origPrice: gal.origPrice, listPrice: gal.listPrice, listedBy: gal.listedBy };
+        c._q = q;
+        c._gal = { origPrice: gal.origPrice, listPrice: gal.listPrice, listedBy: gal.listedBy,
+          occupiedBy: gal.occupiedBy || '', privateRemarks: gal.privateRemarks || '',
+          // No MLS field holds it — agents write it into the remarks.
+          offerDue: core.offerDue([gal.privateRemarks, gal.remarks].filter(Boolean).join(' \n ')) };
+        if (c._gal.offerDue) log(`  offer due: ${c._gal.offerDue}`, 'good');
         const decision = q.decision;
         const dropReason = q.decision === 'drop' ? `Auto-pass (score ${q.score}): ${q.why}` : '';
         send('review', { ...base, verdict: decision, why: `${q.label} · score ${q.score} — ${q.why}` });
@@ -995,9 +1000,11 @@ const LEAD_HEADERS = [
   // Qualification gate — appended at the END so every existing row and the
   // reviewer script (which reads by header name) keep lining up.
   'Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Listing Agent',
+  'Offer Due', 'Private Remarks', 'Occupied By',
 ];
-// Computed by the gate on every review, so a re-score replaces them.
-const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut'];
+// Read fresh off the listing on every review, so a re-review replaces them —
+// an offer date goes from "TBD" to a real date, remarks get edited.
+const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By'];
 const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
@@ -1023,6 +1030,7 @@ const leadRecord = r => ({
   'Notes': r.notes, 'MLS Link': r.link || mlsLink(r.mls), 'First Added': today(),
   'Bucket': r.bucket || '', 'Opportunity Score': r.oppScore != null ? r.oppScore : '',
   'Why': r.why || '', 'Price Cut': r.priceCut || '', 'Listing Agent': r.listedBy || '',
+  'Offer Due': r.offerDue || '', 'Private Remarks': r.privateRemarks || '', 'Occupied By': r.occupiedBy || '',
 });
 
 const rejectRecord = r => ({
@@ -1177,6 +1185,7 @@ function gateFields(c) {
   return {
     bucket: q.bucket || '', bucketLabel: q.label || '', oppScore: q.score != null ? q.score : '',
     why: q.why || '', listedBy: g.listedBy || '',
+    offerDue: g.offerDue || '', privateRemarks: g.privateRemarks || '', occupiedBy: g.occupiedBy || '',
     priceCut: orig > list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
   };
 }
@@ -1196,6 +1205,7 @@ function toSheetRow(l) {
     score: l.score || '', recommendation: l.recommendation || '', flipQuality: l.flipQuality || '',
     bucket: l.bucketLabel || '', oppScore: l.oppScore, why: l.why || '',
     priceCut: l.priceCut || '', listedBy: l.listedBy || '',
+    offerDue: l.offerDue || '', privateRemarks: l.privateRemarks || '', occupiedBy: l.occupiedBy || '',
   };
 }
 
@@ -1281,7 +1291,7 @@ ipcMain.handle('export', async (_e, { leads }) => {
   if (canceled || !filePath) return { ok: false };
   if (filePath.endsWith('.json')) { fs.writeFileSync(filePath, JSON.stringify(leads, null, 2)); return { ok: true, filePath }; }
   // The gate's columns lead: they are what decides which rows to work first.
-  const cols = ['bucketLabel', 'oppScore', 'why', 'priceCut', 'listedBy', 'score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
+  const cols = ['bucketLabel', 'oppScore', 'offerDue', 'why', 'priceCut', 'listedBy', 'occupiedBy', 'privateRemarks', 'score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
   const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
   const csv = [cols.join(',')].concat(leads.map(l => cols.map(c => esc(l[c])).join(','))).join('\n');
   fs.writeFileSync(filePath, csv);

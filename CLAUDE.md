@@ -398,11 +398,21 @@ web app, no deployment and no shared secret any more. Three tabs:
 
 - **`Leads`** — `Status · MLS # · Address · Beds · Baths · SqFt · Lot SqFt ·
   Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added ·
-  Bucket · Opportunity Score · Why · Price Cut · Listing Agent`.
+  Bucket · Opportunity Score · Why · Price Cut · Listing Agent · Offer Due ·
+  Private Remarks · Occupied By`.
   Keyed on `MLS #`; rows are append-or-backfill. The gate columns were added at
   the **end** so existing rows and the reject script (which reads by header
-  name) keep lining up; `Bucket`, `Opportunity Score`, `Why` and `Price Cut`
-  are app-owned and replaced on a re-score, everything else is never overwritten.
+  name) keep lining up; `Bucket`, `Opportunity Score`, `Why`, `Price Cut`,
+  `Offer Due`, `Private Remarks` and `Occupied By` are app-owned and replaced on
+  a re-review, everything else is never overwritten.
+
+  **Offer Due has no MLS field** — every label on live Agent Full pages was
+  checked (23 Sep). Agents write it into the remarks ("All offers due Monday
+  9/21/26 6:00 PM", "Offer date: 9/30/26 by Noon", "Offer Date TBD"), so
+  `core.offerDue()` reads it from the private + public remarks and writes
+  `2026-09-30 (Wed) 12:00 PM`, `TBD`, or blank when nothing says when. Only a
+  sentence about an offer *deadline* counts; "offer to include a deposit copy"
+  and "seller may reject any offer" do not.
 - **`Rejected`** — `Rejected On · MLS # · Address · Price · $/SqFt · SqFt · DOM ·
   Reason · Stage · By · MLS Link`. Everything dropped lands here with the reason
   and the stage it fell out at.

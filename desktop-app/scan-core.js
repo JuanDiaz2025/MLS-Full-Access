@@ -561,6 +561,59 @@ function parseDetail(text, wantMls) {
 }
 
 /**
+ * The offer deadline, read out of the remarks. The MLS has no field for it
+ * (checked every label on live Agent Full pages, 23 Sep) — agents write it
+ * into the private remarks as prose:
+ *   "All offers due Monday 9/21/26 6:00 PM"
+ *   "Offers welcome on Wednesday, September 23rd by 10:00 am"
+ *   "Offer date: 9/30/26 by Noon"            "Offer Date TBD."
+ * Returns "2026-09-30 12:00 PM (Wed)", "TBD", or '' when nothing says when.
+ * Only a sentence that is about an offer DEADLINE counts — "offer to include a
+ * copy of the deposit" and "seller may reject any offer" say nothing about when.
+ */
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const OFFER_CUE = /\boffers?\b[\s,:-]{0,3}(?:(?:are|will be|to be|must be|shall be|if any|,)\s+){0,2}(?:due|date|deadline|welcome|reviewed|review(?:ed)? on|presented|presentation|accepted (?:until|through|by)|by|on)\b/gi;
+function offerDue(text, today) {
+  const t = String(text || '');
+  const now = today ? new Date(today) : new Date();
+  OFFER_CUE.lastIndex = 0;
+  let m;
+  while ((m = OFFER_CUE.exec(t))) {
+    const w = t.slice(m.index, m.index + 110);
+    const date = findDate(w, now);
+    if (date) return date + findTime(w);
+    if (/\bT\.?B\.?D\b|to be determined|to be announced|\bTBA\b/i.test(w.slice(0, 40))) return 'TBD';
+  }
+  return '';
+}
+function findDate(w, now) {
+  let mo, d, y;
+  const num = w.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  const word = w.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(\d{4}))?/i);
+  const first = [num, word].filter(Boolean).sort((a, b) => a.index - b.index)[0];
+  if (!first) return '';
+  if (first === num) { mo = +num[1]; d = +num[2]; y = num[3] ? +num[3] : 0; }
+  else { mo = MONTHS.indexOf(word[1].slice(0, 3).toLowerCase()) + 1; d = +word[2]; y = word[3] ? +word[3] : 0; }
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+  if (y && y < 100) y += 2000;
+  if (!y) {
+    // No year written: the nearest one that is not months in the past.
+    y = now.getFullYear();
+    if (new Date(y, mo - 1, d) < new Date(now.getTime() - 60 * 86400000)) y++;
+  }
+  const dt = new Date(y, mo - 1, d);
+  const pad = n => String(n).padStart(2, '0');
+  return `${y}-${pad(mo)}-${pad(d)}` + ` (${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()]})`;
+}
+function findTime(w) {
+  if (/\bnoon\b/i.test(w)) return ' 12:00 PM';
+  if (/\bmidnight\b/i.test(w)) return ' 12:00 AM';
+  const tm = w.match(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\b\.?/i);
+  if (!tm) return '';
+  return ` ${+tm[1]}:${tm[2] || '00'} ${tm[3].toUpperCase()}M`;
+}
+
+/**
  * Private / agent-only remarks. The Client Full report does not carry them;
  * the Agent Full report does, and the label varies ("Private:", "Agent
  * Remarks:", "Confidential Remarks:"), so several are accepted. "Agent:" on
@@ -577,5 +630,5 @@ module.exports = {
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
-  qualify, privateRemarks, BUCKET_LABEL,
+  qualify, privateRemarks, offerDue, BUCKET_LABEL,
 };
