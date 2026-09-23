@@ -399,7 +399,13 @@ web app, no deployment and no shared secret any more. Three tabs:
 - **`Leads`** — `Status · MLS # · Address · Beds · Baths · SqFt · Lot SqFt ·
   Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added ·
   Bucket · Opportunity Score · Why · Price Cut · Listing Agent · Offer Due ·
-  Private Remarks · Occupied By · MLS Status`.
+  Private Remarks · Occupied By · MLS Status · Agent Phone · Agent Email ·
+  Showing · Disclosures`. The last four come off Agent Full (`LA Ph:`, `LA Em:`,
+  `Instructions:` + `Show Contact:`, `Disclosures URL:`); the Disclosures field
+  was blank on 8 of 10 live samples, so `core.disclosuresLink()` falls back to a
+  link in the remarks next to "disclos…" or on a known host (glide, homelight…).
+  **A label's value is at most ONE tab away** — two tabs means the field is
+  blank; `[ \t]*` let a blank "Show Contact" read "Show type:" as its value.
   Keyed on `MLS #`; rows are append-or-backfill. The gate columns were added at
   the **end** so existing rows and the reject script (which reads by header
   name) keep lining up; `Bucket`, `Opportunity Score`, `Why`, `Price Cut`,
@@ -412,7 +418,10 @@ web app, no deployment and no shared secret any more. Three tabs:
   `core.offerDue()` reads it from the private + public remarks and writes
   `2026-09-30 (Wed) 12:00 PM`, `TBD`, or blank when nothing says when. Only a
   sentence about an offer *deadline* counts; "offer to include a deposit copy"
-  and "seller may reject any offer" do not.
+  and "seller may reject any offer" do not. Also read (Seth's live misses, 23
+  Sep): "Offers **will be accepted** Monday Sept 28th", and a day with no month
+  — "Offers Due Wednesday **the 23rd**" takes the month where the 23rd is a
+  Wednesday. Open-house / broker-tour dates (OH, SOH, BT) are never read as one.
 - **`Board`** — **owned by the app, rebuilt from `Leads` after every scan and
   every refresh** (nothing on it is typed by hand; notes belong on `Leads`).
   Top: today's funnel (Scanned · Auto-Pass C · AI Review B · Work Now A · New)
@@ -423,7 +432,9 @@ web app, no deployment and no shared secret any more. Three tabs:
   with PASS / "we're passing" / rejected are counted, not listed
   (`core.PASSED_NOTE`). **Closed listings** (MLS Status Sold / Withdrawn /
   Expired / Canceled / Off Market — `core.CLOSED_STATUS`) are counted, not
-  listed; **Pending / Contingent** stay on, after every active lead.
+  listed; **Pending / Contingent** stay on, after every active lead; **C —
+  Auto-Pass** rows are counted, not listed. Agent Phone and Showing sit right
+  after the Address.
   `core.buildBoard()` is pure and tested.
 - **MLS Link = `https://www.mlslistings.com/Property/<MLS#>`** (`core.mlsUrl`),
   the public listing page — opens with no sign-in, checked for SF / ML / CROC /
@@ -436,8 +447,12 @@ web app, no deployment and no shared secret any more. Three tabs:
   pulls the `Leads` MLS #s into the ledger as `on-board` (the first test re-
   reviewed 15 of 16 for nothing). **"↻ Refresh leads on the board"** is what
   keeps them current: it re-reads only the Leads rows not passed in Notes and
-  not closed, **newest first** (the first live refresh, 23 Sep, faced 809 rows
-  in sheet order — ~3 hours, with the day's 15 new leads last), reports only
+  not closed and not C, **A first, then B, then unscored** (newest row first
+  inside each). Sorting on First Added alone put the day's SF leads at #59 —
+  every row carried the same Aug 1 date. It also **re-checks the hard
+  exclusions on already-scored rows**: a private remark like "This is not a
+  cosmetic remodel" / "plans approved by the City" moves an A/B lead to C with
+  "(found on refresh)" in Why — only ever down, never up. Reports only
   (no photos, ~12 s each), and updates `Price Cut · Listing Agent ·
   Offer Due · Private Remarks · Occupied By · MLS Status` — a TBD becomes a
   date, a pending listing says so, a listing gone from the Active search is

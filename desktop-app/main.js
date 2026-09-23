@@ -350,7 +350,8 @@ async function showGallery(mls, opts) {
       if (!agent.mismatch) {
         meta.privateRemarks = agent.privateRemarks || '';
         // Agent Full may carry facts Client Full left blank.
-        ['origPrice', 'listPrice', 'listedBy', 'remarks', 'address', 'zip', 'yearBuilt', 'propClass', 'condition', 'occupiedBy', 'status']
+        ['origPrice', 'listPrice', 'listedBy', 'remarks', 'address', 'zip', 'yearBuilt', 'propClass', 'condition', 'occupiedBy', 'status',
+          'agentPhone', 'agentEmail', 'showing', 'disclosuresField']
           .forEach(k => { if (!meta[k] && agent[k]) meta[k] = agent[k]; });
       }
     }
@@ -392,6 +393,8 @@ async function showGallery(mls, opts) {
     privateRemarks: meta.privateRemarks || '', origPrice: meta.origPrice || '',
     listPrice: meta.listPrice || '', listedBy: meta.listedBy || '', occupiedBy: meta.occupiedBy || '',
     status: meta.status || '',
+    agentPhone: meta.agentPhone || '', agentEmail: meta.agentEmail || '', showing: meta.showing || '',
+    disclosures: core.disclosuresLink(meta.disclosuresField, [meta.privateRemarks, meta.remarks].filter(Boolean).join(' \n ')),
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
 }
 
@@ -714,6 +717,8 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         c._q = q;
         c._gal = { origPrice: gal.origPrice, listPrice: gal.listPrice, listedBy: gal.listedBy,
           occupiedBy: gal.occupiedBy || '', privateRemarks: gal.privateRemarks || '', status: gal.status || '',
+          agentPhone: gal.agentPhone || '', agentEmail: gal.agentEmail || '', showing: gal.showing || '',
+          disclosures: gal.disclosures || '',
           // No MLS field holds it — agents write it into the remarks.
           offerDue: core.offerDue([gal.privateRemarks, gal.remarks].filter(Boolean).join(' \n ')) };
         if (c._gal.offerDue) log(`  offer due: ${c._gal.offerDue}`, 'good');
@@ -1011,13 +1016,16 @@ const LEAD_HEADERS = [
   // reviewer script (which reads by header name) keep lining up.
   'Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Listing Agent',
   'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures',
 ];
 // Read fresh off the listing on every review, so a re-review replaces them —
 // an offer date goes from "TBD" to a real date, remarks get edited.
-const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status'];
+const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
 // Facts re-read by "Refresh leads on the board" — the listing's own data, never
 // the reviewer's columns. Bucket / score are only filled where still blank.
-const FACT_HEADERS = ['Price Cut', 'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status'];
+const FACT_HEADERS = ['Price Cut', 'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
 const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
@@ -1045,6 +1053,8 @@ const leadRecord = r => ({
   'Why': r.why || '', 'Price Cut': r.priceCut || '', 'Listing Agent': r.listedBy || '',
   'Offer Due': r.offerDue || '', 'Private Remarks': r.privateRemarks || '', 'Occupied By': r.occupiedBy || '',
   'MLS Status': r.mlsStatus || '',
+  'Agent Phone': r.agentPhone || '', 'Agent Email': r.agentEmail || '', 'Showing': r.showing || '',
+  'Disclosures': r.disclosures || '',
 });
 
 const rejectRecord = r => ({
@@ -1201,6 +1211,8 @@ function gateFields(c) {
     why: q.why || '', listedBy: g.listedBy || '',
     offerDue: g.offerDue || '', privateRemarks: g.privateRemarks || '', occupiedBy: g.occupiedBy || '',
     mlsStatus: g.status || '',
+    agentPhone: g.agentPhone || '', agentEmail: g.agentEmail || '', showing: g.showing || '',
+    disclosures: g.disclosures || '',
     priceCut: orig > list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
   };
 }
@@ -1222,6 +1234,8 @@ function toSheetRow(l) {
     priceCut: l.priceCut || '', listedBy: l.listedBy || '',
     offerDue: l.offerDue || '', privateRemarks: l.privateRemarks || '', occupiedBy: l.occupiedBy || '',
     mlsStatus: l.mlsStatus || '',
+    agentPhone: l.agentPhone || '', agentEmail: l.agentEmail || '', showing: l.showing || '',
+    disclosures: l.disclosures || '',
   };
 }
 
@@ -1300,7 +1314,7 @@ ipcMain.handle('refresh-board', async () => {
   if (control.running) return { ok: false, error: 'a scan is already running' };
   if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 7 first' };
   control.running = true; control.stopped = false; control.paused = false;
-  let done = 0, notFound = 0, scored = 0, started = false;
+  let done = 0, notFound = 0, scored = 0, flagged = 0, started = false;
   try {
     if (!mlsWin || mlsWin.isDestroyed()) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
     const title = await js(core.JS_TITLE).catch(() => '');
@@ -1317,11 +1331,17 @@ ipcMain.handle('refresh-board', async () => {
     const all = rows.slice(1).map((r, i) => ({ r, i })).filter(x => val(x.r, 'MLS #'));
     const passedN = all.filter(x => core.PASSED_NOTE.test(val(x.r, 'Notes'))).length;
     const closedN = all.filter(x => !core.PASSED_NOTE.test(val(x.r, 'Notes')) && core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))).length;
+    // A leads first, then B, then anything not scored yet — so the leads Juan
+    // works are current within minutes. Inside a bucket, newest row first.
+    // (Sorting on First Added alone put the day's SF leads at #59: every row
+    // carried the same Aug 1 date.) C leads are auto-passed; skip them.
+    const rankOf = r => ({ A: 0, B: 1 })[(val(r, 'Bucket').match(/^[ABC]/) || ['?'])[0]] ?? 2;
     const todo = all
-      .filter(x => !core.PASSED_NOTE.test(val(x.r, 'Notes')) && !core.CLOSED_STATUS.test(val(x.r, 'MLS Status')))
-      .sort((a, b) => (val(b.r, 'First Added') || '').localeCompare(val(a.r, 'First Added') || '') || b.i - a.i)
+      .filter(x => !core.PASSED_NOTE.test(val(x.r, 'Notes')) && !core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))
+        && !/^C/.test(val(x.r, 'Bucket')))
+      .sort((a, b) => rankOf(a.r) - rankOf(b.r) || b.i - a.i)
       .map(x => x.r);
-    log(`Refreshing ${todo.length} lead(s), newest first (reports only, no photos) — `
+    log(`Refreshing ${todo.length} lead(s), A first then B (reports only, no photos) — `
       + `skipping ${closedN} closed and ${passedN} passed in Notes…`, 'good');
 
     let batch = [];
@@ -1362,8 +1382,24 @@ ipcMain.handle('refresh-board', async () => {
           'Private Remarks': gal.privateRemarks || '', 'Occupied By': gal.occupiedBy || '',
           'MLS Status': gal.status || '',
           'MLS Link': core.mlsUrl(mls),
+          'Agent Phone': gal.agentPhone || '', 'Agent Email': gal.agentEmail || '',
+          'Showing': gal.showing || '', 'Disclosures': gal.disclosures || '',
         };
-        if (!val(r, 'Bucket')) {
+        // Red flags in the remarks move a lead that was already scored to
+        // C — a private remark like "this is not a cosmetic remodel" or
+        // "plans approved by the City" is exactly what the quick-flip rule
+        // excludes, and it used to stay on the Board because only unscored
+        // rows were looked at. Only ever DOWN: a refresh never upgrades.
+        const hard = val(r, 'Bucket') && !/^C/.test(val(r, 'Bucket')) && !core.isConfirmed(gal.address || val(r, 'Address'))
+          ? core.rulesDecide({ addr: gal.address || val(r, 'Address'), photos: 0,
+              remarks: [gal.remarks, gal.privateRemarks].filter(Boolean).join(' '),
+              condition: gal.condition, propClass: gal.propClass })
+          : null;
+        if (hard && hard.decision === 'drop') {
+          Object.assign(rec, { 'Bucket': core.BUCKET_LABEL.C, 'Opportunity Score': 15,
+            'Why': hard.reason + ' (found on refresh)' });
+          flagged++;
+        } else if (!val(r, 'Bucket')) {
           // Never scored (an older row). No area medians or photos on a refresh,
           // so the score leaves those out and says so.
           const q = core.qualify({
@@ -1378,14 +1414,16 @@ ipcMain.handle('refresh-board', async () => {
         }
         batch.push(rec);
         done++;
-        log(`    ${gal.status || 'status ?'}${offer ? ' · offer due ' + offer : ''}${rec.Bucket ? ' · ' + rec.Bucket + ' ' + rec['Opportunity Score'] : ''}`,
+        log(`    ${gal.status || 'status ?'}${offer ? ' · offer due ' + offer : ''}${rec.Bucket ? ' · ' + rec.Bucket + ' ' + rec['Opportunity Score'] : ''}`
+          + `${gal.agentPhone ? ' · ' + gal.agentPhone : ''}${hard && hard.decision === 'drop' ? ' · RED FLAG: ' + hard.reason : ''}`,
           offer ? 'good' : 'info');
       }
       if (batch.length >= 10) await flush();   // a Stop mid-way keeps what was read
     }
     await flush();
     await rebuildBoard();
-    const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · ${notFound} not found in an Active search.`;
+    const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · `
+      + `${flagged} moved to C by a red flag · ${notFound} not found in an Active search.`;
     log(line, 'good');
     return { ok: true, done, scored, notFound };
   } catch (e) {
@@ -1452,7 +1490,7 @@ ipcMain.handle('export', async (_e, { leads }) => {
   if (canceled || !filePath) return { ok: false };
   if (filePath.endsWith('.json')) { fs.writeFileSync(filePath, JSON.stringify(leads, null, 2)); return { ok: true, filePath }; }
   // The gate's columns lead: they are what decides which rows to work first.
-  const cols = ['bucketLabel', 'oppScore', 'offerDue', 'why', 'priceCut', 'listedBy', 'occupiedBy', 'privateRemarks', 'score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
+  const cols = ['bucketLabel', 'oppScore', 'offerDue', 'agentPhone', 'agentEmail', 'showing', 'disclosures', 'why', 'priceCut', 'listedBy', 'occupiedBy', 'privateRemarks', 'score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
   const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
   const csv = [cols.join(',')].concat(leads.map(l => cols.map(c => esc(l[c])).join(','))).join('\n');
   fs.writeFileSync(filePath, csv);

@@ -341,6 +341,17 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(OD('Seller reserves the right to accept, counter or reject any offer.'), '', 'boilerplate is not a deadline');
   eq(OD('OFFERS to be submitted through the online portal.'), '', 'how to submit is not when');
   eq(OD('Offers due January 5th at 5pm.'), '2027-01-05 (Tue) 5:00 PM', 'a January date in September is next year');
+  //     Seth's live examples, 23 Sep — two the reader missed, two it must leave alone.
+  eq(OD('Please read: Offers will be accepted Monday Sept 28th. I do not have a foundation inspection.'),
+    '2026-09-28 (Mon)', '"Offers will be accepted Monday Sept 28th"');
+  eq(OD('Offers Due Wednesday the 23rd at 1:00 pm. Text seller time you will be coming.'),
+    '2026-09-23 (Wed) 1:00 PM', '"Offers Due Wednesday the 23rd" — no month written');
+  eq(OD('SOH 9/26 & 9/27 2-4pm. Discl. Avail Shortly. Offer date tbd. SQFT not verified.'), 'TBD',
+    '"Offer date tbd" after open-house dates is TBD, not the open house');
+  eq(OD('OH Sat/Sun Sept. 19/20 1 – 4pm, BT Tues. 9/22 10:30 – 1:30 Pre-escrow opened with Chicago Title.'), '',
+    'open house and broker tour dates are not an offer deadline');
+  eq(OD('7534 Adrian Dr. in Rohnert Park offers a compelling opportunity for buyers.'), '',
+    '"offers a compelling opportunity" is not about offers');
 
   // 14. The Board — work order and the numbers on top.
   const { buildBoard } = require('./scan-core');
@@ -357,7 +368,7 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(listed, ['3 Due Tomorrow', '1 Late Due', '2 No Date', '5 B Tbd', '6 Unscored'],
     'Board order: A first, soonest offer deadline first, unscored last');
   eq(listed.includes('4 Passed'), false, 'a lead passed in Notes is not on the Board');
-  eq(board[6].slice(1), [3, 1, 1, 1, 0, 0, 1], 'Board counts: A, B, due in 48h, TBD, pending, closed, passed in Notes');
+  eq(board[6].slice(1), [3, 1, 1, 1, 0, 0, 0, 1], 'Board counts: A, B, due in 48h, TBD, pending, closed, C, passed in Notes');
   eq(board[3].slice(1, 5), [86, 0, 5, 10], "today's funnel: scanned, C, B, A");
   eq(board[9][2], '9/24/2026 4:00 PM', 'the offer date is written as a real date');
   eq(/^=IF\(ISNUMBER\(C10\)/.test(board[9][3]), true, 'Time Left is a live formula on its own row');
@@ -374,11 +385,33 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   ], {}, '2026-09-23T14:00:00');
   eq(sb.slice(9).map(r => r[5]), ['5 Active A', '3 Active B', '2 Pending'],
     'sold and withdrawn are off the Board; pending goes after every active lead');
-  eq(sb[6].slice(1), [1, 1, 0, 0, 1, 2, 0], 'pending and closed are counted, and a pending deadline is not "due in 48h"');
-  eq(sb[9][12], 'https://www.mlslistings.com/Property/SF426159646', 'an old broken Portal link is rewritten on the Board');
+  eq(sb[6].slice(1), [1, 1, 0, 0, 1, 2, 0, 0], 'pending and closed are counted, and a pending deadline is not "due in 48h"');
+  const linkCol = sb[8].indexOf('MLS Link');
+  eq(sb[9][linkCol], 'https://www.mlslistings.com/Property/SF426159646', 'an old broken Portal link is rewritten on the Board');
+  eq(sb[8].slice(5, 8), ['Address', 'Agent Phone', 'Showing'], 'the number to call sits right next to the address');
+  const cb = buildBoard([SH, ['C1', '1 Auto Pass', '', 'C — Auto-Pass', '15', '', 'Active', ''],
+    ['C2', '2 Live', '', 'B — AI Review', '50', '', 'Active', '']], {}, '2026-09-23T14:00:00');
+  eq(cb.slice(9).map(r => r[5]), ['2 Live'], 'a C lead is off the Board');
+  eq(cb[6][7], 1, 'and counted as Auto-Pass (C)');
   const { mlsUrl, fixLink } = require('./scan-core');
   eq(mlsUrl('CROC26191070'), 'https://www.mlslistings.com/Property/CROC26191070', 'the listing link is the public page');
   eq(fixLink('', 'ML82056071'), 'https://www.mlslistings.com/Property/ML82056071', 'a blank link is built from the MLS #');
+
+  //     Agent contact, showing and disclosures off the Agent Full report.
+  const agentFull = 'MLS #:\tSF7654321\n9 Test St, San Francisco 94112\tStatus:\tActive\n'
+    + 'Public:\tFixer. Disclosures: https://app.glide.com/share/abc123.\nPrivate:\tCall first.\n\n'
+    + 'Showing Information\nOccupied By:\t\tOwner:\t\nShow Contact:\t\tShow type:\t\tGt.Code:\t\n'
+    + 'Instructions:\tLockbox - Supra iBox, Go Directly, Leave Card\n'
+    + 'Disclosures URL:\t\nLA:\tJane Agent\tLA Ph:\t(415) 555-0142\t\nLA Lic#:\t0123\tLA Em:\tjane@example.com \n';
+  const af = parseDetail(agentFull, 'SF7654321');
+  eq(af.agentPhone, '(415) 555-0142', 'agent phone is read');
+  eq(af.agentEmail, 'jane@example.com', 'agent email is read');
+  eq(af.showing, 'Lockbox - Supra iBox, Go Directly, Leave Card', 'showing instructions are read, and a blank Show Contact adds nothing');
+  eq(af.occupiedBy, '', 'a blank Occupied By does not swallow the next label');
+  eq(require('./scan-core').disclosuresLink(af.disclosuresField, af.remarks), 'https://app.glide.com/share/abc123',
+    'a blank Disclosures URL falls back to the link in the remarks');
+  eq(require('./scan-core').rulesDecide({ remarks: 'A full set of plans approved by the City is at property. This is not a cosmetic remodel.', photos: 20 }).decision,
+    'drop', '"not a cosmetic remodel" is not a quick flip');
 
   // 15. Google's limit is ~60 reads a minute. Refreshing ~90 rows used to
   //     cost two calls per row and was refused; it must be a handful now.

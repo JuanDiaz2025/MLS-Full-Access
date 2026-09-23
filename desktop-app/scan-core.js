@@ -245,6 +245,7 @@ const SLOW_KW = new RegExp([
   'plans (?:approved|submitted|in review)', 'entitle(?:d|ment)',
   'tear[- ]?down', '\\bscraper\\b', '(?:land|lot) value', 'value (?:is )?in the land',
   'down to the studs', 'full gut', 'gut job',
+  'not a cosmetic (?:remodel|flip|fix|job|project|rehab)',
   'extensive (?:damage|water damage|repairs)',
   '\\bmold\\b', 'dry ?rot throughout', 'sinking', 'landslide', 'slide zone',
 ].join('|'), 'i');
@@ -545,11 +546,11 @@ function parseDetail(text, wantMls) {
     // Colon required and the value may not cross a tab or line: a blank field
     // otherwise swallowed the NEXT one ("Family Room: Roof:"), and a bare
     // "property condition" in a disclaimer was read as the condition itself.
-    condition: grab(/Prop(?:erty)?\s*Condition:[ \t]*([^\t\n]{0,60})/i),
+    condition: grab(/Prop(?:erty)?\s*Condition:[ ]*\t?([^\t\n]{0,60})/i),
     // "Status: Active" — Pending / Contingent means the window has closed.
-    status: grab(/\bStatus:[ \t]*([A-Za-z][A-Za-z \-]{2,24})/),
+    status: grab(/\bStatus:[ ]*\t?([A-Za-z][A-Za-z \-]{2,24})/),
     // Agent Full only — "Occupied By: Vacant / Tenant / Owner".
-    occupiedBy: grab(/Occupied\s*By:[ \t]*([^\t\n]{0,40})/i),
+    occupiedBy: grab(/Occupied\s*By:[ ]*\t?([^\t\n]{0,40})/i),
     // The MLS's own classification — "Res. Single Family / Attached, Single
     // Family". It outranks any keyword in the remarks about second units.
     propClass: grab(/Class:?\s*([^\n\t]{0,80})/i),
@@ -559,7 +560,31 @@ function parseDetail(text, wantMls) {
     // "Listed By: Daniel K. Cheng, Coldwell Banker Realty" — who to call.
     listedBy: grab(/Listed\s*By:?\s*([^\n]{0,120})/i),
     privateRemarks: privateRemarks(block),
+    // Agent Full only. "LA Ph: (415) 279-6833", "LA Em: name@host",
+    // "Instructions: Lockbox - Supra iBox, Go Directly, Leave Card".
+    agentPhone: (grab(/\bLA\s*Ph:[ ]*\t?([^\t\n]{0,30})/i).match(/\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}/) || [''])[0],
+    agentEmail: (grab(/\bLA\s*Em:[ ]*\t?([^\t\n]{0,120})/i).match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/) || [''])[0],
+    showing: [grab(/\bInstructions:[ ]*\t?([^\n]{0,160})/i).replace(/\t+/g, ' ').trim(),
+      (s => s ? 'contact ' + s : '')(grab(/\bShow\s*Contact:[ ]*\t?([^\t\n]{0,60})/i))].filter(Boolean).join(' · '),
+    disclosuresField: (grab(/\bDisclosures\s*URL:[ ]*\t?([^\t\n]{0,300})/i).match(/https?:\/\/\S+/) || [''])[0],
   };
+}
+
+/**
+ * The disclosures link: the MLS's own "Disclosures URL" field when the agent
+ * filled it (2 of 10 live samples), otherwise a link in the remarks that sits
+ * next to the word "disclosure" or points at a known disclosure host.
+ */
+const DISCLOSURE_HOST = /(glide\.com|homelight\.com|disclosures\.io|dropbox\.com|docs\.google\.com|drive\.google\.com|box\.com|onedrive|sharepoint|docusign|disclosure)/i;
+function disclosuresLink(field, text) {
+  if (field) return field.replace(/[).,;]+$/, '');
+  const t = String(text || '');
+  const urls = [...t.matchAll(/https?:\/\/[^\s<>"')]+/gi)];
+  for (const u of urls) {
+    const before = t.slice(Math.max(0, u.index - 80), u.index);
+    if (/disclos/i.test(before) || DISCLOSURE_HOST.test(u[0])) return u[0].replace(/[).,;]+$/, '');
+  }
+  return '';
 }
 
 /**
@@ -574,7 +599,7 @@ function parseDetail(text, wantMls) {
  * copy of the deposit" and "seller may reject any offer" say nothing about when.
  */
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-const OFFER_CUE = /\boffers?\b[\s,:-]{0,3}(?:(?:are|will be|to be|must be|shall be|if any|,)\s+){0,2}(?:due|date|deadline|welcome|reviewed|review(?:ed)? on|presented|presentation|accepted (?:until|through|by)|by|on)\b/gi;
+const OFFER_CUE = /\boffers?\b[\s,:-]{0,3}(?:(?:are|will be|to be|must be|shall be|being|if any|,)\s+){0,2}(?:due|date|deadline|welcome|reviewed|review(?:ed)? on|presented|presentation|accepted|taken|considered|by|on)\b/gi;
 function offerDue(text, today) {
   const t = String(text || '');
   const now = today ? new Date(today) : new Date();
@@ -592,7 +617,23 @@ function findDate(w, now) {
   let mo, d, y;
   const num = w.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
   const word = w.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(\d{4}))?/i);
+  // "Wednesday the 23rd" / "Wed 23rd": a day with no month. Take the month
+  // that makes that day fall on that weekday, starting this month.
+  const bare = w.match(/\b(sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\b/i);
   const first = [num, word].filter(Boolean).sort((a, b) => a.index - b.index)[0];
+  if (!first && bare) {
+    const wd = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(bare[1].slice(0, 3).toLowerCase());
+    const day = +bare[2];
+    for (let k = 0; k < 3; k++) {
+      const c = new Date(now.getFullYear(), now.getMonth() + k, day);
+      if (c.getDate() === day && c.getDay() === wd && c >= new Date(now.getTime() - 30 * 86400000)) {
+        mo = c.getMonth() + 1; d = day; y = c.getFullYear();
+        const pad = n => String(n).padStart(2, '0');
+        return `${y}-${pad(mo)}-${pad(d)} (${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][wd]})`;
+      }
+    }
+    return '';
+  }
   if (!first) return '';
   if (first === num) { mo = +num[1]; d = +num[2]; y = num[3] ? +num[3] : 0; }
   else { mo = MONTHS.indexOf(word[1].slice(0, 3).toLowerCase()) + 1; d = +word[2]; y = word[3] ? +word[3] : 0; }
@@ -672,7 +713,9 @@ function buildBoard(leadRows, today, now) {
   const passed = rows.filter(r => PASSED_NOTE.test(cell(r, 'Notes')));
   const notPassed = rows.filter(r => !PASSED_NOTE.test(cell(r, 'Notes')));
   const closed = notPassed.filter(r => CLOSED_STATUS.test(cell(r, 'MLS Status')));
-  const live = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')));
+  const isC = r => /^C/.test(cell(r, 'Bucket'));
+  const autoPass = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && isC(r));
+  const live = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r));
   const isPending = r => PENDING_STATUS.test(cell(r, 'MLS Status'));
   const bucketOf = r => (cell(r, 'Bucket').match(/^[ABC]/) || ['?'])[0];
   const due = r => offerDueToDate(cell(r, 'Offer Due'));
@@ -709,12 +752,13 @@ function buildBoard(leadRows, today, now) {
     ['', t.scanned || 0, t.bucketC || 0, t.bucketB || 0, t.bucketA || 0, t.pushed || 0],
     [],
     ['On the board', 'A — Work Now', 'B — AI Review', 'Offers due in 48h', 'Offer date TBD',
-      'Pending / contingent', 'Closed (sold, withdrawn…)', 'Passed in Notes'],
+      'Pending / contingent', 'Closed (sold, withdrawn…)', 'Auto-Pass (C)', 'Passed in Notes'],
     ['', active.filter(r => bucketOf(r) === 'A').length, active.filter(r => bucketOf(r) === 'B').length, in48,
-      active.filter(r => /^TBD$/i.test(cell(r, 'Offer Due'))).length, live.length - active.length, closed.length, passed.length],
+      active.filter(r => /^TBD$/i.test(cell(r, 'Offer Due'))).length, live.length - active.length, closed.length,
+      autoPass.length, passed.length],
     [],
-    ['Bucket', 'Score', 'Offer Due', 'Time Left', 'MLS Status', 'Address', 'Price', 'Price Cut',
-      'Occupied By', 'Listing Agent', 'Notes', 'Why', 'MLS Link'],
+    ['Bucket', 'Score', 'Offer Due', 'Time Left', 'MLS Status', 'Address', 'Agent Phone', 'Showing',
+      'Price', 'Price Cut', 'Occupied By', 'Listing Agent', 'Agent Email', 'Disclosures', 'Notes', 'Why', 'MLS Link'],
   ];
   live.forEach((r, i) => {
     const n = out.length + 1;   // this row's sheet row number
@@ -723,8 +767,10 @@ function buildBoard(leadRows, today, now) {
       cell(r, 'Bucket') || 'not scored yet', cell(r, 'Opportunity Score'),
       d ? us(d) : cell(r, 'Offer Due'),
       `=IF(ISNUMBER(C${n}),IF(C${n}<NOW(),"passed",INT(C${n}-NOW())&"d "&HOUR(C${n}-NOW())&"h"),"")`,
-      cell(r, 'MLS Status'), cell(r, 'Address'), cell(r, 'Purchase Price'), cell(r, 'Price Cut'),
-      cell(r, 'Occupied By'), cell(r, 'Listing Agent'), cell(r, 'Notes'), cell(r, 'Why'),
+      cell(r, 'MLS Status'), cell(r, 'Address'), cell(r, 'Agent Phone'), cell(r, 'Showing'),
+      cell(r, 'Purchase Price'), cell(r, 'Price Cut'),
+      cell(r, 'Occupied By'), cell(r, 'Listing Agent'), cell(r, 'Agent Email'), cell(r, 'Disclosures'),
+      cell(r, 'Notes'), cell(r, 'Why'),
       fixLink(cell(r, 'MLS Link'), cell(r, 'MLS #')),
     ]);
   });
@@ -749,5 +795,5 @@ module.exports = {
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
   qualify, privateRemarks, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
-  mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS,
+  mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS, disclosuresLink,
 };
