@@ -235,6 +235,29 @@ button{cursor:pointer}
 .ncompose.col{flex-direction:column;align-items:stretch}
 .ncompose.col .btn{align-self:flex-end}
 
+.bell{position:relative}
+.bell.hot{border-color:var(--h-red);color:var(--ink)}
+#bellN{min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--h-red);color:#fff;font-size:12px;display:inline-grid;place-items:center}
+.notify{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.nbtn{border:1px dashed var(--line-strong);background:transparent;color:var(--accent);border-radius:999px;padding:4px 10px;font-size:12.5px;font-weight:700}
+.nbtn:hover{border-style:solid}
+.nchip{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--ink);border-radius:999px;padding:3px 6px 3px 10px;font-size:12.5px;font-weight:600}
+.nchip button{border:0;background:transparent;color:var(--muted);font-size:11px;padding:0 2px}
+.nhint{font-size:12px;color:var(--muted)}
+.newpill{font-style:normal;background:var(--h-red);color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px}
+.newpill.big{margin-left:0;font-size:12px;padding:3px 9px}
+.atpill{font-style:normal;background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px}
+.upd.unread{color:var(--h-red)}
+.upd.unread::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--h-red)}
+.inb{display:grid;grid-template-columns:28px 1fr;gap:10px;text-align:left;width:100%;background:transparent;border:0;border-top:1px solid var(--line);padding:10px 4px;border-radius:6px}
+.inb:hover{background:var(--surface-2)}
+.inb.new{background:color-mix(in srgb,var(--h-red) 7%,transparent)}
+.inb img,.inb .ini{width:28px;height:28px;border-radius:50%}
+.ib{display:flex;flex-direction:column;gap:2px;min-width:0}
+.it{font-size:13.5px}
+.iw{font-size:12px;color:var(--muted)}
+.ix{font-size:13px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap}
+
 /* Task table */
 .table{overflow-x:auto;border-radius:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc)}
 .grid{display:grid;grid-template-columns:minmax(240px,1.2fr) 150px 140px 130px minmax(220px,1fr) 40px;min-width:880px}
@@ -297,6 +320,7 @@ button{cursor:pointer}
       <label class="search" for="q"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search" autocomplete="off"></label>
       <button class="chip" id="f-mine" aria-pressed="false">My tasks</button>
       <button class="chip" id="f-done" aria-pressed="false">Show done</button>
+      <button class="chip bell" id="bell" type="button" aria-label="Updates"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span>Updates</span><b id="bellN" hidden></b></button>
       <button class="btn" id="add-prop">+ Property</button>
     </div>
   </header>
@@ -342,7 +366,7 @@ const KIND = {buy:"Buying", sell:"Selling", rehab:"Rehab", listed:"Listed", watc
 const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
-const S = { db:null, user:null, me:null, canWrite:true, openTask:null, props:[], tasks:[], notes:[], ready:{p:false,t:false},
+const S = { db:null, user:null, me:null, canWrite:true, openTask:null, inbox:false, inboxSeen:0, mcp:null, lastSeen:0, meName:"A teammate", pend:{}, props:[], tasks:[], notes:[], ready:{p:false,t:false},
   sel:null, q:"", mine:false, hideDone:true, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
 try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!c.showDone; }catch(e){}
 try{ const hsh=location.hash.slice(1); S.sel = hsh || localStorage.getItem("tdb-sel") || "all"; }catch(e){ S.sel="all"; }
@@ -421,7 +445,7 @@ function editing(){ const a=document.activeElement; return a && a.closest && a.c
 function flush(){ setTimeout(()=>{ if(S.pendingRender && !editing()) render(); },0); }
 
 /* ---------- render ---------- */
-async function render(){ await renderMain(); if(!S.pendingRender && S.ready.p && S.ready.t){ const ids=new Set(); S.tasks.forEach(t=>t.owner&&ids.add(t.owner)); S.notes.forEach(n=>n.author&&ids.add(n.author)); const people=S.user&&ids.size?await S.user.profiles([...ids]):{}; if(!editing()) renderDrawer(people); } }
+async function render(){ await renderMain(); updateBell(); if(!S.pendingRender && S.ready.p && S.ready.t){ const ids=new Set(); S.tasks.forEach(t=>t.owner&&ids.add(t.owner)); S.notes.forEach(n=>n.author&&ids.add(n.author)); const people=S.user&&ids.size?await S.user.profiles([...ids]):{}; if(!editing()) renderDrawer(people); } }
 async function renderMain(){
   if(editing()){ S.pendingRender=true; return; }
   S.pendingRender=false;
@@ -454,6 +478,7 @@ async function renderMain(){
       return h("button",{class:"pbox",role:"listitem",style:`--gc:${gc}`,onclick:()=>select(p.id),"aria-label":"Open "+p.address},
         h("span",{class:"a"}, p.address, h("small",{text:(KIND[p.kind]||"")+(p.city?" · "+p.city:"")})),
         h("span",{class:"row1"}, h("span",{class:"health "+hk}, h("i",{class:"hdot "+hk,"aria-hidden":"true"}), HEALTH.find(x=>x.k===hk).label),
+          (()=>{ const nu=unread().filter(x=>x.property===p.id).length; return nu?h("span",{class:"newpill big",text:nu+" new comment"+(nu===1?"":"s")}):null; })(),
           p.closingDate?h("span",{class:"dchip"+(n<0?" past":n<=7?" soon":""),text:"Closes "+fmtDate(p.closingDate)+(n<0?" (passed)":n===0?" (today)":" ("+n+"d)")}):null),
         p.blocker?h("span",{class:"t red"}, h("b",{text:"Blocker"}), p.blocker):null,
         (()=>{ const ot=openTasks(p.id).length, oc=sortedChecks(p).filter(c=>c.state!=="done"&&c.state!=="na").length;
@@ -519,7 +544,7 @@ function renderGroup(p, people){
     const post=h("button",{class:"btn",type:"button",onclick:()=>addNote(pid,ta)},"Post note");
     ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); addNote(pid,ta); } });
     ta.addEventListener("blur",()=>flush());
-    box.append(h("div",{class:"ncompose"}, ta, post));
+    box.append(h("div",{class:"ncompose"}, ta, post), notifyRow("p-"+pid));
   }
   if(!notes.length) box.append(h("p",{class:"nempty",text:"No notes yet."}));
   notes.forEach(n=>{
@@ -539,8 +564,12 @@ function renderGroup(p, people){
 
 async function addNote(pid, ta){
   const text=ta.value.trim(); if(!text) return;
-  const ok=await write(()=>S.db.collection("notes").add({property:pid,text,author:S.me||null,createdAt:Date.now()}),"Note posted");
-  if(ok){ ta.value=""; saveProp(pid,{}); }
+  const key="p-"+pid, rec=(S.pend[key]||[]).slice();
+  const ok=await write(()=>S.db.collection("notes").add({property:pid,text,author:S.me||null,mentions:rec.map(r=>r.id).filter(Boolean),createdAt:Date.now()}), rec.length?null:"Note posted");
+  if(!ok) return;
+  ta.value=""; S.pend[key]=[]; refreshNotify(key); saveProp(pid,{});
+  const pr=S.props.find(x=>x.id===pid)||{};
+  sendEmails(rec, `${S.meName} posted a note on ${pr.address||"a property"}`, `${S.meName} wrote:\n\n${text}\n\nProperty: ${pr.address||""}\nOpen the board: ${BOARD_URL}#${pid}`);
 }
 
 async function removeCheck(pid, cid){
@@ -584,13 +613,39 @@ function renderFacts(p){
 function bubble(){ const s=document.createElementNS("http://www.w3.org/2000/svg","svg"); s.setAttribute("width","15");s.setAttribute("height","15");s.setAttribute("viewBox","0 0 24 24");s.setAttribute("fill","none");s.setAttribute("stroke","currentColor");s.setAttribute("stroke-width","2.2");s.setAttribute("aria-hidden","true");s.innerHTML='<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>';return s; }
 function updBtn(t){
   const n=S.notes.filter(x=>x.taskId===t.id).length;
-  return h("button",{class:"upd"+(n?" has":""),id:"u-"+t.id,type:"button","aria-label":`Open updates for ${t.title||"task"} (${n})`,title:"Open task updates",onclick:()=>openTask(t.id)}, bubble(), n?String(n):null);
+  const nu=S.notes.some(x=>x.taskId===t.id && x.createdAt>S.lastSeen && x.author!==S.me);
+  return h("button",{class:"upd"+(n?" has":"")+(nu?" unread":""),id:"u-"+t.id,type:"button","aria-label":`Open updates for ${t.title||"task"} (${n})`,title:"Open task updates",onclick:()=>openTask(t.id)}, bubble(), n?String(n):null);
 }
-function openTask(id){ S.openTask=id; render(); setTimeout(()=>{ const ta=document.getElementById("tc-new"); if(ta) ta.focus(); },30); }
-function closeTask(){ S.openTask=null; const d=$("#drawer"); d.hidden=true; d.replaceChildren(); document.body.style.overflow=""; flush(); }
-document.addEventListener("keydown",e=>{ if(e.key==="Escape" && S.openTask && $("#pop").hidden) closeTask(); });
+function openTask(id){ S.inbox=false; S.openTask=id; render(); setTimeout(()=>{ const ta=document.getElementById("tc-new"); if(ta) ta.focus(); },30); }
+function closeTask(){ S.openTask=null; S.inbox=false; const d=$("#drawer"); d.hidden=true; d.replaceChildren(); document.body.style.overflow=""; flush(); }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && (S.openTask||S.inbox) && $("#pop").hidden) closeTask(); });
+
+function renderInbox(people){
+  const d=$("#drawer");
+  const items=S.notes.slice().sort((a,b)=>b.createdAt-a.createdAt).slice(0,60);
+  const panel=h("div",{class:"panel",role:"dialog","aria-modal":"true","aria-label":"Updates"},
+    h("div",{class:"phead"}, h("div",{class:"pmain"}, h("div",{class:"pprop",text:"All properties"}), h("h2",{text:"Updates"})),
+      h("button",{class:"px",type:"button","aria-label":"Close",onclick:closeTask},"✕")),
+    h("div",{class:"pbody"},
+      items.length?null:h("p",{class:"nempty",text:"No comments yet."}),
+      ...items.map(n=>{
+        const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(pr.name||"Teammate")):(n.authorName||"Teammate");
+        const prop=S.props.find(x=>x.id===n.property), task=n.taskId?S.tasks.find(x=>x.id===n.taskId):null;
+        const isNew=n.createdAt>S.inboxSeen && n.author!==S.me;
+        return h("button",{class:"inb"+(isNew?" new":""),type:"button",onclick:()=>{ S.inbox=false; const dd=$("#drawer"); dd.hidden=true; dd.replaceChildren(); document.body.style.overflow=""; if(prop) select(prop.id); if(task) openTask(task.id); }},
+          pr?h("img",{src:pr.avatarUrl,alt:""}):badge(who),
+          h("span",{class:"ib"},
+            h("span",{class:"it"}, h("b",{text:who}), " on ", h("b",{text:task?(task.title||"a task"):"property notes"}),
+              isNew?h("i",{class:"newpill",text:"New"}):null, mentionsMe(n)?h("i",{class:"atpill",text:"@ you"}):null),
+            h("span",{class:"iw",text:(prop?prop.address:"")+" · "+ago(n.createdAt)}),
+            h("span",{class:"ix",text:n.text})));
+      })));
+  d.replaceChildren(h("button",{class:"scrim",type:"button","aria-label":"Close",onclick:closeTask}), panel);
+  d.hidden=false; document.body.style.overflow="hidden";
+}
 
 function renderDrawer(people){
+  if(S.inbox) return renderInbox(people);
   const d=$("#drawer");
   const t=S.openTask && S.tasks.find(x=>x.id===S.openTask);
   if(!t){ if(S.openTask) closeTask(); return; }
@@ -613,7 +668,7 @@ function renderDrawer(people){
       h("span",{}, h("b",{text:"Owner "}), owner),
       t.due?h("span",{}, h("b",{text:"Due "}), fmtDate(t.due)):null),
     h("div",{class:"pbody"},
-      ro?null:h("div",{class:"ncompose col"}, ta, h("button",{class:"btn",type:"button",onclick:()=>addTaskNote(t,ta)},"Post update")),
+      ro?null:h("div",{class:"ncompose col"}, ta, notifyRow("t-"+t.id), h("button",{class:"btn",type:"button",onclick:()=>addTaskNote(t,ta)},"Post update")),
       thread.length?null:h("p",{class:"nempty",text:"No updates yet. Be the first to post one."}),
       ...thread.map(n=>{
         const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(pr.name||"Teammate")):(n.authorName||"Teammate");
@@ -628,8 +683,76 @@ function renderDrawer(people){
 }
 async function addTaskNote(t, ta){
   const text=ta.value.trim(); if(!text) return;
-  const ok=await write(()=>S.db.collection("notes").add({property:t.property,taskId:t.id,text,author:S.me||null,createdAt:Date.now()}),"Update posted");
-  if(ok){ ta.value=""; write(()=>S.db.doc("tasks/"+t.id).update({updatedAt:Date.now()})); }
+  const key="t-"+t.id, rec=(S.pend[key]||[]).slice();
+  const ok=await write(()=>S.db.collection("notes").add({property:t.property,taskId:t.id,text,author:S.me||null,mentions:rec.map(r=>r.id).filter(Boolean),createdAt:Date.now()}), rec.length?null:"Update posted");
+  if(!ok) return;
+  ta.value=""; S.pend[key]=[]; refreshNotify(key); write(()=>S.db.doc("tasks/"+t.id).update({updatedAt:Date.now()}));
+  const pr=S.props.find(x=>x.id===t.property)||{};
+  sendEmails(rec, `${S.meName} commented on “${t.title||"a task"}” (${pr.address||"property"})`, `${S.meName} commented on the task “${t.title||""}”:\n\n${text}\n\nProperty: ${pr.address||""}\nOpen the board: ${BOARD_URL}#${t.property}`);
+}
+
+/* ---------- notifications ---------- */
+const BOARD_URL="https://claude.ai/artifact/4AMZxHejytEdUkP7zcDW7L";
+const EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function unread(){ return S.notes.filter(n=>n.createdAt>S.lastSeen && n.author!==S.me); }
+function mentionsMe(n){ return !!S.me && Array.isArray(n.mentions) && n.mentions.includes(S.me); }
+function updateBell(){
+  const n=unread().length, b=$("#bellN");
+  b.hidden=!n; b.textContent=String(n); $("#bell").classList.toggle("hot",!!n);
+  document.title=(n?`(${n}) `:"")+"Property Command Center";
+}
+async function markSeen(){
+  const now=Date.now(); S.lastSeen=now;
+  try{ localStorage.setItem("tdb-seen",String(now)); }catch(e){}
+  if(S.db && S.me){ try{ await S.db.doc("data/users/"+S.me+"/state").set({lastSeen:now}); }catch(e){} }
+  updateBell();
+}
+function openInbox(){ S.openTask=null; S.inboxSeen=S.lastSeen; S.inbox=true; render(); markSeen(); }
+
+function notifyRow(key){
+  const list=S.pend[key]||[];
+  return h("div",{class:"notify",id:"nr-"+key},
+    h("button",{class:"nbtn",type:"button",onclick:e=>openNotify(e.currentTarget,key)},"@ Notify someone"),
+    ...list.map((r,i)=>h("span",{class:"nchip"}, r.label, h("button",{type:"button","aria-label":"Remove "+r.label,onclick:()=>{ list.splice(i,1); refreshNotify(key); }},"✕"))),
+    list.length?h("span",{class:"nhint",text:S.mcp?"They'll get an email from your Gmail when you post.":"They'll see it in Updates."}):null);
+}
+function refreshNotify(key){ const old=document.getElementById("nr-"+key); if(old) old.replaceWith(notifyRow(key)); }
+async function openNotify(anchor,key){
+  const list=h("div",{}), inp=h("input",{id:"notify-search",placeholder:"Name or email",autocomplete:"off"});
+  pop.replaceChildren(inp,list); place(anchor);
+  const add=r=>{ const arr=S.pend[key]=S.pend[key]||[]; if(!arr.some(x=>(r.id&&x.id===r.id)||(r.email&&x.email===r.email))) arr.push(r); closePop(); refreshNotify(key); };
+  async function paint(q){
+    const hits=S.user?await S.user.search(q):[];
+    if(inp.value!==q) return;
+    const qt=q.trim(), isEm=EMAIL_RE.test(qt);
+    list.replaceChildren(
+      ...hits.filter(x=>!x.isMe).map(x=>h("button",{class:"person",onclick:()=>add({id:x.id,email:x.email||null,label:x.name||x.email||"Teammate"})}, h("img",{src:x.avatarUrl,alt:""}), h("span",{text:x.name+(x.email?" · "+x.email:"")}))),
+      isEm?h("button",{class:"person",onclick:()=>add({id:null,email:qt,label:qt})}, badge(qt), h("span",{}, "Email ", h("b",{text:qt}))):null,
+      (!hits.filter(x=>!x.isMe).length && !isEm)?h("div",{class:"hint",text:qt?"No teammate found. Type their full email address.":"Type a teammate's name or an email address."}):null);
+    place(anchor);
+  }
+  inp.addEventListener("input",()=>paint(inp.value));
+  inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); const v=inp.value.trim(); if(EMAIL_RE.test(v)) add({id:null,email:v,label:v}); } });
+  inp.focus(); paint("");
+}
+async function sendEmails(recips, subject, body){
+  if(!recips.length) return;
+  const to=[...new Set(recips.map(r=>r.email).filter(Boolean))];
+  const noMail=recips.filter(r=>!r.email).map(r=>r.label);
+  if(!S.mcp){ toast("Posted. Email isn't available in this view, so they'll see it in Updates."); return; }
+  if(!to.length){ toast("Posted. No email address for "+noMail.join(", ")+", so they'll see it in Updates."); return; }
+  try{
+    await S.mcp.callTool("Gmail","send_message",{to,subject,body});
+    toast("Posted and emailed "+to.length+(to.length===1?" person":" people")+(noMail.length?" (no email for "+noMail.join(", ")+")":""));
+  }catch(e){
+    const c=e&&e.code;
+    if(c==="server_not_connected") toast("Posted. To email people, add Gmail in claude.ai Settings → Connectors.");
+    else if(c==="needs_reauth") toast("Posted. Reconnect Gmail in claude.ai Settings → Connectors to send emails.");
+    else if(c==="not_in_manifest") toast("Posted. Gmail isn't allowed for this page, so no email went out.");
+    else if(c==="blocked_by_policy"||c==="approval_required") toast("Posted. Your organization blocks sending email from this page.");
+    else if(c==="selection_required") toast("Posted. Choose which Gmail account to use, then post again to email.");
+    else toast("Posted, but the email may not have gone out. Check your Gmail Sent folder.");
+  }
 }
 
 /* ---------- task rows ---------- */
@@ -724,6 +847,7 @@ async function openOwner(anchor, t){
 }
 
 /* ---------- controls ---------- */
+$("#bell").addEventListener("click",openInbox);
 $("#q").addEventListener("input",e=>{ S.q=e.target.value; render(); });
 $("#q").addEventListener("keydown",e=>{ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } });
 const fm=$("#f-mine"), fd=$("#f-done");
@@ -743,10 +867,13 @@ np.addEventListener("submit",async e=>{
 
 /* ---------- boot ---------- */
 (async function boot(){
-  const [db,user] = await Promise.all([claude.use("db"), claude.use("user")]);
+  const [db,user,mcp] = await Promise.all([claude.use("db"), claude.use("user"), claude.use("mcp")]);
+  S.mcp=mcp;
+  try{ S.lastSeen=Number(localStorage.getItem("tdb-seen"))||0; }catch(e){}
   if(!db){ $("#groups").replaceChildren(h("div",{class:"notice",text:"The shared board can't load in this view. Open it on claude.ai while signed in to see and edit it."})); $("#add-prop").hidden=true; return; }
   S.db=db; S.user=user;
-  if(user){ S.me = await user.id(); const cw = await user.can("data.write"); if(cw===false){ S.canWrite=false; notice("You can view this board but not change it. Ask Bryan for “Can interact” access.","warn"); } }
+  if(user){ S.me = await user.id(); try{ S.meName=(await user.me()).name||"A teammate"; }catch(e){}
+    if(S.me){ try{ const st=await db.doc("data/users/"+S.me+"/state").get(); if(st.exists) S.lastSeen=Math.max(S.lastSeen, st.data().lastSeen||0); }catch(e){} } const cw = await user.can("data.write"); if(cw===false){ S.canWrite=false; notice("You can view this board but not change it. Ask Bryan for “Can interact” access.","warn"); } }
   if(!S.canWrite) $("#add-prop").hidden=true;
   if(!S.me) fm.hidden=true;
   const onErr = e=>{ if(e && e.code!=="revoked") notice("Live updates stopped. Reload the page to reconnect."); };
