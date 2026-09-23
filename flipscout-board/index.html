@@ -847,17 +847,14 @@ footer .num{font-size:12px}
             (typeof foundLinks[l.mls] === "string" ? foundLinks[l.mls] : "");
     return REDFIN_PAGE.test(u) ? u : "";
   }
-  // Every address opens Redfin: the house's own page when we have it, and
-  // until then Redfin's page for its zip code, so a click never lands anywhere
-  // but Redfin.
-  function zipOf(addr){ var m = String(addr || "").match(/\b(9\d{4})\b(?!.*\b9\d{4}\b)/); return m ? m[1] : ""; }
+  // An address links only to that house's own Redfin page. Until its page is
+  // found it is plain text with a note saying so; never an area or search page.
   function addrHTML(l){
-    var u = redfinOf(l), z = zipOf(l.addr);
-    if (u) return '<a class="addr" href="' + esc(u) + '" target="_blank" rel="noopener" title="Open this house on Redfin">' + esc(l.addr) + '</a>';
-    if (z) return '<a class="addr" href="https://www.redfin.com/zipcode/' + z + '" target="_blank" rel="noopener" title="Open Redfin for ' + z + '">' +
-      esc(l.addr) + '</a><span class="rf-wait">' +
-      (triedLinks[l.mls] ? 'Opens Redfin ' + z + ' — house page not listed' : 'Opens Redfin ' + z + ' — house page coming') + '</span>';
-    return '<span class="addr nolink">' + esc(l.addr) + '</span>';
+    var u = redfinOf(l);
+    return u
+      ? '<a class="addr" href="' + esc(u) + '" target="_blank" rel="noopener" title="Open this house on Redfin">' + esc(l.addr) + '</a>'
+      : '<span class="addr nolink">' + esc(l.addr) + '</span><span class="rf-wait">' +
+        (triedLinks[l.mls] ? 'Redfin page not found yet — checking again' : 'Finding this house on Redfin…') + '</span>';
   }
 
   function noteList(mls){
