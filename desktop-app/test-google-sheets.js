@@ -346,10 +346,28 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(listed, ['3 Due Tomorrow', '1 Late Due', '2 No Date', '5 B Tbd', '6 Unscored'],
     'Board order: A first, soonest offer deadline first, unscored last');
   eq(listed.includes('4 Passed'), false, 'a lead passed in Notes is not on the Board');
-  eq(board[6].slice(1), [3, 1, 1, 1, 1], 'Board counts: A, B, due in 48h, TBD, passed in Notes');
+  eq(board[6].slice(1), [3, 1, 1, 1, 0, 0, 1], 'Board counts: A, B, due in 48h, TBD, pending, closed, passed in Notes');
   eq(board[3].slice(1, 5), [86, 0, 5, 10], "today's funnel: scanned, C, B, A");
   eq(board[9][2], '9/24/2026 4:00 PM', 'the offer date is written as a real date');
   eq(/^=IF\(ISNUMBER\(C10\)/.test(board[9][3]), true, 'Time Left is a live formula on its own row');
+
+  //     Closed listings come off the Board; pending ones sink to the bottom.
+  const SH = ['MLS #', 'Address', 'Notes', 'Bucket', 'Opportunity Score', 'Offer Due', 'MLS Status', 'MLS Link'];
+  const sb = buildBoard([SH,
+    ['S1', '1 Sold', '', 'A — Work Now', '95', '', 'Sold', ''],
+    ['S2', '2 Pending', '', 'A — Work Now', '90', '2026-09-24 (Thu) 4:00 PM', 'Pending', ''],
+    ['S3', '3 Active B', '', 'B — AI Review', '50', '', 'Active', ''],
+    ['S4', '4 Withdrawn', '', 'B — AI Review', '60', '', 'Withdrawn', ''],
+    ['S5', '5 Active A', '', 'A — Work Now', '70', '', 'Active',
+      'https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=SF426159646'],
+  ], {}, '2026-09-23T14:00:00');
+  eq(sb.slice(9).map(r => r[5]), ['5 Active A', '3 Active B', '2 Pending'],
+    'sold and withdrawn are off the Board; pending goes after every active lead');
+  eq(sb[6].slice(1), [1, 1, 0, 0, 1, 2, 0], 'pending and closed are counted, and a pending deadline is not "due in 48h"');
+  eq(sb[9][12], 'https://www.mlslistings.com/Property/SF426159646', 'an old broken Portal link is rewritten on the Board');
+  const { mlsUrl, fixLink } = require('./scan-core');
+  eq(mlsUrl('CROC26191070'), 'https://www.mlslistings.com/Property/CROC26191070', 'the listing link is the public page');
+  eq(fixLink('', 'ML82056071'), 'https://www.mlslistings.com/Property/ML82056071', 'a blank link is built from the MLS #');
 
   // 15. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',

@@ -628,7 +628,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       const filterRejects = (cityFiltered || []).map(r => ({
         mls: r.mls, addr: r.addr, city: cityOf(r), zip: r.zip || '',
         price: r._price, ppsf: r._ppsf, sqft: r._sqft, dom: r._dom, reason: r._reason,
-        link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${r.mls}`,
+        link: core.mlsUrl(r.mls),
       }));
       if (filterRejects.length) log(`[${label}] ${filterRejects.length} failed the buy-box filter — all logged with the reason`);
 
@@ -734,7 +734,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             price: c._price, ppsf: c._ppsf, sqft: c._sqft, dom: domOf(c),
             reason: dropReason || 'dropped at photo review',
             stage: c._q && !c._q.hard && !/^AI/.test(c._q.why) ? 'Qualification gate' : 'Photo review',
-            link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+            link: core.mlsUrl(c.mls),
           });
         }
         // Record as we go, not at the end — a crash or Stop mid-run must not
@@ -763,7 +763,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             recommendation: 'Needs Comps', flipQuality: '', score: '',
             risks: 'Condition-qualified only — ARV and profit not yet calculated',
             ...gateFields(c),
-            link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+            link: core.mlsUrl(c.mls),
             // Push these: with no ARV there is no gate to clear, and the point
             // of this mode is to get the qualified list in front of you.
             surface: true, needsComps: true,
@@ -785,7 +785,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''), dom: domOf(c), price: c._price,
           arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
           arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
-          link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+          link: core.mlsUrl(c.mls),
           ...deal, ...gateFields(c) });
       }
       }
@@ -1040,7 +1040,7 @@ const leadRecord = r => ({
   'Status': r.status || '', 'MLS #': r.mls, 'Address': fullAddress(r.address, r.city, r.zip),
   'Beds': r.beds, 'Baths': r.baths, 'SqFt': r.sqft, 'Lot SqFt': r.lotSqft,
   'Year Built': r.yearBuilt, 'DOM': r.dom, 'Purchase Price': r.price, '$/SqFt': r.ppsf,
-  'Notes': r.notes, 'MLS Link': r.link || mlsLink(r.mls), 'First Added': today(),
+  'Notes': r.notes, 'MLS Link': core.fixLink(r.link, r.mls), 'First Added': today(),
   'Bucket': r.bucket || '', 'Opportunity Score': r.oppScore != null ? r.oppScore : '',
   'Why': r.why || '', 'Price Cut': r.priceCut || '', 'Listing Agent': r.listedBy || '',
   'Offer Due': r.offerDue || '', 'Private Remarks': r.privateRemarks || '', 'Occupied By': r.occupiedBy || '',
@@ -1052,7 +1052,7 @@ const rejectRecord = r => ({
   'Address': fullAddress(r.addr || r.address, r.city, r.zip),
   'Price': r.price, '$/SqFt': r.ppsf,
   'SqFt': r.sqft, 'DOM': r.dom, 'Reason': r.reason || '', 'Stage': r.stage || '',
-  'By': 'FlipScout', 'MLS Link': r.link || mlsLink(r.mls),
+  'By': 'FlipScout', 'MLS Link': core.fixLink(r.link, r.mls),
 });
 
 /** Every MLS # already on the Rejected tab. */
@@ -1311,16 +1311,34 @@ ipcMain.handle('refresh-board', async () => {
     const rows = await gsheets.readAll(token, g.sheetId, g.leadTab);
     const head = (rows[0] || []).map(h => String(h).trim());
     const val = (r, h) => { const i = head.indexOf(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); };
-    const todo = rows.slice(1).filter(r => val(r, 'MLS #') && !core.PASSED_NOTE.test(val(r, 'Notes')));
-    log(`Refreshing ${todo.length} lead(s) on the board (reports only, no photos)…`, 'good');
+    // Newest first (rows are appended, so later rows are newer; First Added
+    // breaks ties), and closed listings are skipped — a sold house has
+    // nothing left to refresh, and re-reading hundreds of them took hours.
+    const all = rows.slice(1).map((r, i) => ({ r, i })).filter(x => val(x.r, 'MLS #'));
+    const passedN = all.filter(x => core.PASSED_NOTE.test(val(x.r, 'Notes'))).length;
+    const closedN = all.filter(x => !core.PASSED_NOTE.test(val(x.r, 'Notes')) && core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))).length;
+    const todo = all
+      .filter(x => !core.PASSED_NOTE.test(val(x.r, 'Notes')) && !core.CLOSED_STATUS.test(val(x.r, 'MLS Status')))
+      .sort((a, b) => (val(b.r, 'First Added') || '').localeCompare(val(a.r, 'First Added') || '') || b.i - a.i)
+      .map(x => x.r);
+    log(`Refreshing ${todo.length} lead(s), newest first (reports only, no photos) — `
+      + `skipping ${closedN} closed and ${passedN} passed in Notes…`, 'good');
 
     let batch = [];
+    // Old broken Portal.aspx links on the rows we are NOT re-reading (closed,
+    // passed) are fixed in the same write — no MLS lookup needed for that.
+    const skipped = all.map(x => x.r).filter(r => todo.indexOf(r) < 0 && /Portal\.aspx/i.test(val(r, 'MLS Link')));
     const flush = async () => {
       if (!batch.length) return;
       await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', batch,
-        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why'] });
+        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link'] });
       batch = [];
     };
+    if (skipped.length) {
+      for (const r of skipped) batch.push({ 'MLS #': val(r, 'MLS #'), 'MLS Link': core.mlsUrl(val(r, 'MLS #')) });
+      await flush();
+      log(`  fixed ${skipped.length} old MLS link(s) on closed / passed rows`);
+    }
     for (let i = 0; i < todo.length; i++) {
       await waitIfPaused();
       if (control.stopped) break;
@@ -1343,6 +1361,7 @@ ipcMain.handle('refresh-board', async () => {
           'Listing Agent': gal.listedBy || '', 'Offer Due': offer,
           'Private Remarks': gal.privateRemarks || '', 'Occupied By': gal.occupiedBy || '',
           'MLS Status': gal.status || '',
+          'MLS Link': core.mlsUrl(mls),
         };
         if (!val(r, 'Bucket')) {
           // Never scored (an older row). No area medians or photos on a refresh,

@@ -421,12 +421,24 @@ web app, no deployment and no shared secret any more. Three tabs:
   offer deadline first, then TBD, then no date, then past deadlines; a live
   `Time Left` formula counts down between rebuilds. Rows whose Notes start
   with PASS / "we're passing" / rejected are counted, not listed
-  (`core.PASSED_NOTE`). `core.buildBoard()` is pure and tested.
+  (`core.PASSED_NOTE`). **Closed listings** (MLS Status Sold / Withdrawn /
+  Expired / Canceled / Off Market — `core.CLOSED_STATUS`) are counted, not
+  listed; **Pending / Contingent** stay on, after every active lead.
+  `core.buildBoard()` is pure and tested.
+- **MLS Link = `https://www.mlslistings.com/Property/<MLS#>`** (`core.mlsUrl`),
+  the public listing page — opens with no sign-in, checked for SF / ML / CROC /
+  BE numbers, active and sold. The old `Matrix/Public/Portal.aspx?ID=<MLS#>` is
+  MLS's client **email** portal: it wants an id from an agent's email, not an
+  MLS number, so every one of those links showed "The email URL you are using
+  is either not valid or it has expired". The Board and every Refresh rewrite
+  old links (`core.fixLink`).
 - **Leads already on the sheet are never re-reviewed by a scan** — every scan
   pulls the `Leads` MLS #s into the ledger as `on-board` (the first test re-
   reviewed 15 of 16 for nothing). **"↻ Refresh leads on the board"** is what
-  keeps them current: it re-reads only the Leads rows not passed in Notes,
-  reports only (no photos, ~5 s each), and updates `Price Cut · Listing Agent ·
+  keeps them current: it re-reads only the Leads rows not passed in Notes and
+  not closed, **newest first** (the first live refresh, 23 Sep, faced 809 rows
+  in sheet order — ~3 hours, with the day's 15 new leads last), reports only
+  (no photos, ~12 s each), and updates `Price Cut · Listing Agent ·
   Offer Due · Private Remarks · Occupied By · MLS Status` — a TBD becomes a
   date, a pending listing says so, a listing gone from the Active search is
   flagged "Not found in Active search — check". Rows never scored get a bucket

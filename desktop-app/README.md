@@ -85,7 +85,10 @@ Leads already on your sheet are **not** re-reviewed by a scan. To bring them up
 to date, click **↻ Refresh leads on the board** (section 3, signed in to MLS):
 it re-reads just those listings — no photos, a few seconds each — and updates
 Offer Due (TBD → a real date), Price Cut, Private Remarks, Occupied By and MLS
-Status (Active / Pending). Your Notes are never changed. **▦ Update Board tab**
+Status (Active / Pending). Your Notes are never changed. It goes **newest lead
+first** and skips listings that are sold, withdrawn or expired, so you can stop
+it once today's leads are done. Sold / withdrawn listings come off the Board;
+pending ones stay at the bottom. Listing links open the public MLSListings page. **▦ Update Board tab**
 rebuilds the Board without touching MLS.
 
 ## One-time Google setup

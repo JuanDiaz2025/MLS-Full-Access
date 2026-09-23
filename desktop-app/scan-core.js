@@ -615,6 +615,27 @@ function findTime(w) {
   return ` ${+tm[1]}:${tm[2] || '00'} ${tm[3].toUpperCase()}M`;
 }
 
+// ---- listing links ----
+// The public listing page, which opens for anyone with no sign-in:
+// https://www.mlslistings.com/Property/SF426159646 (checked for SF, ML, CROC
+// and BE numbers, active and sold). The old link, Matrix/Public/Portal.aspx
+// ?ID=<MLS#>, is MLS's client EMAIL portal — it wants an id from an agent's
+// email, not an MLS number, and every one of those links showed
+// "The email URL you are using is either not valid or it has expired".
+const mlsUrl = mls => mls ? 'https://www.mlslistings.com/Property/' + encodeURIComponent(String(mls).trim()) : '';
+/** Rewrite an old Portal.aspx link to the working one; leave anything else. */
+function fixLink(link, mls) {
+  const m = String(link || '').match(/Portal\.aspx\?ID=([A-Z0-9]+)/i);
+  if (m) return mlsUrl(m[1]);
+  return link || mlsUrl(mls);
+}
+
+// Listing status off the report. Closed listings are finished: they come off
+// the Board and a refresh stops re-reading them. Pending / contingent may
+// still fall out of escrow, so they stay on the Board, at the bottom.
+const CLOSED_STATUS = /\b(sold|withdrawn|expired|cancel+ed|off[- ]?market|closed)\b/i;
+const PENDING_STATUS = /\b(pending|contingent|under contract)\b/i;
+
 // ---- the Board: one tab that says what to work on, rebuilt every time ----
 
 // A row a person has already passed on in the Notes column. Those stay on
@@ -649,7 +670,10 @@ function buildBoard(leadRows, today, now) {
   const rows = leadRows.slice(1).filter(r => cell(r, 'MLS #'));
 
   const passed = rows.filter(r => PASSED_NOTE.test(cell(r, 'Notes')));
-  const live = rows.filter(r => !PASSED_NOTE.test(cell(r, 'Notes')));
+  const notPassed = rows.filter(r => !PASSED_NOTE.test(cell(r, 'Notes')));
+  const closed = notPassed.filter(r => CLOSED_STATUS.test(cell(r, 'MLS Status')));
+  const live = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')));
+  const isPending = r => PENDING_STATUS.test(cell(r, 'MLS Status'));
   const bucketOf = r => (cell(r, 'Bucket').match(/^[ABC]/) || ['?'])[0];
   const due = r => offerDueToDate(cell(r, 'Offer Due'));
   const rank = r => {
@@ -660,6 +684,9 @@ function buildBoard(leadRows, today, now) {
     return [3, -d.getTime()];
   };
   live.sort((a, b) => {
+    // Active first; pending / contingent after every active lead.
+    const pa = isPending(a) ? 1 : 0, pb = isPending(b) ? 1 : 0;
+    if (pa !== pb) return pa - pb;
     const order = { A: 0, B: 1 };   // anything not yet scored goes last
     const ba = order[bucketOf(a)] ?? 2, bb = order[bucketOf(b)] ?? 2;
     if (ba !== bb) return ba - bb;
@@ -669,7 +696,8 @@ function buildBoard(leadRows, today, now) {
     return (Number(cell(b, 'Opportunity Score')) || 0) - (Number(cell(a, 'Opportunity Score')) || 0);
   });
 
-  const in48 = live.filter(r => { const d = due(r); return d && d >= now && d - now <= 48 * 3600000; }).length;
+  const active = live.filter(r => !isPending(r));
+  const in48 = active.filter(r => { const d = due(r); return d && d >= now && d - now <= 48 * 3600000; }).length;
   const pad = n => String(n).padStart(2, '0');
   const us = d => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${((d.getHours() + 11) % 12) + 1}:${pad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
   const t = today || {};
@@ -680,9 +708,10 @@ function buildBoard(leadRows, today, now) {
     ["Today's scan", 'Scanned', 'Auto-Pass (C)', 'AI Review (B)', 'Work Now (A)', 'New on the sheet'],
     ['', t.scanned || 0, t.bucketC || 0, t.bucketB || 0, t.bucketA || 0, t.pushed || 0],
     [],
-    ['On the board', 'A — Work Now', 'B — AI Review', 'Offers due in 48h', 'Offer date TBD', 'Passed in Notes'],
-    ['', live.filter(r => bucketOf(r) === 'A').length, live.filter(r => bucketOf(r) === 'B').length, in48,
-      live.filter(r => /^TBD$/i.test(cell(r, 'Offer Due'))).length, passed.length],
+    ['On the board', 'A — Work Now', 'B — AI Review', 'Offers due in 48h', 'Offer date TBD',
+      'Pending / contingent', 'Closed (sold, withdrawn…)', 'Passed in Notes'],
+    ['', active.filter(r => bucketOf(r) === 'A').length, active.filter(r => bucketOf(r) === 'B').length, in48,
+      active.filter(r => /^TBD$/i.test(cell(r, 'Offer Due'))).length, live.length - active.length, closed.length, passed.length],
     [],
     ['Bucket', 'Score', 'Offer Due', 'Time Left', 'MLS Status', 'Address', 'Price', 'Price Cut',
       'Occupied By', 'Listing Agent', 'Notes', 'Why', 'MLS Link'],
@@ -695,7 +724,8 @@ function buildBoard(leadRows, today, now) {
       d ? us(d) : cell(r, 'Offer Due'),
       `=IF(ISNUMBER(C${n}),IF(C${n}<NOW(),"passed",INT(C${n}-NOW())&"d "&HOUR(C${n}-NOW())&"h"),"")`,
       cell(r, 'MLS Status'), cell(r, 'Address'), cell(r, 'Purchase Price'), cell(r, 'Price Cut'),
-      cell(r, 'Occupied By'), cell(r, 'Listing Agent'), cell(r, 'Notes'), cell(r, 'Why'), cell(r, 'MLS Link'),
+      cell(r, 'Occupied By'), cell(r, 'Listing Agent'), cell(r, 'Notes'), cell(r, 'Why'),
+      fixLink(cell(r, 'MLS Link'), cell(r, 'MLS #')),
     ]);
   });
   return out;
@@ -719,4 +749,5 @@ module.exports = {
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
   qualify, privateRemarks, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
+  mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS,
 };
