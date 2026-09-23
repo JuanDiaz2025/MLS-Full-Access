@@ -249,6 +249,12 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   display:block; font-family:Archivo,sans-serif; font-size:10px; font-weight:600;
   letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
 }
+.rf{display:block; margin-top:2px; font-size:11px; color:var(--muted)}
+.rf-ok{color:var(--t-won); font-weight:600}
+.rf button{border:0; background:none; padding:0; font:inherit; color:var(--accent); cursor:pointer; text-decoration:underline}
+.rf-edit{display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; max-width:52ch}
+.rf-in{flex:1 1 220px; min-width:0; font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
+  color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:5px 8px}
 .team-note{
   display:block; margin-top:6px; max-width:52ch; font-size:12.5px; line-height:1.4;
   border-left:3px solid var(--brand-2); padding:2px 0 2px 8px; color:var(--ink);
@@ -535,10 +541,12 @@ footer .num{font-size:12px}
   "use strict";
   var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
   var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue"];
-  // Addresses link to Redfin. The MLS link only works for someone signed in to
-  // MLSListings, and Redfin's own page addresses need an id the MLS doesn't
-  // give us, so the link searches redfin.com for the exact address — the
-  // listing's Redfin page is the first result.
+  // Addresses open the house's Redfin page. Redfin page links carry Redfin's
+  // own home id, so they can't be built from the address: the FlipScout app
+  // looks each new lead up, and for any lead without one a teammate pastes the
+  // link once (links/<MLS> in the shared board). Until then the address runs a
+  // search for the house on redfin.com.
+  var REDFIN_PAGE = /^https:\/\/(?:www\.)?redfin\.com\/[A-Za-z]{2}\/[^\s"<>]+\/home\/\d+(?:[?#][^\s"<>]*)?$/;
   function redfinLink(addr){
     return "https://www.google.com/search?q=" + encodeURIComponent('"' + addr + '" site:redfin.com');
   }
@@ -558,6 +566,7 @@ footer .num{font-size:12px}
   // entry, so two people writing at once never overwrite each other.
   var notes = {};     // MLS # -> entries, as the shared board has them
   var openNotes = {}, drafts = {}, pendingNotes = {};
+  var links = {}, pendingLinks = {}, editingLink = {};   // MLS # -> Redfin page
   var LEADS = [], BY_DATE = {}, BY_MLS = {}, DATES = [], LAST_PULL = "";
 
   function str(v, n){ return typeof v === "string" ? v.slice(0, n) : ""; }
@@ -578,6 +587,7 @@ footer .num{font-size:12px}
       remarks: str(x.remarks, 2000), agentRemarks: str(x.agentRemarks, 1500),
       showing: str(x.showing, 600), offerFrom: str(x.offerFrom, 40),
       offerPhrase: str(x.offerPhrase, 200), why: str(x.why, 240),
+      redfin: REDFIN_PAGE.test(str(x.redfin, 400)) ? x.redfin : "",
       fromScan: true, link: redfinLink(str(x.addr, 160) || mls)
     };
   }
@@ -810,8 +820,9 @@ footer .num{font-size:12px}
     return '<tr class="' + STRIPE[st] + (gone ? " gone" : st === "Pass" ? " passed" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
       '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + '</td>' +
-      '<td data-l="Property" class="wide"><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener" title="Find on Redfin">' + esc(l.addr) + '</a>' +
-        '<span class="mls">' + esc(l.mls) + '</span>' +
+      '<td data-l="Property" class="wide"><a class="addr" href="' + esc(hrefOf(l)) + '" target="_blank" rel="noopener" title="' +
+          (redfinOf(l) ? 'Open on Redfin' : 'Search Redfin for this house') + '">' + esc(l.addr) + '</a>' +
+        '<span class="mls">' + esc(l.mls) + '</span>' + linkHTML(l) +
         (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + saidHTML(l) + '</td>' +
       '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
       '<td data-l="$/SqFt" class="num">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
@@ -832,6 +843,40 @@ footer .num{font-size:12px}
       '<td data-l="" class="act"><button class="btn tiny" data-act="' + (gone ? "restore" : "remove") + '" type="button">' +
         (gone ? "Restore" : "Remove") + '</button></td>' +
     '</tr>';
+  }
+
+  function redfinOf(l){
+    var p = pendingLinks[l.mls], s = links[l.mls];
+    var u = p != null ? p : (s && typeof s.redfin === "string" ? s.redfin : "") || l.redfin || "";
+    return REDFIN_PAGE.test(u) ? u : "";
+  }
+  function hrefOf(l){ return redfinOf(l) || l.link; }
+
+  function linkHTML(l){
+    var m = esc(l.mls), has = !!redfinOf(l);
+    if (editingLink[l.mls]) {
+      return '<span class="rf-edit"><input type="url" class="rf-in" data-mls="' + m + '" value="' + esc(redfinOf(l)) +
+        '" placeholder="https://www.redfin.com/CA/…/home/…" aria-label="Redfin link for ' + m + '">' +
+        '<button type="button" class="btn tiny" data-rf-save="' + m + '">Save</button>' +
+        '<button type="button" class="btn tiny" data-rf-cancel="' + m + '">Cancel</button></span>';
+    }
+    return '<span class="rf">' + (has ? '<span class="rf-ok">Redfin page</span>' : '<span class="rf-no">Redfin search</span>') +
+      ' · <button type="button" data-rf-edit="' + m + '">' + (has ? 'change link' : 'paste Redfin link') + '</button></span>';
+  }
+
+  function saveLink(mls, val){
+    var u = String(val || "").trim();
+    if (u && !REDFIN_PAGE.test(u)) {
+      toast("That isn't a Redfin house page. Open the house on redfin.com and copy the address bar — it ends in /home/ and a number.");
+      return;
+    }
+    pendingLinks[mls] = u;
+    delete editingLink[mls];
+    draw();
+    if (!db) { note("The shared board isn't connected, so this link is on this screen only. Reload the page.", true); return; }
+    db.doc("links/" + mls).set({redfin: u, by: myName || "Someone", at: new Date().toISOString()})
+      .then(function(){ toast(u ? "Redfin link saved for the team" : "Redfin link removed"); })
+      .catch(function(){ note("Couldn't save that link to the shared board. Reload the page and try again.", true); });
   }
 
   function noteList(mls){
@@ -921,13 +966,14 @@ footer .num{font-size:12px}
     // A teammate's change re-draws the table; keep whoever is typing a note
     // right where they were.
     var act = document.activeElement, keep = null;
-    if (act && act.classList && act.classList.contains("note-in")) {
-      keep = {mls: act.dataset.mls, a: act.selectionStart, b: act.selectionEnd};
+    if (act && act.classList && (act.classList.contains("note-in") || act.classList.contains("rf-in"))) {
+      keep = {sel: (act.tagName === "TEXTAREA" ? 'textarea.note-in' : 'input.rf-in') + '[data-mls="' + act.dataset.mls + '"]',
+              v: act.value, a: act.selectionStart, b: act.selectionEnd};
     }
     renderRows();
     if (keep) {
-      var ta = document.querySelector('textarea.note-in[data-mls="' + keep.mls + '"]');
-      if (ta) { ta.focus(); try { ta.setSelectionRange(keep.a, keep.b); } catch (e) {} }
+      var ta = document.querySelector(keep.sel);
+      if (ta) { if (ta.tagName === "INPUT") ta.value = keep.v; ta.focus(); try { ta.setSelectionRange(keep.a, keep.b); } catch (e) {} }
     }
   }
 
@@ -1074,6 +1120,9 @@ footer .num{font-size:12px}
     if (ev.target.classList && ev.target.classList.contains("note-in")) drafts[ev.target.dataset.mls] = ev.target.value;
   });
   document.addEventListener("keydown", function(ev){
+    if (ev.key === "Enter" && ev.target.classList && ev.target.classList.contains("rf-in")) {
+      ev.preventDefault(); saveLink(ev.target.dataset.mls, ev.target.value); return;
+    }
     if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && ev.target.classList && ev.target.classList.contains("note-in")) {
       ev.preventDefault(); saveNote(ev.target.dataset.mls);
     }
@@ -1106,6 +1155,14 @@ footer .num{font-size:12px}
       if (k === sortKey) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
       draw(); return;
     }
+    var re = ev.target.closest("button[data-rf-edit]");
+    if (re){ editingLink[re.dataset.rfEdit] = true; draw();
+      var inp = document.querySelector('input.rf-in[data-mls="' + re.dataset.rfEdit + '"]'); if (inp) inp.focus(); return; }
+    var rc = ev.target.closest("button[data-rf-cancel]");
+    if (rc){ delete editingLink[rc.dataset.rfCancel]; draw(); return; }
+    var rs = ev.target.closest("button[data-rf-save]");
+    if (rs){ var ri = document.querySelector('input.rf-in[data-mls="' + rs.dataset.rfSave + '"]');
+      saveLink(rs.dataset.rfSave, ri ? ri.value : ""); return; }
     var ns = ev.target.closest("button[data-note-save]");
     if (ns){ saveNote(ns.dataset.noteSave); return; }
     var nd = ev.target.closest("button[data-note-del]");
@@ -1226,7 +1283,7 @@ footer .num{font-size:12px}
           return '<tr><td class="n">' + esc(dueOf(l)) +
             (dueIsApprox(l) ? ' <span class="due-src approx">≈</span>' : '') + '</td>' +
             '<td><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span></td>' +
-            '<td><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' +
+            '<td><a class="addr" href="' + esc(hrefOf(l)) + '" target="_blank" rel="noopener">' +
               esc(l.addr) + '</a><span class="mls">' + esc(l.mls) + '</span></td>' +
             '<td><span class="pill ' + STCLASS[statusOf(l)] + '">' + esc(statusOf(l)) + '</span></td>' +
             '<td class="n">' + fmtMoney(l.price) + '</td>' +
@@ -1394,7 +1451,7 @@ footer .num{font-size:12px}
     return {mls: l.mls, addr: l.addr, price: l.price, ppsf: l.ppsf, sqft: l.sqft, beds: l.beds,
             year: l.year, dom: l.dom, remarks: l.remarks, agentRemarks: l.agentRemarks,
             showing: l.showing, offerDue: l.sdue, offerFrom: l.offerFrom,
-            offerPhrase: l.offerPhrase, why: l.why};
+            offerPhrase: l.offerPhrase, why: l.why, redfin: l.redfin};
   }
 
   function addScan(){
@@ -1465,6 +1522,15 @@ footer .num{font-size:12px}
       if (!x){ note("This view is running <b>offline</b> — your changes stay in this browser only.", true); return; }
       db = x;
       flush();
+      db.collection("links").onSnapshot(function(snap){
+        var next = {};
+        snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
+        links = next;
+        Object.keys(pendingLinks).forEach(function(m){
+          if (links[m] && links[m].redfin === pendingLinks[m]) delete pendingLinks[m];
+        });
+        draw();
+      }, function(){});
       db.collection("notes").onSnapshot(function(snap){
         var next = {};
         snap.docs.forEach(function(d){ var b = d.data() || {}; next[d.id] = b.entries && typeof b.entries === "object" ? b.entries : {}; });

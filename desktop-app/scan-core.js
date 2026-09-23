@@ -622,7 +622,33 @@ function findOfferDue(src, pulled) {
   return { due: '', from: '', phrase: '' };
 }
 
+/**
+ * The exact Redfin page for an address, out of Redfin's location-autocomplete
+ * answer (the text after its "{}&&" guard). Redfin's page links carry an
+ * internal home id — /CA/San-Francisco/21-College-Ter-94112/home/1234567 — so
+ * they cannot be built from the address; they have to be looked up.
+ *
+ * Only a result whose street number and zip match the address is taken: a
+ * wrong house's page is worse than no link.
+ */
+function redfinUrlFrom(body, address) {
+  const txt = String(body || '');
+  const want = String(address || '');
+  const num = (want.match(/^\s*(\d+[A-Za-z]?)\b/) || [])[1];
+  const zip = (want.match(/\b(9\d{4})\b/) || [])[1];
+  if (!num) return '';
+  const urls = [...txt.matchAll(/"url"\s*:\s*"(\/[A-Z]{2}\/[^"]+?\/home\/\d+)"/g)].map(m => m[1]);
+  for (const u of urls) {
+    const slug = u.split('/')[3] || '';                 // "21-College-Ter-94112"
+    if (!slug.startsWith(num + '-')) continue;
+    if (zip && !slug.endsWith('-' + zip)) continue;
+    return 'https://www.redfin.com' + u;
+  }
+  return '';
+}
+
 module.exports = {
+  redfinUrlFrom,
   listingBlock, parseAgentDetail, parseOfferDue, findOfferDue,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,

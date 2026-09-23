@@ -100,6 +100,18 @@ const CASES = [
 ];
 for (const [text, pulled, want] of CASES) eq(core.parseOfferDue(text, pulled).due, want, 'offer due: ' + text);
 
+// ---- the exact Redfin page, only for the right house ----
+{
+  const body = '{}&&{"payload":{"sections":[{"rows":[' +
+    '{"name":"210 College Ter","url":"/CA/San-Francisco/210-College-Ter-94112/home/111"},' +
+    '{"name":"21 College Ter","url":"/CA/San-Francisco/21-College-Ter-94112/home/2345678"}]}]}}';
+  eq(core.redfinUrlFrom(body, '21 College Terrace, San Francisco, CA 94112'),
+    'https://www.redfin.com/CA/San-Francisco/21-College-Ter-94112/home/2345678', 'Redfin: picks the matching house, not 210');
+  eq(core.redfinUrlFrom(body, '21 College Terrace, Daly City, CA 94014'), '', 'Redfin: wrong zip is no link');
+  eq(core.redfinUrlFrom('{}&&{"payload":{}}', '21 College Terrace, San Francisco, CA 94112'), '', 'Redfin: nothing found is no link');
+  eq(core.redfinUrlFrom(body, 'College Terrace'), '', 'Redfin: no street number, no guess');
+}
+
 // ---- the photo-grid key must survive being sent into the page ----
 // 1.31.0 sent /Key=(d+)/ — a single backslash inside a template string is
 // dropped — so the full photo grid was never found and every listing was judged

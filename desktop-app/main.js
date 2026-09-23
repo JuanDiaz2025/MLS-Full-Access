@@ -7,7 +7,7 @@
  * detects the dashboard. Scanning navigates the MLS window through Matrix and
  * runs the same extraction used by the headless pipeline.
  */
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, net } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
@@ -600,7 +600,20 @@ async function autoDecide(c) {
 
 /** What the listing said, as it rides on a lead: remarks, offer deadline,
  *  and why the review kept it. */
-const said = c => Object.assign({ why: c._why || '' }, c._said || {});
+const said = c => Object.assign({ why: c._why || '', redfin: c._redfin || '' }, c._said || {});
+
+// Look the kept house up on Redfin, from this computer, so the Lead Board can
+// link straight to its page. A failure only costs the link, never the lead.
+async function redfinUrl(address) {
+  if (!address) return '';
+  try {
+    const u = 'https://www.redfin.com/stingray/do/location-autocomplete?v=2&al=1&location='
+      + encodeURIComponent(address);
+    const r = await net.fetch(u, { headers: { 'Accept': 'application/json, text/plain, */*' } });
+    if (!r.ok) return '';
+    return core.redfinUrlFrom(await r.text(), address);
+  } catch (_) { return ''; }
+}
 
 // ---------- full run ----------
 /** The buy box as pickable areas, for the checkboxes in section 3. */
@@ -773,7 +786,12 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         }
         if (control.stopped) break;
         runKpi.reviewed++;
-        if (decision === 'keep') { c._why = dropReason || ''; kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
+        if (decision === 'keep') {
+          c._why = dropReason || '';
+          c._redfin = await redfinUrl(c.fullAddr || c.addr);
+          log(c._redfin ? `  Redfin page: ${c._redfin}` : '  no matching Redfin page found — the board will offer a search', c._redfin ? 'good' : 'info');
+          kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good');
+        }
         else {
           runKpi.dropped++; runKpi[dropBucket(dropReason)]++;
           log(`  dropped ${c.addr} — ${dropReason || 'no reason given'}`);
@@ -980,6 +998,7 @@ function boardLead(l) {
     offerDue: /^~?\d{4}-\d{2}-\d{2}$/.test(l.offerDue || '') ? l.offerDue : '',
     offerFrom: clip(l.offerFrom, 40), offerPhrase: clip(l.offerPhrase, 200),
     why: clip(l.why, 240),
+    redfin: /^https:\/\/www\.redfin\.com\/[A-Z]{2}\/[^\s"<>]+\/home\/\d+$/.test(l.redfin || '') ? l.redfin : '',
   };
 }
 
