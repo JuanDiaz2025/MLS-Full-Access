@@ -653,7 +653,7 @@ function renderDrawer(people){
   const ro=!S.canWrite, doc=()=>S.db.doc("tasks/"+t.id);
   const st=STATUS.find(x=>x.k===(t.status||"todo"))||STATUS[0];
   const prof=t.owner?people[t.owner]:null, oname=(t.ownerName||"").trim();
-  const owner = prof?(prof.isMe?"You":(prof.name||"Teammate")):(oname||"Unassigned");
+  const owner = prof?(prof.isMe?"You":first(prof.name)||"Teammate"):(first(oname)||"Unassigned");
   const thread=S.notes.filter(n=>n.taskId===t.id).sort((a,b)=>b.createdAt-a.createdAt);
   const ta=h("textarea",{id:"tc-new",rows:"3",placeholder:"Write an update or comment…","aria-label":"New update"});
   ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); addTaskNote(t,ta); } });
@@ -756,6 +756,7 @@ async function sendEmails(recips, subject, body){
 }
 
 /* ---------- task rows ---------- */
+function first(name){ return String(name||"").trim().split(/\s+/)[0]||""; }
 function initials(name){ return name.trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase(); }
 function nameColor(name){ let x=0; for(const c of name.toLowerCase()) x=(x*31+c.charCodeAt(0))>>>0; return `var(${GCOLORS[x%GCOLORS.length]})`; }
 function badge(name){ return h("i",{class:"ini",style:`background:${nameColor(name)}`,text:initials(name)||"?","aria-hidden":"true"}); }
@@ -771,8 +772,8 @@ function renderRow(grid, t, people){
 
   const prof = t.owner ? people[t.owner] : null, oname=(t.ownerName||"").trim();
   grid.append(h("div",{class:"cell center",role:"cell"},h("button",{class:"owner",id:"o-"+t.id,disabled:ro||null,"aria-label":prof?("Owner: "+(prof.name||"Someone")):oname?("Owner: "+oname):"Assign owner",onclick:e=>openOwner(e.currentTarget,t)},
-    prof ? [h("img",{src:prof.avatarUrl,alt:""}), h("span",{text:prof.isMe?"You":(prof.name||"Someone")})]
-         : oname ? [badge(oname), h("span",{text:oname})] : h("span",{class:"plus",text:"+"}))));
+    prof ? [h("img",{src:prof.avatarUrl,alt:""}), h("span",{text:prof.isMe?"You":(first(prof.name)||"Someone"),title:prof.name||""})]
+         : oname ? [badge(oname), h("span",{text:first(oname),title:oname})] : h("span",{class:"plus",text:"+"}))));
 
   grid.append(h("div",{class:"cell center",role:"cell"}, h("button",{class:"pill",id:"s-"+t.id,disabled:ro||null,style:`background:var(--s-${st.k});color:var(--s-${st.k}-ink)`,
     onclick:e=>openList(e.currentTarget,STATUS.map(x=>({...x,style:`background:var(--s-${x.k});color:var(--s-${x.k}-ink)`})),k=>write(()=>doc().update({status:k,updatedAt:Date.now()}), k==="done"?"Marked done":null))}, st.label)));
