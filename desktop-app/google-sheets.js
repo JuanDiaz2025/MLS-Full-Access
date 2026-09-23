@@ -151,13 +151,23 @@ async function refresh({ clientId, clientSecret, refreshToken }) {
   return { accessToken: tok.access_token, expiresAt: Date.now() + (tok.expires_in || 3600) * 1000 };
 }
 
+// Google allows about 60 reads and 60 writes per minute per user. When a
+// burst hits that ("Quota exceeded for quota metric 'Read requests'"), wait
+// out the minute and try again instead of failing the whole refresh.
+const QUOTA_WAITS = [20000, 40000, 65000];
+let quotaSleep = ms => new Promise(r => setTimeout(r, ms));
 async function api(token, path, opts) {
-  const r = await fetch(SHEETS + path, Object.assign({
-    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-  }, opts || {}));
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((j.error && j.error.message) || `Sheets API ${r.status}`);
-  return j;
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(SHEETS + path, Object.assign({
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    }, opts || {}));
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) return j;
+    const msg = (j.error && j.error.message) || `Sheets API ${r.status}`;
+    const quota = r.status === 429 || /quota exceeded|rate limit/i.test(msg);
+    if (quota && attempt < QUOTA_WAITS.length) { await quotaSleep(QUOTA_WAITS[attempt]); continue; }
+    throw new Error(msg);
+  }
 }
 
 const listTabs = (token, id) =>
@@ -236,10 +246,15 @@ async function syncRows(token, id, tab, headers, keyHeader, records, opts) {
   const over = new Set((opts && opts.overwrite) || []);
   const keyCol = headers.indexOf(keyHeader);
   if (keyCol < 0) throw new Error(`key column "${keyHeader}" is not in the header row`);
-  const colLetter = colName(keyCol);
-  const existing = await readCol(token, id, tab, `${colLetter}2:${colLetter}`);
+  // ONE read of the whole tab and ONE write for every changed row. Reading
+  // and writing row by row cost two API calls per lead, and a refresh that
+  // touched ~90 rows at once hit Google's 60-reads-a-minute limit.
+  const grid = await readAll(token, id, tab);
   const rowOf = {};
-  existing.forEach((v, i) => { const k = String(v || '').trim().toUpperCase(); if (k) rowOf[k] = i + 2; });
+  grid.slice(1).forEach((r, i) => {
+    const k = String((r && r[keyCol]) || '').trim().toUpperCase();
+    if (k && !rowOf[k]) rowOf[k] = i + 2;
+  });
 
   const toAppend = [], toPatch = [];
   for (const rec of records) {
@@ -250,9 +265,9 @@ async function syncRows(token, id, tab, headers, keyHeader, records, opts) {
   }
 
   let filled = 0;
+  const data = [];
   for (const p of toPatch) {
-    const cur = await api(token, `/${id}/values/${encodeURIComponent(tab + '!A' + p.row + ':' + p.row)}`)
-      .then(j => (j.values && j.values[0]) || []);
+    const cur = grid[p.row - 1] || [];
     const merged = p.values.map((v, i) => {
       const had = cur[i];
       const mine = over.has(headers[i]);
@@ -261,7 +276,14 @@ async function syncRows(token, id, tab, headers, keyHeader, records, opts) {
       if (v !== '' && v != null) filled++;
       return v;
     });
-    await writeRow(token, id, tab, p.row, merged);
+    grid[p.row - 1] = merged;   // a second record for the same row builds on this one
+    data.push({ range: tab + '!A' + p.row, values: [merged] });
+  }
+  for (let i = 0; i < data.length; i += 500) {
+    await api(token, `/${id}/values:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: data.slice(i, i + 500) }),
+    });
   }
   if (toAppend.length) await appendRows(token, id, tab, toAppend);
   return { added: toAppend.length, updated: toPatch.length, filled };
@@ -291,5 +313,5 @@ async function replaceTab(token, id, tab, rows) {
   }
 }
 
-module.exports = { parseSheetId, signIn, refresh, listTabs, readCol, readRow, readAll, replaceTab,
+module.exports = { _setQuotaSleep: f => { quotaSleep = f; }, parseSheetId, signIn, refresh, listTabs, readCol, readRow, readAll, replaceTab,
   ensureTab, syncRows, colName, SCOPE };

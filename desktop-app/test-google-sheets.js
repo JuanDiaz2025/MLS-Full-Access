@@ -38,6 +38,16 @@ function fakeSheets(initial) {
       body.requests.forEach(r => { if (r.addSheet) tabs[r.addSheet.properties.title] = []; });
       return json({});
     }
+    if (rest === '/values:batchUpdate') {                // write many rows at once
+      body.data.forEach(d => {
+        const [tab, range] = d.range.split('!');
+        const row = parseInt(range.match(/\d+/)[0], 10) - 1;
+        const grid = tabs[tab] = tabs[tab] || [];
+        while (grid.length <= row) grid.push([]);
+        grid[row] = d.values[0].slice();
+      });
+      return json({});
+    }
     const mVal = rest.match(/^\/values\/(.+?)(:append)?$/);
     if (mVal) {
       const a1 = decodeURIComponent(mVal[1]);
@@ -55,6 +65,7 @@ function fakeSheets(initial) {
         grid[row] = body.values[0].slice();
         return json({});
       }
+      if (range === 'A1:ZZ') return json({ values: grid.map(r => r.slice()) });   // whole tab
       // read a range: a column slice (B2:B / A1:A1) or a whole row (A5:5)
       const col = range.match(/^([A-Z]+)(\d+):([A-Z]+)(\d*)$/);
       if (col && col[1] === col[3]) {
@@ -369,7 +380,37 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(mlsUrl('CROC26191070'), 'https://www.mlslistings.com/Property/CROC26191070', 'the listing link is the public page');
   eq(fixLink('', 'ML82056071'), 'https://www.mlslistings.com/Property/ML82056071', 'a blank link is built from the MLS #');
 
-  // 15. The composed sheet value, end to end.
+  // 15. Google's limit is ~60 reads a minute. Refreshing ~90 rows used to
+  //     cost two calls per row and was refused; it must be a handful now.
+  {
+    const H = ['MLS #', 'Address', 'Notes', 'MLS Link'];
+    const grid = [H.slice()];
+    for (let i = 0; i < 90; i++) grid.push(['M' + i, i + ' Test St', i === 3 ? 'my note' : '', 'old']);
+    tabs = fakeSheets({ Leads: grid });
+    let calls = 0; const real = global.fetch;
+    global.fetch = (u, o) => { calls++; return real(u, o); };
+    const recs = [];
+    for (let i = 0; i < 90; i++) recs.push({ 'MLS #': 'M' + i, 'Notes': 'app text', 'MLS Link': 'new' });
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', recs, { overwrite: ['MLS Link'] });
+    eq(calls <= 6, true, `90 rows updated in ${calls} API calls (was ~180)`);
+    eq(tabs.Leads[4][2], 'my note', 'a note typed by hand still survives the batched write');
+    eq(tabs.Leads[50][3], 'new', 'an app-owned column is replaced in the batched write');
+  }
+  {
+    // A quota refusal is waited out and retried, not thrown.
+    tabs = fakeSheets({ Leads: [['MLS #']] });
+    gs._setQuotaSleep(() => Promise.resolve());
+    let refused = 0; const real = global.fetch;
+    global.fetch = (u, o) => {
+      if (refused < 2) { refused++; return Promise.resolve({ ok: false, status: 429,
+        json: async () => ({ error: { message: "Quota exceeded for quota metric 'Read requests'" } }) }); }
+      return real(u, o);
+    };
+    const info = await gs.listTabs('tok', 'ID');
+    eq(info.tabs, ['Leads'], 'two "quota exceeded" answers in a row are retried, then it works');
+  }
+
+  // 16. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
 

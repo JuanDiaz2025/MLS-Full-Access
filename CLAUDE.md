@@ -587,6 +587,14 @@ Google Cloud project — that cannot be shipped in the app or created for them;
 the five console steps are in the app UI and `desktop-app/README.md`.
 Credentials persist in `google-account.json` under userData.
 
+**Google Sheets quota: ~60 reads and ~60 writes per minute per user.**
+`syncRows` used to read and write ONE ROW PER CALL, so the first v1.36 refresh
+(fixing links on ~92 closed/passed rows at once) died with *"Quota exceeded for
+quota metric 'Read requests' … per minute per user"*. It now reads the whole
+tab once and writes every changed row in one `values:batchUpdate` (90 rows = 4
+calls, tested), and `api()` waits out a quota refusal (20 s, 40 s, 65 s) before
+giving up. Never reintroduce a per-row read or write loop against the sheet.
+
 **A rejected lead never comes back.** Two guards, because the ledger alone is
 not enough: every scan starts by pulling the `Rejected` tab into the seen-ledger,
 and the writer re-checks that tab before appending. The second guard is the one
