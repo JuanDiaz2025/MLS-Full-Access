@@ -16,7 +16,7 @@ const gsheets = require('./google-sheets');
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
 const cfg = {
-  apiKey: '', model: 'claude-opus-5', useAI: false,   // AI vision (optional)
+  apiKey: '', model: 'claude-opus-5-5', useAI: false,   // AI vision (optional)
   readSeconds: 6,                                                      // dwell per listing
   // What to do when the text rules can't tell renovated from dated: ask | keep | drop.
   // Defaults to 'keep' so a run never stalls waiting for a click. It is a safe
@@ -27,7 +27,12 @@ const cfg = {
   runComps: false,     // OFF for now — qualify on CONDITION first, comp later
 };
 
-ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
+ipcMain.on('set-config', (_e, c) => {
+  Object.assign(cfg, c || {});
+  // "claude-opus-5" was never a model id; a saved setting from an older build
+  // would make every AI call fail.
+  if (!cfg.model || cfg.model === 'claude-opus-5') cfg.model = 'claude-opus-5-5';
+});
 
 // ---------- daily KPIs ----------
 // Every scan folds its funnel counts into a per-day record kept on disk, so the
@@ -278,7 +283,10 @@ async function scanArea(area) {
 }
 
 // ---------- open a single MLS# and render its full photo gallery in the MLS window ----------
-async function showGallery(mls) {
+// opts.factsOnly: read the reports (remarks, offer date, price, status) and
+// skip the photo grid and the dwell — what "Refresh leads on the board" needs.
+async function showGallery(mls, opts) {
+  const factsOnly = !!(opts && opts.factsOnly);
   await nav(core.SEARCH_URL, 2200);
   await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
@@ -312,7 +320,7 @@ async function showGallery(mls) {
   // any carousel image, so no popup window has to be driven.
   let urls = [], gridOk = false, info = null;
   try {
-    info = await js(`(() => {
+    if (!factsOnly) info = await js(`(() => {
       const img = [...document.images].find(i => /MediaServer/i.test(i.src));
       if (!img) return null;
       // Double backslashes: this is a template string, and a single \d here
@@ -327,7 +335,7 @@ async function showGallery(mls) {
   } catch (_) {}
   // Carousel fallback, read NOW while the report is still on screen — once we
   // leave for the Agent Full report or the photo grid it is gone.
-  const carousel = await js(core.JS_PHOTOS).catch(() => []);
+  const carousel = factsOnly ? [] : await js(core.JS_PHOTOS).catch(() => []);
 
   // Private / agent-only remarks live on the Agent Full report, not Client
   // Full. Same results page, different display — switch, read, move on.
@@ -342,7 +350,7 @@ async function showGallery(mls) {
       if (!agent.mismatch) {
         meta.privateRemarks = agent.privateRemarks || '';
         // Agent Full may carry facts Client Full left blank.
-        ['origPrice', 'listPrice', 'listedBy', 'remarks', 'address', 'zip', 'yearBuilt', 'propClass', 'condition', 'occupiedBy']
+        ['origPrice', 'listPrice', 'listedBy', 'remarks', 'address', 'zip', 'yearBuilt', 'propClass', 'condition', 'occupiedBy', 'status']
           .forEach(k => { if (!meta[k] && agent[k]) meta[k] = agent[k]; });
       }
     }
@@ -364,7 +372,7 @@ async function showGallery(mls) {
 
   // The grid page IS the gallery, so there is nothing to rebuild — just wait
   // for the images to decode before anything judges the listing.
-  await js(`(async () => {
+  if (!factsOnly) await js(`(async () => {
     const imgs = [...document.images];
     await Promise.all(imgs.map(im => im.complete ? null : new Promise(r => {
       im.onload = im.onerror = r; setTimeout(r, 8000);
@@ -374,7 +382,7 @@ async function showGallery(mls) {
 
   // Dwell, so a human watching can actually see the gallery and the run is not
   // blasting through listings faster than the pictures render.
-  const dwell = Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
+  const dwell = factsOnly ? 0 : Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
   if (dwell) await sleep(dwell);
 
   return { count: urls.length, urls: urls, gridOk: gridOk,
@@ -383,6 +391,7 @@ async function showGallery(mls) {
     propClass: meta.propClass || '',
     privateRemarks: meta.privateRemarks || '', origPrice: meta.origPrice || '',
     listPrice: meta.listPrice || '', listedBy: meta.listedBy || '', occupiedBy: meta.occupiedBy || '',
+    status: meta.status || '',
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
 }
 
@@ -522,7 +531,7 @@ async function autoDecide(c) {
       type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 },
     }));
     content.push({ type: 'text', text: rulesPrompt(c, photos.length, gal) });
-    const body = { model: cfg.model || 'claude-opus-5', max_tokens: 1024, messages: [{ role: 'user', content }] };
+    const body = { model: cfg.model || 'claude-opus-5-5', max_tokens: 1024, messages: [{ role: 'user', content }] };
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -704,7 +713,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         }
         c._q = q;
         c._gal = { origPrice: gal.origPrice, listPrice: gal.listPrice, listedBy: gal.listedBy,
-          occupiedBy: gal.occupiedBy || '', privateRemarks: gal.privateRemarks || '',
+          occupiedBy: gal.occupiedBy || '', privateRemarks: gal.privateRemarks || '', status: gal.status || '',
           // No MLS field holds it — agents write it into the remarks.
           offerDue: core.offerDue([gal.privateRemarks, gal.remarks].filter(Boolean).join(' \n ')) };
         if (c._gal.offerDue) log(`  offer due: ${c._gal.offerDue}`, 'good');
@@ -846,6 +855,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     // and a day with three aborted runs should look different from a quiet one.
     const day = recordKpi(runKpi);
     send('kpi', { today: day, history: kpiReport() });
+    if (started && googleReady() && googleCfg().autoSync) await rebuildBoard(day);
     // Only attempt the KPI push when a sheet is actually connected — an
     // unconfigured app must not log a failure after every single run.
     // FINISH, VISIBLY. The run used to just stop making noise — the MLS window
@@ -1000,11 +1010,14 @@ const LEAD_HEADERS = [
   // Qualification gate — appended at the END so every existing row and the
   // reviewer script (which reads by header name) keep lining up.
   'Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Listing Agent',
-  'Offer Due', 'Private Remarks', 'Occupied By',
+  'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
 ];
 // Read fresh off the listing on every review, so a re-review replaces them —
 // an offer date goes from "TBD" to a real date, remarks get edited.
-const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By'];
+const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status'];
+// Facts re-read by "Refresh leads on the board" — the listing's own data, never
+// the reviewer's columns. Bucket / score are only filled where still blank.
+const FACT_HEADERS = ['Price Cut', 'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status'];
 const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
@@ -1031,6 +1044,7 @@ const leadRecord = r => ({
   'Bucket': r.bucket || '', 'Opportunity Score': r.oppScore != null ? r.oppScore : '',
   'Why': r.why || '', 'Price Cut': r.priceCut || '', 'Listing Agent': r.listedBy || '',
   'Offer Due': r.offerDue || '', 'Private Remarks': r.privateRemarks || '', 'Occupied By': r.occupiedBy || '',
+  'MLS Status': r.mlsStatus || '',
 });
 
 const rejectRecord = r => ({
@@ -1186,6 +1200,7 @@ function gateFields(c) {
     bucket: q.bucket || '', bucketLabel: q.label || '', oppScore: q.score != null ? q.score : '',
     why: q.why || '', listedBy: g.listedBy || '',
     offerDue: g.offerDue || '', privateRemarks: g.privateRemarks || '', occupiedBy: g.occupiedBy || '',
+    mlsStatus: g.status || '',
     priceCut: orig > list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
   };
 }
@@ -1206,6 +1221,7 @@ function toSheetRow(l) {
     bucket: l.bucketLabel || '', oppScore: l.oppScore, why: l.why || '',
     priceCut: l.priceCut || '', listedBy: l.listedBy || '',
     offerDue: l.offerDue || '', privateRemarks: l.privateRemarks || '', occupiedBy: l.occupiedBy || '',
+    mlsStatus: l.mlsStatus || '',
   };
 }
 
@@ -1231,12 +1247,138 @@ async function syncRejectedIntoLedger() {
         ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: 'reviewer-rejected' })));
         log(`Reviewer rejections synced: ${fresh.length} new (won't be checked again).`);
       }
-      return { ok: true, total: ids.length, added: fresh.length };
+      // Leads already on the board are not re-reviewed by a scan either — that
+      // was 15 of 16 listings on the first test run, re-reviewed for nothing.
+      // "Refresh leads on the board" is what keeps their facts current.
+      const lcol = gsheets.colName(LEAD_HEADERS.indexOf('MLS #'));
+      const onBoard = info.tabs.indexOf(g.leadTab) < 0 ? []
+        : await gsheets.readCol(token, g.sheetId, g.leadTab, `${lcol}2:${lcol}`);
+      const seen2 = loadLedger();
+      const freshBoard = onBoard.filter(m => m && !seen2[String(m).trim().toUpperCase()]);
+      if (freshBoard.length) {
+        ledgerRecordMany(freshBoard.map(m => ({ mls: m, verdict: 'on-board' })));
+        log(`Leads already on the sheet: ${freshBoard.length} (skipped by scans — use "Refresh leads on the board").`);
+      }
+      return { ok: true, total: ids.length, added: fresh.length, onBoard: freshBoard.length };
     } catch (e) { return { ok: false, error: e.message }; }
   }
   return { ok: false, unconfigured: true, error: 'connect your Google Sheet in section 7 first' };
 }
 
+
+// ---------- the Board tab ----------
+// One tab that says what to work on: today's funnel on top, then the live A /
+// B leads in work order (soonest offer deadline first). Rebuilt from the Leads
+// tab after every scan and every refresh — nothing on it is typed by hand.
+const BOARD_TAB = 'Board';
+async function rebuildBoard(day) {
+  if (!googleReady()) return { ok: false, unconfigured: true };
+  try {
+    const g = googleCfg();
+    const token = await googleToken();
+    const rows = await gsheets.readAll(token, g.sheetId, g.leadTab);
+    const today = day || Object.assign(blankKpi(), loadKpi()[todayKey()] || {});
+    const board = core.buildBoard(rows, today, new Date());
+    await gsheets.replaceTab(token, g.sheetId, BOARD_TAB, board);
+    const listed = Math.max(0, board.length - 9);
+    log(`Board updated — ${listed} lead(s) in work order.`, 'good');
+    return { ok: true, listed };
+  } catch (e) {
+    log('Board update failed: ' + e.message, 'warn');
+    return { ok: false, error: e.message };
+  }
+}
+ipcMain.handle('board-rebuild', () => rebuildBoard());
+
+// ---------- refresh the leads already on the board ----------
+// A lead is only reviewed once, but its facts move: "Offer Date TBD" becomes a
+// date, the price gets cut, the listing goes pending. This re-reads JUST the
+// leads on the Leads tab (not the passed ones) — reports only, no photos — and
+// updates the listing's own columns. Notes and anything typed by hand are
+// never touched. Rows that were never scored get a bucket and score too.
+ipcMain.handle('refresh-board', async () => {
+  if (control.running) return { ok: false, error: 'a scan is already running' };
+  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 7 first' };
+  control.running = true; control.stopped = false; control.paused = false;
+  let done = 0, notFound = 0, scored = 0, started = false;
+  try {
+    if (!mlsWin || mlsWin.isDestroyed()) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
+    const title = await js(core.JS_TITLE).catch(() => '');
+    if (!/Dashboard|Matrix/i.test(title)) { log('Not logged in — sign in first.', 'error'); return { ok: false, error: 'not signed in' }; }
+    started = true;
+    const g = googleCfg();
+    const token = await googleToken();
+    const rows = await gsheets.readAll(token, g.sheetId, g.leadTab);
+    const head = (rows[0] || []).map(h => String(h).trim());
+    const val = (r, h) => { const i = head.indexOf(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); };
+    const todo = rows.slice(1).filter(r => val(r, 'MLS #') && !core.PASSED_NOTE.test(val(r, 'Notes')));
+    log(`Refreshing ${todo.length} lead(s) on the board (reports only, no photos)…`, 'good');
+
+    let batch = [];
+    const flush = async () => {
+      if (!batch.length) return;
+      await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', batch,
+        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why'] });
+      batch = [];
+    };
+    for (let i = 0; i < todo.length; i++) {
+      await waitIfPaused();
+      if (control.stopped) break;
+      const r = todo[i], mls = val(r, 'MLS #');
+      log(`  [${i + 1}/${todo.length}] ${val(r, 'Address') || mls}`);
+      const gal = await showGallery(mls, { factsOnly: true }).catch(() => ({ mismatch: true }));
+      if (gal.mismatch) {
+        // Either it left the Active search (pending / sold / withdrawn) or
+        // Matrix showed another listing. Say so; never guess.
+        notFound++;
+        batch.push({ 'MLS #': mls, 'MLS Status': 'Not found in Active search — check' });
+        log('    not found in an Active search — may be pending or off market', 'warn');
+      } else {
+        const list = core.num(gal.listPrice) || core.num(val(r, 'Purchase Price'));
+        const orig = core.num(gal.origPrice);
+        const offer = core.offerDue([gal.privateRemarks, gal.remarks].filter(Boolean).join(' \n '));
+        const rec = {
+          'MLS #': mls,
+          'Price Cut': orig > list && list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
+          'Listing Agent': gal.listedBy || '', 'Offer Due': offer,
+          'Private Remarks': gal.privateRemarks || '', 'Occupied By': gal.occupiedBy || '',
+          'MLS Status': gal.status || '',
+        };
+        if (!val(r, 'Bucket')) {
+          // Never scored (an older row). No area medians or photos on a refresh,
+          // so the score leaves those out and says so.
+          const q = core.qualify({
+            addr: gal.address || val(r, 'Address'), remarks: gal.remarks, privateRemarks: gal.privateRemarks,
+            condition: gal.condition, occupiedBy: gal.occupiedBy, propClass: gal.propClass, photos: 0,
+            dom: val(r, 'DOM'), yearBuilt: gal.yearBuilt || val(r, 'Year Built'),
+            price: list, origPrice: gal.origPrice, whenUnsure: cfg.whenUnsure,
+          });
+          Object.assign(rec, { 'Bucket': q.label, 'Opportunity Score': q.score,
+            'Why': q.why + ' (scored on refresh — no $/sqft or photo check)' });
+          scored++;
+        }
+        batch.push(rec);
+        done++;
+        log(`    ${gal.status || 'status ?'}${offer ? ' · offer due ' + offer : ''}${rec.Bucket ? ' · ' + rec.Bucket + ' ' + rec['Opportunity Score'] : ''}`,
+          offer ? 'good' : 'info');
+      }
+      if (batch.length >= 10) await flush();   // a Stop mid-way keeps what was read
+    }
+    await flush();
+    await rebuildBoard();
+    const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · ${notFound} not found in an Active search.`;
+    log(line, 'good');
+    return { ok: true, done, scored, notFound };
+  } catch (e) {
+    if (e.message === 'stopped') { log('Refresh stopped.', 'warn'); return { ok: false, stopped: true }; }
+    log('Refresh error: ' + e.message, 'error');
+    return { ok: false, error: e.message };
+  } finally {
+    control.running = false;
+    if (started) closeMlsWindow();
+    send('done', { stopped: control.stopped, summary: `Refresh finished — ${done} updated, ${notFound} not found.` });
+  }
+});
 
 ipcMain.handle('ledger-stats', () => {
   const e = loadLedger();

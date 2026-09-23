@@ -331,7 +331,27 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(OD('OFFERS to be submitted through the online portal.'), '', 'how to submit is not when');
   eq(OD('Offers due January 5th at 5pm.'), '2027-01-05 (Tue) 5:00 PM', 'a January date in September is next year');
 
-  // 14. The composed sheet value, end to end.
+  // 14. The Board — work order and the numbers on top.
+  const { buildBoard } = require('./scan-core');
+  const BH = ['MLS #', 'Address', 'Notes', 'Bucket', 'Opportunity Score', 'Offer Due'];
+  const board = buildBoard([BH,
+    ['M1', '1 Late Due', '', 'A — Work Now', '80', '2026-09-30 (Wed) 12:00 PM'],
+    ['M2', '2 No Date', '', 'A — Work Now', '95', ''],
+    ['M3', '3 Due Tomorrow', '', 'A — Work Now', '70', '2026-09-24 (Thu) 4:00 PM'],
+    ['M4', '4 Passed', 'PASS-APPEARS WELL MAINTAINED', 'A — Work Now', '90', ''],
+    ['M5', '5 B Tbd', 'OFFER SENT', 'B — AI Review', '60', 'TBD'],
+    ['M6', '6 Unscored', '', '', '', ''],
+  ], { scanned: 86, bucketA: 10, bucketB: 5, bucketC: 0 }, '2026-09-23T14:00:00');
+  const listed = board.slice(9).map(r => r[5]);
+  eq(listed, ['3 Due Tomorrow', '1 Late Due', '2 No Date', '5 B Tbd', '6 Unscored'],
+    'Board order: A first, soonest offer deadline first, unscored last');
+  eq(listed.includes('4 Passed'), false, 'a lead passed in Notes is not on the Board');
+  eq(board[6].slice(1), [3, 1, 1, 1, 1], 'Board counts: A, B, due in 48h, TBD, passed in Notes');
+  eq(board[3].slice(1, 5), [86, 0, 5, 10], "today's funnel: scanned, C, B, A");
+  eq(board[9][2], '9/24/2026 4:00 PM', 'the offer date is written as a real date');
+  eq(/^=IF\(ISNUMBER\(C10\)/.test(board[9][3]), true, 'Time Left is a live formula on its own row');
+
+  // 15. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
 

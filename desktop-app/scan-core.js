@@ -546,6 +546,8 @@ function parseDetail(text, wantMls) {
     // otherwise swallowed the NEXT one ("Family Room: Roof:"), and a bare
     // "property condition" in a disclaimer was read as the condition itself.
     condition: grab(/Prop(?:erty)?\s*Condition:[ \t]*([^\t\n]{0,60})/i),
+    // "Status: Active" — Pending / Contingent means the window has closed.
+    status: grab(/\bStatus:[ \t]*([A-Za-z][A-Za-z \-]{2,24})/),
     // Agent Full only — "Occupied By: Vacant / Tenant / Owner".
     occupiedBy: grab(/Occupied\s*By:[ \t]*([^\t\n]{0,40})/i),
     // The MLS's own classification — "Res. Single Family / Attached, Single
@@ -613,6 +615,92 @@ function findTime(w) {
   return ` ${+tm[1]}:${tm[2] || '00'} ${tm[3].toUpperCase()}M`;
 }
 
+// ---- the Board: one tab that says what to work on, rebuilt every time ----
+
+// A row a person has already passed on in the Notes column. Those stay on
+// Leads (the reviewer never used the reject button for them) but they are
+// not work, so the Board counts them and leaves them off.
+const PASSED_NOTE = /^\s*(?:pass\b|passing\b|passed\b|we'?re passing|rejected\b|not a (?:fit|deal))/i;
+
+/** "2026-09-30 (Wed) 12:00 PM" -> Date, or null for TBD / blank. */
+function offerDueToDate(v) {
+  const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:\s*\(\w+\))?(?:\s+(\d{1,2}):(\d{2})\s*([AP])M)?/i);
+  if (!m) return null;
+  let h = m[4] ? +m[4] % 12 : 23, min = m[4] ? +m[5] : 59;   // no time: end of that day
+  if (m[6] && m[6].toUpperCase() === 'P') h += 12;
+  return new Date(+m[1], +m[2] - 1, +m[3], h, min);
+}
+
+/**
+ * Build the Board tab from the Leads tab (header row + rows, as read off the
+ * sheet) and today's scan numbers. Returns the rows to write.
+ *
+ * Work order: A before B, and inside each the soonest offer deadline first —
+ * a deadline tomorrow beats a higher score with no date. Then TBD, then no
+ * date, then deadlines already past. Rows passed in Notes are counted, not
+ * listed. "Time Left" is a live formula, so it keeps counting down between
+ * rebuilds.
+ */
+function buildBoard(leadRows, today, now) {
+  now = now ? new Date(now) : new Date();
+  const head = (leadRows[0] || []).map(h => String(h).trim());
+  const col = h => head.indexOf(h);
+  const cell = (r, h) => { const i = col(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); };
+  const rows = leadRows.slice(1).filter(r => cell(r, 'MLS #'));
+
+  const passed = rows.filter(r => PASSED_NOTE.test(cell(r, 'Notes')));
+  const live = rows.filter(r => !PASSED_NOTE.test(cell(r, 'Notes')));
+  const bucketOf = r => (cell(r, 'Bucket').match(/^[ABC]/) || ['?'])[0];
+  const due = r => offerDueToDate(cell(r, 'Offer Due'));
+  const rank = r => {
+    const d = due(r);
+    if (d && d >= now) return [0, d.getTime()];
+    if (/^TBD$/i.test(cell(r, 'Offer Due'))) return [1, 0];
+    if (!d) return [2, 0];
+    return [3, -d.getTime()];
+  };
+  live.sort((a, b) => {
+    const order = { A: 0, B: 1 };   // anything not yet scored goes last
+    const ba = order[bucketOf(a)] ?? 2, bb = order[bucketOf(b)] ?? 2;
+    if (ba !== bb) return ba - bb;
+    const ra = rank(a), rb = rank(b);
+    if (ra[0] !== rb[0]) return ra[0] - rb[0];
+    if (ra[1] !== rb[1]) return ra[1] - rb[1];
+    return (Number(cell(b, 'Opportunity Score')) || 0) - (Number(cell(a, 'Opportunity Score')) || 0);
+  });
+
+  const in48 = live.filter(r => { const d = due(r); return d && d >= now && d - now <= 48 * 3600000; }).length;
+  const pad = n => String(n).padStart(2, '0');
+  const us = d => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${((d.getHours() + 11) % 12) + 1}:${pad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+  const t = today || {};
+
+  const out = [
+    ['FlipScout Board', 'Updated', us(now), 'Rebuilt by the app after every scan and refresh — edit notes on the Leads tab, not here.'],
+    [],
+    ["Today's scan", 'Scanned', 'Auto-Pass (C)', 'AI Review (B)', 'Work Now (A)', 'New on the sheet'],
+    ['', t.scanned || 0, t.bucketC || 0, t.bucketB || 0, t.bucketA || 0, t.pushed || 0],
+    [],
+    ['On the board', 'A — Work Now', 'B — AI Review', 'Offers due in 48h', 'Offer date TBD', 'Passed in Notes'],
+    ['', live.filter(r => bucketOf(r) === 'A').length, live.filter(r => bucketOf(r) === 'B').length, in48,
+      live.filter(r => /^TBD$/i.test(cell(r, 'Offer Due'))).length, passed.length],
+    [],
+    ['Bucket', 'Score', 'Offer Due', 'Time Left', 'MLS Status', 'Address', 'Price', 'Price Cut',
+      'Occupied By', 'Listing Agent', 'Notes', 'Why', 'MLS Link'],
+  ];
+  live.forEach((r, i) => {
+    const n = out.length + 1;   // this row's sheet row number
+    const d = due(r);
+    out.push([
+      cell(r, 'Bucket') || 'not scored yet', cell(r, 'Opportunity Score'),
+      d ? us(d) : cell(r, 'Offer Due'),
+      `=IF(ISNUMBER(C${n}),IF(C${n}<NOW(),"passed",INT(C${n}-NOW())&"d "&HOUR(C${n}-NOW())&"h"),"")`,
+      cell(r, 'MLS Status'), cell(r, 'Address'), cell(r, 'Purchase Price'), cell(r, 'Price Cut'),
+      cell(r, 'Occupied By'), cell(r, 'Listing Agent'), cell(r, 'Notes'), cell(r, 'Why'), cell(r, 'MLS Link'),
+    ]);
+  });
+  return out;
+}
+
 /**
  * Private / agent-only remarks. The Client Full report does not carry them;
  * the Agent Full report does, and the label varies ("Private:", "Agent
@@ -630,5 +718,5 @@ module.exports = {
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
-  qualify, privateRemarks, offerDue, BUCKET_LABEL,
+  qualify, privateRemarks, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
 };

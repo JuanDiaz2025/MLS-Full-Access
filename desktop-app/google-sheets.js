@@ -267,4 +267,29 @@ async function syncRows(token, id, tab, headers, keyHeader, records, opts) {
   return { added: toAppend.length, updated: toPatch.length, filled };
 }
 
-module.exports = { parseSheetId, signIn, refresh, listTabs, readCol, readRow, ensureTab, syncRows, colName, SCOPE };
+/** Every row of a tab, header included, as arrays of cell text. */
+const readAll = (token, id, tab) =>
+  api(token, `/${id}/values/${encodeURIComponent(tab + '!A1:ZZ')}`).then(j => j.values || []);
+
+/**
+ * Replace a tab's whole contents. Only for tabs the app owns outright (the
+ * Board): everything on it is rebuilt from the other tabs each time, so there
+ * is nothing typed by hand to protect. USER_ENTERED so formulas and dates work.
+ */
+async function replaceTab(token, id, tab, rows) {
+  const info = await listTabs(token, id);
+  if (info.tabs.indexOf(tab) < 0) {
+    await api(token, `/${id}:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
+    });
+  }
+  await api(token, `/${id}/values/${encodeURIComponent(tab + '!A1:ZZ')}:clear`, { method: 'POST', body: '{}' });
+  if (rows.length) {
+    await api(token, `/${id}/values/${encodeURIComponent(tab + '!A1')}?valueInputOption=USER_ENTERED`,
+      { method: 'PUT', body: JSON.stringify({ values: rows }) });
+  }
+}
+
+module.exports = { parseSheetId, signIn, refresh, listTabs, readCol, readRow, readAll, replaceTab,
+  ensureTab, syncRows, colName, SCOPE };

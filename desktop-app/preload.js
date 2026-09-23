@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('fs', {
   kpiExport: (days) => ipcRenderer.invoke('kpi-export', { days }),
   ledgerStats: () => ipcRenderer.invoke('ledger-stats'),
   ledgerClear: () => ipcRenderer.invoke('ledger-clear'),
+  refreshBoard: () => ipcRenderer.invoke('refresh-board'),
+  rebuildBoard: () => ipcRenderer.invoke('board-rebuild'),
   // Direct Google Sheets connection
   googleStatus: () => ipcRenderer.invoke('google-status'),
   googleSave: (patch) => ipcRenderer.invoke('google-save', patch),

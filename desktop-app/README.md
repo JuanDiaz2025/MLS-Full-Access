@@ -73,6 +73,21 @@ install (creates a desktop shortcut) or run the portable exe directly.
    the KPI tab the app replaces its own counters and leaves the reviewer's
    columns alone.
 
+## The Board tab and "Refresh leads on the board"
+
+After every scan the app rebuilds a **Board** tab in your sheet: today's numbers
+on top (scanned → auto-passed → B → A), then the A and B leads in work order —
+**soonest offer deadline first**, with a live *Time Left* countdown. Leads you
+passed on in the Notes column ("PASS-…", "we're passing…") are counted but left
+off. Don't type on the Board; it is rebuilt each time — notes go on **Leads**.
+
+Leads already on your sheet are **not** re-reviewed by a scan. To bring them up
+to date, click **↻ Refresh leads on the board** (section 3, signed in to MLS):
+it re-reads just those listings — no photos, a few seconds each — and updates
+Offer Due (TBD → a real date), Price Cut, Private Remarks, Occupied By and MLS
+Status (Active / Pending). Your Notes are never changed. **▦ Update Board tab**
+rebuilds the Board without touching MLS.
+
 ## One-time Google setup
 
 Google won't let any app touch your spreadsheets unless it's registered to a

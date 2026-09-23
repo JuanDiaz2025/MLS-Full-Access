@@ -87,7 +87,7 @@
       <label>Anthropic API key</label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
       <label>Model</label>
-      <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
+      <input id="model" type="text" value="claude-opus-5-5" placeholder="claude-opus-5-5 (or claude-sonnet-5, cheaper)">
     </div>
   </div>
 
@@ -106,6 +106,14 @@
       <button id="resume" disabled>▶ Resume</button>
       <button id="stop" disabled>⏹ Stop</button>
     </div>
+    <div class="row" style="margin-top:8px">
+      <button id="refreshBoard" disabled>↻ Refresh leads on the board</button>
+      <button id="rebuildBoard" class="ghost">▦ Update Board tab</button>
+    </div>
+    <div class="hint"><b>Refresh</b> re-reads only the leads already on your sheet (reports, no photos) — offer
+      dates that were TBD, price cuts, pending status, private remarks — and never touches your Notes.
+      <b>Board</b> is a tab the app rebuilds after every scan: today's funnel on top, then A and B leads in
+      work order, soonest offer deadline first.</div>
     <div class="row" style="margin-top:8px">
       <label style="display:flex;align-items:center;gap:6px;margin:0">
         Reading time per listing
@@ -225,6 +233,7 @@
 
   function setScanButtons(running){
     $('start').disabled = running; $('pause').disabled = !running; $('resume').disabled = true; $('stop').disabled = !running;
+    $('refreshBoard').disabled = running;
   }
 
   $('openLogin').onclick = async () => {
@@ -237,6 +246,7 @@
     $('loginStatus').textContent = r.loggedIn ? ('Signed in ✓ — ' + (r.title||'')) : ('Not signed in yet' + (r.title? ' ('+r.title+')':''));
     $('loginStatus').className = 'status ' + (r.loggedIn ? 'good' : 'warn');
     $('start').disabled = !r.loggedIn;
+    $('refreshBoard').disabled = !r.loggedIn;
   };
   // --- which areas to scan ---
   // Checkboxes over the buy box, remembered between runs. Nothing is scanned
@@ -282,6 +292,16 @@
     await window.fs.startScan({ areaIndexes });
     setScanButtons(false);
   };
+  $('refreshBoard').onclick = async () => {
+    setScanButtons(true);
+    $('finished').style.display='none';
+    await window.fs.refreshBoard();
+    setScanButtons(false);
+  };
+  $('rebuildBoard').onclick = async () => {
+    const r = await window.fs.rebuildBoard();
+    if (r && r.unconfigured) log('Connect your Google Sheet in section 7 first.', 'warn');
+  };
   $('pause').onclick = () => { window.fs.pause(); $('pause').disabled=true; $('resume').disabled=false; };
   $('resume').onclick = () => { window.fs.resume(); $('pause').disabled=false; $('resume').disabled=true; };
   $('stop').onclick = () => { window.fs.stop(); setScanButtons(false); };
@@ -289,7 +309,7 @@
 
   function pushConfig(){ window.fs.setConfig({
     useAI: $('useAI').checked,
-    apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
+    apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5-5').trim(),
     readSeconds: Number($('readSeconds').value||6),
     whenUnsure: $('whenUnsure').value,
     runComps: false,   // comping is off; see CLAUDE.md §5

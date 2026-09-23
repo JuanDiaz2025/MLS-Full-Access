@@ -399,7 +399,7 @@ web app, no deployment and no shared secret any more. Three tabs:
 - **`Leads`** — `Status · MLS # · Address · Beds · Baths · SqFt · Lot SqFt ·
   Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added ·
   Bucket · Opportunity Score · Why · Price Cut · Listing Agent · Offer Due ·
-  Private Remarks · Occupied By`.
+  Private Remarks · Occupied By · MLS Status`.
   Keyed on `MLS #`; rows are append-or-backfill. The gate columns were added at
   the **end** so existing rows and the reject script (which reads by header
   name) keep lining up; `Bucket`, `Opportunity Score`, `Why`, `Price Cut`,
@@ -413,6 +413,25 @@ web app, no deployment and no shared secret any more. Three tabs:
   `2026-09-30 (Wed) 12:00 PM`, `TBD`, or blank when nothing says when. Only a
   sentence about an offer *deadline* counts; "offer to include a deposit copy"
   and "seller may reject any offer" do not.
+- **`Board`** — **owned by the app, rebuilt from `Leads` after every scan and
+  every refresh** (nothing on it is typed by hand; notes belong on `Leads`).
+  Top: today's funnel (Scanned · Auto-Pass C · AI Review B · Work Now A · New)
+  and the board counts (A · B · offers due in 48h · TBD · passed in Notes).
+  Below: the live A/B leads in **work order** — A before B, soonest future
+  offer deadline first, then TBD, then no date, then past deadlines; a live
+  `Time Left` formula counts down between rebuilds. Rows whose Notes start
+  with PASS / "we're passing" / rejected are counted, not listed
+  (`core.PASSED_NOTE`). `core.buildBoard()` is pure and tested.
+- **Leads already on the sheet are never re-reviewed by a scan** — every scan
+  pulls the `Leads` MLS #s into the ledger as `on-board` (the first test re-
+  reviewed 15 of 16 for nothing). **"↻ Refresh leads on the board"** is what
+  keeps them current: it re-reads only the Leads rows not passed in Notes,
+  reports only (no photos, ~5 s each), and updates `Price Cut · Listing Agent ·
+  Offer Due · Private Remarks · Occupied By · MLS Status` — a TBD becomes a
+  date, a pending listing says so, a listing gone from the Active search is
+  flagged "Not found in Active search — check". Rows never scored get a bucket
+  and score (without $/sqft or photos, and the Why says so). Notes are never
+  touched.
 - **`Rejected`** — `Rejected On · MLS # · Address · Price · $/SqFt · SqFt · DOM ·
   Reason · Stage · By · MLS Link`. Everything dropped lands here with the reason
   and the stage it fell out at.
@@ -533,6 +552,10 @@ judging kitchens it had never been shown. It now navigates to
 image) and reads the whole grid, and `spreadPhotos()` skips the cover shot and
 spreads the 20 sent across the set instead of taking the first 20. This was
 live-verified with `scripts/mls-photos.js`.
+
+**AI model id:** the default was `claude-opus-5`, which is not a model id, so
+AI vision would have failed on its first call. It is now `claude-opus-5-5`
+(`claude-sonnet-5` is the cheaper option), and a saved old value is migrated.
 
 **The run never stops to ask.** There is no Keep/Drop approval step — it was
 removed per Bryan. AI vision decides when an API key is set, otherwise the text
