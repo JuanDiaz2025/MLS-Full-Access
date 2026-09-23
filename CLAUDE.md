@@ -329,8 +329,14 @@ headless-scrape workflow):
   *Qualification gate*, or *Photo review* for a hard exclusion). Photos are not
   scored yet — AI vision, when on, can still turn a keep into a C.
   Private remarks come from the **Agent Full** report (Client Full does not have
-  them); the label is **unverified** against a live page — the app saves raw
-  report text to `report-samples/` under userData so it can be checked.
+  them), labelled **`Private:`** — verified on the first live run (23 Sep, 15 of
+  15 read). Agent Full also carries **`Occupied By:`** (Vacant / Tenant / Owner),
+  which the gate uses ahead of any word in the remarks. The app saves raw report
+  text to `report-samples/` under userData (first 10 listings per run).
+  Live-run fixes: `\bheirs?\b` (a bare `heirs?` matched "**their**" and scored
+  ordinary listings as probate), and `Prop Condition:` must have its colon and
+  may not cross a tab/line (blank fields were swallowing the next field, and a
+  disclaimer's "property condition" was read as the condition).
 - **⚡ QUICK FLIPS ONLY** (Bryan, 1 Aug). A quick flip is a **cosmetic** job — paint,
   floors, kitchen, bath, done in one pass without drawings or engineers. **Drop**
   anything structural or permit-heavy even when it is a genuine fixer: foundation

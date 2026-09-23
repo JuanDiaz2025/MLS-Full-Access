@@ -387,7 +387,7 @@ const BUCKET_LABEL = { A: 'A — Work Now', B: 'B — AI Review', C: 'C — Auto
 // time on market, which score under their own signals below — counting them
 // twice would inflate the score.
 const FIXER_KW = /(fixer|\bas[- ]is\b|\btlc\b|handyman|contractor special|needs work|needs updating|diamond in the rough|great potential|investor special)/i;
-const DISTRESS_KW = /(probate|trust sale|estate sale|court confirmation|conservatorship|administrator|executor|heirs?\b|inherited)/i;
+const DISTRESS_KW = /(probate|trust sale|estate sale|court confirmation|conservatorship|administrator|executor|\bheirs?\b|inherited)/i;
 const ORIGINAL_KW = /((?:first|1st) time on (?:the )?market|same (?:owner|family) (?:for|since)|(?:long[- ]?time|original) owners?|in the (?:same )?family for|original condition|untouched|time capsule|never (?:been )?(?:updated|renovated|remodel))/i;
 const VACANT_KW = /\bvacant\b|delivered vacant|no one living/i;
 const HOARD_KW = /(hoarder|clutter(?:ed)?|needs (?:a )?(?:good )?clean[- ]?out|full of (?:contents|belongings)|sold with contents)/i;
@@ -396,7 +396,7 @@ const STAGED_KW = /(professionally staged|virtually staged|staged to perfection|
 
 /**
  * Score one listing. `m` carries what the report and the grid gave us:
- *   remarks, privateRemarks, condition, propClass, addr, photos, photosReliable,
+ *   remarks, privateRemarks, condition, occupiedBy, propClass, addr, photos, photosReliable,
  *   dom, yearBuilt, price, origPrice, ppsfRatio (listing $/sqft ÷ area median),
  *   whenUnsure ('keep' | 'drop').
  * Returns { bucket, label, score, decision: 'keep'|'drop', why, hard, signals }.
@@ -420,8 +420,10 @@ function qualify(m) {
   else if (FIXER_KW.test(t)) add(20, `fixer / as-is — "${hit(FIXER_KW)}"`);
   if (DISTRESS_KW.test(t)) add(10, `probate / trust / estate — "${hit(DISTRESS_KW)}"`);
   if (ORIGINAL_KW.test(t)) add(10, `original / long-held — "${hit(ORIGINAL_KW)}"`);
-  if (TENANT_KW.test(t)) add(5, 'tenant occupied — possible motivated seller');
-  if (VACANT_KW.test(t)) add(5, 'vacant');
+  // The MLS's own "Occupied By" field beats a word in the remarks.
+  const occ = String(m.occupiedBy || '');
+  if (/tenant/i.test(occ) || TENANT_KW.test(t)) add(5, 'tenant occupied — possible motivated seller');
+  if (/vacant/i.test(occ) || VACANT_KW.test(t)) add(5, 'vacant');
   if (HOARD_KW.test(t)) add(10, `clutter / hoarder — "${hit(HOARD_KW)}"`);
   if (MOTIVATED_KW.test(t)) add(5, `motivated seller — "${hit(MOTIVATED_KW)}"`);
 
@@ -540,7 +542,12 @@ function parseDetail(text, wantMls) {
     // /Remarks:/ picked up the truncated Open House teaser instead of the real
     // description — which is what the rules engine was judging condition on.
     remarks: grab(/(?:^|\n)\s*(?:Public|Public Remarks?|Marketing Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i),
-    condition: grab(/Prop(?:erty)? Condition:?\s*([^\n]{0,60})/i),
+    // Colon required and the value may not cross a tab or line: a blank field
+    // otherwise swallowed the NEXT one ("Family Room: Roof:"), and a bare
+    // "property condition" in a disclaimer was read as the condition itself.
+    condition: grab(/Prop(?:erty)?\s*Condition:[ \t]*([^\t\n]{0,60})/i),
+    // Agent Full only — "Occupied By: Vacant / Tenant / Owner".
+    occupiedBy: grab(/Occupied\s*By:[ \t]*([^\t\n]{0,40})/i),
     // The MLS's own classification — "Res. Single Family / Attached, Single
     // Family". It outranks any keyword in the remarks about second units.
     propClass: grab(/Class:?\s*([^\n\t]{0,80})/i),
@@ -558,8 +565,7 @@ function parseDetail(text, wantMls) {
  * the Agent Full report does, and the label varies ("Private:", "Agent
  * Remarks:", "Confidential Remarks:"), so several are accepted. "Agent:" on
  * its own is deliberately NOT one — it also labels contact lines.
- * UNVERIFIED against a live Agent Full page: the app saves sample report text
- * (report-samples/ under userData) so the label can be confirmed.
+ * Verified on a live Agent Full page (23 Sep): the label is "Private:".
  */
 function privateRemarks(text) {
   const m = String(text || '').match(/(?:^|\n)\s*(?:Private(?:\s*Remarks?)?|(?:Agent|Realtor|Broker|Confidential)\s*(?:Only\s*)?Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i);

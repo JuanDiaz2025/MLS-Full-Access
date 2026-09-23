@@ -342,7 +342,7 @@ async function showGallery(mls) {
       if (!agent.mismatch) {
         meta.privateRemarks = agent.privateRemarks || '';
         // Agent Full may carry facts Client Full left blank.
-        ['origPrice', 'listPrice', 'listedBy', 'remarks', 'address', 'zip', 'yearBuilt', 'propClass', 'condition']
+        ['origPrice', 'listPrice', 'listedBy', 'remarks', 'address', 'zip', 'yearBuilt', 'propClass', 'condition', 'occupiedBy']
           .forEach(k => { if (!meta[k] && agent[k]) meta[k] = agent[k]; });
       }
     }
@@ -382,7 +382,7 @@ async function showGallery(mls) {
     zip: meta.zip || '', address: meta.address || '', yearBuilt: meta.yearBuilt || '',
     propClass: meta.propClass || '',
     privateRemarks: meta.privateRemarks || '', origPrice: meta.origPrice || '',
-    listPrice: meta.listPrice || '', listedBy: meta.listedBy || '',
+    listPrice: meta.listPrice || '', listedBy: meta.listedBy || '', occupiedBy: meta.occupiedBy || '',
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
 }
 
@@ -682,7 +682,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         // are always C. The run never stops to ask.
         const q = core.qualify({
           addr: c.addr, remarks: gal.remarks, privateRemarks: gal.privateRemarks,
-          condition: gal.condition, propClass: gal.propClass,
+          condition: gal.condition, occupiedBy: gal.occupiedBy, propClass: gal.propClass,
           photos: n, photosReliable: gal.gridOk,
           dom: domOf(c), yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
           price: gal.listPrice || c._price, origPrice: gal.origPrice,
@@ -1280,7 +1280,8 @@ ipcMain.handle('export', async (_e, { leads }) => {
   });
   if (canceled || !filePath) return { ok: false };
   if (filePath.endsWith('.json')) { fs.writeFileSync(filePath, JSON.stringify(leads, null, 2)); return { ok: true, filePath }; }
-  const cols = ['score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
+  // The gate's columns lead: they are what decides which rows to work first.
+  const cols = ['bucketLabel', 'oppScore', 'why', 'priceCut', 'listedBy', 'score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
   const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
   const csv = [cols.join(',')].concat(leads.map(l => cols.map(c => esc(l[c])).join(','))).join('\n');
   fs.writeFileSync(filePath, csv);

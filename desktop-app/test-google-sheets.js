@@ -293,6 +293,24 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(require('./scan-core').privateRemarks('Listing Agent:\tJane Doe\nPublic:\tNice.'), '',
     'a contact line is not mistaken for remarks');
 
+  //     Found on the first live run (23 Sep): "their" is not an heir, a blank
+  //     condition field must not swallow the next one, and the MLS's own
+  //     "Occupied By" field counts.
+  eq(Q({ remarks: 'Fixer, ready for buyers to add their personal touch.' }).why.includes('probate'), false,
+    '"their" is not an heir');
+  eq(Q({ remarks: 'Fixer. Heirs are motivated.' }).why.includes('probate'), true, 'but "heirs" still is');
+  const agentPage = 'MLS #:\tSF1234567\n10 Test St, San Francisco 94112\tStatus:\tActive\n'
+    + 'Public:\tFixer.\nPrivate:\tSeller makes no warranty as to property condition, and dimensions.\n\n'
+    + 'Showing Information\nOccupied By:\tVacant\tOwner:\t\n'
+    + 'Fireplace:\t\tProp Condition:\t\nFamily Room:\t\tRoof:\t\n';
+  const ap = parseDetail(agentPage, 'SF1234567');
+  eq(ap.condition, '', 'a blank Prop Condition stays blank');
+  eq(ap.occupiedBy, 'Vacant', '"Occupied By" is read off Agent Full');
+  eq(ap.privateRemarks.startsWith('Seller makes'), true, 'the private remarks are read');
+  eq(parseDetail(agentPage.replace('Prop Condition:\t', 'Prop Condition:\tFixer Upper'), 'SF1234567').condition,
+    'Fixer Upper', 'a filled Prop Condition is read');
+  eq(Q({ remarks: 'Nice.', occupiedBy: 'Tenant' }).why.includes('tenant'), true, 'Occupied By: Tenant counts');
+
   // 14. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
