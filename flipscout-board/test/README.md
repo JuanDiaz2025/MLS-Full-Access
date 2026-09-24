@@ -20,6 +20,8 @@ left as it is, as the backup; changes are tried here first.
 - **Show** quick views: Work now · Offers due in 3 days · To review (B) ·
   Pending · Sold / off market · Everything
 - **Area** filter: all areas, each county, each city
+- **Pass with a reason**: picking Pass asks for an optional reason, saved with
+  the pass in the board database and shown under the status and in the side panel
 
 All of it comes from columns the FlipScout app writes at the end of the Leads
 tab. `build_data.py` appends them after the eleven columns the real board
