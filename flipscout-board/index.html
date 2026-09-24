@@ -250,10 +250,6 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
 }
 .addr.nolink{color:var(--ink)}
-.agent{display:block; margin-top:3px; font-size:12px; color:var(--ink); max-width:52ch}
-.agent b{font-family:Archivo,sans-serif; font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-right:3px}
-.agent .office{color:var(--muted)}
-.agent .phone{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; white-space:nowrap; user-select:all}
 .rf-wait{display:block; font-size:11px; color:var(--muted); font-style:italic}
 .team-note{
   display:block; margin-top:6px; max-width:52ch; font-size:12.5px; line-height:1.4;
@@ -294,6 +290,40 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
 }
 .due-src{display:block; margin-top:3px; font-size:10.5px; color:var(--muted); letter-spacing:.02em}
 .due-src.approx{color:var(--t-offer); font-weight:600}
+button.due-src{border:0; background:none; padding:0; font:inherit; font-size:10.5px; letter-spacing:.02em;
+  color:var(--accent); text-decoration:underline; text-underline-offset:2px; cursor:pointer; text-align:left}
+button.due-src.approx{color:var(--t-offer)}
+/* ---------- remarks side panel ---------- */
+#side{position:fixed; inset:0; z-index:80; display:flex; justify-content:flex-end}
+#side[hidden]{display:none!important}
+#side .scrim{position:absolute; inset:0; background:rgba(14,32,46,.35)}
+#side .panel-s{position:relative; width:min(460px,100%); height:100%; overflow-y:auto;
+  background:var(--surface); border-left:1px solid var(--line); box-shadow:-18px 0 40px -24px rgba(10,30,50,.6);
+  padding:18px 20px 32px}
+#side h2{font-family:Archivo,sans-serif; font-size:16px; margin:0 32px 2px 0; line-height:1.3}
+#side .x{position:absolute; top:12px; right:12px; min-height:0; padding:4px 10px}
+#side .sec{margin-top:16px}
+#side .sec h3{font-family:Archivo,sans-serif; font-size:10px; font-weight:600; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--muted); margin:0 0 5px}
+#side .sec p{margin:0; font-size:13.5px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere}
+#side mark{background:var(--b-offer); color:var(--t-offer); border-radius:3px; padding:0 2px; font-weight:600}
+#side .quote{border-left:3px solid var(--m-offer); padding:2px 0 2px 10px; font-style:italic}
+.due-time{display:inline-block; margin-left:6px; font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; font-weight:600; color:var(--ink)}
+.due-say{display:block; margin-top:3px; font-size:11.5px; line-height:1.35; color:var(--muted); max-width:24ch; font-style:italic}
+.contact{display:flex; flex-wrap:wrap; gap:4px 10px; margin-top:6px; font-size:12.5px}
+.contact .c{display:inline-flex; align-items:center; gap:5px; font-family:"IBM Plex Mono",ui-monospace,monospace; color:var(--ink); user-select:all}
+.contact.none{color:var(--muted); font-style:italic; font-size:11.5px}
+.contact .c.em{font-family:inherit; overflow-wrap:anywhere}
+.copy{border:1px solid var(--line); background:var(--surface-2); color:var(--muted); border-radius:5px;
+  font:600 10.5px Archivo,sans-serif; letter-spacing:.03em; padding:1px 6px; cursor:pointer; user-select:none}
+.copy:hover{border-color:var(--accent); color:var(--accent)}
+.mlslink{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; margin-left:8px; font-weight:600}
+.mst{display:inline-block; margin-left:8px; font-family:Archivo,sans-serif; font-size:10.5px; font-weight:700;
+  letter-spacing:.04em; text-transform:uppercase; border-radius:999px; padding:1px 7px; vertical-align:1px}
+.mst-active{background:var(--b-won); color:var(--t-won)}
+.mst-pending{background:var(--b-offer); color:var(--t-offer)}
+.mst-closed{background:var(--b-pass); color:var(--t-pass)}
+.mst-other{background:var(--b-none); color:var(--t-none)}
 .due-over {background:var(--b-pass);   color:var(--t-pass)}
 .due-now  {background:var(--b-offer);  color:var(--t-offer)}
 .due-soon {background:var(--b-review); color:var(--t-review)}
@@ -529,6 +559,15 @@ footer .num{font-size:12px}
     </div>
   </dialog>
 
+  <div id="side" hidden>
+    <div class="scrim" data-side-close></div>
+    <aside class="panel-s" role="dialog" aria-modal="true" aria-labelledby="sideTitle">
+      <button type="button" class="btn tiny x" data-side-close aria-label="Close">Close ✕</button>
+      <h2 id="sideTitle"></h2>
+      <div id="sideBody"></div>
+    </aside>
+  </div>
+
   <footer>
     Status changes, removals and scans added here are saved on this board and shared with everyone who opens this link.
     New leads arrive from the FlipScout app with <b>Add scan</b>; leads from before that came from the old MLS sheet.
@@ -540,13 +579,21 @@ footer .num{font-size:12px}
 (function(){
   "use strict";
   var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
-  var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue"];
+  var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue",
+              "agentPhone","agentEmail","agentName","mlsStatus","offerTime","offerFrom","offerPhrase",
+              "agentRemarks","showing"];
   // Addresses open the house's Redfin page — only ever the exact page. Redfin
   // links carry Redfin's own home id, so they can't be built from the address:
   // the FlipScout app looks each new lead up, and links for the older leads are
   // filled in behind the scenes (links/_found). Until a lead has one, its
   // address is plain text rather than a guess.
   var REDFIN_PAGE = /^https:\/\/(?:www\.)?redfin\.com\/[A-Za-z]{2}\/[^\s"<>]+\/home\/\d+(?:[?#][^\s"<>]*)?$/;
+  // The public MLSListings page for a listing: opens for anyone, no sign-in.
+  // Built from the MLS # only, so it can never point at the wrong house.
+  function mlsUrl(mls){ return /^[A-Z0-9]{5,20}$/.test(mls || "") ? "https://www.mlslistings.com/Property/" + mls : ""; }
+  var PHONE = /^\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}$/;
+  var EMAIL = /^[^\s@<>"']{1,64}@[^\s@<>"']{1,190}\.[A-Za-z]{2,}$/;
+  var TIME = /^\d{1,2}:\d{2} [AP]M$/;
 
 
   // Two sources of leads. data.js is the old sheet export — frozen history now
@@ -554,7 +601,8 @@ footer .num{font-size:12px}
   // "Add scan": the FlipScout app's scan file, stored in the shared board
   // under scans/, one document per batch of leads.
   var SHEET_LEADS = D.rows.map(function(r){
-    var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i];
+    // an older data.js stops at sdue; the columns after it read as ""
+    var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i] == null && i > 10 ? "" : r[i];
 
     return o;
   });
@@ -588,9 +636,11 @@ footer .num{font-size:12px}
       remarks: str(x.remarks, 2000), agentRemarks: str(x.agentRemarks, 1500),
       showing: str(x.showing, 600), offerFrom: str(x.offerFrom, 40),
       offerPhrase: str(x.offerPhrase, 200), why: str(x.why, 240),
+      offerTime: TIME.test(str(x.offerTime, 8)) ? x.offerTime : "",
+      agentPhone: PHONE.test(str(x.agentPhone, 20)) ? x.agentPhone : "",
+      agentEmail: EMAIL.test(str(x.agentEmail, 254)) ? x.agentEmail : "",
+      agentName: str(x.agentName, 80), mlsStatus: str(x.mlsStatus, 30),
       redfin: REDFIN_PAGE.test(str(x.redfin, 400)) ? x.redfin : "",
-      agentName: str(x.agentName, 80), agentOffice: str(x.agentOffice, 100),
-      agentPhone: /^\(\d{3}\) \d{3}-\d{4}$/.test(str(x.agentPhone, 20)) ? x.agentPhone : "",
       fromScan: true
     };
   }
@@ -599,20 +649,32 @@ footer .num{font-size:12px}
   // history wins, then the earliest scan, so a listing pasted twice keeps the
   // day it first reached the board — and the team's status on it, which is
   // keyed by that day.
+  var FACTS = ["price", "ppsf", "dom", "remarks", "agentRemarks", "showing", "sdue", "offerTime", "offerFrom",
+               "offerPhrase", "why", "redfin", "agentPhone", "agentEmail", "agentName", "mlsStatus"];
   function rebuild(){
     var seen = {};
     LEADS = [];
     LAST_PULL = D.pulled || "";
-    SHEET_LEADS.forEach(function(l){ if (!seen[l.mls]) { seen[l.mls] = true; LEADS.push(l); } });
+    // Copies, so merging a later scan's facts never leaks into the frozen history.
+    SHEET_LEADS.forEach(function(l){ if (!seen[l.mls]) { seen[l.mls] = LEADS.push(Object.assign({}, l)); } });
+    var at = {}; LEADS.forEach(function(l, i){ at[l.mls] = i; });
     Object.keys(scans).map(function(k){ return scans[k]; })
       .filter(function(sc){ return sc && ISO.test(sc.pulled || ""); })
       .sort(function(a, b){ return a.pulled < b.pulled ? -1 : a.pulled > b.pulled ? 1 : (a.made || "") < (b.made || "") ? -1 : 1; })
       .forEach(function(sc){
-        if (sc.pulled > LAST_PULL) LAST_PULL = sc.pulled;
         var leads = sc.leads && typeof sc.leads === "object" ? sc.leads : {};
         Object.keys(leads).forEach(function(k){
           var l = scanLead(leads[k], sc.pulled);
-          if (l && !seen[l.mls]) { seen[l.mls] = true; LEADS.push(l); }
+          if (!l) return;
+          // Only a lead new to the board makes this a pull date; a scan that
+          // only updates leads already here leaves "Latest pull" alone.
+          if (!seen[l.mls]) { seen[l.mls] = true; at[l.mls] = LEADS.push(l) - 1;
+            if (sc.pulled > LAST_PULL) LAST_PULL = sc.pulled; return; }
+          // Already on the board: it keeps the day it first arrived (the team's
+          // status is keyed by that day), but a newer scan's facts win — an
+          // offer date that was TBD, a price cut, a listing gone pending.
+          var cur = LEADS[at[l.mls]];
+          FACTS.forEach(function(f){ if (l[f] !== "" && l[f] != null) cur[f] = l[f]; });
         });
       });
     BY_DATE = {}; BY_MLS = {};
@@ -743,8 +805,8 @@ footer .num{font-size:12px}
       if (st && statusOf(l) !== st) return false;
       if (!q) return true;
       return (l.addr + " " + l.mls + " " + (l.note || "") + " " + (l.remarks || "") + " " +
-              (l.agentRemarks || "") + " " + (l.showing || "") + " " + (l.agentName || "") + " " +
-              (l.agentOffice || "") + " " + (l.agentPhone || "") + " " +
+              (l.agentRemarks || "") + " " + (l.showing || "") + " " +
+              (l.agentPhone || "") + " " + (l.agentEmail || "") + " " + (l.agentName || "") + " " + (l.mlsStatus || "") + " " +
               noteList(l.mls).map(function(n){ return n.t + " " + n.by; }).join(" ")).toLowerCase().indexOf(q) !== -1;
     });
   }
@@ -825,8 +887,11 @@ footer .num{font-size:12px}
       '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + '</td>' +
       '<td data-l="Property" class="wide">' + addrHTML(l) +
-        '<span class="mls">' + esc(l.mls) + '</span>' + agentHTML(l) +
-        (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + saidHTML(l) + '</td>' +
+        '<span class="mls">' + esc(l.mls) + '</span>' +
+        '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' +
+        mlsStatusHTML(l.mlsStatus) +
+        contactHTML(l) +
+        (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + '</td>' +
       '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
       '<td data-l="$/SqFt" class="num">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
       '<td data-l="SqFt" class="num">' + fmtNum(l.sqft) + '</td>' +
@@ -835,17 +900,48 @@ footer .num{font-size:12px}
       '<td data-l="DOM"><span class="dom ' + domClass(l.dom) + '">' + (l.dom == null ? "—" : l.dom) + '</span></td>' +
       '<td data-l="Offer due" class="wide"><input type="date" class="due-in" value="' + esc(due) +
         '" aria-label="Offer due date for ' + esc(l.mls) + '">' +
-        (dd === null ? '' : '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>') +
+        (dd === null ? '' : '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' +
+          (l.offerTime && !teamDue(l) ? '<span class="due-time">' + esc(l.offerTime) + '</span>' : '')) +
+        (!due && l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<br><span class="due-chip due-later">offer date TBD</span>' +
+          (l.agentRemarks ? '<button type="button" class="due-src" data-side="' + esc(l.mls) + '">agent remarks ›</button>' : '') : '') +
         (dueIsRead(l)
-          ? '<span class="due-src' + (dueIsApprox(l) ? ' approx' : '') + '"' +
-            (l.offerPhrase ? ' title="' + esc('“' + l.offerPhrase + '”') + '"' : '') + '>' +
+          ? (l.agentRemarks || l.remarks
+              ? '<button type="button" class="due-src' + (dueIsApprox(l) ? ' approx' : '') + '" data-side="' + esc(l.mls) + '"' +
+                ' title="Open the remarks this date was read from">'
+              : '<span class="due-src' + (dueIsApprox(l) ? ' approx' : '') + '">') +
             (dueIsApprox(l) ? '≈ ' : '') + 'read from ' + esc(l.offerFrom || 'MLS remarks') +
-            (dueIsApprox(l) ? ' — confirm' : '') + '</span>'
-          : '') + '</td>' +
+            (dueIsApprox(l) ? ' — confirm' : '') + (l.agentRemarks || l.remarks ? ' ›</button>' : '</span>') +
+            (l.offerPhrase ? '<span class="due-say">“' + esc(l.offerPhrase.length > 90 ? l.offerPhrase.slice(0, 90) + "…" : l.offerPhrase) + '”</span>' : '')
+          : (!(!due && l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase)) && (l.agentRemarks || l.remarks || l.showing)
+              ? '<button type="button" class="due-src" data-side="' + esc(l.mls) + '">agent remarks ›</button>' : '')) + '</td>' +
       (view === "__all__" ? '<td data-l="Pulled" class="num">' + esc(l.date) + '</td>' : '') +
       '<td data-l="" class="act"><button class="btn tiny" data-act="' + (gone ? "restore" : "remove") + '" type="button">' +
         (gone ? "Restore" : "Remove") + '</button></td>' +
     '</tr>';
+  }
+
+  // Active is shown quietly; pending / contingent in amber (may still fall
+  // out of escrow); sold / withdrawn / expired in red — the window has closed.
+  function mlsStatusHTML(st){
+    if (!st) return "";
+    var c = /sold|withdrawn|expired|cancel|off.?market|closed/i.test(st) ? "mst-closed"
+          : /pending|contingent|under contract/i.test(st) ? "mst-pending"
+          : /^active$/i.test(st) ? "mst-active" : "mst-other";
+    return '<span class="mst ' + c + '">' + esc(st) + '</span>';
+  }
+  // Phone and email as selectable text with a Copy button: tel:/mailto: links
+  // do nothing for many viewers of a shared page, so the number itself is shown.
+  function contactHTML(l){
+    // Said out loud when missing, so an empty row reads "not loaded" rather
+    // than looking like the field doesn't exist.
+    if (!l.agentPhone && !l.agentEmail)
+      return '<span class="contact none">' + (l.agentName ? esc(l.agentName) + ' · ' : '') +
+        'Agent phone / email: not loaded yet</span>';
+    return '<span class="contact">' +
+      (l.agentName ? '<span>' + esc(l.agentName) + '</span>' : '') +
+      (l.agentPhone ? '<span class="c">' + esc(l.agentPhone) + '<button type="button" class="copy" data-copy="' + esc(l.agentPhone) + '" aria-label="Copy phone number">Copy</button></span>' : '') +
+      (l.agentEmail ? '<span class="c em">' + esc(l.agentEmail) + '<button type="button" class="copy" data-copy="' + esc(l.agentEmail) + '" aria-label="Copy email">Copy</button></span>' : '') +
+      '</span>';
   }
 
   function redfinOf(l){
@@ -862,15 +958,6 @@ footer .num{font-size:12px}
       ? '<a class="addr" href="' + esc(u) + '" target="_blank" rel="noopener" title="Open this house on Redfin">' + esc(l.addr) + '</a>'
       : '<span class="addr nolink">' + esc(l.addr) + '</span><span class="rf-wait">' +
         (triedLinks[l.mls] ? 'Redfin page not found yet — checking again' : 'Finding this house on Redfin…') + '</span>';
-  }
-
-  // The listing agent, as the MLS names them. The phone is plain, selectable
-  // text: phone links do not dial reliably from inside the board.
-  function agentHTML(l){
-    if (!l.agentName && !l.agentPhone) return "";
-    return '<span class="agent"><b>Listing agent</b> ' + esc(l.agentName || "—") +
-      (l.agentOffice ? ' <span class="office">· ' + esc(l.agentOffice) + '</span>' : '') +
-      (l.agentPhone ? ' · <span class="phone">' + esc(l.agentPhone) + '</span>' : '') + '</span>';
   }
 
   function noteList(mls){
@@ -937,19 +1024,6 @@ footer .num{font-size:12px}
     ref.update(body).catch(function(){ return ref.set(body); })
       .then(function(){ toast(done); })
       .catch(function(){ note("Couldn't save that note to the shared board. It is showing on this screen only — reload the page.", true); });
-  }
-
-  // What the listing said, folded under the address. Only scan leads carry it:
-  // the old sheet rows never had the remarks.
-  function saidHTML(l){
-    if (!l.remarks && !l.agentRemarks && !l.showing && !l.why) return "";
-    var parts = [["Offer deadline", l.offerPhrase ? "“" + l.offerPhrase + "” — " + (l.offerFrom || "") : ""],
-                 ["Agent-only remarks", l.agentRemarks], ["Showing", l.showing],
-                 ["Public remarks", l.remarks], ["Why FlipScout kept it", l.why]];
-    return '<details class="said"><summary>Remarks' + (l.agentRemarks ? ' · agent notes' : '') + '</summary>' +
-      parts.filter(function(p){ return p[1]; }).map(function(p){
-        return '<p><b>' + esc(p[0]) + '</b>' + esc(p[1]) + '</p>';
-      }).join("") + '</details>';
   }
 
   function draw(){
@@ -1139,7 +1213,61 @@ footer .num{font-size:12px}
     var i = DATES.indexOf(view); if (i > -1 && i < DATES.length-1){ view = DATES[i+1]; sel.value = view; scopeFor[activeScreen] = view; draw(); syncStep(); }
   });
 
+  // The remarks an offer date was read from, in a side panel, with the
+  // sentence the date came from highlighted.
+  function marked(text, phrase){
+    var t = String(text || ""), norm = function(x){ return x.replace(/\s+/g, " "); };
+    if (!phrase) return esc(t);
+    var flat = norm(t), p = norm(phrase).trim(), at = p ? flat.toLowerCase().indexOf(p.toLowerCase()) : -1;
+    if (at < 0) return esc(t);
+    return esc(flat.slice(0, at)) + '<mark>' + esc(flat.slice(at, at + p.length)) + '</mark>' + esc(flat.slice(at + p.length));
+  }
+  var sideFrom = null;
+  function openSide(mls, from){
+    var l = BY_MLS[mls]; if (!l) return;
+    var due = dueOf(l), secs = [];
+    if (due || l.offerPhrase) secs.push(['Offer due',
+      (due ? esc(due) + (l.offerTime ? ' · ' + esc(l.offerTime) : '') : 'TBD') +
+      (l.offerPhrase ? '<br><span class="quote">“' + esc(l.offerPhrase) + '”</span>' : '')]);
+    if (l.agentRemarks) secs.push(['Agent-only remarks', marked(l.agentRemarks, l.offerPhrase)]);
+    if (l.remarks) secs.push(['Public remarks', marked(l.remarks, l.offerPhrase)]);
+    if (l.showing) secs.push(['Showing', esc(l.showing)]);
+    if (l.why) secs.push(['Why FlipScout kept it', esc(l.why)]);
+    if (l.agentName || l.agentPhone || l.agentEmail) secs.push(['Listing agent',
+      [esc(l.agentName), esc(l.agentPhone), esc(l.agentEmail)].filter(Boolean).join('<br>')]);
+    $("sideTitle").textContent = l.addr;
+    $("sideBody").innerHTML = '<span class="mls">' + esc(l.mls) + '</span>' + mlsStatusHTML(l.mlsStatus) +
+      '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
+      secs.map(function(x){ return '<div class="sec"><h3>' + x[0] + '</h3><p>' + x[1] + '</p></div>'; }).join("");
+    sideFrom = from || null;
+    $("side").hidden = false;
+    var mk = $("sideBody").querySelector("mark");
+    if (mk && mk.scrollIntoView) mk.scrollIntoView({block: "center"});
+    $("side").querySelector(".x").focus();
+  }
+  function closeSide(){
+    if ($("side").hidden) return;
+    $("side").hidden = true;
+    if (sideFrom && document.body.contains(sideFrom)) sideFrom.focus();
+  }
+  document.addEventListener("keydown", function(ev){ if (ev.key === "Escape") closeSide(); });
+
   document.addEventListener("click", function(ev){
+    var sd = ev.target.closest("[data-side]");
+    if (sd){ openSide(sd.dataset.side, sd); return; }
+    if (ev.target.closest("[data-side-close]")){ closeSide(); return; }
+    var cp = ev.target.closest("button[data-copy]");
+    if (cp){
+      var v = cp.dataset.copy;
+      var done = function(){ toast("Copied " + v); };
+      var fallback = function(){
+        var r = document.createRange(); r.selectNodeContents(cp.parentNode);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        toast("Selected — press Ctrl+C to copy");
+      };
+      try { navigator.clipboard.writeText(v).then(done, fallback); } catch (e) { fallback(); }
+      return;
+    }
     var th = ev.target.closest("thead th[data-s]");
     if (th){
       var k = th.dataset.s;
@@ -1263,10 +1391,11 @@ footer .num{font-size:12px}
         '<th class="plain n">Price</th><th class="plain n">$/SqFt</th></tr></thead><tbody>' +
         dues.map(function(l){
           var dd = daysUntil(dueOf(l));
-          return '<tr><td class="n">' + esc(dueOf(l)) +
+          return '<tr><td class="n">' + esc(dueOf(l)) + (l.offerTime && !teamDue(l) ? ' ' + esc(l.offerTime) : '') +
             (dueIsApprox(l) ? ' <span class="due-src approx">≈</span>' : '') + '</td>' +
             '<td><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span></td>' +
-            '<td>' + addrHTML(l) + '<span class="mls">' + esc(l.mls) + '</span></td>' +
+            '<td>' + addrHTML(l) + '<span class="mls">' + esc(l.mls) + '</span>' + mlsStatusHTML(l.mlsStatus) +
+            (l.agentPhone ? '<span class="contact"><span class="c">' + esc(l.agentPhone) + '</span></span>' : '') + '</td>' +
             '<td><span class="pill ' + STCLASS[statusOf(l)] + '">' + esc(statusOf(l)) + '</span></td>' +
             '<td class="n">' + fmtMoney(l.price) + '</td>' +
             '<td class="n">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td></tr>';
@@ -1399,8 +1528,16 @@ footer .num{font-size:12px}
     j.leads.forEach(function(x){
       var l = scanLead(x, pulled);
       if (!l) { bad++; return; }
-      if (BY_MLS[l.mls] || inThis[l.mls]) { dup++; return; }
+      if (inThis[l.mls]) { dup++; return; }
       inThis[l.mls] = true;
+      // Already on the board: keep it if it brings anything new (an offer date,
+      // a phone, a status change) — it updates that lead instead of adding one.
+      var old = BY_MLS[l.mls];
+      if (old) {
+        var changed = FACTS.some(function(f){ return l[f] !== "" && l[f] != null && l[f] !== old[f]; });
+        if (changed) { l.update = true; fresh.push(l); } else dup++;
+        return;
+      }
       fresh.push(l);
     });
     return {pulled: pulled, fresh: fresh, dup: dup, bad: bad, app: str(j.app, 20), made: str(j.made, 40)};
@@ -1413,19 +1550,21 @@ footer .num{font-size:12px}
     if (!parsed) { box.innerHTML = ""; return; }
     if (parsed.error) { box.innerHTML = '<span class="err">' + esc(parsed.error) + '</span>'; return; }
     var offers = parsed.fresh.filter(function(l){ return l.sdue; }).length;
-    var html = '<div class="sum">Scan of <b>' + esc(fmtDate(parsed.pulled)) + '</b>: <b>' + parsed.fresh.length +
-      '</b> new' + (parsed.dup ? ' · <b>' + parsed.dup + '</b> already on the board' : '') +
+    var upd = parsed.fresh.filter(function(l){ return l.update; }).length;
+    var html = '<div class="sum">Scan of <b>' + esc(fmtDate(parsed.pulled)) + '</b>: <b>' + (parsed.fresh.length - upd) +
+      '</b> new' + (upd ? ' · <b>' + upd + '</b> updated' : '') +
+      (parsed.dup ? ' · <b>' + parsed.dup + '</b> already on the board, unchanged' : '') +
       (parsed.bad ? ' · <b>' + parsed.bad + '</b> unreadable, skipped' : '') +
       (offers ? ' · <b>' + offers + '</b> with an offer deadline' : '') + '</div>';
     if (parsed.fresh.length) {
       html += '<ul>' + parsed.fresh.map(function(l){
-        return '<li><span>' + esc(l.addr) + '</span><span class="p">' + fmtMoney(l.price) +
+        return '<li><span>' + (l.update ? '<b>Update</b> · ' : '') + esc(l.addr) + '</span><span class="p">' + fmtMoney(l.price) +
           (l.sdue ? ' · offers ' + esc(l.sdue.replace(/^~/, "≈ ")) : '') + '</span></li>';
       }).join("") + '</ul>';
     }
     box.innerHTML = html;
     go.disabled = !parsed.fresh.length || !db;
-    go.textContent = parsed.fresh.length ? "Add " + parsed.fresh.length + (parsed.fresh.length === 1 ? " lead" : " leads") : "Nothing new to add";
+    go.textContent = parsed.fresh.length ? "Add / update " + parsed.fresh.length + (parsed.fresh.length === 1 ? " lead" : " leads") : "Nothing new to add";
     if (parsed.fresh.length && !db) box.innerHTML += '<p class="err">The shared board isn\'t connected in this view, so nothing can be saved. Open the board from its link.</p>';
   }
 
@@ -1434,7 +1573,8 @@ footer .num{font-size:12px}
             year: l.year, dom: l.dom, remarks: l.remarks, agentRemarks: l.agentRemarks,
             showing: l.showing, offerDue: l.sdue, offerFrom: l.offerFrom,
             offerPhrase: l.offerPhrase, why: l.why, redfin: l.redfin,
-            agentName: l.agentName, agentOffice: l.agentOffice, agentPhone: l.agentPhone};
+            offerTime: l.offerTime, agentPhone: l.agentPhone, agentEmail: l.agentEmail,
+            agentName: l.agentName, mlsStatus: l.mlsStatus};
   }
 
   function addScan(){
@@ -1456,7 +1596,7 @@ footer .num{font-size:12px}
       dlg.close();
       view = day; scopeFor[activeScreen] = day; sel.value = day;
       draw(); syncStep();
-      toast("Added " + n + (n === 1 ? " lead" : " leads") + " to " + fmtShort(day) + " — saved for the team");
+      toast("Added / updated " + n + (n === 1 ? " lead" : " leads") + " — saved for the team");
     }).catch(function(){
       go.disabled = false; go.textContent = "Try again";
       $("scanPreview").innerHTML += '<p class="err">Couldn\'t save to the shared board. Nothing was lost — try again, or reload the page.</p>';
