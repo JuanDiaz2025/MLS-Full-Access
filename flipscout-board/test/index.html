@@ -397,12 +397,6 @@ footer .num{font-size:12px}
 #scanDlg::backdrop, #passDlg::backdrop{background:rgba(14,32,46,.45)}
 #passDlg{border:1px solid var(--line); border-radius:12px; padding:0; width:min(460px, calc(100% - 32px));
   background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55)}
-.alert-row{display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center; margin-top:5px}
-button.mute{border:1px solid var(--line); background:var(--surface-2); color:var(--muted); border-radius:999px;
-  font:600 10.5px Archivo,sans-serif; letter-spacing:.02em; padding:2px 8px; cursor:pointer}
-button.mute:hover{border-color:var(--accent); color:var(--accent)}
-button.mute.on{background:var(--b-none); color:var(--t-none)}
-.alert-sent{font-size:10.5px; color:var(--t-offer); font-weight:600}
 .pass-why{display:block; margin-top:4px; max-width:22ch; font-size:11.5px; line-height:1.35; color:var(--t-pass); font-style:italic}
 .dlg{padding:20px}
 .dlg h2{font-family:Archivo,sans-serif; font-size:17px; margin:0; letter-spacing:-.01em}
@@ -682,9 +676,6 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
   var notes = {};     // MLS # -> entries, as the shared board has them
   var openNotes = {}, drafts = {}, pendingNotes = {};
   var links = {}, pendingLinks = {};   // MLS # -> Redfin page
-  // alerts/<MLS>: the Google Chat alerts sent for a lead ({h24, final} times,
-  // written by the alert check) and whether the team muted it ({muted}).
-  var alerts = {}, pendingMute = {};
   // links/_found holds the Redfin pages looked up in bulk for the older leads,
   // as {map: {MLS #: url}} — one document instead of hundreds.
   var foundLinks = {}, triedLinks = {};
@@ -1103,7 +1094,7 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
             (l.offerPhrase ? '<span class="due-say">“' + esc(l.offerPhrase.length > 90 ? l.offerPhrase.slice(0, 90) + "…" : l.offerPhrase) + '”</span>' : '')
           : (!(!due && l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase)) && (l.agentRemarks || l.remarks || l.showing)
               ? '<button type="button" class="due-src" data-side="' + esc(l.mls) + '">agent remarks ›</button>' : '')) +
-        alertHTML(l) + '</td>' +
+        '</td>' +
       (view === "__all__" ? '<td data-l="Pulled" class="num">' + esc(l.date) + '</td>' : '') +
       '<td data-l="" class="act"><button class="btn tiny" data-act="' + (gone ? "restore" : "remove") + '" type="button">' +
         (gone ? "Restore" : "Remove") + '</button></td>' +
@@ -1112,17 +1103,6 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
 
   // Active is shown quietly; pending / contingent in amber (may still fall
   // out of escrow); sold / withdrawn / expired in red — the window has closed.
-  // Only an A lead with a real offer date can ever alert, so only those get the switch.
-  function mutedOf(mls){ return pendingMute[mls] != null ? pendingMute[mls] : !!(alerts[mls] && alerts[mls].muted); }
-  function alertHTML(l){
-    if (l.bucket !== "A" || !dueOf(l) || /^~/.test(l.sdue || "") && !teamDue(l)) return "";
-    var a = alerts[l.mls] || {}, m = mutedOf(l.mls), sent = a.final || a.h24;
-    return '<div class="alert-row">' +
-      '<button type="button" class="mute' + (m ? ' on' : '') + '" data-mute="' + esc(l.mls) + '" title="' +
-        (m ? 'No Google Chat alerts for this lead. Click to turn them back on.' : 'Stop Google Chat alerts for this lead') + '">' +
-        (m ? '🔕 Alerts muted' : '🔔 Mute alerts') + '</button>' +
-      (sent ? '<span class="alert-sent">📣 ' + (a.final ? 'final call sent' : '24h alert sent') + '</span>' : '') + '</div>';
-  }
   var BK_NAME = {A: "Work Now", B: "AI Review", C: "Auto-Pass"};
   function bucketHTML(l){
     if (!BK_NAME[l.bucket]) return "";
@@ -1531,18 +1511,6 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
   document.addEventListener("keydown", function(ev){ if (ev.key === "Escape") closeSide(); });
 
   document.addEventListener("click", function(ev){
-    var mu = ev.target.closest("button[data-mute]");
-    if (mu){
-      var mm = mu.dataset.mute, next = !mutedOf(mm);
-      pendingMute[mm] = next; draw();
-      if (!db){ note("The shared board isn't connected, so this is on this screen only. Reload the page.", true); return; }
-      var body = {muted: next, mutedBy: myName || "Someone", mutedAt: new Date().toISOString()};
-      var ref = db.doc("alerts/" + mm);
-      ref.update(body).catch(function(){ return ref.set(body); })
-        .then(function(){ toast(next ? "Alerts muted for this lead — saved for the team" : "Alerts back on for this lead"); })
-        .catch(function(){ note("Couldn't save that to the shared board. Reload the page.", true); });
-      return;
-    }
     var sd = ev.target.closest("[data-side]");
     if (sd){ openSide(sd.dataset.side, sd); return; }
     if (ev.target.closest("[data-side-close]")){ closeSide(); return; }
@@ -2131,13 +2099,6 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
       }, function(){
         note("Lost the connection to the shared board — notes from others may not show. Reload the page.", true);
       });
-      db.collection("alerts").onSnapshot(function(snap){
-        var next = {};
-        snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
-        alerts = next;
-        Object.keys(pendingMute).forEach(function(m){ if (!!(alerts[m] && alerts[m].muted) === pendingMute[m]) delete pendingMute[m]; });
-        draw();
-      }, function(){});
       db.collection("sheet").onSnapshot(function(snap){
         var next = {};
         snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });

@@ -74,6 +74,6 @@ Menu "🚨 FlipScout Alerts": Check now · Preview · Send morning summary now �
 Send test message. Trigger code runs as saved ("Head"); only a change to
 `doGet` needs Deploy → Manage deployments → Edit → New version (same URL).
 
-The board's 🔔 Mute button writes `alerts/<MLS>.muted` in the board database;
-the Apps Script cannot see the board database, so a mute there does not stop a
-Chat alert — put "no alerts" in the lead's Notes instead.
+To stop the alerts for one lead, put "no alerts" in its Notes on the sheet
+(or pass it). The board's old 🔔 Mute button was removed on 24 Sep: it saved
+in the board database, which the Apps Script cannot read.
