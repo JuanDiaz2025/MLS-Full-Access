@@ -310,9 +310,33 @@ headless-scrape workflow):
   buy box now reaches photo review, so photo review is the real filter and the
   volume is far higher.
 - **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
-  **tenant-occupied**, multi-unit, vacant lot, **fire-damaged** (any listing noting a
+  multi-unit, vacant lot, **fire-damaged** (any listing noting a
   past fire / fire damage / fire-gutted interior — drop even if it reads as a genuine
   as-is fixer).
+- **Tenant-occupied is NOT a drop any more** (Seth, 23 Sep). It scores as an
+  opportunity signal (a seller stuck with a tenant is often motivated) in the
+  qualification gate below. Foundation / roof / fire / water / non-permitted, DOM
+  over 45 and too few interior photos all stay auto-passed.
+- **🚦 Qualification gate — Opportunity Score + A / B / C** (Seth, 23 Sep).
+  Nothing enters the working board until the gate finds a plausible value-add
+  opportunity. `core.qualify()` in `scan-core.js` scores every reviewed listing
+  0–100 (base 40) from the public **and private** remarks, the price cut
+  (`Orig Price` vs `List Price` on the report), $/sqft against the area median,
+  age and DOM, and returns a bucket:
+  **A — Work Now** (70+) · **B — AI Review** (35–69) · **C — Auto-Pass** (<35 or
+  any hard exclusion from `rulesDecide`). A and B go to `Leads` sorted A first,
+  highest score first; C goes to `Rejected` with the score and the why (stage
+  *Qualification gate*, or *Photo review* for a hard exclusion). Photos are not
+  scored yet — AI vision, when on, can still turn a keep into a C.
+  Private remarks come from the **Agent Full** report (Client Full does not have
+  them), labelled **`Private:`** — verified on the first live run (23 Sep, 15 of
+  15 read). Agent Full also carries **`Occupied By:`** (Vacant / Tenant / Owner),
+  which the gate uses ahead of any word in the remarks. The app saves raw report
+  text to `report-samples/` under userData (first 10 listings per run).
+  Live-run fixes: `\bheirs?\b` (a bare `heirs?` matched "**their**" and scored
+  ordinary listings as probate), and `Prop Condition:` must have its colon and
+  may not cross a tab/line (blank fields were swallowing the next field, and a
+  disclaimer's "property condition" was read as the condition).
 - **⚡ QUICK FLIPS ONLY** (Bryan, 1 Aug). A quick flip is a **cosmetic** job — paint,
   floors, kitchen, bath, done in one pass without drawings or engineers. **Drop**
   anything structural or permit-heavy even when it is a genuine fixer: foundation
@@ -373,8 +397,68 @@ The desktop app writes here **directly over the Sheets API** (§7) — there is 
 web app, no deployment and no shared secret any more. Three tabs:
 
 - **`Leads`** — `Status · MLS # · Address · Beds · Baths · SqFt · Lot SqFt ·
-  Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added`.
-  Keyed on `MLS #`; rows are append-or-backfill.
+  Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added ·
+  Bucket · Opportunity Score · Why · Price Cut · Listing Agent · Offer Due ·
+  Private Remarks · Occupied By · MLS Status · Agent Phone · Agent Email ·
+  Showing · Disclosures`. The last four come off Agent Full (`LA Ph:`, `LA Em:`,
+  `Instructions:` + `Show Contact:`, `Disclosures URL:`); the Disclosures field
+  was blank on 8 of 10 live samples, so `core.disclosuresLink()` falls back to a
+  link in the remarks next to "disclos…" or on a known host (glide, homelight…).
+  **A label's value is at most ONE tab away** — two tabs means the field is
+  blank; `[ \t]*` let a blank "Show Contact" read "Show type:" as its value.
+  Keyed on `MLS #`; rows are append-or-backfill. The gate columns were added at
+  the **end** so existing rows and the reject script (which reads by header
+  name) keep lining up; `Bucket`, `Opportunity Score`, `Why`, `Price Cut`,
+  `Offer Due`, `Private Remarks` and `Occupied By` are app-owned and replaced on
+  a re-review, everything else is never overwritten.
+
+  **Offer Due has no MLS field** — every label on live Agent Full pages was
+  checked (23 Sep). Agents write it into the remarks ("All offers due Monday
+  9/21/26 6:00 PM", "Offer date: 9/30/26 by Noon", "Offer Date TBD"), so
+  `core.offerDue()` reads it from the private + public remarks and writes
+  `2026-09-30 (Wed) 12:00 PM`, `TBD`, or blank when nothing says when. Only a
+  sentence about an offer *deadline* counts; "offer to include a deposit copy"
+  and "seller may reject any offer" do not. Also read (Seth's live misses, 23
+  Sep): "Offers **will be accepted** Monday Sept 28th", and a day with no month
+  — "Offers Due Wednesday **the 23rd**" takes the month where the 23rd is a
+  Wednesday. Open-house / broker-tour dates (OH, SOH, BT) are never read as one.
+- **`Board`** — **owned by the app, rebuilt from `Leads` after every scan and
+  every refresh** (nothing on it is typed by hand; notes belong on `Leads`).
+  Top: today's funnel (Scanned · Auto-Pass C · AI Review B · Work Now A · New)
+  and the board counts (A · B · offers due in 48h · TBD · passed in Notes).
+  Below: the live A/B leads in **work order** — A before B, soonest future
+  offer deadline first, then TBD, then no date, then past deadlines; a live
+  `Time Left` formula counts down between rebuilds. Rows whose Notes start
+  with PASS / "we're passing" / rejected are counted, not listed
+  (`core.PASSED_NOTE`). **Closed listings** (MLS Status Sold / Withdrawn /
+  Expired / Canceled / Off Market — `core.CLOSED_STATUS`) are counted, not
+  listed; **Pending / Contingent** stay on, after every active lead; **C —
+  Auto-Pass** rows are counted, not listed. Agent Phone and Showing sit right
+  after the Address.
+  `core.buildBoard()` is pure and tested.
+- **MLS Link = `https://www.mlslistings.com/Property/<MLS#>`** (`core.mlsUrl`),
+  the public listing page — opens with no sign-in, checked for SF / ML / CROC /
+  BE numbers, active and sold. The old `Matrix/Public/Portal.aspx?ID=<MLS#>` is
+  MLS's client **email** portal: it wants an id from an agent's email, not an
+  MLS number, so every one of those links showed "The email URL you are using
+  is either not valid or it has expired". The Board and every Refresh rewrite
+  old links (`core.fixLink`).
+- **Leads already on the sheet are never re-reviewed by a scan** — every scan
+  pulls the `Leads` MLS #s into the ledger as `on-board` (the first test re-
+  reviewed 15 of 16 for nothing). **"↻ Refresh leads on the board"** is what
+  keeps them current: it re-reads only the Leads rows not passed in Notes and
+  not closed and not C, **A first, then B, then unscored** (newest row first
+  inside each). Sorting on First Added alone put the day's SF leads at #59 —
+  every row carried the same Aug 1 date. It also **re-checks the hard
+  exclusions on already-scored rows**: a private remark like "This is not a
+  cosmetic remodel" / "plans approved by the City" moves an A/B lead to C with
+  "(found on refresh)" in Why — only ever down, never up. Reports only
+  (no photos, ~12 s each), and updates `Price Cut · Listing Agent ·
+  Offer Due · Private Remarks · Occupied By · MLS Status` — a TBD becomes a
+  date, a pending listing says so, a listing gone from the Active search is
+  flagged "Not found in Active search — check". Rows never scored get a bucket
+  and score (without $/sqft or photos, and the Why says so). Notes are never
+  touched.
 - **`Rejected`** — `Rejected On · MLS # · Address · Price · $/SqFt · SqFt · DOM ·
   Reason · Stage · By · MLS Link`. Everything dropped lands here with the reason
   and the stage it fell out at.
@@ -405,30 +489,29 @@ reading whatever is displayed; the app skips that listing **without a ledger
 entry**, so the next run retries instead of writing it off. Never read "the
 first address on the page."
 
-**The agent-only side comes off the `Agent Full` report** (same Display
-dropdown), read right after Client Full by `core.parseAgentDetail(text, mls)`.
-It holds what the buyer report never shows: agent remarks, showing
-instructions, tenant notes and — usually — the **offer deadline**. No Agent Full
-page had been captured when the parser was written, so it finds fields by LABEL
-(`Agent Remarks:`, `Confidential Remarks:`, `Showing Instructions:`, an
-`Offer Date:` field…), and the app saves every report page it reads to
-`listing-pages/<date>/<MLS>-client.txt` / `-agent.txt` in its data folder
-(14 days kept). **Check the parser against those files** before trusting it.
-Both reports are scrolled top to bottom before being read.
+**Both reports are scrolled top to bottom before being read** (v1.40,
+`readWholePage()` in `main.js`; the "Scroll pause per screen" setting). The
+facts-only refresh skips the scroll. Private remarks, offer due and the
+agent's phone/email are read by the live-verified parsers described under the
+qualification gate and the `Leads` columns above.
 
-**Offer deadlines** — `core.findOfferDue()` looks in order: an offer-date field,
-agent/offer notes, showing instructions, public remarks, then anywhere on the
-page. The phrase parser is a port of `parse_offer_due()` in the Lead Board's
-`build_data.py` (a date counts only AFTER an offer phrase; a bare weekday is
-returned as `~YYYY-MM-DD`, shown as approximate). One deliberate difference:
-a year-less date more than 120 days out is refused — "offers accepted 9/1" on a
-23 Sep listing is not a deadline next September. `test-remarks.js` pins all of it.
-
-**Leads go to the FlipScout Lead Board artifact, not the Google Sheet.** Each
-kept lead — with both remarks, the offer deadline and the phrase it was read
-from — is merged into `Documents/FlipScout/FlipScout-scan-<date>.json`, copied
+**Leads also go to the FlipScout Lead Board artifact** (v1.40; Bryan does not
+want to depend on the Google Sheet — it stays optional). Every A/B lead is
+merged into `Documents/FlipScout/FlipScout-scan-<date>.json` by
+`core.boardLead()` — public + private remarks, offer date and time (split from
+`core.offerDue()`'s "2026-09-30 (Wed) 12:00 PM"), listing agent name/phone/
+email, MLS status, bucket + score, and the house's exact Redfin page — copied
 to the clipboard when a run ends, and added on the board with **Add scan**. An
 artifact's shared data can only be written from the page, hence the paste.
+The field names are the board's `scanLead()` names; change both together.
+
+**Redfin links: only the house's own page, never a search or an area page.**
+Redfin page URLs carry Redfin's home id, so they cannot be built from the
+address. The app asks Redfin's location lookup from the user's machine for each
+kept lead and keeps a result only when the slug's house number and zip match
+(`core.redfinUrlFrom`, tested). Redfin blocks this lookup from cloud servers.
+For the older board leads the links were filled in by web search into the
+board's `links/_found` document; ~56% of addresses have a findable page.
 
 `core.fullAddress()` composes the sheet value, stripping a trailing zip/state
 off the street line before recomposing — appending blindly gave
@@ -505,6 +588,14 @@ written to the sheet`. Nothing is left running. A run that never started (not
 signed in) leaves the browser window alone, so it cannot shut the window you are
 about to log in through. `finishRun()` in `main.js`.
 
+**The photo grid never actually opened until 23 Sep.** The snippet that reads
+the media `Key` sits inside a template string, and its single-backslash `\d`
+reached the page as a bare `d`, so the regex never matched and every listing
+fell back to the ~4-photo carousel — which is what dropped 844 Brunswick (29
+photos) as "exterior-only". Fixed (`\\d`), and `gridOk` now tells the rules
+whether a low photo count came off the real grid; a carousel count is never
+read as "no interior access".
+
 **The AI sees EVERY photo now.** `showGallery()` used to read the Client Full
 carousel, which yields ~4 of 26 and starts with the exterior — so vision was
 judging kitchens it had never been shown. It now navigates to
@@ -512,6 +603,10 @@ judging kitchens it had never been shown. It now navigates to
 image) and reads the whole grid, and `spreadPhotos()` skips the cover shot and
 spreads the 20 sent across the set instead of taking the first 20. This was
 live-verified with `scripts/mls-photos.js`.
+
+**AI model id:** the default was `claude-opus-5`, which is not a model id, so
+AI vision would have failed on its first call. It is now `claude-opus-5-5`
+(`claude-sonnet-5` is the cheaper option), and a saved old value is migrated.
 
 **The run never stops to ask.** There is no Keep/Drop approval step — it was
 removed per Bryan. AI vision decides when an API key is set, otherwise the text
@@ -530,6 +625,23 @@ Needs a one-time **OAuth Client ID (Desktop app type)** from the user's own
 Google Cloud project — that cannot be shipped in the app or created for them;
 the five console steps are in the app UI and `desktop-app/README.md`.
 Credentials persist in `google-account.json` under userData.
+
+**Google Sheets quota: ~60 reads and ~60 writes per minute per user.**
+`syncRows` used to read and write ONE ROW PER CALL, so the first v1.36 refresh
+(fixing links on ~92 closed/passed rows at once) died with *"Quota exceeded for
+quota metric 'Read requests' … per minute per user"*. It now reads the whole
+tab once and writes every changed row in one `values:batchUpdate` (90 rows = 4
+calls, tested), and `api()` waits out a quota refusal (20 s, 40 s, 65 s) before
+giving up. Never reintroduce a per-row read or write loop against the sheet.
+
+**Stop saves first.** `waitIfPaused()` THROWS on Stop, which skipped every
+write after the loop: a Stop mid-Refresh lost the unsaved leads (up to 9 — it
+flushes every 10) and never rebuilt the Board (live, 23 Sep: leads 21–29 lost
+their phones), and a Stop mid-Scan lost reviewed leads the ledger already
+marked checked, so they were never looked at again. Loops that have read
+listings use `stopRequested()` instead, which breaks out, so the flush / sheet
+write / Board rebuild still run. Only the search-paging steps (nothing
+reviewed yet) still throw.
 
 **A rejected lead never comes back.** Two guards, because the ledger alone is
 not enough: every scan starts by pulling the `Rejected` tab into the seen-ledger,

@@ -42,43 +42,27 @@ install (creates a desktop shortcut) or run the portable exe directly.
    Single-Family · **45 days on market or less** · 25+ years old). After the first
    pass each run is incremental — listings already checked are skipped outright,
    so day two only costs you the new ones.
-3. **Photo review** — for each candidate the MLS window shows the full photo
-   gallery. Two ways to judge:
-   - **Manual (default):** click **Keep** (genuine dated fixer) or **Drop**
-     (renovated / multi-unit / exterior-only). Clean-but-dated = **Keep**;
-     judge the finishes, not the staging. **Pause/Resume** anytime.
-   - **Auto-verify (AI):** tick the box in step 2 and paste an Anthropic API key.
-     Claude looks at each listing's photos, applies the buy-box rules (Rule #0
-     renovated / Rule #2 review-every-photo / multi-unit / exterior-only), and
-     decides Keep/Drop on its own — no clicking. Model defaults to
-     `claude-opus-5`; switch to `claude-sonnet-5` or `claude-haiku-4-5` for lower
-     cost. Your key and the listing photos are sent to Anthropic for this.
-   Every listing is **scrolled top to bottom and read twice**: the buyer report
-   (Client Full) for the public remarks, then the **Agent Full** report for the
-   agent-only remarks and showing instructions. Both feed the rules and the AI,
-   and the "Now reviewing" panel shows exactly what was read. Section 3's
-   *Scroll pause per screen* sets how slowly it reads (0.7 s by default).
-   Each page read is saved to `listing-pages/<date>/` in the app's data folder
-   for 14 days, so what the app made of a listing can be checked.
-4. **Offer deadlines** — read out of the agent remarks, an offer-date field,
-   showing instructions or the public remarks, and only when the date follows
-   an offer phrase ("Offers due Tue 9/30 5pm"). A bare weekday ("offers due
-   Friday") is marked approximate. The deadline and the words it came from go
-   to the Lead Board with the lead.
-5. **The FlipScout Lead Board** — section 7. Kept leads are merged into
-   `Documents/FlipScout/FlipScout-scan-<date>.json`, and when a run ends they're
-   already on the clipboard: open the board, click **Add scan**, paste (or drop
-   the file in). The board skips any MLS # it already has, so pasting twice is
-   harmless. **Copy for the board** copies today's file again at any time.
-6. **Report** — kept candidates get size-matched sold comps → ARV (what it's worth
+3. **Qualification gate** — each candidate's report (public + private remarks,
+   original vs list price, listing agent) and full photo gallery are read, and it
+   gets an **Opportunity Score (0–100)** and a bucket:
+   - **A — Work Now** (70+): strong distress / value-add signals
+   - **B — AI Review** (35–69): plausible, not obvious — worth a deeper look
+   - **C — Auto-Pass** (under 35, or renovated / multi-unit / fire / structural /
+     too few photos): never reaches the board; logged on **Rejected** with the
+     score and the reason.
+   Tenant-occupied is **not** a drop — it counts toward the score. The run never
+   stops to ask. With an Anthropic API key and **Use AI vision** ticked, Claude
+   also judges the photos and can turn a keep into a C.
+4. **Report** — kept candidates get size-matched sold comps → ARV (what it's worth
    after repair), Light/Heavy rehab, holding, days on market, and the dollar profit
    gate (Strong Deal / Marginal / Pass, with a Flip Quality label). **Export** to
    CSV or JSON.
-7. **Google Sheet (old, optional)** — section 8, folded away. Sign in with your own Google account, paste
+5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,
    nothing to refresh. Three tabs are created if they don't exist:
-   - **Leads** — the qualifying properties. **Address is one column with the whole
+   - **Leads** — the A and B properties, A first, with **Bucket · Opportunity Score ·
+     Why · Price Cut · Listing Agent** at the end of each row. **Address is one column with the whole
      thing** — `1326 Palou Avenue, San Francisco, CA 94124` — not split across
      City and Zip.
    - **Rejected** — everything dropped, with the reason and the stage it fell out at
@@ -88,6 +72,24 @@ install (creates a desktop shortcut) or run the portable exe directly.
    gets filled in on the next pass, but a note you typed yourself stays put. On
    the KPI tab the app replaces its own counters and leaves the reviewer's
    columns alone.
+
+## The Board tab and "Refresh leads on the board"
+
+After every scan the app rebuilds a **Board** tab in your sheet: today's numbers
+on top (scanned → auto-passed → B → A), then the A and B leads in work order —
+**soonest offer deadline first**, with a live *Time Left* countdown. Leads you
+passed on in the Notes column ("PASS-…", "we're passing…") are counted but left
+off. Don't type on the Board; it is rebuilt each time — notes go on **Leads**.
+
+Leads already on your sheet are **not** re-reviewed by a scan. To bring them up
+to date, click **↻ Refresh leads on the board** (section 3, signed in to MLS):
+it re-reads just those listings — no photos, a few seconds each — and updates
+Offer Due (TBD → a real date), Price Cut, Private Remarks, Occupied By and MLS
+Status (Active / Pending). Your Notes are never changed. It goes **newest lead
+first** and skips listings that are sold, withdrawn or expired, so you can stop
+it once today's leads are done. Sold / withdrawn listings come off the Board;
+pending ones stay at the bottom. Listing links open the public MLSListings page. **▦ Update Board tab**
+rebuilds the Board without touching MLS.
 
 ## One-time Google setup
 
@@ -152,3 +154,10 @@ By default the Keep/Drop call is yours (Rule #2 is a judgment call). Turn on
 rules — useful for running the whole buy box hands-off. Either way, the app scans,
 filters, comps, scores, and reports; auto-verify just automates the gallery
 decision.
+
+## The FlipScout Lead Board (v1.40)
+Section 7. Every A and B lead also goes into `Documents/FlipScout/FlipScout-scan-<date>.json`
+with its public and private remarks, offer deadline, listing agent (name, phone, email), bucket and
+score, and its exact Redfin page (looked up from this computer). When a run finishes the leads are
+already copied: open the Lead Board, click **Add scan**, paste. The Google Sheet (section 8) is optional.
+Each report is scrolled top to bottom before it is read — "Scroll pause per screen" in section 3.

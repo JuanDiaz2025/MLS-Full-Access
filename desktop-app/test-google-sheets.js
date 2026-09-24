@@ -38,6 +38,16 @@ function fakeSheets(initial) {
       body.requests.forEach(r => { if (r.addSheet) tabs[r.addSheet.properties.title] = []; });
       return json({});
     }
+    if (rest === '/values:batchUpdate') {                // write many rows at once
+      body.data.forEach(d => {
+        const [tab, range] = d.range.split('!');
+        const row = parseInt(range.match(/\d+/)[0], 10) - 1;
+        const grid = tabs[tab] = tabs[tab] || [];
+        while (grid.length <= row) grid.push([]);
+        grid[row] = d.values[0].slice();
+      });
+      return json({});
+    }
     const mVal = rest.match(/^\/values\/(.+?)(:append)?$/);
     if (mVal) {
       const a1 = decodeURIComponent(mVal[1]);
@@ -55,6 +65,7 @@ function fakeSheets(initial) {
         grid[row] = body.values[0].slice();
         return json({});
       }
+      if (range === 'A1:ZZ') return json({ values: grid.map(r => r.slice()) });   // whole tab
       // read a range: a column slice (B2:B / A1:A1) or a whole row (A5:5)
       const col = range.match(/^([A-Z]+)(\d+):([A-Z]+)(\d*)$/);
       if (col && col[1] === col[3]) {
@@ -180,7 +191,7 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(rules('Tear-down opportunity, value is in the land.'), 'drop', 'tear-down dropped');
   eq(rules('Probate sale. Property is red-tagged and uninhabitable.'), 'drop', 'red-tagged dropped');
   eq(rules('Bring your contractor \u2014 needs a full gut.'), 'drop', 'full gut dropped');
-  eq(rules('Fixer upper. This level is currently tenant-occupied.'), 'drop', 'tenant-occupied dropped');
+  eq(rules('Fixer upper. This level is currently tenant-occupied.'), 'keep', 'tenant-occupied is no longer a drop');
   eq(rules('Beautifully updated with quartz counters and stainless appliances.'), 'drop', 'renovated dropped');
   eq(rules('Lovely garden, three bedrooms, close to transit.'), 'manual', 'silent remarks go to the fallback');
 
@@ -254,7 +265,185 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   await gs.ensureTab('tok', 'ID', 'KPI', NEWK);
   eq(tabs.KPI[0], NEWK, 'a correct header row is left alone');
 
-  // 13. The composed sheet value, end to end.
+  // 13. The qualification gate — Opportunity Score and A / B / C bucket.
+  const { qualify } = require('./scan-core');
+  const Q = (m) => qualify(Object.assign({ photos: 20, photosReliable: true }, m));
+  eq(Q({ remarks: 'Beautifully renovated turnkey home.' }).bucket, 'C', 'renovated is C — auto-pass');
+  eq(Q({ remarks: 'Beautifully renovated turnkey home.' }).score <= 15, true, 'and scores low');
+  eq(Q({ remarks: 'Fixer. Foundation repair needed.' }).bucket, 'C', 'structural work is still C');
+  eq(Q({ remarks: 'Rare duplex, two separate units, each with a full kitchen.' }).bucket, 'C', 'an actual duplex is still C');
+  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant occupied, do not disturb.' }).decision, 'keep',
+    'tenant-occupied is kept');
+  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant occupied, do not disturb.' }).why.includes('tenant'), true,
+    'and named as a signal');
+  eq(Q({ remarks: 'Fixer upper, sold as-is.', origPrice: 1000000, price: 900000, ppsfRatio: 0.7 }).bucket, 'A',
+    'fixer + 10% price cut + cheap $/sqft is A — work now');
+  eq(Q({ remarks: 'Fixer upper, sold as-is.' }).bucket, 'B', 'fixer language alone is B — needs a deeper look');
+  eq(Q({ remarks: 'Lovely garden, three bedrooms, close to transit.' }).bucket, 'B', 'silent remarks are B, not dropped');
+  eq(Q({ remarks: 'Lovely garden, three bedrooms, close to transit.', whenUnsure: 'drop' }).bucket, 'C',
+    'unless "when unsure" is set to drop');
+  eq(Q({ remarks: 'Professionally staged, quartz counters.', ppsfRatio: 1.3 }).bucket, 'C',
+    'staged + a finish + priced above the area is C');
+  eq(Q({ remarks: 'Charming 1904 home with granite counters in the kitchen.' }).bucket, 'B',
+    'one updated finish alone is not an auto-pass (844 Brunswick)');
+  eq(Q({ remarks: 'Nice home.', privateRemarks: 'Probate sale, cash only, sold as-is.' }).score >= 70, true,
+    'private remarks count toward the score');
+  eq(Q({ addr: '21 College Terrace', remarks: 'Beautifully renovated.' }).bucket, 'A', 'a confirmed deal is always A');
+  eq(Q({ remarks: 'Lovely home.', photos: 4, photosReliable: true }).bucket, 'C', '4 photos off the full grid is C');
+  eq(Q({ remarks: 'Lovely home.', photos: 4, photosReliable: false }).bucket, 'B',
+    'but 4 carousel photos (grid failed) prove nothing');
+  //     Real reports: the original price and the listing agent are read off
+  //     them, and Faxon's $99k cut plus its as-is remarks make it an A.
+  const fx = parseDetail(fixture('SF426134156'), 'SF426134156');
+  eq([fx.origPrice, fx.listPrice], [998000, 899000], 'original and list price read off the report');
+  eq(fx.listedBy, 'Jonathan Crossley, eXp Realty of California, Inc', 'listing agent read off the report');
+  eq(Q({ addr: '347 Faxon Avenue', remarks: fx.remarks, propClass: fx.propClass, price: fx.listPrice,
+    origPrice: fx.origPrice, yearBuilt: fx.yearBuilt }).bucket, 'A', '347 Faxon is an A');
+  eq(require('./scan-core').privateRemarks('Public:\tNice.\nPrivate:\tTenant pays $2,400. Cash only.\n\nFeatures'),
+    'Tenant pays $2,400. Cash only.', 'a "Private:" block is read');
+  eq(require('./scan-core').privateRemarks('Listing Agent:\tJane Doe\nPublic:\tNice.'), '',
+    'a contact line is not mistaken for remarks');
+
+  //     Found on the first live run (23 Sep): "their" is not an heir, a blank
+  //     condition field must not swallow the next one, and the MLS's own
+  //     "Occupied By" field counts.
+  eq(Q({ remarks: 'Fixer, ready for buyers to add their personal touch.' }).why.includes('probate'), false,
+    '"their" is not an heir');
+  eq(Q({ remarks: 'Fixer. Heirs are motivated.' }).why.includes('probate'), true, 'but "heirs" still is');
+  const agentPage = 'MLS #:\tSF1234567\n10 Test St, San Francisco 94112\tStatus:\tActive\n'
+    + 'Public:\tFixer.\nPrivate:\tSeller makes no warranty as to property condition, and dimensions.\n\n'
+    + 'Showing Information\nOccupied By:\tVacant\tOwner:\t\n'
+    + 'Fireplace:\t\tProp Condition:\t\nFamily Room:\t\tRoof:\t\n';
+  const ap = parseDetail(agentPage, 'SF1234567');
+  eq(ap.condition, '', 'a blank Prop Condition stays blank');
+  eq(ap.occupiedBy, 'Vacant', '"Occupied By" is read off Agent Full');
+  eq(ap.privateRemarks.startsWith('Seller makes'), true, 'the private remarks are read');
+  eq(parseDetail(agentPage.replace('Prop Condition:\t', 'Prop Condition:\tFixer Upper'), 'SF1234567').condition,
+    'Fixer Upper', 'a filled Prop Condition is read');
+  eq(Q({ remarks: 'Nice.', occupiedBy: 'Tenant' }).why.includes('tenant'), true, 'Occupied By: Tenant counts');
+
+  //     Offer deadline — the MLS has no field for it, agents write it into
+  //     the remarks. Shapes seen on live Agent Full pages (23 Sep).
+  const { offerDue } = require('./scan-core');
+  const OD = t => offerDue(t, '2026-09-23T09:00:00');
+  eq(OD('No inspections done. All offers due Monday 9/21/26 6:00 PM. Disclosures online.'),
+    '2026-09-21 (Mon) 6:00 PM', '"All offers due Monday 9/21/26 6:00 PM"');
+  eq(OD('Go direct. Offers welcome on Wednesday, September 23rd by 10:00 am to the agent.'),
+    '2026-09-23 (Wed) 10:00 AM', '"Offers welcome on Wednesday, September 23rd by 10:00 am"');
+  eq(OD('Sold as-is. Offer date: 9/30/26 by Noon - please email offers.'), '2026-09-30 (Wed) 12:00 PM',
+    '"Offer date: 9/30/26 by Noon"');
+  eq(OD('Trust sale. Offers welcome Wednesday, 9/23, at 12 pm.'), '2026-09-23 (Wed) 12:00 PM',
+    'a date with no year takes this year');
+  eq(OD('Offers are due by Wed 9/23/26 at 4:00 pm.'), '2026-09-23 (Wed) 4:00 PM', '"Offers are due by … at 4:00 pm"');
+  eq(OD('Call agent with questions. Offer Date TBD. Disclosure link to follow.'), 'TBD', '"Offer Date TBD"');
+  eq(OD('Offer to include a copy of the 10% deposit check. Buyer to sign addenda w/ offer.'), '',
+    'an offer instruction is not a deadline');
+  eq(OD('Seller reserves the right to accept, counter or reject any offer.'), '', 'boilerplate is not a deadline');
+  eq(OD('OFFERS to be submitted through the online portal.'), '', 'how to submit is not when');
+  eq(OD('Offers due January 5th at 5pm.'), '2027-01-05 (Tue) 5:00 PM', 'a January date in September is next year');
+  //     Seth's live examples, 23 Sep — two the reader missed, two it must leave alone.
+  eq(OD('Please read: Offers will be accepted Monday Sept 28th. I do not have a foundation inspection.'),
+    '2026-09-28 (Mon)', '"Offers will be accepted Monday Sept 28th"');
+  eq(OD('Offers Due Wednesday the 23rd at 1:00 pm. Text seller time you will be coming.'),
+    '2026-09-23 (Wed) 1:00 PM', '"Offers Due Wednesday the 23rd" — no month written');
+  eq(OD('SOH 9/26 & 9/27 2-4pm. Discl. Avail Shortly. Offer date tbd. SQFT not verified.'), 'TBD',
+    '"Offer date tbd" after open-house dates is TBD, not the open house');
+  eq(OD('OH Sat/Sun Sept. 19/20 1 – 4pm, BT Tues. 9/22 10:30 – 1:30 Pre-escrow opened with Chicago Title.'), '',
+    'open house and broker tour dates are not an offer deadline');
+  eq(OD('7534 Adrian Dr. in Rohnert Park offers a compelling opportunity for buyers.'), '',
+    '"offers a compelling opportunity" is not about offers');
+
+  // 14. The Board — work order and the numbers on top.
+  const { buildBoard } = require('./scan-core');
+  const BH = ['MLS #', 'Address', 'Notes', 'Bucket', 'Opportunity Score', 'Offer Due'];
+  const board = buildBoard([BH,
+    ['M1', '1 Late Due', '', 'A — Work Now', '80', '2026-09-30 (Wed) 12:00 PM'],
+    ['M2', '2 No Date', '', 'A — Work Now', '95', ''],
+    ['M3', '3 Due Tomorrow', '', 'A — Work Now', '70', '2026-09-24 (Thu) 4:00 PM'],
+    ['M4', '4 Passed', 'PASS-APPEARS WELL MAINTAINED', 'A — Work Now', '90', ''],
+    ['M5', '5 B Tbd', 'OFFER SENT', 'B — AI Review', '60', 'TBD'],
+    ['M6', '6 Unscored', '', '', '', ''],
+  ], { scanned: 86, bucketA: 10, bucketB: 5, bucketC: 0 }, '2026-09-23T14:00:00');
+  const listed = board.slice(9).map(r => r[5]);
+  eq(listed, ['3 Due Tomorrow', '1 Late Due', '2 No Date', '5 B Tbd', '6 Unscored'],
+    'Board order: A first, soonest offer deadline first, unscored last');
+  eq(listed.includes('4 Passed'), false, 'a lead passed in Notes is not on the Board');
+  eq(board[6].slice(1), [3, 1, 1, 1, 0, 0, 0, 1], 'Board counts: A, B, due in 48h, TBD, pending, closed, C, passed in Notes');
+  eq(board[3].slice(1, 5), [86, 0, 5, 10], "today's funnel: scanned, C, B, A");
+  eq(board[9][2], '9/24/2026 4:00 PM', 'the offer date is written as a real date');
+  eq(/^=IF\(ISNUMBER\(C10\)/.test(board[9][3]), true, 'Time Left is a live formula on its own row');
+
+  //     Closed listings come off the Board; pending ones sink to the bottom.
+  const SH = ['MLS #', 'Address', 'Notes', 'Bucket', 'Opportunity Score', 'Offer Due', 'MLS Status', 'MLS Link'];
+  const sb = buildBoard([SH,
+    ['S1', '1 Sold', '', 'A — Work Now', '95', '', 'Sold', ''],
+    ['S2', '2 Pending', '', 'A — Work Now', '90', '2026-09-24 (Thu) 4:00 PM', 'Pending', ''],
+    ['S3', '3 Active B', '', 'B — AI Review', '50', '', 'Active', ''],
+    ['S4', '4 Withdrawn', '', 'B — AI Review', '60', '', 'Withdrawn', ''],
+    ['S5', '5 Active A', '', 'A — Work Now', '70', '', 'Active',
+      'https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=SF426159646'],
+  ], {}, '2026-09-23T14:00:00');
+  eq(sb.slice(9).map(r => r[5]), ['5 Active A', '3 Active B', '2 Pending'],
+    'sold and withdrawn are off the Board; pending goes after every active lead');
+  eq(sb[6].slice(1), [1, 1, 0, 0, 1, 2, 0, 0], 'pending and closed are counted, and a pending deadline is not "due in 48h"');
+  const linkCol = sb[8].indexOf('MLS Link');
+  eq(sb[9][linkCol], 'https://www.mlslistings.com/Property/SF426159646', 'an old broken Portal link is rewritten on the Board');
+  eq(sb[8].slice(5, 8), ['Address', 'Agent Phone', 'Showing'], 'the number to call sits right next to the address');
+  const cb = buildBoard([SH, ['C1', '1 Auto Pass', '', 'C — Auto-Pass', '15', '', 'Active', ''],
+    ['C2', '2 Live', '', 'B — AI Review', '50', '', 'Active', '']], {}, '2026-09-23T14:00:00');
+  eq(cb.slice(9).map(r => r[5]), ['2 Live'], 'a C lead is off the Board');
+  eq(cb[6][7], 1, 'and counted as Auto-Pass (C)');
+  const { mlsUrl, fixLink } = require('./scan-core');
+  eq(mlsUrl('CROC26191070'), 'https://www.mlslistings.com/Property/CROC26191070', 'the listing link is the public page');
+  eq(fixLink('', 'ML82056071'), 'https://www.mlslistings.com/Property/ML82056071', 'a blank link is built from the MLS #');
+
+  //     Agent contact, showing and disclosures off the Agent Full report.
+  const agentFull = 'MLS #:\tSF7654321\n9 Test St, San Francisco 94112\tStatus:\tActive\n'
+    + 'Public:\tFixer. Disclosures: https://app.glide.com/share/abc123.\nPrivate:\tCall first.\n\n'
+    + 'Showing Information\nOccupied By:\t\tOwner:\t\nShow Contact:\t\tShow type:\t\tGt.Code:\t\n'
+    + 'Instructions:\tLockbox - Supra iBox, Go Directly, Leave Card\n'
+    + 'Disclosures URL:\t\nLA:\tJane Agent\tLA Ph:\t(415) 555-0142\t\nLA Lic#:\t0123\tLA Em:\tjane@example.com \n';
+  const af = parseDetail(agentFull, 'SF7654321');
+  eq(af.agentPhone, '(415) 555-0142', 'agent phone is read');
+  eq(af.agentEmail, 'jane@example.com', 'agent email is read');
+  eq(af.showing, 'Lockbox - Supra iBox, Go Directly, Leave Card', 'showing instructions are read, and a blank Show Contact adds nothing');
+  eq(af.occupiedBy, '', 'a blank Occupied By does not swallow the next label');
+  eq(require('./scan-core').disclosuresLink(af.disclosuresField, af.remarks), 'https://app.glide.com/share/abc123',
+    'a blank Disclosures URL falls back to the link in the remarks');
+  eq(require('./scan-core').rulesDecide({ remarks: 'A full set of plans approved by the City is at property. This is not a cosmetic remodel.', photos: 20 }).decision,
+    'drop', '"not a cosmetic remodel" is not a quick flip');
+
+  // 15. Google's limit is ~60 reads a minute. Refreshing ~90 rows used to
+  //     cost two calls per row and was refused; it must be a handful now.
+  {
+    const H = ['MLS #', 'Address', 'Notes', 'MLS Link'];
+    const grid = [H.slice()];
+    for (let i = 0; i < 90; i++) grid.push(['M' + i, i + ' Test St', i === 3 ? 'my note' : '', 'old']);
+    tabs = fakeSheets({ Leads: grid });
+    let calls = 0; const real = global.fetch;
+    global.fetch = (u, o) => { calls++; return real(u, o); };
+    const recs = [];
+    for (let i = 0; i < 90; i++) recs.push({ 'MLS #': 'M' + i, 'Notes': 'app text', 'MLS Link': 'new' });
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', recs, { overwrite: ['MLS Link'] });
+    eq(calls <= 6, true, `90 rows updated in ${calls} API calls (was ~180)`);
+    eq(tabs.Leads[4][2], 'my note', 'a note typed by hand still survives the batched write');
+    eq(tabs.Leads[50][3], 'new', 'an app-owned column is replaced in the batched write');
+  }
+  {
+    // A quota refusal is waited out and retried, not thrown.
+    tabs = fakeSheets({ Leads: [['MLS #']] });
+    gs._setQuotaSleep(() => Promise.resolve());
+    let refused = 0; const real = global.fetch;
+    global.fetch = (u, o) => {
+      if (refused < 2) { refused++; return Promise.resolve({ ok: false, status: 429,
+        json: async () => ({ error: { message: "Quota exceeded for quota metric 'Read requests'" } }) }); }
+      return real(u, o);
+    };
+    const info = await gs.listTabs('tok', 'ID');
+    eq(info.tabs, ['Leads'], 'two "quota exceeded" answers in a row are retried, then it works');
+  }
+
+  // 16. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');
 

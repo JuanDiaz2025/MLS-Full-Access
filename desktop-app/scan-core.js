@@ -245,12 +245,15 @@ const SLOW_KW = new RegExp([
   'plans (?:approved|submitted|in review)', 'entitle(?:d|ment)',
   'tear[- ]?down', '\\bscraper\\b', '(?:land|lot) value', 'value (?:is )?in the land',
   'down to the studs', 'full gut', 'gut job',
+  'not a cosmetic (?:remodel|flip|fix|job|project|rehab)',
   'extensive (?:damage|water damage|repairs)',
   '\\bmold\\b', 'dry ?rot throughout', 'sinking', 'landslide', 'slide zone',
 ].join('|'), 'i');
 
-// Tenant-occupied is a hard exclusion in the SOP: no vacant possession, no
-// access for trades, and a timeline nobody controls.
+// Tenant-occupied is NO LONGER a drop (Seth, 23 Sep). An occupied house is
+// harder to show and slower to deliver, but a seller stuck with a tenant is
+// often a motivated one — so it now scores as an opportunity signal in
+// qualify() instead of being thrown away here.
 const TENANT_KW = new RegExp([
   'tenant[- ]occupied', 'occupied by (?:a )?tenant', 'tenants? in place',
   'currently rented', 'lease in place', 'subject to (?:a )?lease',
@@ -318,11 +321,7 @@ const FINISH_KW = [
 // house with a 1950s kitchen is exactly what we are hunting.
 
 function rulesDecide(meta) {
-  // Agent-only remarks and showing instructions are where "tenant occupied, do
-  // not disturb" and "sold as-is" actually get written — the public remarks
-  // are marketing copy. Judge on everything the listing says.
-  const t = [meta.remarks, meta.agentRemarks, meta.showing, meta.condition]
-    .filter(Boolean).join(' ').toLowerCase();
+  const t = ((meta.remarks || '') + ' ' + (meta.condition || '')).toLowerCase();
   const photos = meta.photos || 0;
   if (isConfirmed(meta.addr)) return { decision: 'keep', reason: 'confirmed deal — Bryan wants this one' };
   if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
@@ -333,7 +332,6 @@ function rulesDecide(meta) {
   if (!saysSingle && MULTI_KW.test(t) && !POTENTIAL_RE.test(t)) {
     return { decision: 'drop', reason: `remarks indicate an existing second dwelling — "${(t.match(MULTI_KW) || [''])[0]}"` };
   }
-  if (TENANT_KW.test(t)) return { decision: 'drop', reason: 'remarks say tenant-occupied (hard exclusion)' };
   if (SLOW_KW.test(t)) {
     const hit = (t.match(SLOW_KW) || [''])[0];
     return { decision: 'drop', reason: `not a quick flip — remarks mention "${hit}" (structural/permit work, not cosmetic)` };
@@ -357,12 +355,118 @@ function rulesDecide(meta) {
   if (finishes.length >= 2) {
     return { decision: 'drop', reason: `${finishes.length} finishes already done — "${finishes.slice(0, 3).join('", "')}" (Rule #0)` };
   }
-  if (photos > 0 && photos <= 4) return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access (tenant?)` };
+  // Only trust a low count that came off the full photo grid. When the grid
+  // fails to load the app falls back to the carousel, which only ever has ~4
+  // preloaded — that dropped 844 Brunswick (29 photos) as "exterior-only".
+  if (photos > 0 && photos <= 4 && meta.photosReliable !== false) {
+    return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access` };
+  }
   // Remarks say nothing either way. This engine reads TEXT only — it has not
   // looked at a single photo — so "no renovated keyword" is not evidence the
   // house is a fixer. Auto-keeping here is what let renovated listings through.
   // Hand it to a human (or to AI vision, which does look) instead of guessing.
   return { decision: 'manual', reason: 'remarks are silent on condition — photos must be judged by eye' };
+}
+
+// ---- qualification gate: Opportunity Score 0-100 and an A / B / C bucket ----
+//
+//   A — WORK NOW        score >= 70: strong distress / value-add signals
+//   B — AI REVIEW ONLY  score 35-69: plausible, not obvious — needs a deeper look
+//   C — AUTO-PASS       score < 35, or a hard exclusion: never reaches the board
+//
+// A listing cannot enter the working queue until something here says there is
+// a plausible value-add opportunity. Hard exclusions (renovated, multi-unit,
+// fire, structural / permit-heavy, too few photos) come straight from
+// rulesDecide, so the two can never disagree about what is disqualifying.
+// Everything else is scored from the listing text and data — public AND
+// private remarks, price cuts, $/sqft against the area, age and DOM. Photos are
+// not scored yet; AI vision still decides keep/drop when it is switched on.
+const BUCKET_A = 70, BUCKET_B = 35;
+const BUCKET_LABEL = { A: 'A — Work Now', B: 'B — AI Review', C: 'C — Auto-Pass' };
+
+// Fixer language for SCORING. KEEP_KW also carries probate / estate / first
+// time on market, which score under their own signals below — counting them
+// twice would inflate the score.
+const FIXER_KW = /(fixer|\bas[- ]is\b|\btlc\b|handyman|contractor special|needs work|needs updating|diamond in the rough|great potential|investor special)/i;
+const DISTRESS_KW = /(probate|trust sale|estate sale|court confirmation|conservatorship|administrator|executor|\bheirs?\b|inherited)/i;
+const ORIGINAL_KW = /((?:first|1st) time on (?:the )?market|same (?:owner|family) (?:for|since)|(?:long[- ]?time|original) owners?|in the (?:same )?family for|original condition|untouched|time capsule|never (?:been )?(?:updated|renovated|remodel))/i;
+const VACANT_KW = /\bvacant\b|delivered vacant|no one living/i;
+const HOARD_KW = /(hoarder|clutter(?:ed)?|needs (?:a )?(?:good )?clean[- ]?out|full of (?:contents|belongings)|sold with contents)/i;
+const MOTIVATED_KW = /(cash only|cash offers?|investor special|investors? welcome|bring (?:all )?offers|motivated seller|priced to sell|quick close|no repairs will be made|seller will not make any repairs)/i;
+const STAGED_KW = /(professionally staged|virtually staged|staged to perfection|beautifully staged)/i;
+
+/**
+ * Score one listing. `m` carries what the report and the grid gave us:
+ *   remarks, privateRemarks, condition, occupiedBy, propClass, addr, photos, photosReliable,
+ *   dom, yearBuilt, price, origPrice, ppsfRatio (listing $/sqft ÷ area median),
+ *   whenUnsure ('keep' | 'drop').
+ * Returns { bucket, label, score, decision: 'keep'|'drop', why, hard, signals }.
+ */
+function qualify(m) {
+  m = m || {};
+  const text = [m.remarks, m.privateRemarks].filter(Boolean).join(' ');
+  if (isConfirmed(m.addr)) {
+    return { bucket: 'A', label: BUCKET_LABEL.A, score: 100, decision: 'keep', hard: false,
+      why: 'confirmed deal — kept regardless of the rules', signals: [] };
+  }
+
+  const r = rulesDecide({ ...m, remarks: text });
+  const signals = [];
+  const add = (pts, what) => { signals.push({ pts, what }); };
+  const t = (text + ' ' + (m.condition || '')).toLowerCase();
+  const hit = re => (t.match(re) || [''])[0];
+
+  // Opportunity signals.
+  if (NEEDS_WORK_KW.test(t)) add(20, `needs work — "${hit(NEEDS_WORK_KW)}"`);
+  else if (FIXER_KW.test(t)) add(20, `fixer / as-is — "${hit(FIXER_KW)}"`);
+  if (DISTRESS_KW.test(t)) add(10, `probate / trust / estate — "${hit(DISTRESS_KW)}"`);
+  if (ORIGINAL_KW.test(t)) add(10, `original / long-held — "${hit(ORIGINAL_KW)}"`);
+  // The MLS's own "Occupied By" field beats a word in the remarks.
+  const occ = String(m.occupiedBy || '');
+  if (/tenant/i.test(occ) || TENANT_KW.test(t)) add(5, 'tenant occupied — possible motivated seller');
+  if (/vacant/i.test(occ) || VACANT_KW.test(t)) add(5, 'vacant');
+  if (HOARD_KW.test(t)) add(10, `clutter / hoarder — "${hit(HOARD_KW)}"`);
+  if (MOTIVATED_KW.test(t)) add(5, `motivated seller — "${hit(MOTIVATED_KW)}"`);
+
+  const orig = num(m.origPrice), list = num(m.price);
+  const cut = orig > list && list > 0 ? (orig - list) / orig : 0;
+  if (cut >= 0.08) add(15, `price cut ${Math.round(cut * 100)}% ($${Math.round((orig - list) / 1000)}k)`);
+  else if (cut >= 0.02) add(10, `price cut ${Math.round(cut * 100)}% ($${Math.round((orig - list) / 1000)}k)`);
+
+  const ratio = Number(m.ppsfRatio) || 0;
+  if (ratio > 0 && ratio < 0.75) add(15, `$/sqft ${Math.round(ratio * 100)}% of the area median`);
+  else if (ratio > 0 && ratio < 0.9) add(8, `$/sqft ${Math.round(ratio * 100)}% of the area median`);
+  else if (ratio > 1.2) add(-10, `$/sqft ${Math.round(ratio * 100)}% of the area median — priced above the area`);
+
+  const yb = Number(m.yearBuilt) || 0;
+  if (yb >= 1850 && yb <= 1960) add(5, `built ${yb}`);
+  const dom = Number(m.dom) || 0;
+  if (dom >= 21) add(5, `${dom} days on market`);
+
+  // Retail-ready signals that are not disqualifying on their own.
+  const finishes = FINISH_KW.map(re => (t.match(re) || [''])[0]).filter(Boolean);
+  if (finishes.length === 1 && !NEEDS_WORK_KW.test(t)) add(-5, `one updated finish — "${finishes[0]}"`);
+  if (STAGED_KW.test(t)) add(-5, `staged — "${hit(STAGED_KW)}"`);
+  if (!text.trim()) signals.push({ pts: 0, what: 'no remarks — nothing to read, needs a look' });
+
+  const raw = 40 + signals.reduce((s, x) => s + x.pts, 0);
+  let score = Math.max(0, Math.min(100, raw));
+  const top = signals.filter(x => x.pts > 0).sort((a, b) => b.pts - a.pts).map(x => x.what);
+  const neg = signals.filter(x => x.pts < 0).map(x => x.what);
+
+  // Hard exclusions: auto-pass whatever the score would have been.
+  if (r.decision === 'drop') {
+    score = Math.min(score, 15);
+    return { bucket: 'C', label: BUCKET_LABEL.C, score, decision: 'drop', hard: true,
+      why: r.reason, signals };
+  }
+
+  let bucket = score >= BUCKET_A ? 'A' : score >= BUCKET_B ? 'B' : 'C';
+  // Remarks silent on condition and the reviewer asked for unsure = drop.
+  if (r.decision === 'manual' && m.whenUnsure === 'drop' && bucket === 'B' && !top.length) bucket = 'C';
+  const why = [...top, ...neg].join(' + ') || r.reason;
+  return { bucket, label: BUCKET_LABEL[bucket], score, decision: bucket === 'C' ? 'drop' : 'keep',
+    hard: false, why, signals };
 }
 
 /**
@@ -409,25 +513,21 @@ function fullAddress(street, city, zip) {
  * The full address lives here and nowhere else — the results grid has no zip
  * column at all, which is why zip used to reach the sheet blank.
  */
-/** The part of a report page that belongs to one MLS #, or '' if that listing
- *  is not on the page. Shared by every parser so none of them can read a
- *  neighbouring listing by accident. */
-function listingBlock(text, wantMls) {
+function parseDetail(text, wantMls) {
   const t = String(text || '').replace(/\r/g, '');
   const want = String(wantMls || '').trim().toUpperCase();
   const marks = [...t.matchAll(/MLS\s*#:?\s*([A-Z0-9]{6,})/gi)];
   const seen = marks.map(m => m[1].toUpperCase());
+
+  let block = '';
   for (let i = 0; i < marks.length; i++) {
     if (seen[i] !== want) continue;
+    const from = marks[i].index;
     const to = i + 1 < marks.length ? marks[i + 1].index : t.length;
-    return { block: t.slice(marks[i].index, to), showing: seen[0] || '', want };
+    block = t.slice(from, to);
+    break;
   }
-  return { block: '', showing: seen[0] || '', want };
-}
-
-function parseDetail(text, wantMls) {
-  const { block, showing, want } = listingBlock(text, wantMls);
-  if (!block) return { mismatch: true, showing: showing, want: want };
+  if (!block) return { mismatch: true, showing: seen[0] || '', want: want };
 
   const grab = re => { const m = block.match(re); return m ? m[1].replace(/\s+/g, ' ').trim() : ''; };
   // "814 Potrero Avenue, San Francisco 94110" — street, city and zip on one
@@ -443,235 +543,250 @@ function parseDetail(text, wantMls) {
     // /Remarks:/ picked up the truncated Open House teaser instead of the real
     // description — which is what the rules engine was judging condition on.
     remarks: grab(/(?:^|\n)\s*(?:Public|Public Remarks?|Marketing Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i),
-    // Stop at the tab. The report lays two fields to a line, so when Prop
-    // Condition is blank a greedy read ran on into the NEXT field and recorded
-    // "Flooring: Roof: Other" as the condition.
-    condition: grab(/Prop(?:erty)? Condition:?[ \t]*([^\t\n]{0,60})/i),
+    // Colon required and the value may not cross a tab or line: a blank field
+    // otherwise swallowed the NEXT one ("Family Room: Roof:"), and a bare
+    // "property condition" in a disclaimer was read as the condition itself.
+    condition: grab(/Prop(?:erty)?\s*Condition:[ ]*\t?([^\t\n]{0,60})/i),
+    // "Status: Active" — Pending / Contingent means the window has closed.
+    status: grab(/\bStatus:[ ]*\t?([A-Za-z][A-Za-z \-]{2,24})/),
+    // Agent Full only — "Occupied By: Vacant / Tenant / Owner".
+    occupiedBy: grab(/Occupied\s*By:[ ]*\t?([^\t\n]{0,40})/i),
     // The MLS's own classification — "Res. Single Family / Attached, Single
     // Family". It outranks any keyword in the remarks about second units.
     propClass: grab(/Class:?\s*([^\n\t]{0,80})/i),
-    // "Listed By:	Karyn Kambur, Coldwell Banker Realty" — every report has it.
-    ...splitListedBy(grab(/Listed By:?[ \t]*([^\n\t]{2,120})/i)),
+    // "Orig Price: $998,000 ... List Price: $899,000" — a cut is a signal.
+    origPrice: num(grab(/Orig(?:inal)?\s*Price:?\s*(\$?[\d,]+)/i)) || '',
+    listPrice: num(grab(/List\s*Price:?\s*(\$?[\d,]+)/i)) || '',
+    // "Listed By: Daniel K. Cheng, Coldwell Banker Realty" — who to call.
+    listedBy: grab(/Listed\s*By:?\s*([^\n]{0,120})/i),
+    privateRemarks: privateRemarks(block),
+    // Agent Full only. "LA Ph: (415) 279-6833", "LA Em: name@host",
+    // "Instructions: Lockbox - Supra iBox, Go Directly, Leave Card".
+    agentPhone: (grab(/\bLA\s*Ph:[ ]*\t?([^\t\n]{0,30})/i).match(/\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}/) || [''])[0],
+    agentEmail: (grab(/\bLA\s*Em:[ ]*\t?([^\t\n]{0,120})/i).match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/) || [''])[0],
+    showing: [grab(/\bInstructions:[ ]*\t?([^\n]{0,160})/i).replace(/\t+/g, ' ').trim(),
+      (s => s ? 'contact ' + s : '')(grab(/\bShow\s*Contact:[ ]*\t?([^\t\n]{0,60})/i))].filter(Boolean).join(' · '),
+    disclosuresField: (grab(/\bDisclosures\s*URL:[ ]*\t?([^\t\n]{0,300})/i).match(/https?:\/\/\S+/) || [''])[0],
   };
 }
 
-/** "Karyn Kambur, Coldwell Banker Realty" -> name and brokerage. */
-function splitListedBy(v) {
-  const t = String(v || '').trim();
-  if (!t) return { agentName: '', agentOffice: '' };
-  const i = t.indexOf(',');
-  return i < 0 ? { agentName: t, agentOffice: '' }
-    : { agentName: t.slice(0, i).trim(), agentOffice: t.slice(i + 1).trim() };
-}
-
-// A US phone number, as agents write them: (415) 555-1212, 415-555-1212,
-// 415.555.1212, 415 555 1212.
-const PHONE_RE = /\(?\b([2-9]\d{2})\)?[\s.\-]{0,2}([2-9]\d{2})[\s.\-]([0-9]{4})\b/;
-const fmtPhone = m => `(${m[1]}) ${m[2]}-${m[3]}`;
-
 /**
- * The listing agent's phone off the Agent Full report. Looked for on a line
- * that names the listing agent or a cell/direct/phone label; an office, fax or
- * co-agent line is only a last resort, because the office switchboard is not
- * the person. Returns { phone, from } or { phone: '' }.
+ * The disclosures link: the MLS's own "Disclosures URL" field when the agent
+ * filled it (2 of 10 live samples), otherwise a link in the remarks that sits
+ * next to the word "disclosure" or points at a known disclosure host.
  */
-function findAgentPhone(block, agentRemarks) {
-  const lines = String(block || '').replace(/\r/g, '').split('\n');
-  const tiers = [
-    /(list(ing)?\s*agent|\bLA\b|agent\s*(cell|phone|direct|mobile)|\bcell\b|mobile|direct)/i,
-    /(agent|phone|\bph\b|contact)/i,
-  ];
-  const skip = /(fax|co-?list|co-?agent|buyer'?s?\s*agent|selling\s*agent|\bSA\b)/i;
-  for (const want of tiers) {
-    for (const ln of lines) {
-      if (!want.test(ln) || skip.test(ln)) continue;
-      const m = ln.match(PHONE_RE);
-      if (m) return { phone: fmtPhone(m), from: 'agent report' };
-    }
-  }
-  const r = String(agentRemarks || '').match(PHONE_RE);
-  if (r) return { phone: fmtPhone(r), from: 'agent remarks' };
-  for (const ln of lines) {
-    if (!/office|\bLO\b|brokerage/i.test(ln) || /fax/i.test(ln)) continue;
-    const m = ln.match(PHONE_RE);
-    if (m) return { phone: fmtPhone(m), from: 'office line' };
-  }
-  return { phone: '', from: '' };
-}
-
-/**
- * Read the agent-only side of a listing off its Agent Full report text.
- *
- * The Client Full report is written for buyers and leaves out everything the
- * listing agent says to other agents — and that is where "tenant occupied, do
- * not disturb", showing instructions and "offers due Tuesday 5pm" live. Nobody
- * has captured an Agent Full page yet, so fields are found by their LABEL
- * rather than by position, and every page read is saved to disk (see main.js)
- * so this can be checked against the real thing.
- *
- * A value runs until a blank line or the next "Label:" — the report puts two
- * fields to a line separated by tabs, so a tab followed by a label ends it too.
- */
-const AGENT_LABEL = String.raw`(?:(?:Agent|Confidential|Private|Broker|REALTOR®?|Realtor|Member|Special)[ \t]*(?:Only[ \t]*)?(?:Remarks?|Notes?|Comments?|Instructions?)|Showing[ \t]*(?:Instructions?|Info(?:rmation)?|Remarks?|Notes?|Comments?)|Offer[ \t]*(?:Instructions?|Info(?:rmation)?|Remarks?|Notes?|Details?))`;
-const NEXT_LABEL = String.raw`(?=\n[ \t]*\n|\n[ \t]*[A-Z][A-Za-z0-9 .#/&'()-]{0,40}:|\t[A-Z][A-Za-z0-9 .#/&'()-]{0,40}:|$)`;
-const OFFER_DATE_FIELD = /Offers?[ \t]*(?:Review[ \t]*)?(?:Date|Due(?:[ \t]*Date)?|Deadline)[ \t]*:[ \t]*([^\t\n]{1,60})/i;
-
-function parseAgentDetail(text, wantMls) {
-  const { block, showing, want } = listingBlock(text, wantMls);
-  if (!block) return { mismatch: true, showing: showing, want: want };
-  const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
-  const out = { mismatch: false, agentRemarks: '', showing: '', offerNotes: '', offerDateField: '', labels: [] };
-  const re = new RegExp(String.raw`(?:^|\n|\t)[ \t]*(${AGENT_LABEL})[ \t]*:[ \t]*([\s\S]{0,1500}?)` + NEXT_LABEL, 'gi');
-  for (const m of block.matchAll(re)) {
-    const label = clean(m[1]);
-    const value = clean(m[2]);
-    if (!value) continue;
-    out.labels.push(label);
-    const key = /^showing/i.test(label) ? 'showing' : /^offer/i.test(label) ? 'offerNotes' : 'agentRemarks';
-    // A label can appear twice (a header and a repeat); keep both, once each.
-    if (out[key].indexOf(value) < 0) out[key] = out[key] ? out[key] + ' | ' + value : value;
-  }
-  const f = block.match(OFFER_DATE_FIELD);
-  if (f && clean(f[1])) out.offerDateField = clean(f[1]);
-  // The listing agent, as the agent report names them (a "List Agent:" field),
-  // and their phone.
-  const la = block.match(/(?:List(?:ing)?\s*Agent|\bLA\b)(?:\s*Name)?\s*:[ \t]*([A-Za-z][A-Za-z .,'-]{2,60}?)(?=[ \t]*(?:\t|\n|\(|\d|$))/i);
-  out.agentName = la ? clean(la[1]).replace(/[,\s]+$/, '') : '';
-  const ph = findAgentPhone(block, out.agentRemarks);
-  out.agentPhone = ph.phone; out.agentPhoneFrom = ph.from;
-  return out;
-}
-
-// ---- offer deadlines out of listing remarks ----
-//
-// A straight port of parse_offer_due() in flipscout-board/build_data.py, so the
-// app and the board read a deadline the same way. The two rules that keep it
-// from inventing deadlines are the part to preserve:
-//
-//   * a date counts only when it FOLLOWS a phrase about offers, so a closing
-//     date or an open-house time elsewhere in the remarks is never taken;
-//   * a weekday with no date ("offers due Tuesday") is resolved against the
-//     pull date and returned with a leading "~" — the board shows that as
-//     approximate. It is a reading, not a fact, and is labelled as one.
-//
-// One deliberate difference: every offer phrase is tried in turn, not just the
-// first, because agent remarks often say "offers reviewed as received" early
-// and give the real date later.
-//
-// Anything ambiguous returns '' — an empty box a person fills in beats a
-// confident wrong date somebody plans around.
-const OFFER_CUE = /\b(?:offers?\s+(?:are\s+|will\s+be\s+|to\s+be\s+)?(?:due|reviewed|review|presented|presentation|accepted)|offer\s+deadline|deadline\s+for\s+offers|review(?:ing)?\s+offers|present(?:ing)?\s+offers)\b/gi;
-const NO_DEADLINE = /\b(?:no\s+(?:set\s+|offer\s+)?deadline|offers?\s+as\s+(?:they\s+are\s+)?received|as\s+they\s+come|no\s+preemptive)\b/i;
-const MDY = /\b(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?\b/;
-const MONTH_DAY = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i;
-const WEEKDAY = /\b(mon|tues?|wed(?:nes)?|thur?s?|fri|sat|sun)[a-z]*\b/i;
-const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
-// Monday = 0, as in Python's weekday(), so the table matches build_data.py.
-const WEEKDAYS = { mon: 0, tue: 1, tues: 1, wed: 2, wednes: 2, thu: 3, thur: 3, thurs: 3, fri: 4, sat: 5, sun: 6 };
-const OFFER_WINDOW = 70;   // how far past the phrase a date still belongs to it
-
-const utcDate = (y, m, d) => {
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? dt : null;
-};
-const iso = dt => dt.toISOString().slice(0, 10);
-
-function offerAnchor(pulled) {
-  const m = String(pulled || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const d = m && utcDate(+m[1], +m[2], +m[3]);
-  if (d) return d;
-  const n = new Date();
-  return utcDate(n.getFullYear(), n.getMonth() + 1, n.getDate());
-}
-
-/** The year that puts this month/day nearest the pull date, not before it.
- *
- *  Differs from build_data.py in one way: a date more than ~4 months out is
- *  refused. Without a year, "offers accepted 9/1" on a listing pulled 23 Sep
- *  rolled forward to 1 Sep NEXT year — an offer window has already passed, it
- *  is not eleven months away. */
-const MAX_AHEAD_DAYS = 120;
-function pickYear(month, day, anchor) {
-  const y = anchor.getUTCFullYear();
-  for (const year of [y, y + 1, y - 1]) {
-    const cand = utcDate(year, month, day);
-    if (!cand) continue;
-    const days = (cand - anchor) / 86400000;
-    if (days >= -14) return days <= MAX_AHEAD_DAYS ? cand : null;
-  }
-  return null;
-}
-
-/** A date written in `s` (the text just after an offer phrase, or the value of
- *  an offer-date field), as 'YYYY-MM-DD', '~YYYY-MM-DD' for a bare weekday, or ''. */
-function dateIn(s, anchor) {
-  let m = s.match(MDY);
-  if (m) {
-    const month = +m[1], day = +m[2];
-    if (m[3]) {
-      let year = +m[3];
-      if (year < 100) year += 2000;
-      const d = utcDate(year, month, day);
-      return d ? iso(d) : '';
-    }
-    const d = pickYear(month, day, anchor);
-    return d ? iso(d) : '';
-  }
-  m = s.match(MONTH_DAY);
-  if (m) {
-    const d = pickYear(MONTHS[m[1].toLowerCase().slice(0, 3)], +m[2], anchor);
-    return d ? iso(d) : '';
-  }
-  m = s.match(WEEKDAY);
-  if (m) {
-    const key = m[1].toLowerCase();
-    const want = WEEKDAYS[key] != null ? WEEKDAYS[key] : WEEKDAYS[key.slice(0, 3)];
-    if (want == null) return '';
-    const have = (anchor.getUTCDay() + 6) % 7;          // JS Sunday=0 -> Monday=0
-    const ahead = ((want - have) % 7 + 7) % 7 || 7;
-    return '~' + iso(new Date(anchor.getTime() + ahead * 86400000));
+const DISCLOSURE_HOST = /(glide\.com|homelight\.com|disclosures\.io|dropbox\.com|docs\.google\.com|drive\.google\.com|box\.com|onedrive|sharepoint|docusign|disclosure)/i;
+function disclosuresLink(field, text) {
+  if (field) return field.replace(/[).,;]+$/, '');
+  const t = String(text || '');
+  const urls = [...t.matchAll(/https?:\/\/[^\s<>"')]+/gi)];
+  for (const u of urls) {
+    const before = t.slice(Math.max(0, u.index - 80), u.index);
+    if (/disclos/i.test(before) || DISCLOSURE_HOST.test(u[0])) return u[0].replace(/[).,;]+$/, '');
   }
   return '';
 }
 
-/** An offer deadline out of free text: { due, phrase } or { due: '' }. */
-function parseOfferDue(text, pulled) {
+/**
+ * The offer deadline, read out of the remarks. The MLS has no field for it
+ * (checked every label on live Agent Full pages, 23 Sep) — agents write it
+ * into the private remarks as prose:
+ *   "All offers due Monday 9/21/26 6:00 PM"
+ *   "Offers welcome on Wednesday, September 23rd by 10:00 am"
+ *   "Offer date: 9/30/26 by Noon"            "Offer Date TBD."
+ * Returns "2026-09-30 12:00 PM (Wed)", "TBD", or '' when nothing says when.
+ * Only a sentence that is about an offer DEADLINE counts — "offer to include a
+ * copy of the deposit" and "seller may reject any offer" say nothing about when.
+ */
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const OFFER_CUE = /\boffers?\b[\s,:-]{0,3}(?:(?:are|will be|to be|must be|shall be|being|if any|,)\s+){0,2}(?:due|date|deadline|welcome|reviewed|review(?:ed)? on|presented|presentation|accepted|taken|considered|by|on)\b/gi;
+function offerDue(text, today) {
   const t = String(text || '');
-  if (!t) return { due: '', phrase: '' };
-  const anchor = offerAnchor(pulled);
-  for (const cue of t.matchAll(OFFER_CUE)) {
-    const end = cue.index + cue[0].length;
-    if (NO_DEADLINE.test(t.slice(Math.max(0, cue.index - 20), end + OFFER_WINDOW))) continue;
-    const due = dateIn(t.slice(end, end + OFFER_WINDOW), anchor);
-    if (due) return { due, phrase: t.slice(cue.index, end + OFFER_WINDOW).replace(/\s+/g, ' ').trim() };
+  const now = today ? new Date(today) : new Date();
+  OFFER_CUE.lastIndex = 0;
+  let m;
+  while ((m = OFFER_CUE.exec(t))) {
+    const w = t.slice(m.index, m.index + 110);
+    const date = findDate(w, now);
+    if (date) return date + findTime(w);
+    if (/\bT\.?B\.?D\b|to be determined|to be announced|\bTBA\b/i.test(w.slice(0, 40))) return 'TBD';
   }
-  return { due: '', phrase: '' };
+  return '';
+}
+function findDate(w, now) {
+  let mo, d, y;
+  const num = w.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  const word = w.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(\d{4}))?/i);
+  // "Wednesday the 23rd" / "Wed 23rd": a day with no month. Take the month
+  // that makes that day fall on that weekday, starting this month.
+  const bare = w.match(/\b(sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\b/i);
+  const first = [num, word].filter(Boolean).sort((a, b) => a.index - b.index)[0];
+  if (!first && bare) {
+    const wd = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(bare[1].slice(0, 3).toLowerCase());
+    const day = +bare[2];
+    for (let k = 0; k < 3; k++) {
+      const c = new Date(now.getFullYear(), now.getMonth() + k, day);
+      if (c.getDate() === day && c.getDay() === wd && c >= new Date(now.getTime() - 30 * 86400000)) {
+        mo = c.getMonth() + 1; d = day; y = c.getFullYear();
+        const pad = n => String(n).padStart(2, '0');
+        return `${y}-${pad(mo)}-${pad(d)} (${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][wd]})`;
+      }
+    }
+    return '';
+  }
+  if (!first) return '';
+  if (first === num) { mo = +num[1]; d = +num[2]; y = num[3] ? +num[3] : 0; }
+  else { mo = MONTHS.indexOf(word[1].slice(0, 3).toLowerCase()) + 1; d = +word[2]; y = word[3] ? +word[3] : 0; }
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+  if (y && y < 100) y += 2000;
+  if (!y) {
+    // No year written: the nearest one that is not months in the past.
+    y = now.getFullYear();
+    if (new Date(y, mo - 1, d) < new Date(now.getTime() - 60 * 86400000)) y++;
+  }
+  const dt = new Date(y, mo - 1, d);
+  const pad = n => String(n).padStart(2, '0');
+  return `${y}-${pad(mo)}-${pad(d)}` + ` (${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()]})`;
+}
+function findTime(w) {
+  if (/\bnoon\b/i.test(w)) return ' 12:00 PM';
+  if (/\bmidnight\b/i.test(w)) return ' 12:00 AM';
+  const tm = w.match(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\b\.?/i);
+  if (!tm) return '';
+  return ` ${+tm[1]}:${tm[2] || '00'} ${tm[3].toUpperCase()}M`;
+}
+
+// ---- listing links ----
+// The public listing page, which opens for anyone with no sign-in:
+// https://www.mlslistings.com/Property/SF426159646 (checked for SF, ML, CROC
+// and BE numbers, active and sold). The old link, Matrix/Public/Portal.aspx
+// ?ID=<MLS#>, is MLS's client EMAIL portal — it wants an id from an agent's
+// email, not an MLS number, and every one of those links showed
+// "The email URL you are using is either not valid or it has expired".
+const mlsUrl = mls => mls ? 'https://www.mlslistings.com/Property/' + encodeURIComponent(String(mls).trim()) : '';
+/** Rewrite an old Portal.aspx link to the working one; leave anything else. */
+function fixLink(link, mls) {
+  const m = String(link || '').match(/Portal\.aspx\?ID=([A-Z0-9]+)/i);
+  if (m) return mlsUrl(m[1]);
+  return link || mlsUrl(mls);
+}
+
+// Listing status off the report. Closed listings are finished: they come off
+// the Board and a refresh stops re-reading them. Pending / contingent may
+// still fall out of escrow, so they stay on the Board, at the bottom.
+const CLOSED_STATUS = /\b(sold|withdrawn|expired|cancel+ed|off[- ]?market|closed)\b/i;
+const PENDING_STATUS = /\b(pending|contingent|under contract)\b/i;
+
+// ---- the Board: one tab that says what to work on, rebuilt every time ----
+
+// A row a person has already passed on in the Notes column. Those stay on
+// Leads (the reviewer never used the reject button for them) but they are
+// not work, so the Board counts them and leaves them off.
+const PASSED_NOTE = /^\s*(?:pass\b|passing\b|passed\b|we'?re passing|rejected\b|not a (?:fit|deal))/i;
+
+/** "2026-09-30 (Wed) 12:00 PM" -> Date, or null for TBD / blank. */
+function offerDueToDate(v) {
+  const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:\s*\(\w+\))?(?:\s+(\d{1,2}):(\d{2})\s*([AP])M)?/i);
+  if (!m) return null;
+  let h = m[4] ? +m[4] % 12 : 23, min = m[4] ? +m[5] : 59;   // no time: end of that day
+  if (m[6] && m[6].toUpperCase() === 'P') h += 12;
+  return new Date(+m[1], +m[2] - 1, +m[3], h, min);
 }
 
 /**
- * The listing's offer deadline, looking where it is most likely to be written
- * first: a dedicated offer-date field, then the agent's own words, then the
- * public remarks, then anywhere else on the page (an open-house note, say).
- * Returns { due, from, phrase } — `from` names where it was read, so the board
- * can say so and a person can check it.
+ * Build the Board tab from the Leads tab (header row + rows, as read off the
+ * sheet) and today's scan numbers. Returns the rows to write.
+ *
+ * Work order: A before B, and inside each the soonest offer deadline first —
+ * a deadline tomorrow beats a higher score with no date. Then TBD, then no
+ * date, then deadlines already past. Rows passed in Notes are counted, not
+ * listed. "Time Left" is a live formula, so it keeps counting down between
+ * rebuilds.
  */
-function findOfferDue(src, pulled) {
-  const s = src || {};
-  if (s.offerDateField) {
-    const due = dateIn(s.offerDateField, offerAnchor(pulled));
-    if (due) return { due, from: 'offer date field', phrase: 'Offer date: ' + s.offerDateField };
-  }
-  const places = [
-    ['offer notes', s.offerNotes], ['agent remarks', s.agentRemarks],
-    ['showing instructions', s.showing], ['public remarks', s.remarks],
-    ['listing page', s.pageText],
+function buildBoard(leadRows, today, now) {
+  now = now ? new Date(now) : new Date();
+  const head = (leadRows[0] || []).map(h => String(h).trim());
+  const col = h => head.indexOf(h);
+  const cell = (r, h) => { const i = col(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); };
+  const rows = leadRows.slice(1).filter(r => cell(r, 'MLS #'));
+
+  const passed = rows.filter(r => PASSED_NOTE.test(cell(r, 'Notes')));
+  const notPassed = rows.filter(r => !PASSED_NOTE.test(cell(r, 'Notes')));
+  const closed = notPassed.filter(r => CLOSED_STATUS.test(cell(r, 'MLS Status')));
+  const isC = r => /^C/.test(cell(r, 'Bucket'));
+  const autoPass = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && isC(r));
+  const live = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r));
+  const isPending = r => PENDING_STATUS.test(cell(r, 'MLS Status'));
+  const bucketOf = r => (cell(r, 'Bucket').match(/^[ABC]/) || ['?'])[0];
+  const due = r => offerDueToDate(cell(r, 'Offer Due'));
+  const rank = r => {
+    const d = due(r);
+    if (d && d >= now) return [0, d.getTime()];
+    if (/^TBD$/i.test(cell(r, 'Offer Due'))) return [1, 0];
+    if (!d) return [2, 0];
+    return [3, -d.getTime()];
+  };
+  live.sort((a, b) => {
+    // Active first; pending / contingent after every active lead.
+    const pa = isPending(a) ? 1 : 0, pb = isPending(b) ? 1 : 0;
+    if (pa !== pb) return pa - pb;
+    const order = { A: 0, B: 1 };   // anything not yet scored goes last
+    const ba = order[bucketOf(a)] ?? 2, bb = order[bucketOf(b)] ?? 2;
+    if (ba !== bb) return ba - bb;
+    const ra = rank(a), rb = rank(b);
+    if (ra[0] !== rb[0]) return ra[0] - rb[0];
+    if (ra[1] !== rb[1]) return ra[1] - rb[1];
+    return (Number(cell(b, 'Opportunity Score')) || 0) - (Number(cell(a, 'Opportunity Score')) || 0);
+  });
+
+  const active = live.filter(r => !isPending(r));
+  const in48 = active.filter(r => { const d = due(r); return d && d >= now && d - now <= 48 * 3600000; }).length;
+  const pad = n => String(n).padStart(2, '0');
+  const us = d => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${((d.getHours() + 11) % 12) + 1}:${pad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+  const t = today || {};
+
+  const out = [
+    ['FlipScout Board', 'Updated', us(now), 'Rebuilt by the app after every scan and refresh — edit notes on the Leads tab, not here.'],
+    [],
+    ["Today's scan", 'Scanned', 'Auto-Pass (C)', 'AI Review (B)', 'Work Now (A)', 'New on the sheet'],
+    ['', t.scanned || 0, t.bucketC || 0, t.bucketB || 0, t.bucketA || 0, t.pushed || 0],
+    [],
+    ['On the board', 'A — Work Now', 'B — AI Review', 'Offers due in 48h', 'Offer date TBD',
+      'Pending / contingent', 'Closed (sold, withdrawn…)', 'Auto-Pass (C)', 'Passed in Notes'],
+    ['', active.filter(r => bucketOf(r) === 'A').length, active.filter(r => bucketOf(r) === 'B').length, in48,
+      active.filter(r => /^TBD$/i.test(cell(r, 'Offer Due'))).length, live.length - active.length, closed.length,
+      autoPass.length, passed.length],
+    [],
+    ['Bucket', 'Score', 'Offer Due', 'Time Left', 'MLS Status', 'Address', 'Agent Phone', 'Showing',
+      'Price', 'Price Cut', 'Occupied By', 'Listing Agent', 'Agent Email', 'Disclosures', 'Notes', 'Why', 'MLS Link'],
   ];
-  for (const [from, text] of places) {
-    if (!text) continue;
-    const r = parseOfferDue(text, pulled);
-    if (r.due) return { due: r.due, from, phrase: r.phrase };
-  }
-  return { due: '', from: '', phrase: '' };
+  live.forEach((r, i) => {
+    const n = out.length + 1;   // this row's sheet row number
+    const d = due(r);
+    out.push([
+      cell(r, 'Bucket') || 'not scored yet', cell(r, 'Opportunity Score'),
+      d ? us(d) : cell(r, 'Offer Due'),
+      `=IF(ISNUMBER(C${n}),IF(C${n}<NOW(),"passed",INT(C${n}-NOW())&"d "&HOUR(C${n}-NOW())&"h"),"")`,
+      cell(r, 'MLS Status'), cell(r, 'Address'), cell(r, 'Agent Phone'), cell(r, 'Showing'),
+      cell(r, 'Purchase Price'), cell(r, 'Price Cut'),
+      cell(r, 'Occupied By'), cell(r, 'Listing Agent'), cell(r, 'Agent Email'), cell(r, 'Disclosures'),
+      cell(r, 'Notes'), cell(r, 'Why'),
+      fixLink(cell(r, 'MLS Link'), cell(r, 'MLS #')),
+    ]);
+  });
+  return out;
+}
+
+/**
+ * Private / agent-only remarks. The Client Full report does not carry them;
+ * the Agent Full report does, and the label varies ("Private:", "Agent
+ * Remarks:", "Confidential Remarks:"), so several are accepted. "Agent:" on
+ * its own is deliberately NOT one — it also labels contact lines.
+ * Verified on a live Agent Full page (23 Sep): the label is "Private:".
+ */
+function privateRemarks(text) {
+  const m = String(text || '').match(/(?:^|\n)\s*(?:Private(?:\s*Remarks?)?|(?:Agent|Realtor|Broker|Confidential)\s*(?:Only\s*)?Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
 }
 
 /**
@@ -699,12 +814,46 @@ function redfinUrlFrom(body, address) {
   return '';
 }
 
+/**
+ * One lead as the FlipScout Lead Board stores it (the board's scanLead() reads
+ * exactly these names). Lengths are capped and phone, email, date and Redfin
+ * link are shape-checked, so a pasted file can never put junk on the board.
+ */
+const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+function boardLead(l) {
+  const num = v => (v === '' || v == null || !isFinite(Number(v))) ? null : Number(v);
+  // core.offerDue writes "2026-09-30 (Wed) 12:00 PM" or "TBD".
+  const od = String(l.offerDue || '');
+  const date = (od.match(/^(\d{4}-\d{2}-\d{2})/) || [])[1] || '';
+  const time = (od.match(/(\d{1,2}:\d{2} [AP]M)/) || [])[1] || '';
+  const agent = String(l.listedBy || '');
+  const phone = clip(l.agentPhone, 20);
+  return {
+    mls: clip(l.mls, 20).toUpperCase(),
+    addr: clip(fullAddress(l.address, l.city, l.zip), 160),
+    city: clip(l.city, 60), zip: clip(l.zip, 10),
+    price: num(l.price), ppsf: num(l.ppsf), sqft: num(l.sqft),
+    beds: num(l.beds), baths: num(l.baths), year: num(l.yearBuilt), dom: num(l.dom),
+    remarks: clip(l.remarks, 2000), agentRemarks: clip(l.privateRemarks, 1500), showing: clip(l.showing, 600),
+    offerDue: date, offerTime: time, offerFrom: od ? 'MLS remarks' : '',
+    offerPhrase: od === 'TBD' ? 'Offer date TBD' : clip(od, 60),
+    why: clip([l.bucketLabel, l.oppScore !== '' && l.oppScore != null ? 'score ' + l.oppScore : '', l.why]
+      .filter(Boolean).join(' · '), 240),
+    redfin: /^https:\/\/www\.redfin\.com\/[A-Z]{2}\/[^\s"<>]+\/home\/\d+$/.test(l.redfin || '') ? l.redfin : '',
+    agentName: clip(agent.split(',')[0], 80),
+    agentPhone: /^\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}$/.test(phone) ? phone : '',
+    agentEmail: /^[^\s@<>"']{1,64}@[^\s@<>"']{1,190}\.[A-Za-z]{2,}$/.test(clip(l.agentEmail, 254)) ? clip(l.agentEmail, 254) : '',
+    mlsStatus: clip(l.mlsStatus, 30),
+  };
+}
+
 module.exports = {
-  findAgentPhone, splitListedBy,
+  boardLead,
   redfinUrlFrom,
-  listingBlock, parseAgentDetail, parseOfferDue, findOfferDue,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
+  qualify, privateRemarks, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
+  mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS, disclosuresLink,
 };

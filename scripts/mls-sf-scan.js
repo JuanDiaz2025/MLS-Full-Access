@@ -140,7 +140,7 @@ function recordLedger(items) {
       yearBuilt: detail.yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
       photos: detail.photos, reason: v.reason,
       remarks: (detail.remarks || '').slice(0, 300),
-      link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+      link: core.mlsUrl(c.mls),
     };
     // Silent remarks fall to the configured default, same as the app.
     const decision = v.decision === 'manual' ? 'keep' : v.decision;

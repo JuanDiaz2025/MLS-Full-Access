@@ -44,8 +44,6 @@
   tr.surface td{color:var(--strong)}
   .mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
   .hint{font-size:11.5px;color:var(--muted);margin-top:8px}
-  .said{background:var(--panel2);border:1px solid var(--hair);border-radius:8px;padding:8px 10px;margin-top:6px;font-size:12.5px;max-height:140px;overflow:auto;white-space:pre-wrap}
-  .said b{display:block;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
 </style>
 </head>
 <body>
@@ -69,14 +67,14 @@
 
   <div class="card">
     <h2>2 · How each listing is judged</h2>
-    <div class="hint">The run decides Keep/Drop on its own and <b>never stops to ask you</b>.
-      Every listing is scrolled top to bottom and read twice — the buyer report for the
-      public remarks, and the <b>Agent Full</b> report for the agent-only remarks and
-      showing instructions, which is where tenants and offer deadlines are written.
-      Built-in rules read all of it: they drop renovated / turnkey wording,
-      multi-unit, tenant-occupied, fire damage, and anything that isn't a quick flip
-      (foundation, structural, permits, tear-down). Rules can't see photos, so add a key
-      below and AI vision judges the pictures instead.</div>
+    <div class="hint">Every listing gets an <b>Opportunity Score (0–100)</b> and a bucket, and the
+      run <b>never stops to ask you</b>:
+      <b>A — Work Now</b> (70+) · <b>B — AI Review</b> (35–69) · <b>C — Auto-Pass</b> (under 35, hidden on the Rejected tab).
+      The score reads the public and private remarks, price cuts, $/sqft against the area, age and
+      days on market. Always auto-passed: renovated / turnkey, multi-unit, fire damage, and anything
+      that isn't a quick flip (foundation, structural, permits, tear-down). Tenant-occupied is
+      <b>not</b> dropped — it counts as an opportunity. Rules can't see photos; add a key below and
+      AI vision judges the pictures too.</div>
     <label style="margin-top:10px">When the remarks don't say either way</label>
     <select id="whenUnsure" style="width:100%;padding:6px">
       <option value="keep">Keep it and carry on (default)</option>
@@ -89,7 +87,7 @@
       <label>Anthropic API key</label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
       <label>Model</label>
-      <input id="model" type="text" value="claude-opus-5" placeholder="claude-opus-5">
+      <input id="model" type="text" value="claude-opus-5-5" placeholder="claude-opus-5-5 (or claude-sonnet-5, cheaper)">
     </div>
   </div>
 
@@ -109,6 +107,14 @@
       <button id="stop" disabled>⏹ Stop</button>
     </div>
     <div class="row" style="margin-top:8px">
+      <button id="refreshBoard" disabled>↻ Refresh leads on the board</button>
+      <button id="rebuildBoard" class="ghost">▦ Update Board tab</button>
+    </div>
+    <div class="hint"><b>Refresh</b> re-reads only the leads already on your sheet (reports, no photos) — offer
+      dates that were TBD, price cuts, pending status, private remarks — and never touches your Notes.
+      <b>Board</b> is a tab the app rebuilds after every scan: today's funnel on top, then A and B leads in
+      work order, soonest offer deadline first.</div>
+    <div class="row" style="margin-top:8px">
       <label style="display:flex;align-items:center;gap:6px;margin:0">
         Reading time per listing
         <input id="readSeconds" type="number" min="0" max="60" value="6" style="width:70px">
@@ -123,11 +129,11 @@
     <div class="hint"><b>What it looks for</b> — Active · single-family ·
       <b>45 days on market or less</b> · 25+ years old · <b>quick flips only</b>
       (cosmetic work; foundation / structural / permit jobs and tear-downs are dropped) ·
-      not renovated · not multi-unit · not tenant-occupied.
+      not renovated · not multi-unit.
       <br><b>Only new listings.</b> Every MLS # ever checked is remembered, so today's run
       skips everything yesterday already looked at — day two costs you only the new ones.
-      <br><b>One area at a time, in order</b> — each is finished completely, added to
-      today's Lead Board file, and only then does the next one start. Untick the ones you don't want:
+      <br><b>One area at a time, in order</b> — each is finished completely, written to
+      the sheet, and only then does the next one start. Untick the ones you don't want:
       San Francisco on its own takes minutes, the whole buy box takes hours.</div>
     <div id="funnel" class="status" style="margin-top:10px">Idle.</div>
     <div id="finished" class="status good" style="display:none;margin-top:10px"></div>
@@ -138,8 +144,6 @@
     <div class="addr" id="rAddr">—</div>
     <div class="meta" id="rMeta">—</div>
     <div id="aiVerdict" class="status" style="display:none"></div>
-    <div id="rOffer" class="status" style="display:none;margin-top:8px"></div>
-    <div id="rSaid" style="margin-top:8px"></div>
     <div class="hint">The gallery opens in the MLS window so you can watch, but nothing
       waits on you — every listing is judged and the run carries on.</div>
   </div>
@@ -167,7 +171,9 @@
       <button id="kpiExport">Export CSV / JSON</button>
       <button id="ledgerClear" class="drop">Clear ledger</button>
     </div>
-    <div class="hint">Counts accumulate per calendar day and survive closing the app.</div>
+    <div class="hint">Counts accumulate per calendar day and survive closing the app. They
+      go to the sheet's KPI tab automatically at the end of each run, and the reviewer's
+      rejections come back into the ledger at the start of the next one.</div>
   </div>
 
   <div class="card">
@@ -178,17 +184,16 @@
       <button id="boardOpen">Open Lead Board</button>
       <button id="boardShow">Show scan file</button>
     </div>
-    <div class="hint">Every lead the scan keeps goes into today's scan file — with its
-      public and agent remarks and any <b>offer deadline</b> read from them. When a run
-      finishes the leads are already copied: open the Lead Board, click <b>Add scan</b>,
+    <div class="hint">Every A and B lead goes into today's scan file with its public and private
+      remarks, offer deadline, listing agent (name, phone, email), bucket and its exact Redfin page.
+      When a run finishes the leads are already copied: open the Lead Board, click <b>Add scan</b>,
       and paste (or drop the file in). The board skips anything it already has.</div>
     <label style="margin-top:10px">Lead Board link</label>
     <input id="boardUrl" type="text" autocomplete="off">
   </div>
 
-  <details class="card">
-    <summary style="cursor:pointer;color:var(--muted);font-size:11px;letter-spacing:.12em;text-transform:uppercase">8 · Google Sheet (old — optional)</summary>
-    <div style="margin-top:12px"></div>
+  <div class="card">
+    <h2>8 · Google Sheet (optional)</h2>
     <div id="gStatus" class="status">Not connected.</div>
 
     <label style="margin-top:10px">Your spreadsheet (paste the URL)</label>
@@ -239,7 +244,7 @@
         so a dropped connection never loses work you have already paid for. If the sheet
         was offline during a scan, reconnect and hit <b>Send this run's leads</b>.</div>
     </details>
-  </details>
+  </div>
 </div>
 
 <script>
@@ -249,6 +254,7 @@
 
   function setScanButtons(running){
     $('start').disabled = running; $('pause').disabled = !running; $('resume').disabled = true; $('stop').disabled = !running;
+    $('refreshBoard').disabled = running;
   }
 
   $('openLogin').onclick = async () => {
@@ -261,6 +267,7 @@
     $('loginStatus').textContent = r.loggedIn ? ('Signed in ✓ — ' + (r.title||'')) : ('Not signed in yet' + (r.title? ' ('+r.title+')':''));
     $('loginStatus').className = 'status ' + (r.loggedIn ? 'good' : 'warn');
     $('start').disabled = !r.loggedIn;
+    $('refreshBoard').disabled = !r.loggedIn;
   };
   // --- which areas to scan ---
   // Checkboxes over the buy box, remembered between runs. Nothing is scanned
@@ -306,6 +313,16 @@
     await window.fs.startScan({ areaIndexes });
     setScanButtons(false);
   };
+  $('refreshBoard').onclick = async () => {
+    setScanButtons(true);
+    $('finished').style.display='none';
+    await window.fs.refreshBoard();
+    setScanButtons(false);
+  };
+  $('rebuildBoard').onclick = async () => {
+    const r = await window.fs.rebuildBoard();
+    if (r && r.unconfigured) log('Connect your Google Sheet in section 7 first.', 'warn');
+  };
   $('pause').onclick = () => { window.fs.pause(); $('pause').disabled=true; $('resume').disabled=false; };
   $('resume').onclick = () => { window.fs.resume(); $('pause').disabled=false; $('resume').disabled=true; };
   $('stop').onclick = () => { window.fs.stop(); setScanButtons(false); };
@@ -313,7 +330,7 @@
 
   function pushConfig(){ window.fs.setConfig({
     useAI: $('useAI').checked,
-    apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5').trim(),
+    apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5-5').trim(),
     readSeconds: Number($('readSeconds').value||6),
     scrollPauseMs: Math.round(Number($('scrollPause').value||0.7) * 1000),
     boardUrl: ($('boardUrl').value||'').trim() || BOARD_URL,
@@ -323,8 +340,8 @@
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
   $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
   $('readSeconds').oninput = pushConfig;
-  $('scrollPause').oninput = () => { localStorage.setItem('fs.scrollPause', $('scrollPause').value); pushConfig(); };
-  { const v = localStorage.getItem('fs.scrollPause'); if (v) $('scrollPause').value = v; }
+  $('scrollPause').oninput = () => { try { localStorage.setItem('fs.scrollPause', $('scrollPause').value); } catch(_) {} pushConfig(); };
+  { let v = null; try { v = localStorage.getItem('fs.scrollPause'); } catch(_) {} if (v) $('scrollPause').value = v; }
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
 
@@ -400,34 +417,6 @@
     if (s.sheetId) $('gSheetUrl').value = 'https://docs.google.com/spreadsheets/d/' + s.sheetId + '/edit';
   })();
 
-  // --- the Lead Board hand-off ---
-  const BOARD_URL = 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1';
-  $('boardUrl').value = localStorage.getItem('fs.boardUrl') || BOARD_URL;
-  $('boardUrl').oninput = () => { localStorage.setItem('fs.boardUrl', $('boardUrl').value.trim()); pushConfig(); };
-  function paintBoard(b){
-    const box = $('boardStatus');
-    box.className = 'status' + (b.count ? ' good' : '');
-    box.textContent = b.count
-      ? `Today (${b.pulled}): ${b.count} lead(s) ready for the board`
-        + (b.offers ? `, ${b.offers} with an offer deadline` : '') + '.'
-      : `No leads kept today (${b.pulled}) yet.`;
-  }
-  async function refreshBoard(){ paintBoard(await window.fs.boardStatus()); }
-  $('boardCopy').onclick = async () => {
-    const r = await window.fs.boardCopy();
-    if (!r.ok) { $('boardStatus').className='status warn'; $('boardStatus').textContent = 'Nothing to copy — ' + r.error + '.'; return; }
-    $('boardStatus').className='status good';
-    $('boardStatus').textContent = `Copied ${r.count} lead(s). Open the Lead Board, click "Add scan", paste.`;
-  };
-  $('boardOpen').onclick = async () => { const r = await window.fs.boardOpen(); if (!r.ok) log(r.error, 'warn'); };
-  $('boardShow').onclick = () => window.fs.boardShow();
-  window.fs.on('board', paintBoard);
-  refreshBoard();
-  // Send the saved settings once at start. Before this, what the screen showed
-  // (a remembered "when unsure" choice, say) did not reach the scan until a
-  // setting was touched.
-  pushConfig();
-
   // --- local backup ---
   async function refreshBackup(){
     const s = await window.fs.backupStatus();
@@ -439,6 +428,32 @@
   }
   $('openBackup').onclick = async () => { const s = await window.fs.backupStatus(); if(s.path) window.fs.showFile(s.path); };
   refreshBackup();
+
+  // --- the Lead Board hand-off ---
+  var BOARD_URL = 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1';
+  { let v = null; try { v = localStorage.getItem('fs.boardUrl'); } catch(_) {} $('boardUrl').value = v || BOARD_URL; }
+  $('boardUrl').oninput = () => { try { localStorage.setItem('fs.boardUrl', $('boardUrl').value.trim()); } catch(_) {} pushConfig(); };
+  function paintBoard(b){
+    const box = $('boardStatus');
+    box.className = 'status' + (b.count ? ' good' : '');
+    box.textContent = b.count
+      ? `Today (${b.pulled}): ${b.count} lead(s) ready for the board` + (b.offers ? `, ${b.offers} with an offer deadline` : '') + '.'
+      : `No leads kept today (${b.pulled}) yet.`;
+  }
+  async function refreshBoardFile(){ paintBoard(await window.fs.boardStatus()); }
+  $('boardCopy').onclick = async () => {
+    const r = await window.fs.boardCopy();
+    $('boardStatus').className = 'status ' + (r.ok ? 'good' : 'warn');
+    $('boardStatus').textContent = r.ok ? `Copied ${r.count} lead(s). Open the Lead Board, click "Add scan", paste.`
+                                        : 'Nothing to copy — ' + r.error + '.';
+  };
+  $('boardOpen').onclick = async () => { const r = await window.fs.boardOpen(); if (!r.ok) log(r.error, 'warn'); };
+  $('boardShow').onclick = () => window.fs.boardShow();
+  window.fs.on('board', paintBoard);
+  refreshBoardFile();
+  // Send the saved settings once at start, so what the screen shows is what
+  // the scan uses.
+  pushConfig();
 
   function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
   function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
@@ -468,35 +483,16 @@
     box.style.display = 'block';
     box.className = 'status ' + (p.verdict === 'keep' ? 'good' : 'warn');
     box.textContent = `${p.verdict === 'keep' ? '✓ KEEP' : '✕ DROP'} — ${p.why || ''}`;
-    // Show what was READ, in full, so you can see the app actually read it.
-    const off = p.offer || {};
-    const ob = $('rOffer');
-    ob.style.display = 'block';
-    ob.className = 'status' + (off.due ? ' good' : '');
-    ob.textContent = off.due
-      ? `Offer deadline: ${off.due.replace(/^~/, '≈ ')}${off.due[0] === '~' ? ' (weekday only — confirm)' : ''} — from ${off.from}: “${off.phrase}”`
-      : 'No offer deadline found in the remarks.';
-    const said = $('rSaid'); said.textContent = '';
-    if (p.agentName || p.agentPhone) {
-      const d = document.createElement('div'); d.className = 'said';
-      const b = document.createElement('b'); b.textContent = 'Listing agent';
-      d.appendChild(b);
-      d.appendChild(document.createTextNode([[p.agentName, p.agentOffice].filter(Boolean).join(', '), p.agentPhone].filter(Boolean).join(' · ')));
-      said.appendChild(d);
+    if (p.remarks) {
+      $('rMeta').innerHTML += `<div class="hint" style="margin-top:6px">${
+        String(p.remarks).slice(0,400).replace(/[<>]/g,'')}</div>`;
     }
-    [['Public remarks', p.remarks], ['Agent-only remarks', p.agentRemarks], ['Showing instructions', p.showingNotes]]
-      .forEach(([h, t]) => {
-        const d = document.createElement('div'); d.className = 'said';
-        const b = document.createElement('b'); b.textContent = h;
-        d.appendChild(b); d.appendChild(document.createTextNode(t || '— none on the listing —'));
-        said.appendChild(d);
-      });
   });
   // ---------------- daily KPI ----------------
   const KPI_COLS = [
     ['scanned','Scanned'], ['candidates','Candidates'], ['reviewed','Reviewed'],
-    ['kept','Kept'], ['dropped','Dropped'], ['leads','Leads'],
-    ['gateCleared','Clear gate'], ['pushed','To board'],
+    ['bucketA','A'], ['bucketB','B'], ['bucketC','C'],
+    ['pushed','To sheet'],
   ];
   function renderKpi(rep){
     if(!rep) return;
@@ -506,7 +502,7 @@
     $('kpiToday').innerHTML = t.runs
       ? `<b>Today (${t.date})</b> — ${t.runs} run(s): `
         + `${t.scanned} scanned → ${t.candidates} candidates → ${t.reviewed} reviewed → `
-        + `<b>${t.kept} kept</b> → ${t.gateCleared} clear the gate → ${t.pushed} new for the Lead Board.`
+        + `<b>${t.bucketA||0} A — Work Now</b> · ${t.bucketB||0} B — AI Review · ${t.bucketC||0} C — Auto-Pass → ${t.pushed} new on the sheet.`
         + `<br><span class="pill">keep rate ${pct(t.kept,t.reviewed)}</span> `
         + `<span class="pill">gate rate ${pct(t.gateCleared,t.leads)}</span>`
         + (t.dropped ? `<br>Dropped ${t.dropped}: `
@@ -545,20 +541,24 @@
     const surf = lastLeads.filter(l => l.surface);
     const noComps = lastLeads.length && lastLeads.every(l => l.needsComps);
     let html = `<div class="hint">${noComps
-      ? `${lastLeads.length} condition-qualified listing(s) — comps off, so no ARV or profit yet. Cheapest $/sqft first.`
+      ? `${lastLeads.length} listing(s) on the board — A before B, highest Opportunity Score first. Comps off, so no ARV or profit yet.`
       : `${surf.length} of ${lastLeads.length} kept leads clear the profit gate.`} Generated ${p.generatedAt}</div>`;
     html += noComps
-      ? '<table><thead><tr><th>Property</th><th>DOM</th><th>Beds</th><th>SqFt</th><th>Price</th><th>$/sqft</th></tr></thead><tbody>'
-      : '<table><thead><tr><th>Property</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th><th>Score</th></tr></thead><tbody>';
+      ? '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>Offer due</th><th>DOM</th><th>SqFt</th><th>Price</th><th>$/sqft</th><th>Why</th></tr></thead><tbody>'
+      : '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>Offer due</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th></tr></thead><tbody>';
     for (const l of lastLeads) {
-      const head = `<td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+      const esc = t => String(t == null ? '' : t).replace(/[<>&]/g, '');
+      const head = `<td><b>${esc(l.bucket)||'—'}</b></td><td class="mono">${l.oppScore!=null&&l.oppScore!==''?l.oppScore:'—'}</td>`+
+        `<td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+        `<td class="mono"><b>${esc(l.offerDue)||'—'}</b></td>`+
         `<td class="mono">${l.dom!=null&&l.dom!==''?l.dom:'—'}</td>`;
       html += noComps
-        ? `<tr class="surface">${head}<td class="mono">${l.beds||'—'}</td><td class="mono">${l.sqft||'—'}</td>`+
-          `<td class="mono">${money(l.price)}</td><td class="mono">$${l.ppsf||'—'}</td></tr>`
+        ? `<tr class="surface">${head}<td class="mono">${l.sqft||'—'}</td>`+
+          `<td class="mono">${money(l.price)}</td><td class="mono">$${l.ppsf||'—'}</td>`+
+          `<td class="hint">${esc(l.why)}</td></tr>`
         : `<tr class="${l.surface?'surface':''}">${head}`+
           `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
-          `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td><td class="mono">${l.score}</td></tr>`;
+          `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td></tr>`;
     }
     html += '</tbody></table>';
     $('report').innerHTML = html; $('reportCard').style.display='block';

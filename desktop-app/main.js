@@ -16,7 +16,7 @@ const gsheets = require('./google-sheets');
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
 const cfg = {
-  apiKey: '', model: 'claude-opus-5', useAI: false,   // AI vision (optional)
+  apiKey: '', model: 'claude-opus-5-5', useAI: false,   // AI vision (optional)
   readSeconds: 6,                                                      // dwell per listing
   // What to do when the text rules can't tell renovated from dated: ask | keep | drop.
   // Defaults to 'keep' so a run never stalls waiting for a click. It is a safe
@@ -29,7 +29,12 @@ const cfg = {
   boardUrl: 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1',   // FlipScout Lead Board
 };
 
-ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
+ipcMain.on('set-config', (_e, c) => {
+  Object.assign(cfg, c || {});
+  // "claude-opus-5" was never a model id; a saved setting from an older build
+  // would make every AI call fail.
+  if (!cfg.model || cfg.model === 'claude-opus-5') cfg.model = 'claude-opus-5-5';
+});
 
 // ---------- daily KPIs ----------
 // Every scan folds its funnel counts into a per-day record kept on disk, so the
@@ -38,7 +43,8 @@ ipcMain.on('set-config', (_e, c) => { Object.assign(cfg, c || {}); });
 const KPI_FILE = () => path.join(app.getPath('userData'), 'kpi-history.json');
 const KPI_FIELDS = ['runs', 'scanned', 'candidates', 'skippedAlreadyChecked', 'reviewed', 'kept',
   'dropped', 'droppedRenovated', 'droppedMultiUnit', 'droppedFire',
-  'droppedFewPhotos', 'droppedOther', 'leads', 'gateCleared', 'pushed', 'pushSkipped'];
+  'droppedFewPhotos', 'droppedOther', 'leads', 'gateCleared', 'pushed', 'pushSkipped',
+  'bucketA', 'bucketB', 'bucketC'];
 const todayKey = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -144,9 +150,12 @@ const log = (msg, level = 'info') => send('log', { msg, level, t: Date.now() });
 
 function createControlWindow() {
   controlWin = new BrowserWindow({
-    width: 720, height: 860, title: 'FlipScout',
+    width: 720, height: 860, title: `FlipScout Filters v${app.getVersion()}`,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
+  // Keep the build name and version in the title bar, so it is always clear
+  // which build is running. The page's own <title> would replace it.
+  controlWin.on('page-title-updated', e => e.preventDefault());
   controlWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   controlWin.on('closed', () => { controlWin = null; });
 }
@@ -185,6 +194,16 @@ const setInput = (sel, val) => `(() => {
 async function waitIfPaused() {
   while (control.paused && !control.stopped) { await sleep(400); }
   if (control.stopped) throw new Error('stopped');
+}
+
+/** Like waitIfPaused, but a Stop is an answer, not an exception. Loops that
+ *  have already read listings use it so a Stop BREAKS out and the work done
+ *  so far is still written to the sheet — throwing skipped that write, so a
+ *  Stop mid-refresh lost the last unsaved leads and a Stop mid-scan lost
+ *  reviewed leads the ledger already counted as checked. */
+async function stopRequested() {
+  try { await waitIfPaused(); } catch (_) { /* stopped */ }
+  return control.stopped;
 }
 
 // ---------- login ----------
@@ -276,7 +295,10 @@ async function scanArea(area) {
 }
 
 // ---------- open a single MLS# and render its full photo gallery in the MLS window ----------
-async function showGallery(mls) {
+// opts.factsOnly: read the reports (remarks, offer date, price, status) and
+// skip the photo grid and the dwell — what "Refresh leads on the board" needs.
+async function showGallery(mls, opts) {
+  const factsOnly = !!(opts && opts.factsOnly);
   await nav(core.SEARCH_URL, 2200);
   await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
@@ -285,39 +307,18 @@ async function showGallery(mls) {
   // The Client Full report is the only place the full address, the zip, the
   // year built and the real remarks exist — the results grid has none of them.
   let meta = { remarks: '', condition: '', zip: '', address: '', yearBuilt: '', propClass: '', mismatch: false };
-  let agent = { agentRemarks: '', showing: '', offerNotes: '', offerDateField: '', labels: [] };
-  let pageText = '';
-  let info = null, carousel = [];
   try {
     await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); })()`);
     await sleep(400);
-    if (await showReport(/^Client Full - All Photos$/i)) {
+    const selId = await js(`(() => { const s=[...document.querySelectorAll('select')].find(se=>[...se.options].some(o=>/Client Full - All Photos/i.test(o.text))); return s?s.id:null; })()`);
+    if (selId) {
+      await js(`(() => { const s=document.getElementById(${JSON.stringify(selId)}); if(!s) return; const o=[...s.options].find(o=>/Client Full - All Photos/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
+      await sleep(2600);
       // Parse in Node rather than in the page: it makes the extraction testable
       // against saved report text, which is how the wrong-listing bug surfaced.
-      const raw = await readWholePage();
-      savePage(mls, 'client', raw);
+      const raw = factsOnly ? await js('document.body.innerText').catch(() => '') : await readWholePage();
       meta = core.parseDetail(raw, mls);
-      // The photo grid is built from a media Key on this report's carousel, so
-      // take it now, before switching to the agent report.
-      info = await js(JS_PHOTO_KEY).catch(() => null);
-      carousel = await js(core.JS_PHOTOS).catch(() => []);
-
-      // The agent-side report: remarks written for other agents, showing
-      // instructions, and — when there is one — the offer deadline. The buyer
-      // report never shows any of it.
-      if (!meta.mismatch && await showReport(/^Agent Full$/i)) {
-        const rawA = await readWholePage();
-        savePage(mls, 'agent', rawA);
-        const a = core.parseAgentDetail(rawA, mls);
-        if (!a.mismatch) {
-          agent = a;
-          pageText = core.listingBlock(rawA, mls).block;
-          if (!a.labels.length) log('  agent report open, but no agent-remarks label found on it — page saved for checking', 'warn');
-        }
-      } else if (!meta.mismatch) {
-        log('  no "Agent Full" report offered — agent remarks not read for this listing', 'warn');
-      }
-      if (!pageText) pageText = core.listingBlock(raw, mls).block;
+      saveReportSample(mls, 'client', raw);
     }
   } catch (_) {}
 
@@ -329,23 +330,64 @@ async function showGallery(mls) {
   // exactly the "you are not analysing the images" complaint. PhotoPopup.aspx
   // with View=G is a grid of the lot; the URL is built from the media Key on
   // any carousel image, so no popup window has to be driven.
-  let urls = [];
+  let urls = [], gridOk = false, info = null;
+  try {
+    if (!factsOnly) info = await js(`(() => {
+      const img = [...document.images].find(i => /MediaServer/i.test(i.src));
+      if (!img) return null;
+      // Double backslashes: this is a template string, and a single \d here
+      // reaches the page as a bare "d" — the regex never matched, so the full
+      // photo grid was never opened and every listing fell back to the ~4
+      // photos the carousel preloads.
+      const key = (img.src.match(/Key=(\\d+)/) || [])[1];
+      const tid = (img.src.match(/TableID=(\\d+)/) || [])[1] || '9';
+      // The carousel counter reads "1 / 29", spaced. Beds/baths ("3/0") and
+      // Age/Yr Blt ("122/1904") are not, so they cannot be taken for the count.
+      const n = (document.body.innerText.match(/\\b1 \\/ (\\d{1,3})\\b/) || [])[1];
+      return key ? { key: key, tid: tid, n: n || '60' } : null;
+    })()`).catch(() => null);
+  } catch (_) {}
+  // Carousel fallback, read NOW while the report is still on screen — once we
+  // leave for the Agent Full report or the photo grid it is gone.
+  const carousel = factsOnly ? [] : await js(core.JS_PHOTOS).catch(() => []);
+
+  // Private / agent-only remarks live on the Agent Full report, not Client
+  // Full. Same results page, different display — switch, read, move on.
+  try {
+    const agentSel = await js(`(() => { const s=[...document.querySelectorAll('select')].find(se=>[...se.options].some(o=>/^\\s*Agent Full\\s*$/i.test(o.text))); return s?s.id:null; })()`);
+    if (agentSel) {
+      await js(`(() => { const s=document.getElementById(${JSON.stringify(agentSel)}); if(!s) return; const o=[...s.options].find(o=>/^\\s*Agent Full\\s*$/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
+      await sleep(2600);
+      const rawAgent = factsOnly ? await js('document.body.innerText').catch(() => '') : await readWholePage();
+      saveReportSample(mls, 'agent', rawAgent);
+      const agent = core.parseDetail(rawAgent, mls);
+      if (!agent.mismatch) {
+        meta.privateRemarks = agent.privateRemarks || '';
+        // Agent Full may carry facts Client Full left blank.
+        ['origPrice', 'listPrice', 'listedBy', 'remarks', 'address', 'zip', 'yearBuilt', 'propClass', 'condition', 'occupiedBy', 'status',
+          'agentPhone', 'agentEmail', 'showing', 'disclosuresField']
+          .forEach(k => { if (!meta[k] && agent[k]) meta[k] = agent[k]; });
+      }
+    }
+  } catch (_) {}
+
   try {
     if (info) {
       await nav('https://search.mlslistings.com/Matrix/Public/PhotoPopup.aspx'
         + `?n=${info.n}&i=0&L=1&tid=${info.tid}&key=${info.key}&mtid=1&View=G`, 3000);
       urls = await js(`[...document.images].map(i => i.src).filter(u => /MediaServer/i.test(u))`)
         .catch(() => []);
+      gridOk = urls.length > 0;
     }
   } catch (_) {}
   // Fall back to the carousel rather than judging a listing with no photos.
-  // Read off the buyer report before the switch to the agent report, which
-  // may not carry the same images.
-  if (!urls.length) urls = carousel.length ? carousel : await js(core.JS_PHOTOS).catch(() => []);
+  // Its count is NOT the listing's photo count (only ~4 are ever preloaded),
+  // so gridOk=false tells the rules not to read "few photos" into it.
+  if (!urls.length) urls = carousel || [];
 
   // The grid page IS the gallery, so there is nothing to rebuild — just wait
   // for the images to decode before anything judges the listing.
-  await js(`(async () => {
+  if (!factsOnly) await js(`(async () => {
     const imgs = [...document.images];
     await Promise.all(imgs.map(im => im.complete ? null : new Promise(r => {
       im.onload = im.onerror = r; setTimeout(r, 8000);
@@ -355,56 +397,30 @@ async function showGallery(mls) {
 
   // Dwell, so a human watching can actually see the gallery and the run is not
   // blasting through listings faster than the pictures render.
-  const dwell = Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
+  const dwell = factsOnly ? 0 : Math.max(0, Number(cfg.readSeconds != null ? cfg.readSeconds : 6) * 1000);
   if (dwell) await sleep(dwell);
 
-  const offer = core.findOfferDue({
-    offerDateField: agent.offerDateField, offerNotes: agent.offerNotes,
-    agentRemarks: agent.agentRemarks, showing: agent.showing,
-    remarks: meta.remarks, pageText,
-  }, todayKey());
-
-  return { count: urls.length, urls: urls,
+  return { count: urls.length, urls: urls, gridOk: gridOk,
     remarks: meta.remarks || '', condition: meta.condition || '',
     zip: meta.zip || '', address: meta.address || '', yearBuilt: meta.yearBuilt || '',
     propClass: meta.propClass || '',
-    agentRemarks: agent.agentRemarks || '', showingNotes: agent.showing || '',
-    offerNotes: agent.offerNotes || '', offer,
-    // The listing agent: name and brokerage off "Listed By", phone off the
-    // agent report (or, failing that, a number in the agent remarks).
-    agentName: agent.agentName || meta.agentName || '', agentOffice: meta.agentOffice || '',
-    agentPhone: agent.agentPhone || '', agentPhoneFrom: agent.agentPhoneFrom || '',
+    privateRemarks: meta.privateRemarks || '', origPrice: meta.origPrice || '',
+    listPrice: meta.listPrice || '', listedBy: meta.listedBy || '', occupiedBy: meta.occupiedBy || '',
+    status: meta.status || '',
+    agentPhone: meta.agentPhone || '', agentEmail: meta.agentEmail || '', showing: meta.showing || '',
+    disclosures: core.disclosuresLink(meta.disclosuresField, [meta.privateRemarks, meta.remarks].filter(Boolean).join(' \n ')),
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
-}
-
-// Pick a report in the results page's Display dropdown by its exact name.
-// Exact, because "Agent Full" must not land on "Agent 1 Line" and "Client Full"
-// must not land on "Client Full - All Photos".
-async function showReport(nameRe) {
-  const re = nameRe.source, fl = nameRe.flags;
-  const ok = await js(`(() => {
-    const re = new RegExp(${JSON.stringify(re)}, ${JSON.stringify(fl)});
-    const s = [...document.querySelectorAll('select')].find(se => [...se.options].some(o => re.test(o.text.trim())));
-    if (!s) return false;
-    const o = [...s.options].find(o => re.test(o.text.trim()));
-    s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
-  })()`).catch(() => false);
-  if (ok) await sleep(2600);
-  return ok;
 }
 
 // Scroll the report top to bottom, a screen at a time, before reading it.
 // Matrix builds some sections as they come into view, and it is how a person
 // reads a listing: all of it, not the first screen. The pause per screen is
-// the "take it slow" setting in section 3.
+// the "Scroll pause" setting in section 3. Only real content panels are
+// scrolled — the page and at most two tall panels — not every menu.
 async function readWholePage() {
   const pause = Math.max(150, Number(cfg.scrollPauseMs != null ? cfg.scrollPauseMs : 700));
   await js(`(async () => {
     const wait = ms => new Promise(r => setTimeout(r, ms));
-    // The report may scroll in the window or inside its own panel; do both —
-    // but only real content panels (tall ones, the two biggest), not every
-    // dropdown and menu on the page, each of which would cost its own pauses.
     const panels = [document.scrollingElement || document.documentElement]
       .concat([...document.querySelectorAll('div, main, section')]
         .filter(el => el.clientHeight > 250 && el.scrollHeight > el.clientHeight + 80
@@ -421,35 +437,30 @@ async function readWholePage() {
   return await js('document.body.innerText').catch(() => '');
 }
 
-const JS_PHOTO_KEY = `(() => {
-  const img = [...document.images].find(i => /MediaServer/i.test(i.src));
-  if (!img) return null;
-  const key = (img.src.match(/Key=(\\d+)/) || [])[1];
-  const tid = (img.src.match(/TableID=(\\d+)/) || [])[1] || '9';
-  // The carousel counter reads "1 / 29", spaced. Beds/baths ("3/0") and
-  // Age/Yr Blt ("122/1904") are not, so they cannot be taken for the count.
-  const n = (document.body.innerText.match(/\\b1 \\/ (\\d{1,3})\\b/) || [])[1];
-  return key ? { key: key, tid: tid, n: n || '60' } : null;
-})()`;
-
-// Every report page the app reads is kept, one folder per day, so what the
-// parser made of a listing can always be checked against what the page said.
-// Nobody had seen an Agent Full page when its parser was written; these files
-// are how it gets verified. Pruned to the last 14 days.
-const PAGES_DIR = () => path.join(app.getPath('userData'), 'listing-pages');
-function savePage(mls, kind, text) {
+// Look the kept house up on Redfin, from this computer, so the Lead Board can
+// link straight to its page. A failure only costs the link, never the lead.
+async function redfinUrl(address) {
+  if (!address) return '';
   try {
-    const dir = path.join(PAGES_DIR(), todayKey());
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, `${String(mls).replace(/[^A-Za-z0-9]/g, '')}-${kind}.txt`), String(text || ''));
-  } catch (_) { /* a failed save must never cost a listing */ }
+    const u = 'https://www.redfin.com/stingray/do/location-autocomplete?v=2&al=1&location='
+      + encodeURIComponent(address);
+    const r = await net.fetch(u, { headers: { 'Accept': 'application/json, text/plain, */*' } });
+    if (!r.ok) return '';
+    return core.redfinUrlFrom(await r.text(), address);
+  } catch (_) { return ''; }
 }
-function prunePages() {
+
+/** Keep the raw report text for the first few listings of each run, so the
+ *  Agent Full layout (private-remarks label) can be checked against the real
+ *  page instead of guessed. userData/report-samples/<MLS#>-<kind>.txt */
+let samplesThisRun = 0;
+function saveReportSample(mls, kind, text) {
   try {
-    const keep = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
-    for (const d of fs.readdirSync(PAGES_DIR())) {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d < keep) fs.rmSync(path.join(PAGES_DIR(), d), { recursive: true, force: true });
-    }
+    if (!text || samplesThisRun >= 10) return;
+    if (kind === 'agent') samplesThisRun++;
+    const dir = path.join(app.getPath('userData'), 'report-samples');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${String(mls).replace(/[^A-Z0-9]/gi, '')}-${kind}.txt`), text);
   } catch (_) {}
 }
 
@@ -477,24 +488,19 @@ async function compFor(mls, zip, sqft) {
 
 // ---------- AI auto-verify (Claude vision applies the buy-box rules) ----------
 function rulesPrompt(c, photoCount, gal) {
-  // The whole description, not the first 700 characters: "sold in its present
-  // as-is condition" sat at character 1,106 of 347 Faxon's remarks and the
-  // model never saw it. The agent's own remarks go in too.
-  const remarks = ((gal && gal.remarks) || '').slice(0, 3000);
-  const agentSaid = [gal && gal.agentRemarks, gal && gal.showingNotes].filter(Boolean).join(' | ').slice(0, 2000);
+  const remarks = ((gal && gal.remarks) || '').slice(0, 700);
   return `You are screening a real-estate listing for a house-FLIPPING buy box.
 
 Listing: ${c.addr}, ${c._cityKey} — ${c._sqft} sqft, $${c._price.toLocaleString()}.
 You have been given ${photoCount} SEPARATE photos of this listing (every photo the MLS has, up to 20).
-${remarks ? `Public remarks: "${remarks}"` : 'No public remarks available.'}
-${agentSaid ? `Agent-only remarks / showing instructions: "${agentSaid}"` : 'No agent-only remarks available.'}
+${remarks ? `Agent remarks: "${remarks}"` : 'No agent remarks available.'}
 
 Work through the photos ONE BY ONE before answering. For each, note what room it is
 and the state of the finishes. Pay closest attention to the KITCHEN and BATHROOMS —
 that is where renovation shows first, and a listing is often photographed to hide it.
 Do not answer from the exterior shots alone.
 
-KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
+KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, tenant-occupied (NOT a reason to drop), old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
 
 The ONLY question that matters is: HAS WORK BEEN DONE TO THIS HOUSE? Judge the FINISHES, not the housekeeping or the staging. A house that is tidy, empty, swept, or professionally staged but still has ORIGINAL DATED FINISHES is a KEEP — "clean" is not "renovated". When torn between "clean but dated" and "lightly updated", choose KEEP.
 
@@ -505,7 +511,6 @@ DROP if ANY of:
 - Newer build that looks modern.
 - Exterior-only / too few interior photos to judge condition (then DROP, reason "insufficient photos").
 - NOT A QUICK FLIP. We want a COSMETIC job — paint, floors, kitchen, bath, done in one pass without drawings or engineers. DROP if the photos or remarks show work that is structural or permit-heavy: foundation cracks, visible settlement or a sloping/sagging floor, jacked-up posts or shoring, an open framed shell / stripped down to studs, a collapsed or missing roof, extensive water damage or mould, or a tear-down / land-value listing. A dated house needing everything cosmetically is EXACTLY what we want; a house needing an engineer is not.
-- Tenant-occupied: remarks say tenant/lease in place, or the photos show a lived-in unit the seller cannot deliver vacant.
 
 If you saw NO kitchen photo and NO bathroom photo, you cannot judge condition: DROP with
 reason "no kitchen/bath photos".
@@ -581,7 +586,7 @@ async function autoDecide(c) {
       type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 },
     }));
     content.push({ type: 'text', text: rulesPrompt(c, photos.length, gal) });
-    const body = { model: cfg.model || 'claude-opus-5', max_tokens: 1024, messages: [{ role: 'user', content }] };
+    const body = { model: cfg.model || 'claude-opus-5-5', max_tokens: 1024, messages: [{ role: 'user', content }] };
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -602,23 +607,6 @@ async function autoDecide(c) {
   } catch (e) { return { decision: 'drop', reason: 'AI call failed: ' + e.message }; }
 }
 
-/** What the listing said, as it rides on a lead: remarks, offer deadline,
- *  and why the review kept it. */
-const said = c => Object.assign({ why: c._why || '', redfin: c._redfin || '' }, c._said || {});
-
-// Look the kept house up on Redfin, from this computer, so the Lead Board can
-// link straight to its page. A failure only costs the link, never the lead.
-async function redfinUrl(address) {
-  if (!address) return '';
-  try {
-    const u = 'https://www.redfin.com/stingray/do/location-autocomplete?v=2&al=1&location='
-      + encodeURIComponent(address);
-    const r = await net.fetch(u, { headers: { 'Accept': 'application/json, text/plain, */*' } });
-    if (!r.ok) return '';
-    return core.redfinUrlFrom(await r.text(), address);
-  } catch (_) { return ''; }
-}
-
 // ---------- full run ----------
 /** The buy box as pickable areas, for the checkboxes in section 3. */
 ipcMain.handle('buybox', () => core.DEFAULT_BUYBOX.map((a, i) => ({
@@ -636,6 +624,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     : core.DEFAULT_BUYBOX;
   if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
   control.running = true; control.stopped = false; control.paused = false;
+  samplesThisRun = 0;
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
   // Only a run that actually started closes the browser window at the end.
   // Bailing out for "not signed in" and then shutting the window the user is
@@ -682,7 +671,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
 
       // Medians are per-city anyway, so filtering a city on its own gives the
       // same answer as filtering the whole batch — without the wait.
-      const { candidates: cityCands, rejected: cityFiltered } = core.filterCandidates({ [label]: scanned });
+      const { candidates: cityCands, rejected: cityFiltered, medians: cityMedians } = core.filterCandidates({ [label]: scanned });
       runKpi.candidates += cityCands.length;
 
       // Log why listings failed the buy-box filter. Capped, near-misses first —
@@ -694,7 +683,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       const filterRejects = (cityFiltered || []).map(r => ({
         mls: r.mls, addr: r.addr, city: cityOf(r), zip: r.zip || '',
         price: r._price, ppsf: r._ppsf, sqft: r._sqft, dom: r._dom, reason: r._reason,
-        link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${r.mls}`,
+        link: core.mlsUrl(r.mls),
       }));
       if (filterRejects.length) log(`[${label}] ${filterRejects.length} failed the buy-box filter — all logged with the reason`);
 
@@ -728,11 +717,10 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       // Seeded with the buy-box filter failures so both stages are represented.
       const cityRejects = filterRejects.map(r => ({ ...r, stage: 'Buy-box filter' }));
       for (let i = 0; i < fresh.length; i++) {
-        await waitIfPaused();
-        if (control.stopped) break;
+        if (await stopRequested()) break;   // save what was read, then stop
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
-        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false, offer: {} }));
+        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false }));
         // Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT
         // listing on screen. Judging that would put another property's photos,
         // remarks and address onto this lead, so skip it — deliberately without
@@ -747,60 +735,56 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         if (gal.zip) c.zip = gal.zip;
         if (gal.address) c.fullAddr = gal.address;
         if (gal.yearBuilt) c._yearBuilt = Number(gal.yearBuilt);
-        // Everything the listing SAYS travels with the lead to the Lead Board:
-        // both sets of remarks, the showing notes, and the offer deadline with
-        // the words it was read from, so a person can check it.
-        const offer = gal.offer || {};
-        c._said = {
-          remarks: gal.remarks || '', agentRemarks: gal.agentRemarks || '',
-          showing: gal.showingNotes || '', offerNotes: gal.offerNotes || '',
-          offerDue: offer.due || '', offerFrom: offer.from || '', offerPhrase: offer.phrase || '',
-          agentName: gal.agentName || '', agentOffice: gal.agentOffice || '',
-          agentPhone: gal.agentPhone || '', agentPhoneFrom: gal.agentPhoneFrom || '',
-        };
-        if (gal.agentName || gal.agentPhone) {
-          log(`  listing agent: ${[gal.agentName, gal.agentOffice].filter(Boolean).join(', ') || '—'}`
-            + (gal.agentPhone ? ` · ${gal.agentPhone} (${gal.agentPhoneFrom})` : ' · no phone on the listing'));
-        }
-        if (offer.due) log(`  offer deadline ${offer.due.replace(/^~/, '≈ ')} — from ${offer.from}: "${offer.phrase}"`, 'good');
         const base = { i: i + 1, total: fresh.length, city: cityOf(c), mls: c.mls, addr: c.addr,
           price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n,
-          remarks: gal.remarks || '', agentRemarks: gal.agentRemarks || '',
-          showingNotes: gal.showingNotes || '', offer, details: gal.details || {},
-          agentName: gal.agentName || '', agentOffice: gal.agentOffice || '', agentPhone: gal.agentPhone || '' };
-        // The run NEVER stops to ask. AI vision when a key is configured,
-        // otherwise the text rules; when the rules genuinely cannot tell
-        // (they read remarks, they never see a photo) the fallback in
-        // section 2 settles it. There is no approval step to click through.
-        let decision, dropReason = '';
-        if (core.isConfirmed(c.addr)) {
-          // A deal Bryan has already confirmed. No screen, and no model, gets
-          // to overrule that.
-          decision = 'keep'; dropReason = '';
-          send('review', { ...base, verdict: 'keep', why: 'Confirmed deal — kept regardless of the rules' });
-          log(`  KEEP ${c.addr} — confirmed deal`, 'good');
-        } else if (cfg.useAI && cfg.apiKey) {
+          remarks: gal.remarks || '', details: gal.details || {} };
+        // THE QUALIFICATION GATE. Every listing gets an Opportunity Score and a
+        // bucket — A work now, B AI review, C auto-pass. C never reaches the
+        // board; it goes to the Rejected tab with its score and why. Hard
+        // exclusions (renovated, multi-unit, fire, structural, too few photos)
+        // are always C. The run never stops to ask.
+        const q = core.qualify({
+          addr: c.addr, remarks: gal.remarks, privateRemarks: gal.privateRemarks,
+          condition: gal.condition, occupiedBy: gal.occupiedBy, propClass: gal.propClass,
+          photos: n, photosReliable: gal.gridOk,
+          dom: domOf(c), yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
+          price: gal.listPrice || c._price, origPrice: gal.origPrice,
+          ppsfRatio: cityMedians && cityMedians[c._cityKey] ? c._ppsf / cityMedians[c._cityKey] : 0,
+          whenUnsure: cfg.whenUnsure,
+        });
+        if (!gal.gridOk && n) log(`  photo grid did not load — only ${n} carousel photo(s) seen, photo count not used`, 'warn');
+        if (gal.privateRemarks) log(`  private remarks read (${gal.privateRemarks.length} chars)`);
+        if (cfg.useAI && cfg.apiKey && !core.isConfirmed(c.addr) && !q.hard) {
+          // AI vision still has the final say on condition when it is on: a
+          // DROP from the photos is an auto-pass whatever the text scored.
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
-          decision = v.decision; dropReason = v.reason;
-          send('review', { ...base, verdict: v.decision, why: 'AI (vision): ' + v.reason });
-          log(`  AI ${v.decision.toUpperCase()}: ${v.reason}`, v.decision === 'keep' ? 'good' : 'info');
-        } else {
-          const v = core.rulesDecide({ addr: c.addr, photos: n, remarks: gal.remarks,
-            agentRemarks: gal.agentRemarks, showing: gal.showingNotes,
-            condition: gal.condition, propClass: gal.propClass });
-          const settled = v.decision === 'manual' ? (cfg.whenUnsure === 'drop' ? 'drop' : 'keep') : v.decision;
-          decision = settled;
-          dropReason = v.decision === 'manual' ? v.reason + ' (auto-' + settled + ')' : v.reason;
-          const tag = v.decision === 'manual' ? `Rules unsure → ${settled.toUpperCase()}` : `Rules ${settled.toUpperCase()}`;
-          send('review', { ...base, verdict: settled, why: tag + ': ' + v.reason });
-          log(`  ${tag}: ${v.reason}`, settled === 'keep' ? 'good' : 'info');
+          if (v.decision !== 'keep') {
+            Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop',
+              score: Math.min(q.score, 15), why: 'AI (vision): ' + v.reason });
+          } else {
+            q.why = q.why + ' + AI (vision) keep: ' + v.reason;
+          }
         }
+        c._q = q;
+        c._gal = { origPrice: gal.origPrice, listPrice: gal.listPrice, listedBy: gal.listedBy,
+          occupiedBy: gal.occupiedBy || '', privateRemarks: gal.privateRemarks || '', status: gal.status || '',
+          agentPhone: gal.agentPhone || '', agentEmail: gal.agentEmail || '', showing: gal.showing || '',
+          disclosures: gal.disclosures || '',
+          // No MLS field holds it — agents write it into the remarks.
+          offerDue: core.offerDue([gal.privateRemarks, gal.remarks].filter(Boolean).join(' \n ')) };
+        if (c._gal.offerDue) log(`  offer due: ${c._gal.offerDue}`, 'good');
+        const decision = q.decision;
+        const dropReason = q.decision === 'drop' ? `Auto-pass (score ${q.score}): ${q.why}` : '';
+        send('review', { ...base, verdict: decision, why: `${q.label} · score ${q.score} — ${q.why}` });
+        log(`  ${q.label} · score ${q.score} — ${q.why}`, decision === 'keep' ? 'good' : 'info');
         if (control.stopped) break;
         runKpi.reviewed++;
+        runKpi['bucket' + q.bucket]++;
         if (decision === 'keep') {
-          c._why = dropReason || '';
+          // For the Lead Board: the public remarks and the house's own Redfin page.
+          c._remarks = gal.remarks || '';
           c._redfin = await redfinUrl(c.fullAddr || c.addr);
-          log(c._redfin ? `  Redfin page: ${c._redfin}` : '  no matching Redfin page found — the board will offer a search', c._redfin ? 'good' : 'info');
+          log(c._redfin ? `  Redfin page: ${c._redfin}` : '  no matching Redfin page found', c._redfin ? 'good' : 'info');
           kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good');
         }
         else {
@@ -810,8 +794,9 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           cityRejects.push({
             mls: c.mls, addr: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
             price: c._price, ppsf: c._ppsf, sqft: c._sqft, dom: domOf(c),
-            reason: dropReason || 'dropped at photo review', stage: 'Photo review',
-            link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+            reason: dropReason || 'dropped at photo review',
+            stage: c._q && !c._q.hard && !/^AI/.test(c._q.why) ? 'Qualification gate' : 'Photo review',
+            link: core.mlsUrl(c.mls),
           });
         }
         // Record as we go, not at the end — a crash or Stop mid-run must not
@@ -839,19 +824,18 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             arv: 0, arvBasis: 'not comped yet',
             recommendation: 'Needs Comps', flipQuality: '', score: '',
             risks: 'Condition-qualified only — ARV and profit not yet calculated',
-            link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
+            ...gateFields(c),
+            link: core.mlsUrl(c.mls),
             // Push these: with no ARV there is no gate to clear, and the point
             // of this mode is to get the qualified list in front of you.
             surface: true, needsComps: true,
-            ...said(c),
           });
         }
         log(`[${label}] comps skipped — ${cityLeads.length} condition-qualified listing(s)`, 'good');
       } else {
       send('city', { label, index: ai + 1, total: areas.length, phase: 'comping', count: kept.length });
       for (const c of kept) {
-        await waitIfPaused();
-        if (control.stopped) break;
+        if (await stopRequested()) break;   // save what was read, then stop
         log(`[${label}] Comping ${c.addr}…`);
         const zip = (c.zip || '').match(/9\d{4}/) ? c.zip : await js(`(() => { const m=document.body.innerText.match(/\\b(9[45]\\d{3})\\b/); return m?m[1]:''; })()`).catch(() => '');
         let comp = { arv: 0, medianPpsf: 0, band: 'n/a', n: 0 };
@@ -862,17 +846,19 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''), dom: domOf(c), price: c._price,
           arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
           arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
-          link: `https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=${c.mls}`,
-          ...deal, ...said(c) });
+          link: core.mlsUrl(c.mls),
+          ...deal, ...gateFields(c) });
       }
       }
 
       leads.push(...cityLeads);
       // Without comps there is no profit to rank by — fall back to the best
       // value signal we do have, cheapest $/sqft first.
-      leads.sort(cfg.runComps
-        ? (a, b) => b.grossLight - a.grossLight
-        : (a, b) => (a.ppsf || Infinity) - (b.ppsf || Infinity));
+      // A before B, then the higher Opportunity Score; profit (with comps) or
+      // cheapest $/sqft (without) breaks ties.
+      leads.sort((a, b) => String(a.bucket || 'Z').localeCompare(String(b.bucket || 'Z'))
+        || (b.oppScore || 0) - (a.oppScore || 0)
+        || (cfg.runComps ? b.grossLight - a.grossLight : (a.ppsf || Infinity) - (b.ppsf || Infinity)));
       runKpi.leads = leads.length;
       runKpi.gateCleared = leads.filter(l => l.surface).length;
       send('report', { leads, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
@@ -888,8 +874,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         if (googleReady() && googleCfg().autoSync) {
           const s = await googleSync(rows, cityRejects);
           if (s.ok) {
-            // "pushed" now counts leads handed to the Lead Board (below); the
-            // old sheet path, if anyone still has it connected, is logged only.
+            runKpi.pushed += s.leads.added;
             runKpi.pushSkipped += s.leads.updated;
             log(`[${label}] sheet updated: ${s.leads.added} new lead(s), ${s.leads.updated} refreshed, `
               + `${s.rejects.added} rejection(s) logged`, 'good');
@@ -897,20 +882,20 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             log(`[${label}] sheet write failed: ${s.error} — kept in the local backup`, 'warn');
           }
         }
-        // The Lead Board's copy of this city. Written before anything else can
-        // fail, and merged into the day's file, so a later city or a second run
-        // today adds to it rather than replacing it.
-        if (cityWinners.length) {
-          const b = writeBoardScan(cityWinners);
-          if (b.ok) { runKpi.pushed += b.added; log(`[${label}] ${cityWinners.length} lead(s) added to today's Lead Board file`, 'good'); }
-          else log(`[${label}] could not write the Lead Board file: ${b.error}`, 'warn');
-        }
         // Written either way: a failed API call, or a disconnected sheet, must
         // never lose a city that has already been reviewed.
         const d = writeBackup(rows, cityRejects);
         if (!d.ok) log(`[${label}] could not write the local backup: ${d.error}`, 'warn');
+        // The Lead Board's copy of this city, merged into the day's file.
+        if (cityWinners.length) {
+          const b = writeBoardScan(cityWinners);
+          if (b.ok) log(`[${label}] ${cityWinners.length} lead(s) added to today's Lead Board file`, 'good');
+          else log(`[${label}] could not write the Lead Board file: ${b.error}`, 'warn');
+        }
       }
-      log(`━━━ ${label} done: ${kept.length} kept, ${cityWinners.length} clear the gate ━━━`, 'good');
+      const cityA = cityLeads.filter(l => l.bucket === 'A').length;
+      log(`━━━ ${label} done: ${cityA} A — Work Now · ${cityLeads.length - cityA} B — AI Review · `
+        + `${cityRejects.filter(r => r.stage !== 'Buy-box filter').length} C — Auto-Pass ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'done',
         kept: kept.length, winners: cityWinners.length });
     }
@@ -921,7 +906,9 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       return { ok: true, leads: [] };
     }
     // Leads were already written city by city above — don't re-send them here.
-    log(`Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate.`, 'good');
+    log(cfg.runComps
+      ? `Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate.`
+      : `Done. ${leads.length} lead(s) on the board — comps are off, so no profit figures yet.`, 'good');
     return { ok: true, leads };
   } catch (e) {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
@@ -932,6 +919,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     // and a day with three aborted runs should look different from a quiet one.
     const day = recordKpi(runKpi);
     send('kpi', { today: day, history: kpiReport() });
+    if (started && googleReady() && googleCfg().autoSync) await rebuildBoard(day);
     // Only attempt the KPI push when a sheet is actually connected — an
     // unconfigured app must not log a failure after every single run.
     // FINISH, VISIBLY. The run used to just stop making noise — the MLS window
@@ -946,12 +934,11 @@ ipcMain.handle('start-scan', async (_e, opts) => {
 function finishRun(runKpi, day, started) {
   if (!started) { send('done', { neverStarted: true, summary: 'Not signed in — nothing scanned.' }); return; }
   closeMlsWindow();
-  prunePages();
   const line = control.stopped
-    ? `Scan STOPPED early — ${runKpi.reviewed} reviewed, ${runKpi.kept} kept, ${runKpi.pushed} new for the Lead Board.`
+    ? `Scan STOPPED early — ${runKpi.reviewed} reviewed, ${runKpi.kept} kept, ${runKpi.pushed} written to the sheet.`
     : `Scan COMPLETE — ${runKpi.scanned} scanned · ${runKpi.skippedAlreadyChecked} already checked (skipped) · `
-      + `${runKpi.reviewed} reviewed · ${runKpi.kept} kept · ${runKpi.dropped} dropped · `
-      + `${runKpi.pushed} new for the Lead Board.`;
+      + `${runKpi.reviewed} reviewed → ${runKpi.bucketA} A — Work Now · ${runKpi.bucketB} B — AI Review · `
+      + `${runKpi.bucketC} C — Auto-Pass · sheet: ${runKpi.pushed} new, ${runKpi.pushSkipped} updated.`;
   log(line, 'good');
   // Hand today's leads to the Lead Board: on the clipboard, ready to paste.
   const board = boardStatus();
@@ -960,7 +947,7 @@ function finishRun(runKpi, day, started) {
       clipboard.writeText(fs.readFileSync(board.file, 'utf8'));
       log(`Today's ${board.count} lead(s) are copied — open the Lead Board, click "Add scan", and paste.`
         + (board.offers ? ` ${board.offers} have an offer deadline.` : ''), 'good');
-    } catch (e) { log('Could not copy the leads: ' + e.message + ' — use "Copy for the board" in section 7.', 'warn'); }
+    } catch (e) { log('Could not copy the leads: ' + e.message + ' — use "Copy for the board".', 'warn'); }
   }
   send('board', board);
   log('Nothing else is running. Start scan again whenever you want the next pass.', 'good');
@@ -985,36 +972,14 @@ ipcMain.on('stop', () => { control.stopped = true; control.paused = false; });
 
 // ---------- the Lead Board hand-off ----------
 // One file per day, in Documents/FlipScout, holding every lead the day's runs
-// kept — with its remarks and offer deadline. The Lead Board's "Add scan"
-// button takes this file (or the same text pasted), so leads go from the scan
-// to the board with no spreadsheet in between. An artifact's shared data can
-// only be written from the board page itself, which is why this is a paste and
-// not a push.
+// kept — remarks, offer deadline, listing agent and bucket included. The Lead
+// Board's "Add scan" takes this file (or the same text pasted). An artifact's
+// shared data can only be written from the board page itself, which is why
+// this is a paste and not a push. Field names match the board's scanLead().
 const BOARD_DIR = () => path.join(app.getPath('documents'), 'FlipScout');
 const BOARD_FILE = (d = todayKey()) => path.join(BOARD_DIR(), `FlipScout-scan-${d}.json`);
-const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
 
-/** One lead as the board stores it. Short keys are not worth the confusion;
- *  lengths are capped so a pasted file can never blow the board's storage. */
-function boardLead(l) {
-  const num = v => (v === '' || v == null || !isFinite(Number(v))) ? null : Number(v);
-  return {
-    mls: clip(l.mls, 20).toUpperCase(),
-    addr: clip(fullAddress(l.address, l.city, l.zip), 160),
-    city: clip(l.city, 60), zip: clip(l.zip, 10),
-    price: num(l.price), ppsf: num(l.ppsf), sqft: num(l.sqft),
-    beds: num(l.beds), baths: num(l.baths), year: num(l.yearBuilt), dom: num(l.dom),
-    remarks: clip(l.remarks, 2000), agentRemarks: clip(l.agentRemarks, 1500),
-    showing: clip(l.showing, 600),
-    offerDue: /^~?\d{4}-\d{2}-\d{2}$/.test(l.offerDue || '') ? l.offerDue : '',
-    offerFrom: clip(l.offerFrom, 40), offerPhrase: clip(l.offerPhrase, 200),
-    why: clip(l.why, 240),
-    agentName: clip(l.agentName, 80), agentOffice: clip(l.agentOffice, 100),
-    agentPhone: /^\(\d{3}\) \d{3}-\d{4}$/.test(l.agentPhone || '') ? l.agentPhone : '',
-    agentPhoneFrom: clip(l.agentPhoneFrom, 30),
-    redfin: /^https:\/\/www\.redfin\.com\/[A-Z]{2}\/[^\s"<>]+\/home\/\d+$/.test(l.redfin || '') ? l.redfin : '',
-  };
-}
+const boardLead = core.boardLead;
 
 function readBoardScan(d) {
   try {
@@ -1032,10 +997,8 @@ function writeBoardScan(leads) {
     ((prev && prev.leads) || []).forEach(l => { if (l.mls) by[l.mls] = l; });
     const before = Object.keys(by).length;
     (leads || []).map(boardLead).forEach(l => { if (l.mls) by[l.mls] = l; });
-    const out = {
-      kind: 'flipscout-scan', v: 1, app: app.getVersion(), pulled: d,
-      made: new Date().toISOString(), leads: Object.keys(by).map(k => by[k]),
-    };
+    const out = { kind: 'flipscout-scan', v: 1, app: app.getVersion(), pulled: d,
+      made: new Date().toISOString(), leads: Object.keys(by).map(k => by[k]) };
     fs.mkdirSync(BOARD_DIR(), { recursive: true });
     fs.writeFileSync(BOARD_FILE(d), JSON.stringify(out, null, 1));
     return { ok: true, added: out.leads.length - before, total: out.leads.length };
@@ -1179,7 +1142,20 @@ const LEAD_HEADERS = [
   'Status', 'MLS #', 'Address',
   'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
   'Purchase Price', '$/SqFt', 'Notes', 'MLS Link', 'First Added',
+  // Qualification gate — appended at the END so every existing row and the
+  // reviewer script (which reads by header name) keep lining up.
+  'Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Listing Agent',
+  'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures',
 ];
+// Read fresh off the listing on every review, so a re-review replaces them —
+// an offer date goes from "TBD" to a real date, remarks get edited.
+const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
+// Facts re-read by "Refresh leads on the board" — the listing's own data, never
+// the reviewer's columns. Bucket / score are only filled where still blank.
+const FACT_HEADERS = ['Price Cut', 'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
 const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
@@ -1202,7 +1178,13 @@ const leadRecord = r => ({
   'Status': r.status || '', 'MLS #': r.mls, 'Address': fullAddress(r.address, r.city, r.zip),
   'Beds': r.beds, 'Baths': r.baths, 'SqFt': r.sqft, 'Lot SqFt': r.lotSqft,
   'Year Built': r.yearBuilt, 'DOM': r.dom, 'Purchase Price': r.price, '$/SqFt': r.ppsf,
-  'Notes': r.notes, 'MLS Link': r.link || mlsLink(r.mls), 'First Added': today(),
+  'Notes': r.notes, 'MLS Link': core.fixLink(r.link, r.mls), 'First Added': today(),
+  'Bucket': r.bucket || '', 'Opportunity Score': r.oppScore != null ? r.oppScore : '',
+  'Why': r.why || '', 'Price Cut': r.priceCut || '', 'Listing Agent': r.listedBy || '',
+  'Offer Due': r.offerDue || '', 'Private Remarks': r.privateRemarks || '', 'Occupied By': r.occupiedBy || '',
+  'MLS Status': r.mlsStatus || '',
+  'Agent Phone': r.agentPhone || '', 'Agent Email': r.agentEmail || '', 'Showing': r.showing || '',
+  'Disclosures': r.disclosures || '',
 });
 
 const rejectRecord = r => ({
@@ -1210,7 +1192,7 @@ const rejectRecord = r => ({
   'Address': fullAddress(r.addr || r.address, r.city, r.zip),
   'Price': r.price, '$/SqFt': r.ppsf,
   'SqFt': r.sqft, 'DOM': r.dom, 'Reason': r.reason || '', 'Stage': r.stage || '',
-  'By': 'FlipScout', 'MLS Link': r.link || mlsLink(r.mls),
+  'By': 'FlipScout', 'MLS Link': core.fixLink(r.link, r.mls),
 });
 
 /** Every MLS # already on the Rejected tab. */
@@ -1246,7 +1228,7 @@ async function googleSync(leads, rejects) {
     leads = fresh;
 
     const L = (leads && leads.length)
-      ? await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', leads.map(leadRecord))
+      ? await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', leads.map(leadRecord), { overwrite: GATE_HEADERS })
       : blank;
     // Rejections can repeat an MLS # across stages; key on it anyway so the tab
     // holds one row per property rather than growing a row per scan.
@@ -1349,6 +1331,23 @@ ipcMain.handle('google-sync', async (_e, { leads, rejects }) => {
   return r;
 });
 
+/** The qualification-gate fields carried on every lead. */
+function gateFields(c) {
+  const q = c._q || {}, g = c._gal || {};
+  // Same list price the score used — the report's, falling back to the grid's.
+  const orig = core.num(g.origPrice), list = core.num(g.listPrice) || c._price;
+  return {
+    bucket: q.bucket || '', bucketLabel: q.label || '', oppScore: q.score != null ? q.score : '',
+    why: q.why || '', listedBy: g.listedBy || '',
+    offerDue: g.offerDue || '', privateRemarks: g.privateRemarks || '', occupiedBy: g.occupiedBy || '',
+    mlsStatus: g.status || '',
+    agentPhone: g.agentPhone || '', agentEmail: g.agentEmail || '', showing: g.showing || '',
+    disclosures: g.disclosures || '',
+    remarks: c._remarks || '', redfin: c._redfin || '',
+    priceCut: orig > list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
+  };
+}
+
 /** One lead in the shape the sheet expects. Shared by the sheet writer and the
  *  local backup so the two can never drift apart. */
 function toSheetRow(l) {
@@ -1362,6 +1361,12 @@ function toSheetRow(l) {
     rehabLight: l.rehabLight || '', rehabHeavy: l.rehabHeavy || '',
     holding: l.holding || '', maxOffer: l.recommendedMaxOffer || '',
     score: l.score || '', recommendation: l.recommendation || '', flipQuality: l.flipQuality || '',
+    bucket: l.bucketLabel || '', oppScore: l.oppScore, why: l.why || '',
+    priceCut: l.priceCut || '', listedBy: l.listedBy || '',
+    offerDue: l.offerDue || '', privateRemarks: l.privateRemarks || '', occupiedBy: l.occupiedBy || '',
+    mlsStatus: l.mlsStatus || '',
+    agentPhone: l.agentPhone || '', agentEmail: l.agentEmail || '', showing: l.showing || '',
+    disclosures: l.disclosures || '',
   };
 }
 
@@ -1387,12 +1392,180 @@ async function syncRejectedIntoLedger() {
         ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: 'reviewer-rejected' })));
         log(`Reviewer rejections synced: ${fresh.length} new (won't be checked again).`);
       }
-      return { ok: true, total: ids.length, added: fresh.length };
+      // Leads already on the board are not re-reviewed by a scan either — that
+      // was 15 of 16 listings on the first test run, re-reviewed for nothing.
+      // "Refresh leads on the board" is what keeps their facts current.
+      const lcol = gsheets.colName(LEAD_HEADERS.indexOf('MLS #'));
+      const onBoard = info.tabs.indexOf(g.leadTab) < 0 ? []
+        : await gsheets.readCol(token, g.sheetId, g.leadTab, `${lcol}2:${lcol}`);
+      const seen2 = loadLedger();
+      const freshBoard = onBoard.filter(m => m && !seen2[String(m).trim().toUpperCase()]);
+      if (freshBoard.length) {
+        ledgerRecordMany(freshBoard.map(m => ({ mls: m, verdict: 'on-board' })));
+        log(`Leads already on the sheet: ${freshBoard.length} (skipped by scans — use "Refresh leads on the board").`);
+      }
+      return { ok: true, total: ids.length, added: fresh.length, onBoard: freshBoard.length };
     } catch (e) { return { ok: false, error: e.message }; }
   }
   return { ok: false, unconfigured: true, error: 'connect your Google Sheet in section 7 first' };
 }
 
+
+// ---------- the Board tab ----------
+// One tab that says what to work on: today's funnel on top, then the live A /
+// B leads in work order (soonest offer deadline first). Rebuilt from the Leads
+// tab after every scan and every refresh — nothing on it is typed by hand.
+const BOARD_TAB = 'Board';
+async function rebuildBoard(day) {
+  if (!googleReady()) return { ok: false, unconfigured: true };
+  try {
+    const g = googleCfg();
+    const token = await googleToken();
+    const rows = await gsheets.readAll(token, g.sheetId, g.leadTab);
+    const today = day || Object.assign(blankKpi(), loadKpi()[todayKey()] || {});
+    const board = core.buildBoard(rows, today, new Date());
+    await gsheets.replaceTab(token, g.sheetId, BOARD_TAB, board);
+    const listed = Math.max(0, board.length - 9);
+    log(`Board updated — ${listed} lead(s) in work order.`, 'good');
+    return { ok: true, listed };
+  } catch (e) {
+    log('Board update failed: ' + e.message, 'warn');
+    return { ok: false, error: e.message };
+  }
+}
+ipcMain.handle('board-rebuild', () => rebuildBoard());
+
+// ---------- refresh the leads already on the board ----------
+// A lead is only reviewed once, but its facts move: "Offer Date TBD" becomes a
+// date, the price gets cut, the listing goes pending. This re-reads JUST the
+// leads on the Leads tab (not the passed ones) — reports only, no photos — and
+// updates the listing's own columns. Notes and anything typed by hand are
+// never touched. Rows that were never scored get a bucket and score too.
+ipcMain.handle('refresh-board', async () => {
+  if (control.running) return { ok: false, error: 'a scan is already running' };
+  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 7 first' };
+  control.running = true; control.stopped = false; control.paused = false;
+  let done = 0, notFound = 0, scored = 0, flagged = 0, started = false;
+  try {
+    if (!mlsWin || mlsWin.isDestroyed()) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
+    const title = await js(core.JS_TITLE).catch(() => '');
+    if (!/Dashboard|Matrix/i.test(title)) { log('Not logged in — sign in first.', 'error'); return { ok: false, error: 'not signed in' }; }
+    started = true;
+    const g = googleCfg();
+    const token = await googleToken();
+    const rows = await gsheets.readAll(token, g.sheetId, g.leadTab);
+    const head = (rows[0] || []).map(h => String(h).trim());
+    const val = (r, h) => { const i = head.indexOf(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); };
+    // Newest first (rows are appended, so later rows are newer; First Added
+    // breaks ties), and closed listings are skipped — a sold house has
+    // nothing left to refresh, and re-reading hundreds of them took hours.
+    const all = rows.slice(1).map((r, i) => ({ r, i })).filter(x => val(x.r, 'MLS #'));
+    const passedN = all.filter(x => core.PASSED_NOTE.test(val(x.r, 'Notes'))).length;
+    const closedN = all.filter(x => !core.PASSED_NOTE.test(val(x.r, 'Notes')) && core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))).length;
+    // A leads first, then B, then anything not scored yet — so the leads Juan
+    // works are current within minutes. Inside a bucket, newest row first.
+    // (Sorting on First Added alone put the day's SF leads at #59: every row
+    // carried the same Aug 1 date.) C leads are auto-passed; skip them.
+    const rankOf = r => ({ A: 0, B: 1 })[(val(r, 'Bucket').match(/^[ABC]/) || ['?'])[0]] ?? 2;
+    const todo = all
+      .filter(x => !core.PASSED_NOTE.test(val(x.r, 'Notes')) && !core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))
+        && !/^C/.test(val(x.r, 'Bucket')))
+      .sort((a, b) => rankOf(a.r) - rankOf(b.r) || b.i - a.i)
+      .map(x => x.r);
+    log(`Refreshing ${todo.length} lead(s), A first then B (reports only, no photos) — `
+      + `skipping ${closedN} closed and ${passedN} passed in Notes…`, 'good');
+
+    let batch = [];
+    // Old broken Portal.aspx links on the rows we are NOT re-reading (closed,
+    // passed) are fixed in the same write — no MLS lookup needed for that.
+    const skipped = all.map(x => x.r).filter(r => todo.indexOf(r) < 0 && /Portal\.aspx/i.test(val(r, 'MLS Link')));
+    const flush = async () => {
+      if (!batch.length) return;
+      await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', batch,
+        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link'] });
+      batch = [];
+    };
+    if (skipped.length) {
+      for (const r of skipped) batch.push({ 'MLS #': val(r, 'MLS #'), 'MLS Link': core.mlsUrl(val(r, 'MLS #')) });
+      await flush();
+      log(`  fixed ${skipped.length} old MLS link(s) on closed / passed rows`);
+    }
+    for (let i = 0; i < todo.length; i++) {
+      if (await stopRequested()) break;   // flush + Board rebuild below still run
+      const r = todo[i], mls = val(r, 'MLS #');
+      log(`  [${i + 1}/${todo.length}] ${val(r, 'Address') || mls}`);
+      const gal = await showGallery(mls, { factsOnly: true }).catch(() => ({ mismatch: true }));
+      if (gal.mismatch) {
+        // Either it left the Active search (pending / sold / withdrawn) or
+        // Matrix showed another listing. Say so; never guess.
+        notFound++;
+        batch.push({ 'MLS #': mls, 'MLS Status': 'Not found in Active search — check' });
+        log('    not found in an Active search — may be pending or off market', 'warn');
+      } else {
+        const list = core.num(gal.listPrice) || core.num(val(r, 'Purchase Price'));
+        const orig = core.num(gal.origPrice);
+        const offer = core.offerDue([gal.privateRemarks, gal.remarks].filter(Boolean).join(' \n '));
+        const rec = {
+          'MLS #': mls,
+          'Price Cut': orig > list && list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
+          'Listing Agent': gal.listedBy || '', 'Offer Due': offer,
+          'Private Remarks': gal.privateRemarks || '', 'Occupied By': gal.occupiedBy || '',
+          'MLS Status': gal.status || '',
+          'MLS Link': core.mlsUrl(mls),
+          'Agent Phone': gal.agentPhone || '', 'Agent Email': gal.agentEmail || '',
+          'Showing': gal.showing || '', 'Disclosures': gal.disclosures || '',
+        };
+        // Red flags in the remarks move a lead that was already scored to
+        // C — a private remark like "this is not a cosmetic remodel" or
+        // "plans approved by the City" is exactly what the quick-flip rule
+        // excludes, and it used to stay on the Board because only unscored
+        // rows were looked at. Only ever DOWN: a refresh never upgrades.
+        const hard = val(r, 'Bucket') && !/^C/.test(val(r, 'Bucket')) && !core.isConfirmed(gal.address || val(r, 'Address'))
+          ? core.rulesDecide({ addr: gal.address || val(r, 'Address'), photos: 0,
+              remarks: [gal.remarks, gal.privateRemarks].filter(Boolean).join(' '),
+              condition: gal.condition, propClass: gal.propClass })
+          : null;
+        if (hard && hard.decision === 'drop') {
+          Object.assign(rec, { 'Bucket': core.BUCKET_LABEL.C, 'Opportunity Score': 15,
+            'Why': hard.reason + ' (found on refresh)' });
+          flagged++;
+        } else if (!val(r, 'Bucket')) {
+          // Never scored (an older row). No area medians or photos on a refresh,
+          // so the score leaves those out and says so.
+          const q = core.qualify({
+            addr: gal.address || val(r, 'Address'), remarks: gal.remarks, privateRemarks: gal.privateRemarks,
+            condition: gal.condition, occupiedBy: gal.occupiedBy, propClass: gal.propClass, photos: 0,
+            dom: val(r, 'DOM'), yearBuilt: gal.yearBuilt || val(r, 'Year Built'),
+            price: list, origPrice: gal.origPrice, whenUnsure: cfg.whenUnsure,
+          });
+          Object.assign(rec, { 'Bucket': q.label, 'Opportunity Score': q.score,
+            'Why': q.why + ' (scored on refresh — no $/sqft or photo check)' });
+          scored++;
+        }
+        batch.push(rec);
+        done++;
+        log(`    ${gal.status || 'status ?'}${offer ? ' · offer due ' + offer : ''}${rec.Bucket ? ' · ' + rec.Bucket + ' ' + rec['Opportunity Score'] : ''}`
+          + `${gal.agentPhone ? ' · ' + gal.agentPhone : ''}${hard && hard.decision === 'drop' ? ' · RED FLAG: ' + hard.reason : ''}`,
+          offer ? 'good' : 'info');
+      }
+      if (batch.length >= 10) await flush();   // a Stop mid-way keeps what was read
+    }
+    await flush();
+    await rebuildBoard();
+    const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · `
+      + `${flagged} moved to C by a red flag · ${notFound} not found in an Active search.`;
+    log(line, 'good');
+    return { ok: true, done, scored, notFound };
+  } catch (e) {
+    if (e.message === 'stopped') { log('Refresh stopped.', 'warn'); return { ok: false, stopped: true }; }
+    log('Refresh error: ' + e.message, 'error');
+    return { ok: false, error: e.message };
+  } finally {
+    control.running = false;
+    if (started) closeMlsWindow();
+    send('done', { stopped: control.stopped, summary: `Refresh finished — ${done} updated, ${notFound} not found.` });
+  }
+});
 
 ipcMain.handle('ledger-stats', () => {
   const e = loadLedger();
@@ -1446,7 +1619,8 @@ ipcMain.handle('export', async (_e, { leads }) => {
   });
   if (canceled || !filePath) return { ok: false };
   if (filePath.endsWith('.json')) { fs.writeFileSync(filePath, JSON.stringify(leads, null, 2)); return { ok: true, filePath }; }
-  const cols = ['score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
+  // The gate's columns lead: they are what decides which rows to work first.
+  const cols = ['bucketLabel', 'oppScore', 'offerDue', 'agentPhone', 'agentEmail', 'showing', 'disclosures', 'why', 'priceCut', 'listedBy', 'occupiedBy', 'privateRemarks', 'score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
   const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
   const csv = [cols.join(',')].concat(leads.map(l => cols.map(c => esc(l[c])).join(','))).join('\n');
   fs.writeFileSync(filePath, csv);
