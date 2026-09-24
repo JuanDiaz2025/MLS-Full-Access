@@ -331,16 +331,18 @@ button.due-src.approx{color:var(--t-offer)}
 .contact{display:flex; flex-wrap:wrap; gap:4px 10px; margin-top:6px; font-size:12.5px}
 .contact .c{display:inline-flex; align-items:center; gap:5px; font-family:"IBM Plex Mono",ui-monospace,monospace; color:var(--ink); user-select:all}
 .contact.none{color:var(--muted); font-style:italic; font-size:11.5px}
-.contact .c.em{font-family:inherit; overflow-wrap:anywhere}
+.contact .c.em{font-family:inherit; flex-wrap:wrap; row-gap:4px; overflow-wrap:anywhere}
+.copy,.mailbtn{white-space:nowrap; flex:none}
 .copy{border:1px solid var(--line); background:var(--surface-2); color:var(--muted); border-radius:5px;
   font:600 10.5px Archivo,sans-serif; letter-spacing:.03em; padding:1px 6px; cursor:pointer; user-select:none}
 .copy:hover{border-color:var(--accent); color:var(--accent)}
 .mailbtn{display:inline-flex; align-items:center; gap:4px; border:1px solid var(--accent); color:var(--accent);
   background:var(--surface); border-radius:6px; font:600 11.5px Archivo,sans-serif; padding:2px 8px; text-decoration:none; cursor:pointer}
 .mailbtn:hover{background:var(--accent); color:#fff}
-.mailbtn.again{border-color:var(--line); color:var(--muted)}
+.mailbtn{margin-left:4px; padding:1px 7px; font-size:11px}
+.mailbtn.done{border-color:transparent; background:var(--b-won); color:var(--t-won)}
+.mailbtn.done:hover{background:var(--t-won); color:#fff}
 .mailbtn.sure{border-color:var(--t-offer); color:var(--t-offer)}
-.mailed{display:inline-block; font-size:11.5px; color:var(--t-won); font-weight:600}
 .mlslink{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; margin-left:8px; font-weight:600}
 .mst{display:inline-block; margin-left:8px; font-family:Archivo,sans-serif; font-size:10.5px; font-weight:700;
   letter-spacing:.04em; text-transform:uppercase; border-radius:999px; padding:1px 7px; vertical-align:1px}
@@ -1141,8 +1143,8 @@ footer .num{font-size:12px}
     return '<span class="contact">' +
       (l.agentName ? '<span>' + esc(l.agentName) + '</span>' : '') +
       (l.agentPhone ? '<span class="c">' + esc(l.agentPhone) + '<button type="button" class="copy" data-copy="' + esc(l.agentPhone) + '" aria-label="Copy phone number">Copy</button></span>' : '') +
-      (l.agentEmail ? '<span class="c em">' + esc(l.agentEmail) + '<button type="button" class="copy" data-copy="' + esc(l.agentEmail) + '" aria-label="Copy email">Copy</button></span>' : '') +
-      mailHTML(l) + '</span>';
+      (l.agentEmail ? '<span class="c em">' + esc(l.agentEmail) + '<button type="button" class="copy" data-copy="' + esc(l.agentEmail) + '" aria-label="Copy email">Copy</button>' + mailHTML(l) + '</span>' : '') +
+      '</span>';
   }
 
   /* ---------- agent email: a Gmail compose window, filled in ---------- */
@@ -1176,11 +1178,12 @@ footer .num{font-size:12px}
   function mailHTML(l){
     if (!l.agentEmail) return "";
     var m = mailedOf(l);
-    return (m ? '<span class="mailed">✉️ Emailed · ' + esc(m.eb || "Someone") + ' · ' + esc(noteWhen(m.em)) + '</span>' : '') +
-      '<a class="mailbtn' + (m ? ' again' : '') + '" href="' + esc(mailUrl(l)) + '" target="_blank" rel="noopener"' +
+    // once emailed, the button itself says so — one element, not two
+    return '<a class="mailbtn' + (m ? ' done' : '') + '" href="' + esc(mailUrl(l)) + '" target="_blank" rel="noopener"' +
       ' data-mail="' + esc(l.mls) + '" data-date="' + esc(l.date) + '"' +
-      ' title="Opens Gmail with the email to ' + esc(l.agentEmail) + ' written — fill in the offer amount, then Send">' +
-      (m ? '✉️ Email again' : '✉️ Draft email') + '</a>';
+      ' title="' + (m ? 'Emailed by ' + esc(m.eb || "Someone") + ', ' + esc(noteWhen(m.em)) + ' — click twice to email again'
+                      : 'Opens Gmail with the email to ' + esc(l.agentEmail) + ' written — fill in the offer amount, then Send') + '">' +
+      (m ? '✓ Emailed ' + esc(noteDay(m.em)) : '✉ Email agent') + '</a>';
   }
 
   function redfinOf(l){
@@ -1209,6 +1212,10 @@ footer .num{font-size:12px}
       if (!n || typeof n !== "object" || n.del || typeof n.t !== "string" || !n.t.trim()) return null;
       return {id: id, t: n.t.slice(0, 2000), by: str(n.by, 40) || "Someone", at: str(n.at, 40)};
     }).filter(Boolean).sort(function(a, b){ return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
+  }
+  function noteDay(at){
+    var d = new Date(at);
+    return isNaN(d) ? "" : d.toLocaleDateString("en-US", {month: "short", day: "numeric"});
   }
   function noteWhen(at){
     var d = new Date(at);
