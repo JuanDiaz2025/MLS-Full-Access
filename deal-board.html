@@ -292,6 +292,17 @@ button{cursor:pointer}
 .atts .file span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .atts .file:hover{border-color:var(--accent)}
 .ix .clip{color:var(--muted)}
+.nfoot{display:flex;gap:10px;margin-top:4px}
+.nreply{border:0;background:transparent;color:var(--accent);font-weight:700;font-size:12.5px;padding:2px 0}
+.nreply:hover{text-decoration:underline}
+.replies{margin-top:8px;padding-left:14px;border-left:2px solid var(--line-strong);display:flex;flex-direction:column;gap:8px}
+.note.reply{border-top:0;padding-top:0;grid-template-columns:24px 1fr}
+.note.reply img,.note.reply .ini{width:24px;height:24px}
+.rbox{display:flex;flex-direction:column;gap:6px}
+.rbox textarea{width:100%;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);padding:8px 10px;resize:vertical;min-height:52px}
+.rbox textarea:focus{outline:0;border-color:var(--accent)}
+.rbar{display:flex;gap:6px;justify-content:flex-end}
+.rbar .btn{height:30px;padding:0 12px}
 .pinline{flex:1 1 100%;max-width:720px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#2b2f36;display:flex;flex-direction:column}
 .phd{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#1f2329;color:#e8ecf3;font-size:13px}
 .pic{background:#d8334d;color:#fff;font-family:var(--f-mono);font-size:10px;font-weight:700;border-radius:4px;padding:2px 5px;flex:none}
@@ -575,7 +586,7 @@ const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
 const S = { db:null, user:null, assets:null, att:{}, me:null, canWrite:true, openTask:null, inbox:false, inboxSeen:0, mcp:null, lastSeen:0, meName:"A teammate", pend:{}, props:[], tasks:[], notes:[], ready:{p:false,t:false},
-  sel:null, q:"", mine:false, hideDone:true, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
+  sel:null, replyOpen:null, q:"", mine:false, hideDone:true, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
 try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!c.showDone; }catch(e){}
 try{ const hsh=location.hash.slice(1); S.sel = hsh || localStorage.getItem("tdb-sel") || "all"; }catch(e){ S.sel="all"; }
 function saveUI(){ try{ localStorage.setItem("tdb-ui", JSON.stringify({collapsed:[...S.collapsed], showDone:!S.hideDone})); }catch(e){} }
@@ -758,7 +769,7 @@ function renderGroup(p, people){
   g.append(h("div",{class:"table"},grid));
 
   // notes / updates
-  const notes=S.notes.filter(n=>n.property===pid && !n.taskId).sort((a,b)=>b.createdAt-a.createdAt);
+  const notes=S.notes.filter(n=>n.property===pid && !n.taskId && !n.parentId).sort((a,b)=>b.createdAt-a.createdAt);
   const box=h("div",{class:"notes"}, h("h3",{text:"Notes"}));
   if(!ro){
     const ta=h("textarea",{id:"note-"+pid,rows:"2",placeholder:"Write an update for the team…","aria-label":"New note for "+p.address});
@@ -768,14 +779,7 @@ function renderGroup(p, people){
     box.append(composer("p-"+pid, ta, post, ()=>addNote(pid,ta)));
   }
   if(!notes.length) box.append(h("p",{class:"nempty",text:"No notes yet."}));
-  notes.forEach(n=>{
-    const prof=n.author?people[n.author]:null;
-    const who=prof?(prof.isMe?"You":(first(prof.name)||"Teammate")):(n.authorName||"Teammate");
-    const del = (!ro && n.author && n.author===S.me) ? h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ delNote(n,"Note deleted"); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete") : null;
-    box.append(h("div",{class:"note"},
-      prof?h("img",{src:prof.avatarUrl,alt:""}):badge(who),
-      h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), n.text?h("p",{text:n.text}):null, attList(n))));
-  });
+  notes.forEach(n=>box.append(noteItem(n,people,ro,"Note deleted")));
   g.append(box);
 
   if(p.facts || (p.links||[]).length) g.append(h("button",{class:"linkbtn",style:"margin-top:10px","aria-expanded":String(info),onclick:()=>{info?S.info.delete(pid):S.info.add(pid);render();}}, info?"Hide property details":"Property details"));
@@ -852,7 +856,46 @@ async function uploadAndPost(key, files){
   if(readyAtts(key).length && POSTERS[key]) POSTERS[key]();
 }
 async function delFile(x){ for(let i=0;i<(x.n||1);i++){ try{ await S.db.doc("files/"+x.fid+"_"+i).delete(); }catch(e){} } }
-async function delNote(n,msg){ const ok=await write(()=>S.db.doc("notes/"+n.id).delete(),msg); if(ok) (n.attachments||[]).forEach(x=>x&&x.fid&&delFile(x)); }
+async function delNote(n,msg){ const ok=await write(()=>S.db.doc("notes/"+n.id).delete(),msg); if(!ok) return; (n.attachments||[]).forEach(x=>x&&x.fid&&delFile(x)); S.notes.filter(r=>r.parentId===n.id).forEach(r=>write(()=>S.db.doc("notes/"+r.id).delete())); }
+
+/* ---------- threaded notes ---------- */
+function whoOf(n,people){ const pr=n.author?people[n.author]:null; return {pr, who: pr?(pr.isMe?"You":(first(pr.name)||"Teammate")):(n.authorName||"Teammate")}; }
+function delBtn(n,ro,msg){
+  if(ro || !n.author || n.author!==S.me) return null;
+  return h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ delNote(n,msg); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete");
+}
+function noteItem(n, people, ro, msg){
+  const {pr,who}=whoOf(n,people);
+  const replies=S.notes.filter(r=>r.parentId===n.id).sort((a,b)=>a.createdAt-b.createdAt);
+  const open=S.replyOpen===n.id;
+  const rbtn=ro?null:h("button",{class:"nreply",type:"button","aria-expanded":String(open),onclick:()=>{ S.replyOpen=open?null:n.id; render(); if(!open) setTimeout(()=>{ const t=document.getElementById("rp-"+n.id); if(t) t.focus(); },40); }},
+    replies.length?`Reply · ${replies.length}`:"Reply");
+  const thread=h("div",{class:"replies"},
+    ...replies.map(r=>{ const w=whoOf(r,people);
+      return h("div",{class:"note reply"}, w.pr?h("img",{src:w.pr.avatarUrl,alt:""}):badge(w.who),
+        h("div",{}, h("div",{class:"nhead"}, h("b",{text:w.who}), h("span",{text:ago(r.createdAt)}), delBtn(r,ro,"Reply deleted")), r.text?h("p",{text:r.text}):null, attList(r))); }),
+    open?replyBox(n):null);
+  return h("div",{class:"note"},
+    pr?h("img",{src:pr.avatarUrl,alt:""}):badge(who),
+    h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), delBtn(n,ro,msg)),
+      n.text?h("p",{text:n.text}):null, attList(n),
+      h("div",{class:"nfoot"}, rbtn),
+      (replies.length||open)?thread:null));
+}
+function replyBox(n){
+  const ta=h("textarea",{id:"rp-"+n.id,rows:"2",placeholder:"Write a reply…","aria-label":"Reply"});
+  const send=async()=>{
+    const text=ta.value.trim(); if(!text) return;
+    const mentions=n.author && n.author!==S.me ? [n.author] : [];
+    const ok=await write(()=>S.db.collection("notes").add({property:n.property,taskId:n.taskId||null,parentId:n.id,text,author:S.me||null,mentions,createdAt:Date.now()}),"Reply posted");
+    if(ok){ ta.value=""; S.replyOpen=null; ta.blur(); render(); }
+  };
+  ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); } if(e.key==="Escape"){ S.replyOpen=null; ta.blur(); render(); } });
+  ta.addEventListener("blur",()=>flush());
+  return h("div",{class:"rbox"}, ta, h("div",{class:"rbar"},
+    h("button",{class:"btn ghost",type:"button",onclick:()=>{ S.replyOpen=null; render(); }},"Cancel"),
+    h("button",{class:"btn",type:"button",onclick:send},"Reply")));
+}
 function attachRow(key){
   const list=S.att[key]||[];
   return h("div",{class:"attrow",id:"ar-"+key},
@@ -1063,7 +1106,7 @@ function renderInbox(people){
         return h("button",{class:"inb"+(isNew?" new":""),type:"button",onclick:()=>{ S.inbox=false; const dd=$("#drawer"); dd.hidden=true; dd.replaceChildren(); document.body.style.overflow=""; if(prop) select(prop.id); if(task) openTask(task.id); }},
           pr?h("img",{src:pr.avatarUrl,alt:""}):badge(who),
           h("span",{class:"ib"},
-            h("span",{class:"it"}, h("b",{text:who}), " on ", h("b",{text:task?(task.title||"a task"):"property notes"}),
+            h("span",{class:"it"}, h("b",{text:who}), n.parentId?" replied on ":" on ", h("b",{text:task?(task.title||"a task"):"property notes"}),
               isNew?h("i",{class:"newpill",text:"New"}):null, mentionsMe(n)?h("i",{class:"atpill",text:"@ you"}):null),
             h("span",{class:"iw",text:(prop?prop.address:"")+" · "+ago(n.createdAt)}),
             h("span",{class:"ix"}, n.text||"", (n.attachments||[]).length?h("span",{class:"clip",text:(n.text?"  ":"")+"📎 "+n.attachments.length+" attachment"+(n.attachments.length===1?"":"s")}):null)));
@@ -1082,7 +1125,7 @@ function renderDrawer(people){
   const st=STATUS.find(x=>x.k===(t.status||"todo"))||STATUS[0];
   const prof=t.owner?people[t.owner]:null, oname=(t.ownerName||"").trim();
   const owner = prof?(prof.isMe?"You":first(prof.name)||"Teammate"):(first(oname)||"Unassigned");
-  const thread=S.notes.filter(n=>n.taskId===t.id).sort((a,b)=>b.createdAt-a.createdAt);
+  const thread=S.notes.filter(n=>n.taskId===t.id && !n.parentId).sort((a,b)=>b.createdAt-a.createdAt);
   const ta=h("textarea",{id:"tc-new",rows:"3",placeholder:"Write an update or comment…","aria-label":"New update"});
   ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); addTaskNote(t,ta); } });
   ta.addEventListener("blur",()=>flush());
@@ -1098,12 +1141,7 @@ function renderDrawer(people){
     h("div",{class:"pbody"},
       ro?null:composer("t-"+t.id, ta, h("button",{class:"btn",type:"button",onclick:()=>addTaskNote(t,ta)},"Post update"), ()=>addTaskNote(t,ta)),
       thread.length?null:h("p",{class:"nempty",text:"No updates yet. Be the first to post one."}),
-      ...thread.map(n=>{
-        const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(first(pr.name)||"Teammate")):(n.authorName||"Teammate");
-        const del=(!ro && n.author && n.author===S.me)?h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ delNote(n,"Update deleted"); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete"):null;
-        return h("div",{class:"note"}, pr?h("img",{src:pr.avatarUrl,alt:""}):badge(who),
-          h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), n.text?h("p",{text:n.text}):null, attList(n)));
-      })));
+      ...thread.map(n=>noteItem(n,people,ro,"Update deleted"))));
   const keep = d.querySelector("#tc-new"); const draft = keep ? keep.value : "";
   d.replaceChildren(h("button",{class:"scrim",type:"button","aria-label":"Close",onclick:closeTask}), panel);
   if(draft) ta.value=draft;
