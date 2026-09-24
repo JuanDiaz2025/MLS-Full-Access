@@ -9,7 +9,10 @@ Export the whole workbook, not one tab — a CSV export only carries the
 first tab, and the leads live on "Leads".
 
 Emits `window.__MLS__ = {pulled, dates, rows}` where each row is
-[mls, address, price, ppsf, sqft, beds, year, dom, note, pull_date].
+[mls, address, price, ppsf, sqft, beds, year, dom, note, pull_date, offer_due,
+ agent_phone, agent_email, agent_name, mls_status, offer_time, offer_from,
+ offer_phrase, agent_remarks, showing, bucket, score, why]. The last twelve come from the columns the FlipScout app
+writes at the end of the Leads tab; an older sheet without them gives "".
 The board derives the MLS link from the MLS number, so the sheet's link
 column is dropped.
 
@@ -145,10 +148,37 @@ def number(s):
         return None
 
 
+# The app writes Offer Due as "2026-09-28 (Mon) 5:00 PM", "2026-09-28 (Mon)"
+# or "TBD" — read off the listing, so it beats a guess from the Notes text.
+SHEET_DUE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:\s*\(\w+\))?(?:\s+(\d{1,2}:\d{2} [AP]M))?")
+
+
+def sheet_offer(value):
+    """(date, time, phrase) from the app's Offer Due cell."""
+    m = SHEET_DUE.match(value or "")
+    if m:
+        return m.group(1), m.group(2) or "", ""
+    if re.match(r"^T\.?B\.?D\b", value or "", re.I):
+        return "", "", "Offer date TBD"
+    return "", "", ""
+
+
+# The sentence an offer date was read from, so the board can quote it and
+# highlight it in the agent's remarks.
+OFFER_SENTENCE = re.compile(
+    r"[^.!?\n]*\boffers?\b[^.!?\n]*(?:\d|\b(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|\bTBD\b)(?:[^!?\n]*?(?:[ap]\.m\.|[.!?](?=\s|$))|[^.!?\n]*)", re.I)
+
+
+def offer_sentence(text):
+    m = OFFER_SENTENCE.search(text or "")
+    return re.sub(r"\s+", " ", m.group(0)).strip()[:200] if m else ""
+
+
 def build(xlsx_path):
     ws = openpyxl.load_workbook(xlsx_path, data_only=True)["Leads"]
     grid = list(ws.iter_rows(min_row=1, values_only=True))
     header = [cell(h) for h in grid[0][:len(FIELDS)]]
+    extra = {cell(h): i for i, h in enumerate(grid[0]) if i >= len(FIELDS) and h}
     if header != FIELDS:
         raise SystemExit(
             "The Leads tab's columns have changed, so the board would be built "
@@ -158,18 +188,29 @@ def build(xlsx_path):
     rows = []
     for raw in grid[1:]:
         r = {FIELDS[i]: cell(raw[i]) for i in range(len(FIELDS))}
+        for h, i in extra.items():
+            r[h] = cell(raw[i]) if i < len(raw) else ""
         if not r["MLS #"] and not r["Address"]:
             continue
         note = "" if r["Notes"] == BOILERPLATE else r["Notes"]
         # remarks land in Notes today; if the pull ever adds a dedicated
         # remarks column, read both
         remarks = " ".join(x for x in (note, r.get("Agent Remarks", "")) if x)
+        due, due_time, due_phrase = sheet_offer(r.get("Offer Due", ""))
         rows.append([
             r["MLS #"], r["Address"], number(r["Purchase Price"]),
             number(r["$/SqFt"]), number(r["SqFt"]), number(r["Beds"]),
             number(r["Year Built"]), number(r["DOM"]),
             note, r["First Added"],
-            parse_offer_due(remarks, r["First Added"]),
+            due or parse_offer_due(remarks, r["First Added"]),
+            r.get("Agent Phone", ""), r.get("Agent Email", ""),
+            r.get("Listing Agent", "").split(",")[0].strip(), r.get("MLS Status", ""),
+            due_time, "agent remarks" if due else "",
+            due_phrase or (offer_sentence(r.get("Private Remarks", "")) if due else ""),
+            r.get("Private Remarks", "")[:2000], r.get("Showing", "")[:600],
+            # "A — Work Now" -> "A"; the board spells the labels itself
+            (r.get("Bucket", "")[:1] if r.get("Bucket", "")[:1] in ("A", "B", "C") else ""),
+            number(r.get("Opportunity Score", "")), r.get("Why", "")[:240],
         ])
 
     # cheapest per square foot first within each pull date — how the team reads it
