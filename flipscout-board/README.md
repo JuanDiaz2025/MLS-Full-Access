@@ -1,5 +1,21 @@
 # FlipScout Lead Board
 
+> **24 Sep 2026 — the Test board's page is now the real Board's page.**
+> `index.html` here is published at https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1
+> (artifact 864f77f8) and `test/index.html` at the Test board; the two differ only
+> in the title and the "Test copy" banner. Everything the new page adds —
+> agent contact, remarks panel, A/B buckets, Show views, Area filter, Pass with a
+> reason, Pass ↗ to the sheet, Refresh from sheet, confirmed saves — is described
+> in `test/README.md`. The team's statuses and removals stayed where they were
+> (`edits/<pull date>` → `{MLS: {s, r, d, by, at}}`, the same shape both pages
+> use): 172 records carried over unchanged, 97 Pass · 30 Reviewing · 45 removed.
+> Don't republish an older `index.html` over it — edit this file instead.
+> Daily refresh: the "FlipScout Lead Board — daily 11am refresh" Routine in
+> Seth's session publishes both boards from this branch.
+
+The notes below describe the original page and still hold for the parts it
+shared with the new one.
+
 A published board of every MLS lead in the acquisitions sheet, grouped by the
 date it was pulled. The team works it directly: set a status, remove a lead,
 restore one.

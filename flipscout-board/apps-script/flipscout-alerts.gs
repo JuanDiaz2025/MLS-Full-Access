@@ -45,7 +45,7 @@
  */
 
 const FS_LEADS = 'Leads';
-const FS_BOARD_URL = 'https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9';
+const FS_BOARD_URL = 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1';
 const FS_FINAL_HOURS = 5;
 const FS_MAX_PER_MESSAGE = 5;
 const FS_SENT_KEY = 'FS_ALERTS_SENT';

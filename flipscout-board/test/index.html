@@ -639,7 +639,7 @@ footer .num{font-size:12px}
   var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
   var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue",
               "agentPhone","agentEmail","agentName","mlsStatus","offerTime","offerFrom","offerPhrase",
-              "agentRemarks","showing","bucket","score","why"];
+              "agentRemarks","showing","bucket","score","why","occ","cut"];
   // Addresses open the house's Redfin page — only ever the exact page. Redfin
   // links carry Redfin's own home id, so they can't be built from the address:
   // the FlipScout app looks each new lead up, and links for the older leads are
@@ -1069,7 +1069,7 @@ footer .num{font-size:12px}
       '<td data-l="Property" class="wide">' + addrHTML(l) +
         '<span class="mls">' + esc(l.mls) + '</span>' +
         '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' +
-        mlsStatusHTML(l.mlsStatus) +
+        mlsStatusHTML(l.mlsStatus) + occCutHTML(l) +
         contactHTML(l) +
         (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + '</td>' +
       '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
@@ -1108,6 +1108,12 @@ footer .num{font-size:12px}
     if (!BK_NAME[l.bucket]) return "";
     return '<br><span class="bk bk-' + l.bucket + '" title="' + esc(l.why || BK_NAME[l.bucket]) + '">' + l.bucket + ' · ' +
       BK_NAME[l.bucket] + (l.score != null ? ' <span class="sc">' + esc(String(l.score)) + '</span>' : '') + '</span>';
+  }
+  // Occupancy and price cut, as the original board showed them.
+  function occCutHTML(l){
+    var o = l.occ || "", c = l.cut || "";
+    return (o ? '<span class="mst ' + (/tenant/i.test(o) ? 'mst-closed' : /vacant/i.test(o) ? 'mst-active' : 'mst-other') + '">' + esc(o) + '</span>' : '') +
+           (c ? '<span class="mst mst-pending">cut ' + esc(c) + '</span>' : '');
   }
   function mlsStatusHTML(st){
     if (!st) return "";
@@ -1839,7 +1845,8 @@ footer .num{font-size:12px}
         m ? m[1] : "", g("Agent Phone"), g("Agent Email"), g("Listing Agent").split(",")[0].trim(), g("MLS Status"),
         m && m[2] ? m[2] : "", m ? "agent remarks" : "", tbd ? "Offer date TBD" : ph,
         priv.slice(0, 2000), g("Showing").slice(0, 600),
-        /^[ABC]$/.test(b) ? b : "", numOf(g("Opportunity Score")), g("Why").slice(0, 240)]);
+        /^[ABC]$/.test(b) ? b : "", numOf(g("Opportunity Score")), g("Why").slice(0, 240),
+        g("Occupied By"), g("Price Cut")]);
     });
     out.sort(function(a, c){ return a[9] < c[9] ? -1 : a[9] > c[9] ? 1 : (a[3] == null ? 1e9 : a[3]) - (c[3] == null ? 1e9 : c[3]); });
     return out;
