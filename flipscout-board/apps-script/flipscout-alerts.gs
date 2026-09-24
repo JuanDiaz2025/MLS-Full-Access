@@ -17,6 +17,13 @@
  *    one message per check with at most 5 leads, and nothing when nothing is
  *    due. What was sent is remembered in Script Properties.
  *
+ * 1b) MORNING SUMMARY — fsMorning runs at 8:00: first "📅 OFFERS DUE IN 3
+ *    DAYS", then the 8:00 alert check. The list is the Board's "Offers due in
+ *    3 days" button: A and B leads, deadline today through 3 days out and not
+ *    yet past, not sold / withdrawn / off market, not passed in Notes. One
+ *    summary a day (the menu can send it again on purpose); none if the list
+ *    is empty.
+ *
  * 2) PASS BRIDGE — deployed as a web app, a link like
  *      <web app URL>?action=pass&mls=SF426163762&why=too%20far&by=Seth
  *    writes "PASS (Board) — Seth, Sep 24: too far" at the front of that lead's
@@ -33,7 +40,7 @@
  *
  * MENU — fsSetupSchedule also adds a "🚨 FlipScout Alerts" menu to the sheet
  * (reload the sheet once to see it): Check now · Preview (sends nothing) ·
- * Send test message. It is a separate menu because flip-scout-reject.gs owns
+ * Send morning summary now · Send test message. It is a separate menu because flip-scout-reject.gs owns
  * onOpen; this one is opened by an installable trigger instead.
  */
 
@@ -42,6 +49,9 @@ const FS_BOARD_URL = 'https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9';
 const FS_FINAL_HOURS = 5;
 const FS_MAX_PER_MESSAGE = 5;
 const FS_SENT_KEY = 'FS_ALERTS_SENT';
+const FS_DIGEST_KEY = 'FS_DIGEST_DAY';
+const FS_DIGEST_DAYS = 3;
+const FS_CLOSED = /sold|withdrawn|expired|cancel|off.?market|closed|duplicate/i;
 const FS_PASSED = /^\s*(?:pass\b|passing\b|passed\b|we'?re passing|rejected\b|not a (?:fit|deal))/i;
 const FS_BOARD_PASS = /^PASS \(Board\) — [^|]*?(?:\s\|\s|$)/;
 
@@ -49,14 +59,16 @@ const FS_BOARD_PASS = /^PASS \(Board\) — [^|]*?(?:\s\|\s|$)/;
 
 function fsSetupSchedule() {
   ScriptApp.getProjectTriggers()
-    .filter(t => ['fsAlertCheck', 'fsOnOpen'].indexOf(t.getHandlerFunction()) >= 0)
+    .filter(t => ['fsAlertCheck', 'fsOnOpen', 'fsMorning'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('fsOnOpen').forSpreadsheet(SpreadsheetApp.getActive()).onOpen().create();
-  [[8, 0], [11, 15], [15, 0]].forEach(([h, m]) =>
+  ScriptApp.newTrigger('fsMorning').timeBased().atHour(8).nearMinute(0).everyDays(1)
+    .inTimezone('America/Los_Angeles').create();
+  [[11, 15], [15, 0]].forEach(([h, m]) =>
     ScriptApp.newTrigger('fsAlertCheck').timeBased().atHour(h).nearMinute(m).everyDays(1)
       .inTimezone('America/Los_Angeles').create());
   if (!fsWebhook_()) throw new Error('Schedule is on, but CHAT_WEBHOOK is missing — add it under Project Settings → Script Properties.');
-  Logger.log('Alerts scheduled for about 8:00, 11:15 and 15:00 Pacific. Reload the sheet for the 🚨 FlipScout Alerts menu.');
+  Logger.log('Morning summary + alerts at about 8:00, alerts at 11:15 and 15:00 Pacific. Reload the sheet for the 🚨 FlipScout Alerts menu.');
 }
 
 function fsOnOpen() {
@@ -64,6 +76,7 @@ function fsOnOpen() {
     .addItem('Check now (send what is due)', 'fsCheckNow')
     .addItem('Preview — show what would send, send nothing', 'fsPreview')
     .addSeparator()
+    .addItem('Send morning summary now (offers due in 3 days)', 'fsDigestNow')
     .addItem('Send test message', 'fsSendTest')
     .addToUi();
 }
@@ -84,6 +97,52 @@ function fsPreview() {
 
 function fsSendTest() {
   fsPost_('🧪 *TEST — FlipScout alerts from Apps Script*\nThe 8am / 11am / 3pm checks will post here.\n\nBoard: ' + FS_BOARD_URL);
+}
+
+/* ------------------------------------------------------ morning summary -- */
+
+// 8:00 — the summary first, then the regular alert check.
+function fsMorning() {
+  try { fsDigest_(false); } finally { fsAlertCheck(); }
+}
+
+function fsDigestNow() {
+  const n = fsDigest_(true);
+  SpreadsheetApp.getActive().toast(n ? 'Sent the summary with ' + n + (n === 1 ? ' offer.' : ' offers.')
+                                     : 'No A or B offers due in the next 3 days — nothing sent.', 'FlipScout Alerts', 6);
+}
+
+// Returns how many leads it listed. force = send even if today's already went.
+function fsDigest_(force) {
+  const now = new Date(), tz = 'America/Los_Angeles';
+  const today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  const props = PropertiesService.getScriptProperties();
+  if (!force && props.getProperty(FS_DIGEST_KEY) === today) return 0;
+  const dayNo = d => Math.round(Date.parse(Utilities.formatDate(d, tz, 'yyyy-MM-dd') + 'T00:00:00Z') / 864e5);
+  const list = [];
+  fsReadLeads_().forEach(l => {
+    if (!/^[AB]/i.test(l.bucket)) return;
+    if (FS_CLOSED.test(l.mstat)) return;
+    if (FS_PASSED.test(l.notes)) return;
+    const dl = fsDeadline_(l.due);
+    if (!dl || dl.when <= now) return;
+    const days = dayNo(dl.when) - dayNo(now);
+    if (days < 0 || days > FS_DIGEST_DAYS) return;
+    list.push({ l, when: dl.when, stated: dl.stated, days });
+  });
+  if (!list.length) return 0;
+  list.sort((a, b) => a.when - b.when);
+  const lines = list.map(d => {
+    const l = d.l, day = d.days === 0 ? 'Today' : d.days === 1 ? 'Tomorrow' : Utilities.formatDate(d.when, tz, 'EEE MMM d');
+    const time = d.stated ? Utilities.formatDate(d.when, tz, 'h:mm a') : 'time not stated';
+    const pend = /pending|contingent/i.test(l.mstat) ? ' · ' + l.mstat.toUpperCase() : '';
+    const who = [l.agent, l.phone].filter(Boolean).join(' ');
+    return '*' + day + ' · ' + time + '* — ' + l.addr + '\n' +
+      l.bucket.charAt(0).toUpperCase() + (l.score ? ' ' + l.score : '') + pend + (who ? ' · ' + who : '');
+  });
+  fsPost_('📅 *FLIPSCOUT — OFFERS DUE IN 3 DAYS* (' + list.length + ')\n\n' + lines.join('\n\n') + '\n\nBoard: ' + FS_BOARD_URL);
+  props.setProperty(FS_DIGEST_KEY, today);
+  return list.length;
 }
 
 /* --------------------------------------------------------------- alerts -- */
