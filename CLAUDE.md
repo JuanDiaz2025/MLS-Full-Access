@@ -392,7 +392,10 @@ Header order + value vocabulary for both sheets: `docs/lead-format.md`.
 Recommendation vocab: `Strong Deal` / `Marginal`. Flip Quality: `Good Flip` /
 `Thin Flip` / `Flip W/ Caution` / `Negative`.
 
-**Primary — "Flip Scout Agent"** (`1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4`).
+**Primary — "Updated Flip Scout Agent"** (`1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ`) — the
+prod sheet the app is connected to since 24 Sep. The old "Flip Scout Agent"
+(`1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4`) now holds only an old KPI tab;
+TEST sheet: `12Vr7PN5zb84rOwqyk7HjnkOybir_N1EIWfCMWw9suhQ`.
 The desktop app writes here **directly over the Sheets API** (§7) — there is no
 web app, no deployment and no shared secret any more. Three tabs:
 
@@ -542,6 +545,30 @@ nothing vanishes silently. It also owns the KPI tab (above). Paste-and-save only
 **Legacy — "Property Review"** (`10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA`,
 gid `1510205894`) via `apps-script/append-lead.gs`, POST `{secret, lead}`.
 De-dupes on Redfin Link. Kept for the existing headless pipeline.
+
+## 6b. Lead Board, Google Chat alerts, Pass bridge (branch `claude/keen-meitner-t4gora`)
+
+All of this lives on the Board's branch, not this one — `flipscout-board/`:
+
+- **Real Lead Board** (`864f77f8…`) is kept as it is, as the backup. Another
+  session also edits its code; check before touching it.
+- **Test board** https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9 —
+  `flipscout-board/test/` (README there is the manual). Built from the prod
+  sheet by `flipscout-board/build_data.py`; refreshed daily at 11:00 PT by a
+  Routine in Seth's session, and on demand by its own **↻ Refresh from sheet**
+  button (viewer's Google Drive connector). Adds agent phone/email, MLS link,
+  offer time, MLS status, remarks panel, bucket/score (A first), Show views,
+  Area filter, Pass with a reason, confirmed saves.
+- **Chat alerts** — `flipscout-board/apps-script/flipscout-alerts.gs`, pasted
+  into the prod sheet next to `flip-scout-reject.gs`: 8:00 "Offers due in 3
+  days" summary + 🚨 NEEDS JUAN (under 24h) / 🔴 final call (under 5h) at 8:00,
+  11:15 and 15:00 PT. Webhook in Script Properties `CHAT_WEBHOOK`, never in git.
+- **Pass bridge** — the same script's web app: the Board's "Pass ↗" writes
+  `PASS (Board) — who, date: why` into the lead's Notes, which the app's
+  Refresh (`core.PASSED_NOTE`) and the alerts already skip.
+- The artifacts cannot write the sheet directly (Drive connector is read-only
+  for cells; a page cannot post in the background) — hence the link-in-a-tab
+  bridge. Don't reintroduce a "Copy for the board" button in the app.
 
 ## 7. FlipScout desktop app
 
