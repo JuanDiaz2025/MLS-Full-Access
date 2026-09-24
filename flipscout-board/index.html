@@ -1625,15 +1625,27 @@ footer .num{font-size:12px}
     var live = k.total - k.removed - k.counts["Pass"];
     var untouched = k.total - k.touched;
 
-    // deadlines only matter on leads still in play: a passed or removed lead
-    // has no offer to get out the door
-    var dues = list.filter(function(l){
-      return dueOf(l) && !removedOf(l) && statusOf(l) !== "Pass";
-    }).sort(function(a, b){ return dueOf(a) < dueOf(b) ? -1 : dueOf(a) > dueOf(b) ? 1 : 0; });
+    // A deadline only matters on something still buyable: not removed, not
+    // passed, and not already sold, off market or pending on the MLS.
+    function chaseable(l){
+      return !removedOf(l) && statusOf(l) !== "Pass" && isLive(l);
+    }
+    function isTBD(l){ return !dueOf(l) && /\bT\.?B\.?D\b/i.test(l.offerPhrase || ""); }
+    // Soonest first among deadlines still ahead, then the ones already passed,
+    // most recent first — plain date order buries today under stale deadlines.
+    var dues = list.filter(function(l){ return dueOf(l) && chaseable(l); })
+      .sort(function(a, b){
+        var da = daysUntil(dueOf(a)), db2 = daysUntil(dueOf(b)), pa = da < 0, pb = db2 < 0;
+        if (pa !== pb) return pa ? 1 : -1;
+        return pa ? db2 - da : da - db2;
+      });
+    var tbds = list.filter(function(l){ return isTBD(l) && chaseable(l); });
     var late = dues.filter(function(l){ return daysUntil(dueOf(l)) < 0; }).length;
-    var week = dues.filter(function(l){
-      var n = daysUntil(dueOf(l)); return n >= 0 && n <= 7;
-    }).length;
+    var week = dues.filter(function(l){ var n = daysUntil(dueOf(l)); return n >= 0 && n <= 7; }).length;
+    var today = dues.filter(function(l){ return daysUntil(dueOf(l)) === 0; }).length;
+    var onMarket = list.filter(isLive).length;
+    var soldN = list.filter(function(l){ return CLOSED.test(l.mlsStatus || ""); }).length;
+    var pendN = list.filter(function(l){ return PENDING.test(l.mlsStatus || ""); }).length;
     $("kpiTiles").innerHTML = [
       ['<div class="kpi"><dt>Leads</dt><dd>' + k.total + '</dd>' +
        '<div class="sub">' + scope + '</div></div>'],
@@ -1650,27 +1662,43 @@ footer .num{font-size:12px}
        '<div class="sub">ruled out on review</div></div>'],
       ['<div class="kpi"><dt>Deadlines</dt><dd style="color:var(--t-offer)">' + dues.length + '</dd>' +
        '<div class="sub">' + (dues.length
-          ? late + ' late · ' + week + ' due within 7 days'
-          : 'set an offer due date on the Leads screen') + '</div></div>']
+          ? today + ' due today · ' + week + ' within 7 days · ' + late + ' late'
+          : 'nothing still buyable has a deadline') +
+       (tbds.length ? ' · ' + tbds.length + ' TBD' : '') + '</div></div>'],
+      ['<div class="kpi"><dt>Still on market</dt><dd style="color:var(--t-won)">' + onMarket + '</dd>' +
+       '<div class="sub">' + soldN + ' sold / off market · ' + pendN + ' pending already</div></div>']
     ].join("");
 
-    $("kpiDue").innerHTML = dues.length
+    function contactCell(l){
+      return (l.agentName || l.agentPhone)
+        ? esc(l.agentName || "") + (l.agentPhone ? '<span class="mls">' + esc(l.agentPhone) + '</span>' : '')
+        : '\u2014';
+    }
+    $("kpiDue").innerHTML = dues.length || tbds.length
       ? '<thead><tr><th class="plain">Offer due</th><th class="plain">When</th>' +
         '<th class="plain">Property</th><th class="plain">Status</th>' +
-        '<th class="plain n">Price</th><th class="plain n">$/SqFt</th></tr></thead><tbody>' +
+        '<th class="plain n">Price</th><th class="plain n">$/SqFt</th><th class="plain">Listing agent</th></tr></thead><tbody>' +
         dues.map(function(l){
           var dd = daysUntil(dueOf(l));
           return '<tr><td class="n">' + esc(dueOf(l)) + (l.offerTime && !teamDue(l) ? ' ' + esc(l.offerTime) : '') +
             (dueIsApprox(l) ? ' <span class="due-src approx">≈</span>' : '') + '</td>' +
             '<td><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span></td>' +
-            '<td>' + addrHTML(l) + '<span class="mls">' + esc(l.mls) + '</span>' + mlsStatusHTML(l.mlsStatus) +
-            (l.agentPhone ? '<span class="contact"><span class="c">' + esc(l.agentPhone) + '</span></span>' : '') + '</td>' +
+            '<td>' + addrHTML(l) + '<span class="mls">' + esc(l.mls) + '</span>' + mlsStatusHTML(l.mlsStatus) + '</td>' +
             '<td><span class="pill ' + STCLASS[statusOf(l)] + '">' + esc(statusOf(l)) + '</span></td>' +
             '<td class="n">' + fmtMoney(l.price) + '</td>' +
-            '<td class="n">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td></tr>';
+            '<td class="n">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
+            '<td>' + contactCell(l) + '</td></tr>';
+        }).join("") +
+        tbds.map(function(l){
+          return '<tr><td class="n">TBD</td><td><span class="due-chip due-later">deadline TBD — call agent</span></td>' +
+            '<td>' + addrHTML(l) + '<span class="mls">' + esc(l.mls) + '</span>' + mlsStatusHTML(l.mlsStatus) + '</td>' +
+            '<td><span class="pill ' + STCLASS[statusOf(l)] + '">' + esc(statusOf(l)) + '</span></td>' +
+            '<td class="n">' + fmtMoney(l.price) + '</td>' +
+            '<td class="n">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
+            '<td>' + contactCell(l) + '</td></tr>';
         }).join("") + '</tbody>'
-      : '<tbody><tr><td class="empty"><b>No deadlines set</b>' +
-        'Put a date in the Offer due column on the Leads screen and every deadline lands here, soonest first.' +
+      : '<tbody><tr><td class="empty"><b>No deadlines here</b>' +
+        'Nothing still on the market in this view has an offer deadline.' +
         '</td></tr></tbody>';
 
     // one stacked bar; numbers live in the legend and the tables, never inside
