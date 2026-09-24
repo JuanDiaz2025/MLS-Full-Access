@@ -888,7 +888,8 @@ footer .num{font-size:12px}
   var CLOSED = /sold|withdrawn|expired|cancel|off.?market|closed|duplicate/i;
   var PENDING = /pending|contingent|under contract/i;
   function isLive(l){ return !CLOSED.test(l.mlsStatus || "") && !PENDING.test(l.mlsStatus || ""); }
-  function teamOpen(l){ var s = statusOf(l); return !removedOf(l) && s !== "Pass" && s !== "Won"; }
+  var anyTeamStatus = false;   // set while picking a view's leads; see presetMatch
+  function teamOpen(l){ if (anyTeamStatus) return true; var s = statusOf(l); return !removedOf(l) && s !== "Pass" && s !== "Won"; }
   function notLate(l){ var n = daysUntil(dueOf(l)); return n === null || n >= 0; }
   var PRESETS = {
     now:     {label: "Work now", hint: "A leads still active on the MLS, deadline not passed, not passed by the team", sort: "bk",
@@ -903,6 +904,13 @@ footer .num{font-size:12px}
               test: function(l){ return CLOSED.test(l.mlsStatus || ""); }}
   };
   var preset = "now";
+  // A quick view picks the leads; whether the team still has them open only
+  // decides which section they land in — so a lead removed or passed by
+  // mistake still shows under Removed / Passed, with its Restore button.
+  function presetMatch(k, l){
+    anyTeamStatus = true;
+    try { return PRESETS[k].test(l); } finally { anyTeamStatus = false; }
+  }
   function drawPresets(){
     var keys = Object.keys(PRESETS), ar = $("areaFilter").value;
     // counts follow the chosen area, so "Work now 5" means five in that area
@@ -931,7 +939,7 @@ footer .num{font-size:12px}
     var st = $("statusFilter").value, area = $("areaFilter").value;
     return base.filter(function(l){
       if (st && statusOf(l) !== st) return false;
-      if (preset && !PRESETS[preset].test(l)) return false;
+      if (preset && !presetMatch(preset, l)) return false;
       if (area && !inArea(l, area)) return false;
       if (!q) return true;
       return (l.addr + " " + l.mls + " " + (l.note || "") + " " + (l.remarks || "") + " " +
