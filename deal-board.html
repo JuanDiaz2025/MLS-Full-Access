@@ -283,6 +283,37 @@ button{cursor:pointer}
 @keyframes blink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
 @media (prefers-reduced-motion: reduce){.pbox.closing,.spark{animation:none}}
 
+.fin{display:none}
+.frow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.frow .nbtn{display:inline-flex;align-items:center;gap:5px}
+.fext{font-style:normal;font-family:var(--f-mono);font-size:10px;font-weight:700;text-transform:uppercase;border-radius:4px;padding:2px 5px;color:#fff;background:#6b7487;flex:none}
+.fext.e-pdf{background:#d8334d}.fext.e-img{background:#1f8f6a}.fext.e-xls{background:#1d7a3e}.fext.e-doc{background:#2f5bd8}
+.files{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.fthumb{border:1px solid var(--line);border-radius:8px;padding:0;overflow:hidden;background:var(--surface-2);line-height:0}
+.fthumb img{width:140px;height:100px;object-fit:cover;display:block}
+.fcard{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:7px 10px;max-width:100%}
+.fname{border:0;background:transparent;text-align:left;font-weight:600;font-size:13.5px;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;padding:0}
+.fname small{display:block;font-weight:500;color:var(--muted);font-size:11.5px}
+.fname:hover{color:var(--accent)}
+.fact{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:4px 9px;font-size:12px;font-weight:700;color:var(--ink-2);flex:none}
+.fact:hover{border-color:var(--accent);color:var(--accent)}
+#viewer{position:fixed;inset:0;z-index:70;background:rgba(10,14,24,.78);display:flex;padding:calc(12px + env(safe-area-inset-top,0px)) 12px calc(12px + env(safe-area-inset-bottom,0px))}
+#viewer[hidden]{display:none}
+.vwrap{flex:1;display:flex;flex-direction:column;background:#2b2f36;border-radius:12px;overflow:hidden;max-width:1100px;margin:0 auto;width:100%}
+.vhead{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#1f2329;color:#e8ecf3}
+.vhead b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.vhead .px{background:#2b2f36;border-color:#3a4050;color:#e8ecf3}
+.vstage{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.vpage{background:#fff;box-shadow:0 4px 18px rgba(0,0,0,.45);max-width:none}
+.vimg{max-width:none;background:#fff}
+.vtxt{background:#fff;color:#111;padding:16px;border-radius:6px;white-space:pre-wrap;width:100%;max-width:900px;font-size:13px;margin:0}
+.vmsg{color:#e8ecf3}
+.vbar{align-self:center;display:flex;align-items:center;gap:6px;margin:0 0 12px;background:#1f2329;color:#e8ecf3;border-radius:10px;padding:6px 8px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.vbar button{min-width:32px;height:32px;border:0;border-radius:6px;background:#2f343c;color:#e8ecf3;font-weight:700;padding:0 10px}
+.vbar button:hover{background:#3b414b}
+.vbar .vdl{background:var(--accent);color:var(--accent-ink)}
+.vzm,.vpg{font-family:var(--f-mono);font-size:12px;min-width:52px;text-align:center}
+
 /* Task table */
 .table{overflow-x:auto;border-radius:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gc)}
 .grid{display:grid;grid-template-columns:minmax(240px,1.2fr) 150px 140px 130px minmax(220px,1fr) 40px;min-width:880px}
@@ -330,7 +361,7 @@ button{cursor:pointer}
 .pop .person img{width:24px;height:24px;border-radius:50%}
 .pop input{width:100%;height:32px;border:1px solid var(--line);border-radius:6px;padding:0 8px;background:var(--surface-2);margin-bottom:6px}
 .pop .hint{color:var(--muted);font-size:12px;padding:6px 8px}
-.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:9px 14px;border-radius:8px;font-weight:500;z-index:60;max-width:calc(100vw - 32px)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:9px 14px;border-radius:8px;font-weight:500;z-index:90;max-width:calc(100vw - 32px)}
 @media (prefers-reduced-motion: reduce){*{transition:none !important}}
 @media (max-width:560px){.brand h1{font-size:22px}.battery{display:none}}
 </style>
@@ -365,6 +396,7 @@ button{cursor:pointer}
 
 </div>
 <div id="drawer" hidden></div>
+<div id="viewer" hidden></div>
 <div id="pop" class="pop" hidden></div>
 <div id="toast" class="toast" hidden></div>
 
@@ -391,7 +423,7 @@ const KIND = {buy:"Acquisition", sell:"Pending to close", rehab:"Under construct
 const HRANK = {red:0, yellow:1, grey:2, green:3};
 const GCOLORS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
 
-const S = { db:null, user:null, me:null, canWrite:true, openTask:null, inbox:false, inboxSeen:0, mcp:null, lastSeen:0, meName:"A teammate", pend:{}, props:[], tasks:[], notes:[], ready:{p:false,t:false},
+const S = { db:null, user:null, me:null, canWrite:true, openTask:null, inbox:false, inboxSeen:0, mcp:null, lastSeen:0, meName:"A teammate", pend:{}, pendFiles:{}, uploading:{}, assets:null, downloads:null, props:[], tasks:[], notes:[], ready:{p:false,t:false},
   sel:null, q:"", mine:false, hideDone:true, kpi:null, collapsed:new Set(), info:new Set(), pendingRender:false };
 try{ const c = JSON.parse(localStorage.getItem("tdb-ui")||"{}"); (c.collapsed||[]).forEach(x=>S.collapsed.add(x)); S.hideDone=!c.showDone; }catch(e){}
 try{ const hsh=location.hash.slice(1); S.sel = hsh || localStorage.getItem("tdb-sel") || "all"; }catch(e){ S.sel="all"; }
@@ -582,7 +614,7 @@ function renderGroup(p, people){
     const post=h("button",{class:"btn",type:"button",onclick:()=>addNote(pid,ta)},"Post note");
     ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); addNote(pid,ta); } });
     ta.addEventListener("blur",()=>flush());
-    box.append(h("div",{class:"ncompose"}, ta, post), notifyRow("p-"+pid));
+    box.append(h("div",{class:"ncompose"}, ta, post), fileRow("p-"+pid), notifyRow("p-"+pid));
   }
   if(!notes.length) box.append(h("p",{class:"nempty",text:"No notes yet."}));
   notes.forEach(n=>{
@@ -591,7 +623,7 @@ function renderGroup(p, people){
     const del = (!ro && n.author && n.author===S.me) ? h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ write(()=>S.db.doc("notes/"+n.id).delete(),"Note deleted"); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete") : null;
     box.append(h("div",{class:"note"},
       prof?h("img",{src:prof.avatarUrl,alt:""}):badge(who),
-      h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), h("p",{text:n.text}))));
+      h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), n.text?h("p",{text:n.text}):null, filesView(n))));
   });
   g.append(box);
 
@@ -601,11 +633,13 @@ function renderGroup(p, people){
 }
 
 async function addNote(pid, ta){
-  const text=ta.value.trim(); if(!text) return;
-  const key="p-"+pid, rec=(S.pend[key]||[]).slice();
-  const ok=await write(()=>S.db.collection("notes").add({property:pid,text,author:S.me||null,mentions:rec.map(r=>r.id).filter(Boolean),createdAt:Date.now()}), rec.length?null:"Note posted");
+  const key="p-"+pid, text=ta.value.trim();
+  if(!text && !(S.pendFiles[key]||[]).length) return;
+  const rec=(S.pend[key]||[]).slice();
+  const files=await uploadPending(key); if(files===null) return;
+  const ok=await write(()=>S.db.collection("notes").add({property:pid,text,files,author:S.me||null,mentions:rec.map(r=>r.id).filter(Boolean),createdAt:Date.now()}), rec.length?null:"Note posted");
   if(!ok) return;
-  ta.value=""; S.pend[key]=[]; refreshNotify(key); saveProp(pid,{});
+  ta.value=""; S.pend[key]=[]; S.pendFiles[key]=[]; refreshFiles(key); refreshNotify(key); saveProp(pid,{});
   const pr=S.props.find(x=>x.id===pid)||{};
   sendEmails(rec, `${S.meName} posted a note on ${pr.address||"a property"}`, `${S.meName} wrote:\n\n${text}\n\nProperty: ${pr.address||""}\nOpen the board: ${BOARD_URL}#${pid}`);
 }
@@ -706,13 +740,13 @@ function renderDrawer(people){
       h("span",{}, h("b",{text:"Owner "}), owner),
       t.due?h("span",{}, h("b",{text:"Due "}), fmtDate(t.due)):null),
     h("div",{class:"pbody"},
-      ro?null:h("div",{class:"ncompose col"}, ta, notifyRow("t-"+t.id), h("button",{class:"btn",type:"button",onclick:()=>addTaskNote(t,ta)},"Post update")),
+      ro?null:h("div",{class:"ncompose col"}, ta, fileRow("t-"+t.id), notifyRow("t-"+t.id), h("button",{class:"btn",type:"button",onclick:()=>addTaskNote(t,ta)},"Post update")),
       thread.length?null:h("p",{class:"nempty",text:"No updates yet. Be the first to post one."}),
       ...thread.map(n=>{
         const pr=n.author?people[n.author]:null, who=pr?(pr.isMe?"You":(first(pr.name)||"Teammate")):(n.authorName||"Teammate");
         const del=(!ro && n.author && n.author===S.me)?h("button",{class:"ndel",type:"button",onclick:e=>{ const b=e.currentTarget; if(b.dataset.arm){ write(()=>S.db.doc("notes/"+n.id).delete(),"Update deleted"); } else { b.dataset.arm="1"; b.textContent="Delete?"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.arm; b.textContent="Delete"; } },3000); } }},"Delete"):null;
         return h("div",{class:"note"}, pr?h("img",{src:pr.avatarUrl,alt:""}):badge(who),
-          h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), h("p",{text:n.text})));
+          h("div",{}, h("div",{class:"nhead"}, h("b",{text:who}), h("span",{text:ago(n.createdAt)}), del), n.text?h("p",{text:n.text}):null, filesView(n)));
       })));
   const keep = d.querySelector("#tc-new"); const draft = keep ? keep.value : "";
   d.replaceChildren(h("button",{class:"scrim",type:"button","aria-label":"Close",onclick:closeTask}), panel);
@@ -720,13 +754,156 @@ function renderDrawer(people){
   d.hidden=false; document.body.style.overflow="hidden";
 }
 async function addTaskNote(t, ta){
-  const text=ta.value.trim(); if(!text) return;
-  const key="t-"+t.id, rec=(S.pend[key]||[]).slice();
-  const ok=await write(()=>S.db.collection("notes").add({property:t.property,taskId:t.id,text,author:S.me||null,mentions:rec.map(r=>r.id).filter(Boolean),createdAt:Date.now()}), rec.length?null:"Update posted");
+  const key="t-"+t.id, text=ta.value.trim();
+  if(!text && !(S.pendFiles[key]||[]).length) return;
+  const rec=(S.pend[key]||[]).slice();
+  const files=await uploadPending(key); if(files===null) return;
+  const ok=await write(()=>S.db.collection("notes").add({property:t.property,taskId:t.id,text,files,author:S.me||null,mentions:rec.map(r=>r.id).filter(Boolean),createdAt:Date.now()}), rec.length?null:"Update posted");
   if(!ok) return;
-  ta.value=""; S.pend[key]=[]; refreshNotify(key); write(()=>S.db.doc("tasks/"+t.id).update({updatedAt:Date.now()}));
+  ta.value=""; S.pend[key]=[]; S.pendFiles[key]=[]; refreshFiles(key); refreshNotify(key); write(()=>S.db.doc("tasks/"+t.id).update({updatedAt:Date.now()}));
   const pr=S.props.find(x=>x.id===t.property)||{};
   sendEmails(rec, `${S.meName} commented on “${t.title||"a task"}” (${pr.address||"property"})`, `${S.meName} commented on the task “${t.title||""}”:\n\n${text}\n\nProperty: ${pr.address||""}\nOpen the board: ${BOARD_URL}#${t.property}`);
+}
+
+/* ---------- attachments ---------- */
+const NATIVE={png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",webp:"image/webp",svg:"image/svg+xml",mp4:"video/mp4",webm:"video/webm",pdf:"application/pdf",csv:"text/csv",md:"text/markdown",json:"application/json",txt:"text/plain"};
+const NATIVE_TYPES=new Set(Object.values(NATIVE));
+const extOf=n=>{ const m=String(n||"").toLowerCase().match(/\.([a-z0-9]+)$/); return m?m[1]:""; };
+const fmtSize=b=>b<1024?b+" B":b<1048576?Math.round(b/1024)+" KB":(b/1048576).toFixed(1)+" MB";
+function fileRow(key){
+  const list=S.pendFiles[key]||[], busy=S.uploading[key];
+  const inp=h("input",{type:"file",id:"fi-"+key,multiple:true,class:"fin","aria-label":"Attach files"});
+  inp.addEventListener("change",()=>{ addFiles(key,[...inp.files]); inp.value=""; });
+  return h("div",{class:"frow",id:"fr-"+key},
+    S.assets ? [inp, h("button",{class:"nbtn",type:"button",disabled:busy||null,onclick:()=>inp.click()}, clip(), "Attach file")]
+             : h("span",{class:"nhint",text:"Attaching files needs “Can edit” access to this board."}),
+    ...list.map((f,i)=>h("span",{class:"nchip"}, extBadge(f.name), f.name+" · "+fmtSize(f.size), busy?null:h("button",{type:"button","aria-label":"Remove "+f.name,onclick:()=>{ list.splice(i,1); refreshFiles(key); }},"✕"))),
+    busy?h("span",{class:"nhint",text:busy}):null);
+}
+function refreshFiles(key){ const o=document.getElementById("fr-"+key); if(o) o.replaceWith(fileRow(key)); }
+function addFiles(key, files){
+  const arr=S.pendFiles[key]=S.pendFiles[key]||[];
+  for(const f of files){
+    if(!f.size){ toast(f.name+" is empty."); continue; }
+    const native=NATIVE_TYPES.has(f.type)?f.type:NATIVE[extOf(f.name)];
+    const cap = native ? (native==="image/svg+xml"?2:20)*1048576 : 14*1048576;
+    if(f.size>cap){ toast(`${f.name} is ${fmtSize(f.size)}. The limit for this type is ${fmtSize(cap)}.`); continue; }
+    arr.push(f);
+  }
+  refreshFiles(key);
+}
+function toB64(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>{ const s=String(r.result||""); res(s.slice(s.indexOf(",")+1)); }; r.onerror=()=>rej({code:"read_error"}); r.readAsDataURL(file); }); }
+async function uploadPending(key){
+  const list=S.pendFiles[key]||[]; if(!list.length) return [];
+  if(!S.assets){ toast("You need “Can edit” access to attach files."); return null; }
+  const out=[];
+  try{
+    for(let i=0;i<list.length;i++){
+      S.uploading[key]=`Uploading ${i+1} of ${list.length}…`; refreshFiles(key);
+      const f=list[i], native=NATIVE_TYPES.has(f.type)?f.type:NATIVE[extOf(f.name)];
+      if(native){ const r=await S.assets.upload(f,{type:native}); out.push({id:r.id,name:f.name,type:native,size:f.size}); }
+      else{
+        const env=new Blob([JSON.stringify({name:f.name,type:f.type||"application/octet-stream",b64:await toB64(f)})],{type:"application/json"});
+        const r=await S.assets.upload(env,{type:"application/json"}); out.push({id:r.id,name:f.name,type:f.type||"application/octet-stream",size:f.size,wrapped:true});
+      }
+    }
+    return out;
+  }catch(e){
+    const c=e&&e.code;
+    toast(c==="too_large"?"That file is too large.":c==="unsupported_type"?"That file type can't be attached.":c==="quota_exceeded"?"The board's file storage is full.":c==="not_granted"?"You need “Can edit” access to attach files.":"Upload failed. Try again.");
+    return null;
+  }finally{ delete S.uploading[key]; refreshFiles(key); }
+}
+function clip(){ const s=document.createElementNS("http://www.w3.org/2000/svg","svg"); s.setAttribute("width","14");s.setAttribute("height","14");s.setAttribute("viewBox","0 0 24 24");s.setAttribute("fill","none");s.setAttribute("stroke","currentColor");s.setAttribute("stroke-width","2.2");s.setAttribute("aria-hidden","true");s.innerHTML='<path d="m21 12-8.6 8.6a5 5 0 0 1-7-7l9-9a3.3 3.3 0 0 1 4.7 4.7l-9 9a1.7 1.7 0 0 1-2.4-2.4l8.3-8.3"/>'; return s; }
+function extBadge(name){ const e=(extOf(name)||"file").slice(0,4); return h("i",{class:"fext e-"+(e==="pdf"?"pdf":/^(png|jpe?g|gif|webp|svg)$/.test(e)?"img":/^(xlsx?|csv)$/.test(e)?"xls":/^docx?$/.test(e)?"doc":"oth"),text:e}); }
+const canPreview=f=>!f.wrapped && (f.type==="application/pdf"||f.type.startsWith("image/")||f.type.startsWith("video/")||f.type.startsWith("text/")||f.type==="application/json");
+function filesView(n){
+  const files=n.files||[]; if(!files.length) return null;
+  return h("div",{class:"files"}, ...files.map(f=>{
+    if(!f.wrapped && f.type.startsWith("image/")) return h("button",{class:"fthumb",type:"button",onclick:()=>openViewer(f),"aria-label":"View "+f.name}, h("img",{src:"/_blob/"+f.id,alt:f.name,loading:"lazy"}));
+    return h("div",{class:"fcard"}, extBadge(f.name),
+      h("button",{class:"fname",type:"button",onclick:()=>canPreview(f)?openViewer(f):saveFile(f),title:f.name}, f.name, h("small",{text:fmtSize(f.size||0)})),
+      canPreview(f)?h("button",{class:"fact",type:"button",onclick:()=>openViewer(f)},"View"):null,
+      h("button",{class:"fact",type:"button",onclick:()=>saveFile(f)},"Download"));
+  }));
+}
+async function fileBlob(f){
+  const r=await fetch("/_blob/"+f.id); if(!r.ok) throw {code:"gone"};
+  if(!f.wrapped) return await r.blob();
+  const j=await r.json(), bin=atob(j.b64||""), arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return new Blob([arr],{type:j.type||f.type});
+}
+async function saveFile(f){
+  if(!S.downloads){
+    if(!f.wrapped){ window.open("/_blob/"+f.id,"_blank","noopener"); return; }
+    toast("Downloading isn't available in this view."); return;
+  }
+  try{ await S.downloads.save({filename:f.name||"file",data:await fileBlob(f)}); }
+  catch(e){ const c=e&&e.code;
+    if(c==="declined") return;
+    toast(c==="gone"?"That file is no longer stored on the board.":c==="rejected_extension"||c==="extension_not_enabled"?`.${extOf(f.name)} files can't be downloaded here. Ask for a PDF or ZIP instead.`:c==="rate_limited"?"A download is already open. Finish that one first.":"Couldn't download that file. Try again."); }
+}
+/* viewer */
+let PDFJS=null;
+function loadScript(src){ return new Promise((res,rej)=>{ const sc=document.createElement("script"); sc.src=src; sc.onload=res; sc.onerror=rej; document.head.append(sc); }); }
+async function pdfjs(){
+  if(PDFJS) return PDFJS;
+  const base="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+  await loadScript(base+"pdf.min.js"); await loadScript(base+"pdf.worker.min.js");
+  PDFJS=window.pdfjsLib; return PDFJS;
+}
+const V={f:null,doc:null,scale:1,page:1,obs:null};
+function closeViewer(){ const v=$("#viewer"); v.hidden=true; v.replaceChildren(); if(V.obs) V.obs.disconnect(); V.doc=null; V.f=null; if(!S.openTask && !S.inbox) document.body.style.overflow=""; }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && V.f){ e.stopImmediatePropagation(); closeViewer(); } },true);
+async function openViewer(f){
+  V.f=f; V.scale=1; V.page=1;
+  const v=$("#viewer"), stage=h("div",{class:"vstage"}), pageLbl=h("span",{class:"vpg"}), zoomLbl=h("span",{class:"vzm",text:"100%"});
+  const tb=h("div",{class:"vbar"},
+    h("button",{type:"button","aria-label":"Zoom out",onclick:()=>zoom(-.25)},"−"), zoomLbl, h("button",{type:"button","aria-label":"Zoom in",onclick:()=>zoom(.25)},"+"),
+    h("button",{type:"button","aria-label":"Fit to width",onclick:()=>zoom(0)},"Fit"),
+    pageLbl,
+    h("button",{type:"button",class:"vdl",onclick:()=>saveFile(f)},"Download"));
+  v.replaceChildren(h("div",{class:"vwrap",role:"dialog","aria-modal":"true","aria-label":f.name},
+    h("div",{class:"vhead"}, extBadge(f.name), h("b",{text:f.name}), h("button",{class:"px",type:"button","aria-label":"Close",onclick:closeViewer},"✕")),
+    stage, tb));
+  v.hidden=false; document.body.style.overflow="hidden";
+  const url="/_blob/"+f.id;
+  const zoom=d=>{ V.scale = d===0?1:Math.min(4,Math.max(.25,V.scale+d)); zoomLbl.textContent=Math.round(V.scale*100)+"%"; apply(); };
+  let apply=()=>{};
+  if(f.type.startsWith("image/")){
+    const img=h("img",{src:url,alt:f.name,class:"vimg"}); stage.append(img);
+    apply=()=>{ img.style.width=(V.scale*100)+"%"; }; apply();
+  }else if(f.type.startsWith("video/")){
+    stage.append(h("video",{src:url,controls:true,class:"vimg"})); tb.querySelectorAll("button:not(.vdl)").forEach(b=>b.hidden=true); zoomLbl.hidden=true;
+  }else if(f.type==="application/pdf"){
+    stage.append(h("p",{class:"vmsg",text:"Loading PDF…"}));
+    try{
+      const lib=await pdfjs(), data=new Uint8Array(await (await fetch(url)).arrayBuffer());
+      const doc=await lib.getDocument({data}).promise; if(V.f!==f) return; V.doc=doc;
+      stage.replaceChildren();
+      const pages=[];
+      for(let i=1;i<=doc.numPages;i++){ const c=h("canvas",{class:"vpage","data-p":String(i)}); stage.append(c); pages.push(c); }
+      pageLbl.textContent=`1 / ${doc.numPages}`;
+      const render=async()=>{
+        const w=stage.clientWidth-32;
+        for(let i=0;i<pages.length;i++){
+          if(V.f!==f) return;
+          const pg=await doc.getPage(i+1), base=pg.getViewport({scale:1});
+          const cssW=Math.min(w, 900)*V.scale, sc=cssW/base.width, dpr=Math.min(2,window.devicePixelRatio||1);
+          const vp=pg.getViewport({scale:sc*dpr}), c=pages[i];
+          c.width=vp.width; c.height=vp.height; c.style.width=cssW+"px"; c.style.height=(vp.height/dpr)+"px";
+          await pg.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;
+        }
+      };
+      apply=()=>{ render(); }; render();
+      V.obs=new IntersectionObserver(es=>{ es.forEach(e=>{ if(e.isIntersecting){ V.page=+e.target.dataset.p; pageLbl.textContent=`${V.page} / ${doc.numPages}`; } }); },{root:stage,threshold:.5});
+      pages.forEach(c=>V.obs.observe(c));
+    }catch(e){ stage.replaceChildren(h("p",{class:"vmsg",text:"This PDF couldn't be previewed here. Use Download to open it."})); }
+  }else{
+    try{ const txt=await (await fetch(url)).text(); stage.append(h("pre",{class:"vtxt",text:txt.slice(0,200000)})); apply=()=>{ stage.querySelector("pre").style.fontSize=(13*V.scale)+"px"; }; }
+    catch(e){ stage.append(h("p",{class:"vmsg",text:"Preview not available. Use Download."})); }
+  }
 }
 
 /* ---------- notifications ---------- */
@@ -909,7 +1086,8 @@ np.addEventListener("submit",async e=>{
 
 /* ---------- boot ---------- */
 (async function boot(){
-  const [db,user,mcp] = await Promise.all([claude.use("db"), claude.use("user"), claude.use("mcp")]);
+  const [db,user,mcp,assets,downloads] = await Promise.all([claude.use("db"), claude.use("user"), claude.use("mcp"), claude.use("assets"), claude.use("downloads")]);
+  S.assets=assets; S.downloads=downloads;
   S.mcp=mcp;
   try{ S.lastSeen=Number(localStorage.getItem("tdb-seen"))||0; }catch(e){}
   if(!db){ $("#groups").replaceChildren(h("div",{class:"notice",text:"The shared board can't load in this view. Open it on claude.ai while signed in to see and edit it."})); $("#add-prop").hidden=true; return; }
