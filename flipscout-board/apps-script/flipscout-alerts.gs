@@ -30,6 +30,11 @@
  *   Deploy → New deployment → Web app → Execute as: Me,
  *     Who has access: Anyone within twinhomebuyer.com → Deploy → copy the URL.
  *   Optional: run fsSendTest to post a test message.
+ *
+ * MENU — fsSetupSchedule also adds a "🚨 FlipScout Alerts" menu to the sheet
+ * (reload the sheet once to see it): Check now · Preview (sends nothing) ·
+ * Send test message. It is a separate menu because flip-scout-reject.gs owns
+ * onOpen; this one is opened by an installable trigger instead.
  */
 
 const FS_LEADS = 'Leads';
@@ -44,13 +49,37 @@ const FS_BOARD_PASS = /^PASS \(Board\) — [^|]*?(?:\s\|\s|$)/;
 
 function fsSetupSchedule() {
   ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'fsAlertCheck')
+    .filter(t => ['fsAlertCheck', 'fsOnOpen'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('fsOnOpen').forSpreadsheet(SpreadsheetApp.getActive()).onOpen().create();
   [[8, 0], [11, 15], [15, 0]].forEach(([h, m]) =>
     ScriptApp.newTrigger('fsAlertCheck').timeBased().atHour(h).nearMinute(m).everyDays(1)
       .inTimezone('America/Los_Angeles').create());
   if (!fsWebhook_()) throw new Error('Schedule is on, but CHAT_WEBHOOK is missing — add it under Project Settings → Script Properties.');
-  Logger.log('Alerts scheduled for about 8:00, 11:15 and 15:00 Pacific.');
+  Logger.log('Alerts scheduled for about 8:00, 11:15 and 15:00 Pacific. Reload the sheet for the 🚨 FlipScout Alerts menu.');
+}
+
+function fsOnOpen() {
+  SpreadsheetApp.getUi().createMenu('🚨 FlipScout Alerts')
+    .addItem('Check now (send what is due)', 'fsCheckNow')
+    .addItem('Preview — show what would send, send nothing', 'fsPreview')
+    .addSeparator()
+    .addItem('Send test message', 'fsSendTest')
+    .addToUi();
+}
+
+// Same rules as the schedule: only leads that are due and not yet alerted.
+function fsCheckNow() {
+  const n = fsAlertCheck();
+  SpreadsheetApp.getActive().toast(n ? 'Sent 1 message to Google Chat with ' + n + (n === 1 ? ' lead.' : ' leads.')
+                                     : 'Nothing due right now — no message sent.', 'FlipScout Alerts', 6);
+}
+
+function fsPreview() {
+  const got = fsBuild_(new Date());
+  const ui = SpreadsheetApp.getUi();
+  ui.alert('FlipScout Alerts — preview (nothing sent)',
+    got ? got.text.replace(/\*/g, '') : 'Nothing is due right now, so a check would send nothing.', ui.ButtonSet.OK);
 }
 
 function fsSendTest() {
@@ -59,8 +88,20 @@ function fsSendTest() {
 
 /* --------------------------------------------------------------- alerts -- */
 
+// Returns how many leads it alerted on (0 when nothing was due).
 function fsAlertCheck() {
   const now = new Date();
+  const got = fsBuild_(now);
+  if (!got) return 0;
+  fsPost_(got.text);                 // throws on failure, so nothing is marked sent
+  const stamp = now.toISOString();
+  got.shown.forEach(d => { got.sent[d.l.mls] = Object.assign(got.sent[d.l.mls] || {}, { [d.stage]: stamp }); });
+  PropertiesService.getScriptProperties().setProperty(FS_SENT_KEY, JSON.stringify(got.sent));
+  return got.shown.length;
+}
+
+// The message a check would send now, or null when nothing is due.
+function fsBuild_(now) {
   const sent = fsLoadSent_(now);
   const due = [];
 
@@ -78,7 +119,7 @@ function fsAlertCheck() {
     due.push({ l, when: dl.when, stated: dl.stated, stage });
   });
 
-  if (!due.length) return;
+  if (!due.length) return null;
   due.sort((a, b) => a.when - b.when);
   const shown = due.slice(0, FS_MAX_PER_MESSAGE), rest = due.length - shown.length;
 
@@ -103,10 +144,7 @@ function fsAlertCheck() {
   const text = head + '\n\n' + blocks.join('\n\n') +
     (rest ? '\n\n+' + rest + ' more due within 24h — see the Board' : '') + '\n\nBoard: ' + FS_BOARD_URL;
 
-  fsPost_(text);                     // throws on failure, so nothing is marked sent
-  const stamp = now.toISOString();
-  shown.forEach(d => { sent[d.l.mls] = Object.assign(sent[d.l.mls] || {}, { [d.stage]: stamp }); });
-  PropertiesService.getScriptProperties().setProperty(FS_SENT_KEY, JSON.stringify(sent));
+  return { text, shown, sent };
 }
 
 /* ---------------------------------------------------------- pass bridge -- */
