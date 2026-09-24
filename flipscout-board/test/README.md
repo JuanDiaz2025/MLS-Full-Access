@@ -36,23 +36,44 @@ reads, so the real board ignores them and a rebuild cannot change it.
    publish `flipscout-board/test/index.html` with `data.js` alongside it to the
    page URL above, so it updates in place.
 
-## Google Chat alerts ("FLIPSCOUT NEEDS JUAN")
+## Refresh from sheet (the Board's own button)
 
-`../alerts.py` picks the leads whose offer deadline is under a day away and
-writes one Chat message; the checks run at **8:00, 11:15 (after the refresh)
-and 15:00 Pacific**. Safety rules — a lead alerts only if it is an A lead,
-still Active on the MLS, not passed / won / removed / muted on the board, and
-has a real offer date (TBD and weekday guesses never alert). At most two alerts
-per lead (inside 24h, then a final call inside 5h), at most 5 leads per
-message, nothing sent when nothing is due.
+"↻ Refresh from sheet" reads the prod sheet through the viewer's own Google
+Drive connector (the page declares `mcp: Google Drive · download_file_content`),
+rebuilds the rows exactly as `build_data.py` does (checked identical on all 896
+leads, 24 Sep) and saves them under `sheet/` (`c0…cN` chunks of 40, then
+`meta`) so every viewer switches to the same list. The newer of data.js
+(`built`) and `sheet/meta.at` wins. Same safety stop as the daily build: more
+than 20 leads gone, or the columns changed, and nothing is replaced.
 
-1. Read the Test board's `edits` and `alerts` collections (ArtifactData) into
-   `state.json` as `{"edits": {doc_id: data}, "alerts": {doc_id: data}}`.
-2. `python3 flipscout-board/alerts.py flipscout-board/test/data.js state.json`
-3. If `text` is not empty, POST `{"text": text}` to the webhook in
-   `$FLIPSCOUT_CHAT_WEBHOOK`, then update `alerts/<MLS>` with
-   `{<stage>: <now ISO>}` for every entry in `record`.
+## Passes
 
-The webhook URL is a secret: it lives in the environment variable
-`FLIPSCOUT_CHAT_WEBHOOK`, never in git or on the board. The board's
-🔔 Mute alerts button writes `alerts/<MLS>.muted`.
+- A Board status always wins. With none, a lead whose sheet Notes start with
+  PASS / passing / rejected shows as Passed (the app's own rule).
+- "Pass ↗" in the Pass box opens the Apps Script web app, which writes
+  `PASS (Board) — who, date: why` at the front of the lead's Notes. Moving it
+  off Pass offers "Take it off ↗" (action=unpass). "Board only" skips the sheet.
+- Every Board change says "Saving…" and then "✓ … saved" only once the shared
+  board confirms it. A lead with no First Added date cannot hold a status
+  (edits are keyed by pull date) and says so.
+
+## Google Chat alerts — Apps Script in the prod sheet
+
+`../apps-script/flipscout-alerts.gs`, pasted into the prod sheet next to the
+rejections script. It runs on Google's servers, needs no Claude session:
+
+| Pacific | Chat message |
+|---|---|
+| 8:00 | 📅 OFFERS DUE IN 3 DAYS (same list as the Board button), then 🚨/🔴 alerts |
+| 11:15, 15:00 | 🚨 NEEDS JUAN (under 24h) · 🔴 FINAL CALL (under 5h) — only when due |
+
+Alert rules: A lead, MLS Status Active, Notes not PASS and no "no alerts", a
+real offer date, at most two alerts per lead, five leads per message.
+The webhook lives in Script Properties (`CHAT_WEBHOOK`), never in git.
+Menu "🚨 FlipScout Alerts": Check now · Preview · Send morning summary now ·
+Send test message. Trigger code runs as saved ("Head"); only a change to
+`doGet` needs Deploy → Manage deployments → Edit → New version (same URL).
+
+The board's 🔔 Mute button writes `alerts/<MLS>.muted` in the board database;
+the Apps Script cannot see the board database, so a mute there does not stop a
+Chat alert — put "no alerts" in the lead's Notes instead.

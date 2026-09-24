@@ -796,7 +796,12 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
     if (p) return p;
     return (server[date] && server[date][mls]) || null;
   }
-  function statusOf(l){ var e = rec(l.date, l.mls); return (e && e.s) || "Needs Comps"; }
+  // A status set on the Board wins. Without one, a lead whose sheet Notes
+  // start with PASS (the app's own rule, and what "Pass ↗" writes) is passed
+  // here too — the alerts and the app already skip it.
+  var SHEET_PASSED = /^\s*(?:pass\b|passing\b|passed\b|we'?re passing|rejected\b|not a (?:fit|deal))/i;
+  function passedOnSheet(l){ return SHEET_PASSED.test(l.note || ""); }
+  function statusOf(l){ var e = rec(l.date, l.mls); return (e && e.s) || (passedOnSheet(l) ? "Pass" : "Needs Comps"); }
   function removedOf(l){ var e = rec(l.date, l.mls); return !!(e && e.r); }
   function teamDue(l){ var e = rec(l.date, l.mls); return (e && e.d) || ""; }
   function sheetDue(l){ return l.sdue || ""; }
@@ -1068,6 +1073,7 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
         (l.date ? '' : ' disabled title="This lead has no First Added date on the sheet, so its status cannot be saved"') + '>' + opts + '</select>' +
         (l.date ? '' : '<span class="by">No First Added date on the sheet — status can’t be saved</span>') +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') +
+        (!(e && e.s) && passedOnSheet(l) ? '<span class="by">passed on the sheet</span>' : '') +
         (st === "Pass" && e && e.pr ? '<span class="pass-why">“' + esc(e.pr) + '”</span>' : '') + bucketHTML(l) + '</td>' +
       '<td data-l="Property" class="wide">' + addrHTML(l) +
         '<span class="mls">' + esc(l.mls) + '</span>' +
@@ -1584,7 +1590,9 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
       if (s.value === "Pass") { askPass(tr.dataset.date, tr.dataset.mls); return; }
       var was = rec(tr.dataset.date, tr.dataset.mls);
       applyEdit(tr.dataset.date, tr.dataset.mls, {s: s.value, sp: false});
-      if (was && was.s === "Pass" && was.sp) askUnpass(tr.dataset.mls);
+      var lead = BY_MLS[tr.dataset.mls];
+      if ((was && was.s === "Pass" && was.sp) ||
+          (!(was && was.s) && lead && /^PASS \(Board\)/.test(lead.note || ""))) askUnpass(tr.dataset.mls);
       return;
     }
     var dueIn = ev.target.closest("input.due-in");
