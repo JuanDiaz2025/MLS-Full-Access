@@ -292,6 +292,20 @@ button{cursor:pointer}
 .atts .file span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .atts .file:hover{border-color:var(--accent)}
 .ix .clip{color:var(--muted)}
+.pinline{flex:1 1 100%;max-width:720px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#2b2f36;display:flex;flex-direction:column}
+.phd{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#1f2329;color:#e8ecf3;font-size:13px}
+.pic{background:#d8334d;color:#fff;font-family:var(--f-mono);font-size:10px;font-weight:700;border-radius:4px;padding:2px 5px;flex:none}
+.pnm{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.psz{color:#9aa3b5;font-size:12px;flex:none}
+.pscroll{height:420px;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px}
+.ppage{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.45);max-width:none;flex:none}
+.pmsg{color:#dfe4ee;margin:auto;font-size:13px}
+.ptools{align-self:center;display:flex;align-items:center;gap:4px;margin:0 0 10px;background:#1f2329;border-radius:10px;padding:4px 6px;box-shadow:0 4px 16px rgba(0,0,0,.4)}
+.ptools button{min-width:30px;height:30px;border:0;border-radius:6px;background:transparent;color:#e8ecf3;font-weight:700;font-size:16px;display:grid;place-items:center;padding:0 6px;cursor:pointer}
+.ptools button:hover{background:rgba(255,255,255,.14)}
+.pz{color:#e8ecf3;font-family:var(--f-mono);font-size:12px;min-width:44px;text-align:center}
+.psep{width:1px;height:18px;background:rgba(255,255,255,.2);margin:0 4px}
+@media (max-width:560px){.pscroll{height:340px}}
 .newpill{font-style:normal;background:var(--h-red);color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px}
 .newpill.big{margin-left:0;font-size:12px;padding:3px 9px}
 .atpill{font-style:normal;background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px}
@@ -922,6 +936,54 @@ async function saveBlob(x, blob){
   catch(e){ const c=e&&e.code; if(c==="declined") return;
     toast(c==="rejected_extension"||c==="extension_not_enabled"?`.${(String(x.name||"").split(".").pop()||"").toLowerCase()} files can't be downloaded here. Ask for a PDF or ZIP instead.`:c==="rate_limited"?"A download is already open. Finish that one first.":"Couldn't download that file. Try again."); }
 }
+/* inline PDF preview: shows pages right in the note, no click needed */
+const INLINE=new Map();
+function inlinePdf(x){
+  if(INLINE.has(x.fid)) return INLINE.get(x.fid);
+  const body=h("div",{class:"pscroll"}, h("p",{class:"pmsg",text:"Loading preview…"}));
+  const zl=h("span",{class:"pz",text:"100%"}), pl=h("span",{class:"pz",text:"– / –"});
+  const tb=h("div",{class:"ptools"});
+  const box=h("div",{class:"pinline"},
+    h("div",{class:"phd"}, h("span",{class:"pic",text:"PDF"}), h("span",{class:"pnm",text:x.name||"File",title:x.name||""}), x.size?h("span",{class:"psz",text:fmtSize(x.size)}):null),
+    body, tb);
+  INLINE.set(x.fid, box);
+  let started=false, doc=null, scale=1, gen=0, pages=[];
+  const draw=async()=>{
+    if(!doc) return;
+    const my=++gen, w=Math.max(200,(body.clientWidth||600)-24)*scale, dpr=Math.min(2,window.devicePixelRatio||1);
+    for(let i=0;i<pages.length;i++){
+      if(my!==gen) return;
+      const pg=await doc.getPage(i+1), v1=pg.getViewport({scale:1}), vp=pg.getViewport({scale:(w/v1.width)*dpr}), c=pages[i];
+      c.width=vp.width; c.height=vp.height; c.style.width=(vp.width/dpr)+"px";
+      await pg.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;
+    }
+  };
+  const zoom=d=>{ scale=d===0?1:Math.min(3,Math.max(.4,+(scale+d).toFixed(2))); zl.textContent=Math.round(scale*100)+"%"; draw(); };
+  let got=null;
+  tb.append(
+    h("button",{type:"button",title:"Full screen","aria-label":"Open full screen",onclick:()=>openViewer(x)}, icon('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>')),
+    h("button",{type:"button","aria-label":"Zoom out",onclick:()=>zoom(-.2)},"−"),
+    h("button",{type:"button","aria-label":"Zoom in",onclick:()=>zoom(.2)},"+"), zl,
+    h("span",{class:"psep"}), pl, h("span",{class:"psep"}),
+    h("button",{type:"button",title:"Download","aria-label":"Download "+(x.name||"file"),onclick:async()=>{ try{ got=got||await loadFile(x); saveBlob(x,got.blob); }catch(e){ toast("This file couldn't be loaded."); } }}, icon('<path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/>')));
+  const start=async()=>{
+    if(started) return; started=true;
+    try{
+      got=await loadFile(x);
+      const L=await getPdf();
+      doc=await L.getDocument({data:new Uint8Array(await got.blob.arrayBuffer())}).promise;
+      body.replaceChildren();
+      for(let i=1;i<=doc.numPages;i++){ const c=h("canvas",{class:"ppage","aria-label":"Page "+i}); pages.push(c); body.append(c); }
+      pl.textContent="1 / "+doc.numPages;
+      const io=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting) pl.textContent=(pages.indexOf(e.target)+1)+" / "+doc.numPages; }),{root:body,threshold:.5});
+      pages.forEach(c=>io.observe(c));
+      await draw();
+    }catch(e){ started=false; body.replaceChildren(h("p",{class:"pmsg",text:"Preview couldn't load. Use full screen or Download."})); }
+  };
+  const vis=new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)){ vis.disconnect(); start(); } },{rootMargin:"200px"});
+  requestAnimationFrame(()=>vis.observe(box));
+  return box;
+}
 function attList(n){
   const a=Array.isArray(n.attachments)?n.attachments.filter(x=>x&&x.fid):[];
   if(!a.length) return null;
@@ -933,6 +995,7 @@ function attList(n){
       return btn;
     }
     const isPdf=/pdf/.test(String(x.type||""))||/\.pdf$/i.test(x.name||"");
+    if(isPdf) return inlinePdf(x);
     return h("button",{class:"file",type:"button",title:"View "+(x.name||"file"),onclick:()=>openViewer(x)}, isPdf?"📕":"📄", h("span",{text:(x.name||"File")+(x.size?" · "+fmtSize(x.size):"")}), h("b",{class:"vw",text:"View"}));
   }));
 }
