@@ -1055,7 +1055,12 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
       return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>';
     }).join("");
     return '<tr class="' + STRIPE[st] + (gone ? " gone" : st === "Pass" ? " passed" : l.bucket === "C" ? " cpass" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
-      '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
+      // The team's status is saved per pull date; a row with no First Added
+      // date on the sheet has nowhere to be saved, so say so instead of
+      // letting a change vanish on the next reload.
+      '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '"' +
+        (l.date ? '' : ' disabled title="This lead has no First Added date on the sheet, so its status cannot be saved"') + '>' + opts + '</select>' +
+        (l.date ? '' : '<span class="by">No First Added date on the sheet — status can’t be saved</span>') +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') +
         (st === "Pass" && e && e.pr ? '<span class="pass-why">“' + esc(e.pr) + '”</span>' : '') + bucketHTML(l) + '</td>' +
       '<td data-l="Property" class="wide">' + addrHTML(l) +
@@ -1338,6 +1343,10 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
 
   /* ---------- persistence ---------- */
   function applyEdit(date, mls, patch){
+    if (!date) {
+      note("That lead has no First Added date on the sheet, so the Board can't save changes to it. Add the date on the sheet and it will work after the next refresh.", true);
+      draw(); return;
+    }
     var cur = rec(date, mls) || {};
     var next = {
       s: cur.s || "Needs Comps",
