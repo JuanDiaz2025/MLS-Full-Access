@@ -35,3 +35,24 @@ reads, so the real board ignores them and a rebuild cannot change it.
 3. Diff against the published `data.js` (leads added / gone / changed), then
    publish `flipscout-board/test/index.html` with `data.js` alongside it to the
    page URL above, so it updates in place.
+
+## Google Chat alerts ("FLIPSCOUT NEEDS JUAN")
+
+`../alerts.py` picks the leads whose offer deadline is under a day away and
+writes one Chat message; the checks run at **8:00, 11:15 (after the refresh)
+and 15:00 Pacific**. Safety rules — a lead alerts only if it is an A lead,
+still Active on the MLS, not passed / won / removed / muted on the board, and
+has a real offer date (TBD and weekday guesses never alert). At most two alerts
+per lead (inside 24h, then a final call inside 5h), at most 5 leads per
+message, nothing sent when nothing is due.
+
+1. Read the Test board's `edits` and `alerts` collections (ArtifactData) into
+   `state.json` as `{"edits": {doc_id: data}, "alerts": {doc_id: data}}`.
+2. `python3 flipscout-board/alerts.py flipscout-board/test/data.js state.json`
+3. If `text` is not empty, POST `{"text": text}` to the webhook in
+   `$FLIPSCOUT_CHAT_WEBHOOK`, then update `alerts/<MLS>` with
+   `{<stage>: <now ISO>}` for every entry in `record`.
+
+The webhook URL is a secret: it lives in the environment variable
+`FLIPSCOUT_CHAT_WEBHOOK`, never in git or on the board. The board's
+🔔 Mute alerts button writes `alerts/<MLS>.muted`.
