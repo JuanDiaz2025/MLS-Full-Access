@@ -1366,7 +1366,9 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
     pending[date] = pending[date] || {};
     pending[date][mls] = next;
     draw();
-    toast("d" in patch
+    // Say "Saving…" now and "Saved" only once the shared board confirms it,
+    // so nobody walks away from a change that did not stick.
+    savedMsg[date + "|" + mls] = ("d" in patch
       ? (next.d === "-" ? "Marked no deadline — saved for the team"
          : next.d ? "Offer due " + next.d + " — saved for the team"
          : "Deadline cleared")
@@ -1375,12 +1377,14 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
         : next.s === "Pass"
           ? (next.sp ? "Passed — finish in the new tab to mark it on the sheet" : "Marked Pass — moved to Passed, below the list")
           : "Marked " + next.s + " — saved for the team");
+    toast(db ? "Saving…" : "Not connected — this change is on your screen only. Reload the page.");
     flush();
   }
 
   // Send every change the shared board hasn't confirmed yet. Safe to call at
   // any moment: before the connection is up it does nothing, and the queued
   // changes go out the moment it is.
+  var savedMsg = {};   // "date|mls" -> what to say once the save is confirmed
   function flush(){
     if (!db) return;
     Object.keys(pending).forEach(function(date){
@@ -1395,9 +1399,13 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
         // update rejects on.
         ref.update(body)
           .catch(function(){ return ref.set(body); })
-          .then(function(){ delete inflight[key]; })
-          .catch(function(){
+          .then(function(){
             delete inflight[key];
+            if (savedMsg[key]) { toast("✓ " + savedMsg[key]); delete savedMsg[key]; }
+          })
+          .catch(function(){
+            delete inflight[key]; delete savedMsg[key];
+            toast("✗ Not saved — reload the page and try again");
             note("Couldn't save that change to the shared board. It is showing on this screen only — reload the page.", true);
           });
       });
