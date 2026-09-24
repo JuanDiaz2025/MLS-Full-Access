@@ -390,7 +390,10 @@ footer .num{font-size:12px}
   border:1px solid var(--line); border-radius:12px; padding:0; width:min(640px, calc(100% - 32px));
   background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55);
 }
-#scanDlg::backdrop{background:rgba(14,32,46,.45)}
+#scanDlg::backdrop, #passDlg::backdrop{background:rgba(14,32,46,.45)}
+#passDlg{border:1px solid var(--line); border-radius:12px; padding:0; width:min(460px, calc(100% - 32px));
+  background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55)}
+.pass-why{display:block; margin-top:4px; max-width:22ch; font-size:11.5px; line-height:1.35; color:var(--t-pass); font-style:italic}
 .dlg{padding:20px}
 .dlg h2{font-family:Archivo,sans-serif; font-size:17px; margin:0; letter-spacing:-.01em}
 .dlg-sub{font-size:13px; color:var(--muted); margin:6px 0 12px}
@@ -575,6 +578,20 @@ footer .num{font-size:12px}
       <div class="dlg-actions">
         <button type="button" class="btn" id="scanCancel">Cancel</button>
         <button type="button" class="btn go" id="scanGo" disabled>Add leads</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="passDlg" aria-labelledby="passTitle">
+    <div class="dlg">
+      <h2 id="passTitle">Pass on this lead</h2>
+      <p class="dlg-sub" id="passAddr"></p>
+      <label class="dlg-hint" for="passWhy">Why? <i>(optional — leave blank if you like)</i></label>
+      <input type="text" id="passWhy" maxlength="200" placeholder="e.g. already renovated, too far, price too high…"
+        style="width:100%; margin-top:6px">
+      <div class="dlg-actions">
+        <button type="button" class="btn" id="passCancel">Cancel</button>
+        <button type="button" class="btn go" id="passGo">Pass</button>
       </div>
     </div>
   </dialog>
@@ -1002,7 +1019,8 @@ footer .num{font-size:12px}
     }).join("");
     return '<tr class="' + STRIPE[st] + (gone ? " gone" : st === "Pass" ? " passed" : l.bucket === "C" ? " cpass" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
       '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
-        (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + bucketHTML(l) + '</td>' +
+        (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') +
+        (st === "Pass" && e && e.pr ? '<span class="pass-why">“' + esc(e.pr) + '”</span>' : '') + bucketHTML(l) + '</td>' +
       '<td data-l="Property" class="wide">' + addrHTML(l) +
         '<span class="mls">' + esc(l.mls) + '</span>' +
         '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' +
@@ -1221,6 +1239,28 @@ footer .num{font-size:12px}
     });
   }
 
+  /* ---------- pass, with an optional reason ---------- */
+  var passFor = null;
+  function askPass(date, mls){
+    var l = BY_MLS[mls], d = $("passDlg"), e = rec(date, mls);
+    passFor = {date: date, mls: mls};
+    $("passAddr").textContent = l ? l.addr + " · " + mls : mls;
+    $("passWhy").value = (e && e.pr) || "";
+    if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+    $("passWhy").focus();
+  }
+  function closePass(save){
+    var d = $("passDlg"), p = passFor;
+    passFor = null;
+    if (d.open) d.close();
+    if (save && p) applyEdit(p.date, p.mls, {s: "Pass", pr: $("passWhy").value.trim().slice(0, 200)});
+    else draw();                                   // cancelled: the menu goes back to what it was
+  }
+  $("passGo").addEventListener("click", function(){ closePass(true); });
+  $("passCancel").addEventListener("click", function(){ closePass(false); });
+  $("passWhy").addEventListener("keydown", function(ev){ if (ev.key === "Enter") { ev.preventDefault(); closePass(true); } });
+  $("passDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closePass(false); });
+
   /* ---------- persistence ---------- */
   function applyEdit(date, mls, patch){
     var cur = rec(date, mls) || {};
@@ -1228,12 +1268,15 @@ footer .num{font-size:12px}
       s: cur.s || "Needs Comps",
       r: !!cur.r,
       d: cur.d || "",
+      pr: cur.pr || "",
       by: myName || "Someone",
       at: new Date().toISOString()
     };
     if ("s" in patch) next.s = patch.s;
     if ("r" in patch) next.r = patch.r;
     if ("d" in patch) next.d = patch.d;
+    if ("pr" in patch) next.pr = patch.pr;
+    if (next.s !== "Pass") next.pr = "";        // a reason only belongs to a pass
     pending[date] = pending[date] || {};
     pending[date][mls] = next;
     draw();
@@ -1357,6 +1400,9 @@ footer .num{font-size:12px}
     if (l.agentRemarks) secs.push(['Agent-only remarks', marked(l.agentRemarks, l.offerPhrase)]);
     if (l.remarks) secs.push(['Public remarks', marked(l.remarks, l.offerPhrase)]);
     if (l.showing) secs.push(['Showing', esc(l.showing)]);
+    var pe = rec(l.date, l.mls);
+    if (pe && pe.s === "Pass") secs.push(['Passed by the team', esc(pe.by || "Someone") + (pe.at ? ' · ' + esc(noteWhen(pe.at)) : '') +
+      (pe.pr ? '<br><span class="quote">“' + esc(pe.pr) + '”</span>' : '<br><i>no reason given</i>')]);
     if (l.why || BK_NAME[l.bucket]) secs.push(['Bucket & score',
       (BK_NAME[l.bucket] ? '<b>' + l.bucket + ' — ' + BK_NAME[l.bucket] + (l.score != null ? ' · ' + esc(String(l.score)) + '/100' : '') + '</b><br>' : '') + esc(l.why)]);
     if (l.agentName || l.agentPhone || l.agentEmail) secs.push(['Listing agent',
@@ -1422,7 +1468,9 @@ footer .num{font-size:12px}
     var tr, s = ev.target.closest('select[data-act="status"]');
     if (s){
       tr = s.closest("tr");
-      if (tr) applyEdit(tr.dataset.date, tr.dataset.mls, {s: s.value});
+      if (!tr) return;
+      if (s.value === "Pass") { askPass(tr.dataset.date, tr.dataset.mls); return; }
+      applyEdit(tr.dataset.date, tr.dataset.mls, {s: s.value});
       return;
     }
     var dueIn = ev.target.closest("input.due-in");
