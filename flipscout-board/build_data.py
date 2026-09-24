@@ -9,7 +9,15 @@ Export the whole workbook, not one tab — a CSV export only carries the
 first tab, and the leads live on "Leads".
 
 Emits `window.__MLS__ = {pulled, dates, rows}` where each row is
-[mls, address, price, ppsf, sqft, beds, year, dom, note, pull_date].
+[mls, address, price, ppsf, sqft, beds, year, dom, note, pull_date, offer_due,
+ agent_phone, agent_email, agent_name, mls_status, offer_time, offer_from,
+ offer_phrase, agent_remarks, showing, bucket, score, why, occupied, price_cut].
+Everything from `offer_due` on comes from the columns the FlipScout app writes
+at the end of the Leads tab; an older sheet without them gives "".
+
+`cols` in the payload names every field in order. Read rows through it rather
+than by literal index — two boards already share this file, and appending a
+field must never shift one of them out from under the other.
 The board derives the MLS link from the MLS number, so the sheet's link
 column is dropped.
 
@@ -23,41 +31,9 @@ import openpyxl
 # every lead the scout hasn't scored yet carries this placeholder; the board
 # treats it as "no note" so the notes people actually wrote stand out
 BOILERPLATE = "Condition-qualified only — ARV and profit not yet calculated"
-# The first fourteen columns are the board's backbone and must not move.
 FIELDS = ["Status", "MLS #", "Address", "Beds", "Baths", "SqFt", "Lot SqFt",
           "Year Built", "DOM", "Purchase Price", "$/SqFt", "Notes",
           "MLS Link", "First Added"]
-
-# Columns the scan added later. Looked up by name and optional by design: an
-# older export without them still builds, the board just shows less.
-EXTRA = ["Offer Due", "Private Remarks", "MLS Status", "Occupied By",
-         "Opportunity Score", "Bucket", "Price Cut", "Listing Agent",
-         "Agent Phone", "Agent Email"]
-
-# "2026-09-29 (Tue) 2:30 PM" — the scan's own offer-due format. The weekday is
-# redundant with the date and the time is worth keeping separate, since a
-# deadline at 10 AM and one at 5 PM are different days of work.
-OFFER_DUE_CELL = re.compile(
-    r"^\s*(\d{4}-\d{2}-\d{2})\s*(?:\([A-Za-z]{3}\))?\s*"
-    r"(\d{1,2}:\d{2}\s*[AaPp]\.?[Mm]\.?)?")
-
-
-def offer_due(cell):
-    """(date, time) from the sheet's Offer Due column.
-
-    "TBD" is kept rather than dropped: the agent said there IS a deadline and
-    has not named it, which is a different state from no deadline at all and
-    means somebody should call.
-    """
-    text = cell.strip()
-    if not text:
-        return "", ""
-    if text.upper().startswith("TBD"):
-        return "TBD", ""
-    m = OFFER_DUE_CELL.match(text)
-    if not m:
-        return "", ""
-    return m.group(1), (m.group(2) or "").upper().replace(".", "").strip()
 
 
 # --- reading offer deadlines out of listing remarks ------------------------
@@ -177,51 +153,86 @@ def number(s):
         return None
 
 
+# The app writes Offer Due as "2026-09-28 (Mon) 5:00 PM", "2026-09-28 (Mon)"
+# or "TBD" — read off the listing, so it beats a guess from the Notes text.
+SHEET_DUE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:\s*\(\w+\))?(?:\s+(\d{1,2}:\d{2} [AP]M))?")
+
+
+def sheet_offer(value):
+    """(date, time, phrase) from the app's Offer Due cell."""
+    m = SHEET_DUE.match(value or "")
+    if m:
+        return m.group(1), m.group(2) or "", ""
+    if re.match(r"^T\.?B\.?D\b", value or "", re.I):
+        return "", "", "Offer date TBD"
+    return "", "", ""
+
+
+# The sentence an offer date was read from, so the board can quote it and
+# highlight it in the agent's remarks.
+OFFER_SENTENCE = re.compile(
+    r"[^.!?\n]*\boffers?\b[^.!?\n]*(?:\d|\b(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|\bTBD\b)(?:[^!?\n]*?(?:[ap]\.m\.|[.!?](?=\s|$))|[^.!?\n]*)", re.I)
+
+
+def offer_sentence(text):
+    m = OFFER_SENTENCE.search(text or "")
+    return re.sub(r"\s+", " ", m.group(0)).strip()[:200] if m else ""
+
+
+# The row layout, named. Append here, never insert: boards read rows through
+# this list, and shifting an index silently rewrites every lead on screen.
+COLUMNS = ["mls", "addr", "price", "ppsf", "sqft", "beds", "year", "dom",
+           "note", "date", "sdue", "phone", "email", "agent", "mstat",
+           "dtime", "dfrom", "dphrase", "remarks", "showing", "bucket",
+           "score", "why", "occ", "cut"]
+
+
 def build(xlsx_path):
     ws = openpyxl.load_workbook(xlsx_path, data_only=True)["Leads"]
     grid = list(ws.iter_rows(min_row=1, values_only=True))
-    full = [cell(h) for h in grid[0]]
-    header = full[:len(FIELDS)]
+    header = [cell(h) for h in grid[0][:len(FIELDS)]]
+    extra = {cell(h): i for i, h in enumerate(grid[0]) if i >= len(FIELDS) and h}
     if header != FIELDS:
         raise SystemExit(
             "The Leads tab's columns have changed, so the board would be built "
             "from the wrong fields. Stop and re-map them.\n"
             "  expected: %s\n  found:    %s" % (FIELDS, header))
-    at = {name: full.index(name) for name in EXTRA if name in full}
 
     rows = []
     for raw in grid[1:]:
         r = {FIELDS[i]: cell(raw[i]) for i in range(len(FIELDS))}
+        for h, i in extra.items():
+            r[h] = cell(raw[i]) if i < len(raw) else ""
         if not r["MLS #"] and not r["Address"]:
             continue
-        get = lambda name: cell(raw[at[name]]) if name in at else ""
         note = "" if r["Notes"] == BOILERPLATE else r["Notes"]
-
-        # The sheet's own Offer Due column is authoritative. Only when it is
-        # empty do we fall back to reading a deadline out of the remarks, and
-        # that reading stays marked approximate.
-        due, due_time = offer_due(get("Offer Due"))
-        if not due:
-            remarks = " ".join(x for x in (note, get("Private Remarks")) if x)
-            due = parse_offer_due(remarks, r["First Added"])
-
+        # remarks land in Notes today; if the pull ever adds a dedicated
+        # remarks column, read both
+        remarks = " ".join(x for x in (note, r.get("Agent Remarks", "")) if x)
+        due, due_time, due_phrase = sheet_offer(r.get("Offer Due", ""))
         rows.append([
             r["MLS #"], r["Address"], number(r["Purchase Price"]),
             number(r["$/SqFt"]), number(r["SqFt"]), number(r["Beds"]),
             number(r["Year Built"]), number(r["DOM"]),
             note, r["First Added"],
-            due, due_time,
-            get("MLS Status"), get("Occupied By"),
-            number(get("Opportunity Score")),
-            get("Bucket").split("—")[0].strip(),   # "A — Work Now" -> "A"
-            get("Price Cut"), get("Listing Agent"),
-            get("Agent Phone"), get("Agent Email"),
+            due or parse_offer_due(remarks, r["First Added"]),
+            r.get("Agent Phone", ""), r.get("Agent Email", ""),
+            r.get("Listing Agent", "").split(",")[0].strip(), r.get("MLS Status", ""),
+            due_time, "agent remarks" if due else "",
+            due_phrase or (offer_sentence(r.get("Private Remarks", "")) if due else ""),
+            r.get("Private Remarks", "")[:2000], r.get("Showing", "")[:600],
+            # "A — Work Now" -> "A"; the board spells the labels itself
+            (r.get("Bucket", "")[:1] if r.get("Bucket", "")[:1] in ("A", "B", "C") else ""),
+            number(r.get("Opportunity Score", "")), r.get("Why", "")[:240],
+            # appended, never inserted: see the note on `cols` above
+            r.get("Occupied By", ""), r.get("Price Cut", ""),
         ])
 
     # cheapest per square foot first within each pull date — how the team reads it
     rows.sort(key=lambda x: (x[9], x[3] if x[3] is not None else 10 ** 9))
     dates = sorted({x[9] for x in rows if x[9]}, reverse=True)
-    return {"pulled": dates[0] if dates else "", "dates": dates, "rows": rows}
+    return {"pulled": dates[0] if dates else "", "dates": dates,
+            "cols": COLUMNS, "rows": rows}
 
 
 def main():
@@ -238,16 +249,11 @@ def main():
     for d in payload["dates"][:5]:
         print("   %s  %d" % (d, by_date[d]))
     dues = [x for x in payload["rows"] if x[10]]
-    read = [x for x in dues if x[10].startswith("~")]
-    tbd = [x for x in dues if x[10] == "TBD"]
-    print("offer deadlines: %d (%d dated from the sheet, %d TBD, %d read from remarks)"
-          % (len(dues), len(dues) - len(read) - len(tbd), len(tbd), len(read)))
-    market = collections.Counter(x[12] for x in payload["rows"] if x[12])
-    if market:
-        print("MLS status: " + ", ".join("%s %d" % (k, v) for k, v in market.most_common()))
-    occ = collections.Counter(x[13] for x in payload["rows"] if x[13])
-    if occ:
-        print("occupancy:  " + ", ".join("%s %d" % (k, v) for k, v in occ.most_common(4)))
+    exact = [x for x in dues if not x[10].startswith("~")]
+    print("offer deadlines read from remarks: %d (%d dated, %d weekday-only)"
+          % (len(dues), len(exact), len(dues) - len(exact)))
+    for x in dues[:10]:
+        print("   %-13s %s  <- %s" % (x[0], x[10], x[8][:60]))
 
 
 if __name__ == "__main__":

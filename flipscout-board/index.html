@@ -475,8 +475,10 @@ footer .num{font-size:12px}
 (function(){
   "use strict";
   var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
-  var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date",
-              "sdue","dtime","mstat","occ","score","bucket","cut","agent","phone","email"];
+  // The build names its own columns. Two boards read this data now, so a new
+  // field is appended rather than inserted — read by name and a shifted index
+  // can never silently rewrite every lead on screen.
+  var COLS = D.cols || ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue"];
   var LEADS = D.rows.map(function(r){
     var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i];
     o.link = "https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=" + o.mls;
@@ -531,19 +533,17 @@ footer .num{font-size:12px}
   function sheetDue(l){ return l.sdue || ""; }
   // "TBD" means the agent confirmed a deadline exists and would not name it —
   // a different state from no deadline, and one that needs a phone call.
-  function dueIsTBD(l){ return !teamDue(l) && sheetDue(l) === "TBD"; }
+  // the build reports a named-but-unstated deadline in its own field
+  function dueIsTBD(l){
+    return !teamDue(l) && !sheetDue(l) && /TBD/i.test(l.dphrase || "");
+  }
   function dueOf(l){
     var t = teamDue(l);
     if (t === "-") return "";
     if (t) return t;
-    var sd = sheetDue(l);
-    if (!sd || sd === "TBD") return "";
-    return sd.replace(/^~/, "");
+    return sheetDue(l).replace(/^~/, "");
   }
-  function dueIsRead(l){
-    var sd = sheetDue(l);
-    return !teamDue(l) && !!sd && sd !== "TBD";
-  }
+  function dueIsRead(l){ return !teamDue(l) && !!sheetDue(l); }
   function dueIsApprox(l){ return dueIsRead(l) && sheetDue(l).charAt(0) === "~"; }
   function dueTime(l){ return (!teamDue(l) && l.dtime) ? l.dtime : ""; }
 
