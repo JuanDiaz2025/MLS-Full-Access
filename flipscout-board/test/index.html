@@ -335,6 +335,12 @@ button.due-src.approx{color:var(--t-offer)}
 .copy{border:1px solid var(--line); background:var(--surface-2); color:var(--muted); border-radius:5px;
   font:600 10.5px Archivo,sans-serif; letter-spacing:.03em; padding:1px 6px; cursor:pointer; user-select:none}
 .copy:hover{border-color:var(--accent); color:var(--accent)}
+.mailbtn{display:inline-flex; align-items:center; gap:4px; border:1px solid var(--accent); color:var(--accent);
+  background:var(--surface); border-radius:6px; font:600 11.5px Archivo,sans-serif; padding:2px 8px; text-decoration:none; cursor:pointer}
+.mailbtn:hover{background:var(--accent); color:#fff}
+.mailbtn.again{border-color:var(--line); color:var(--muted)}
+.mailbtn.sure{border-color:var(--t-offer); color:var(--t-offer)}
+.mailed{display:inline-block; font-size:11.5px; color:var(--t-won); font-weight:600}
 .mlslink{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; margin-left:8px; font-weight:600}
 .mst{display:inline-block; margin-left:8px; font-family:Archivo,sans-serif; font-size:10.5px; font-weight:700;
   letter-spacing:.04em; text-transform:uppercase; border-radius:999px; padding:1px 7px; vertical-align:1px}
@@ -931,6 +937,8 @@ footer .num{font-size:12px}
               test: function(l){ return l.bucket === "B" && isLive(l) && teamOpen(l) && notLate(l); }},
     pending: {label: "Pending", hint: "Pending or contingent on the MLS — worth watching in case it falls through", sort: "bk",
               test: function(l){ return PENDING.test(l.mlsStatus || "") && teamOpen(l); }},
+    mailed:  {label: "Emailed", hint: "Leads whose agent the team has emailed from the Board", sort: "bk",
+              test: function(l){ return !!mailedOf(l); }},
     closed:  {label: "Sold / off market", hint: "Sold, withdrawn, cancelled or expired on the MLS", sort: "bk",
               test: function(l){ return CLOSED.test(l.mlsStatus || ""); }}
   };
@@ -1134,7 +1142,45 @@ footer .num{font-size:12px}
       (l.agentName ? '<span>' + esc(l.agentName) + '</span>' : '') +
       (l.agentPhone ? '<span class="c">' + esc(l.agentPhone) + '<button type="button" class="copy" data-copy="' + esc(l.agentPhone) + '" aria-label="Copy phone number">Copy</button></span>' : '') +
       (l.agentEmail ? '<span class="c em">' + esc(l.agentEmail) + '<button type="button" class="copy" data-copy="' + esc(l.agentEmail) + '" aria-label="Copy email">Copy</button></span>' : '') +
-      '</span>';
+      mailHTML(l) + '</span>';
+  }
+
+  /* ---------- agent email: a Gmail compose window, filled in ---------- */
+  // The page cannot create a Gmail draft itself, so the button is a real link
+  // to Gmail's compose screen in whatever Google account the viewer is signed
+  // into. They type the offer and send — or close it and Gmail keeps a draft.
+  // The Board remembers who opened it and when (em / eb on the lead's record).
+  var MAIL_OFFER = "[OFFER — fill in]";
+  function mailFirst(name){
+    var w = String(name || "").replace(/\(.*?\)/g, " ").split(/\s+/).filter(function(x){ return x && !/^[A-Z]\.?$/i.test(x); });
+    if (!w.length) return "";
+    var f = w[0];
+    return f === f.toUpperCase() ? f.charAt(0) + f.slice(1).toLowerCase() : f;
+  }
+  // "1908 Pennsylvania Ave, Richmond, CA 94801" -> "1908 Pennsylvania Ave, Richmond"
+  function mailAddr(a){
+    var p = String(a || "").split(",").map(function(x){ return x.trim(); }).filter(Boolean);
+    return p.length >= 3 ? p[0] + ", " + p[1] : p.join(", ").replace(/\s+\d{5}(?:-\d{4})?$/, "");
+  }
+  function mailUrl(l){
+    var addr = mailAddr(l.addr), first = mailFirst(l.agentName) || "there";
+    var body = "Hi " + first + ",\n\n" +
+      "Would your seller entertain an offer of $" + MAIL_OFFER + " on " + addr + "? We're a local cash buyer, " +
+      "no financing contingency, can close fast and work around your timeline.\n\n" +
+      "Let me know if that's something worth putting in front of them.\n\n" +
+      "Best,\nTwin Home Buyer team";
+    return "https://mail.google.com/mail/?view=cm&fs=1&to=" + encodeURIComponent(l.agentEmail) +
+      "&su=" + encodeURIComponent("Offer on " + addr) + "&body=" + encodeURIComponent(body);
+  }
+  function mailedOf(l){ var e = rec(l.date, l.mls); return e && e.em ? e : null; }
+  function mailHTML(l){
+    if (!l.agentEmail) return "";
+    var m = mailedOf(l);
+    return (m ? '<span class="mailed">✉️ Emailed · ' + esc(m.eb || "Someone") + ' · ' + esc(noteWhen(m.em)) + '</span>' : '') +
+      '<a class="mailbtn' + (m ? ' again' : '') + '" href="' + esc(mailUrl(l)) + '" target="_blank" rel="noopener"' +
+      ' data-mail="' + esc(l.mls) + '" data-date="' + esc(l.date) + '"' +
+      ' title="Opens Gmail with the email to ' + esc(l.agentEmail) + ' written — fill in the offer amount, then Send">' +
+      (m ? '✉️ Email again' : '✉️ Draft email') + '</a>';
   }
 
   function redfinOf(l){
@@ -1346,12 +1392,17 @@ footer .num{font-size:12px}
       draw(); return;
     }
     var cur = rec(date, mls) || {};
+    var lead0 = BY_MLS[mls];
     var next = {
-      s: cur.s || "Needs Comps",
+      // no Board status yet: start from what the lead shows (a sheet PASS
+      // stays a pass when someone only removes it or emails the agent)
+      s: cur.s || (lead0 && passedOnSheet(lead0) ? "Pass" : "Needs Comps"),
       r: !!cur.r,
       d: cur.d || "",
       pr: cur.pr || "",
       sp: !!cur.sp,
+      em: cur.em || "",
+      eb: cur.eb || "",
       by: myName || "Someone",
       at: new Date().toISOString()
     };
@@ -1360,13 +1411,14 @@ footer .num{font-size:12px}
     if ("d" in patch) next.d = patch.d;
     if ("pr" in patch) next.pr = patch.pr;
     if ("sp" in patch) next.sp = patch.sp;
+    if ("em" in patch) { next.em = patch.em; next.eb = myName || "Someone"; }
     if (next.s !== "Pass") { next.pr = ""; next.sp = false; }   // a reason only belongs to a pass
     pending[date] = pending[date] || {};
     pending[date][mls] = next;
     draw();
     // Say "Saving…" now and "Saved" only once the shared board confirms it,
     // so nobody walks away from a change that did not stick.
-    savedMsg[date + "|" + mls] = ("d" in patch
+    savedMsg[date + "|" + mls] = "em" in patch ? "Marked emailed — Gmail opened in a new tab" : ("d" in patch
       ? (next.d === "-" ? "Marked no deadline — saved for the team"
          : next.d ? "Offer due " + next.d + " — saved for the team"
          : "Deadline cleared")
@@ -1495,10 +1547,12 @@ footer .num{font-size:12px}
     var pe = rec(l.date, l.mls);
     if (pe && pe.s === "Pass") secs.push(['Passed by the team', esc(pe.by || "Someone") + (pe.at ? ' · ' + esc(noteWhen(pe.at)) : '') +
       (pe.pr ? '<br><span class="quote">“' + esc(pe.pr) + '”</span>' : '<br><i>no reason given</i>')]);
+    var me0 = mailedOf(l);
+    if (me0) secs.push(['Agent emailed', esc(me0.eb || "Someone") + ' · ' + esc(noteWhen(me0.em))]);
     if (l.why || BK_NAME[l.bucket]) secs.push(['Bucket & score',
       (BK_NAME[l.bucket] ? '<b>' + l.bucket + ' — ' + BK_NAME[l.bucket] + (l.score != null ? ' · ' + esc(String(l.score)) + '/100' : '') + '</b><br>' : '') + esc(l.why)]);
     if (l.agentName || l.agentPhone || l.agentEmail) secs.push(['Listing agent',
-      [esc(l.agentName), esc(l.agentPhone), esc(l.agentEmail)].filter(Boolean).join('<br>')]);
+      [esc(l.agentName), esc(l.agentPhone), esc(l.agentEmail)].filter(Boolean).join('<br>') + (l.agentEmail ? '<br>' + mailHTML(l) : '')]);
     $("sideTitle").textContent = l.addr;
     $("sideBody").innerHTML = '<span class="mls">' + esc(l.mls) + '</span>' + mlsStatusHTML(l.mlsStatus) +
       '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
@@ -1520,6 +1574,20 @@ footer .num{font-size:12px}
     var sd = ev.target.closest("[data-side]");
     if (sd){ openSide(sd.dataset.side, sd); return; }
     if (ev.target.closest("[data-side-close]")){ closeSide(); return; }
+    var ml = ev.target.closest("a[data-mail]");
+    if (ml){
+      var ll = BY_MLS[ml.dataset.mail];
+      // emailed before: the first click only arms it, so nobody writes to the
+      // same agent twice about the same house by accident
+      if (ll && mailedOf(ll) && !ml.classList.contains("sure")) {
+        ev.preventDefault(); ml.classList.add("sure");
+        ml.textContent = "Already emailed — click again to open";
+        return;
+      }
+      if (!ml.dataset.date) { toast("Opening Gmail — this lead has no First Added date, so the Board can't record it"); return; }
+      applyEdit(ml.dataset.date, ml.dataset.mail, {em: new Date().toISOString()});
+      return;
+    }
     var cp = ev.target.closest("button[data-copy]");
     if (cp){
       var v = cp.dataset.copy;
