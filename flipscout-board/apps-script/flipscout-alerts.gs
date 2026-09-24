@@ -29,6 +29,8 @@
  *    writes "PASS (Board) — Seth, Sep 24: too far" at the front of that lead's
  *    Notes, so the app's Refresh and these alerts both skip it.
  *    action=unpass takes that prefix off again.
+ *    action=email hands the lead to flipscout-instantly.gs (the Board's
+ *    "✉ Email agent" button).
  *
  * SETUP (once) — see the steps Claude gave you:
  *   Project Settings → Time zone: (GMT-07:00) Pacific Time - Los Angeles
@@ -212,6 +214,10 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   const action = String(p.action || '');
   const mls = String(p.mls || '').trim().toUpperCase();
+  // "✉ Email agent" on the Board — handled by flipscout-instantly.gs
+  if (action === 'email' && /^[A-Z0-9]{5,20}$/.test(mls) && typeof fsiWebEmail_ === 'function') {
+    return fsiWebEmail_(mls, String(p.by || '').trim().slice(0, 40));
+  }
   if (!/^(pass|unpass)$/.test(action) || !/^[A-Z0-9]{5,20}$/.test(mls)) {
     return fsPage_('Nothing to do', 'This link is missing the lead or the action. Open it from the FlipScout Board.');
   }

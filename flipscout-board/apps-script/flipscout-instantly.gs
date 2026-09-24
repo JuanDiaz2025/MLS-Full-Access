@@ -24,6 +24,9 @@
  *       blank or TBD — and goes back in if the app's Refresh blanks it, since
  *       Refresh rewrites Offer Due from the MLS remarks.
  *
+ *  The Board's "✉ Email agent" button adds one lead on demand (fsiWebEmail_,
+ *  reached through doGet in flipscout-alerts.gs).
+ *
  *  Everything is logged on the "Agent Emails" tab (one row per property).
  *
  * SETUP (once)
@@ -39,7 +42,7 @@ const FSI_TAB = 'Agent Emails';
 const FSI_DAILY_MAX = 10;
 const FSI_TEST = { mls: 'TEST0001', email: 'bryan@twinhomebuyer.com', first: 'Bryan', addr: '123 Test Street, San Francisco, CA 94112' };
 const FSI_HEAD = ['Added On', 'MLS #', 'Address', 'Agent', 'Agent Email', 'Status', 'Replied On',
-                  'Agent Offer Due', 'Needs Juan', 'Reply', 'Stopped On', 'Stop Reason', 'Instantly Lead ID'];
+                  'Agent Offer Due', 'Needs Juan', 'Reply', 'Stopped On', 'Stop Reason', 'Instantly Lead ID', 'Added By'];
 const FSI_EMAIL = /^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i;
 const FSI_PENDING = /pending|contingent|under contract/i;
 const FSI_NO_EMAIL_NOTE = /no (?:outreach|e-?mails?)/i;
@@ -125,11 +128,9 @@ function fsiPreview() {
 
 function fsiAddTest() {
   const ui = SpreadsheetApp.getUi();
-  if (fsiRows_().some(r => r.mls === FSI_TEST.mls && r.status === 'Emailing')) {
-    ui.alert('The TEST lead is already in the campaign. Launch the campaign in Instantly, wait for the email at ' +
-             FSI_TEST.email + ', then reply to it.'); return;
-  }
-  fsiAddOne_({ mls: FSI_TEST.mls, addr: FSI_TEST.addr, agent: FSI_TEST.first + ' Test', email: FSI_TEST.email });
+  // a finished test (replied / completed) is cleared so Instantly takes it again
+  fsiRows_().filter(r => r.mls === FSI_TEST.mls && r.status !== 'Stopped').forEach(r => fsiStop_(r, 'Replaced by a new test'));
+  fsiAddOne_({ mls: FSI_TEST.mls, addr: FSI_TEST.addr, agent: FSI_TEST.first + ' Test', email: FSI_TEST.email }, fsSafeEmail_() || 'menu');
   ui.alert('TEST lead added',
     FSI_TEST.email + ' is in the campaign as "' + fsiShort_(FSI_TEST.addr) + '".\n\n' +
     '1. In Instantly, click Launch (it only has this one lead).\n' +
@@ -231,7 +232,7 @@ function fsiAddNew_(now) {
   return n;
 }
 
-function fsiAddOne_(l) {
+function fsiAddOne_(l, by) {
   const first = fsiFirst_(l.agent);
   const res = fsiApi_('post', '/leads', {
     campaign: FSI_CAMPAIGN, email: l.email, first_name: first,
@@ -240,7 +241,44 @@ function fsiAddOne_(l) {
     skip_if_in_campaign: true
   });
   if (!res || !res.id) throw new Error('Instantly did not add ' + l.email + ' (already in the campaign?)');
-  fsiTab_().appendRow([new Date(), l.mls, l.addr, l.agent, l.email, 'Emailing', '', '', '', '', '', '', res.id]);
+  fsiTab_().appendRow([new Date(), l.mls, l.addr, l.agent, l.email, 'Emailing', '', '', '', '', '', '', res.id, by || 'Automatic']);
+}
+
+/* ----------------------------------------- the Board's Email button -- */
+
+// doGet (flipscout-alerts.gs) sends action=email here. A person chose this
+// lead, so any bucket is fine; the safety checks still apply.
+function fsiWebEmail_(mls, by) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return fsPage_('Busy', 'FlipScout is updating right now. Close this tab and click the button again in a minute.');
+  try {
+    let l;
+    if (mls === FSI_TEST.mls) {
+      // the test lead: clear the previous test so Instantly takes it again
+      fsiRows_().filter(r => r.mls === FSI_TEST.mls && r.status !== 'Stopped').forEach(r => fsiStop_(r, 'Replaced by a new test'));
+      l = { mls, addr: FSI_TEST.addr, agent: FSI_TEST.first + ' Test', email: FSI_TEST.email, notes: '', mstat: 'Active' };
+    } else {
+      l = fsiLeads_().find(x => x.mls === mls);
+      if (!l) return fsPage_('Lead not on the sheet', mls + ' is not on the Leads tab (it may have been rejected). Nothing was sent.');
+      const done = fsiRows_().filter(r => r.mls === mls).pop();
+      if (done) return fsPage_('Already emailed', fsiShort_(l.addr) + ' was handed to Instantly on ' +
+        Utilities.formatDate(new Date(done.added), FSI_TZ, 'MMM d') + ' (' + done.status.toLowerCase() + '). See the Agent Emails tab.');
+      if (!l.email) return fsPage_('No agent email', 'The sheet has no agent email for ' + fsiShort_(l.addr) + '. Nothing was sent.');
+      if (FS_PASSED.test(l.notes)) return fsPage_('Passed', fsiShort_(l.addr) + ' is marked PASS in Notes. Nothing was sent.');
+      if (FS_CLOSED.test(l.mstat) || FSI_PENDING.test(l.mstat)) return fsPage_('Not active', fsiShort_(l.addr) + ' is ' + l.mstat.toLowerCase() + ' on the MLS. Nothing was sent.');
+      const busy = fsiRows_().find(r => r.email === l.email && r.status === 'Emailing');
+      if (busy) return fsPage_('Agent already in the campaign', (l.agent || l.email) + ' is already being emailed about ' + fsiShort_(busy.addr) +
+        '. Instantly holds one email per agent at a time, so this one waits until that finishes.');
+    }
+    fsiAddOne_(l, by);
+    return fsPage_('✓ Sent to Instantly', fsiShort_(l.addr) + ' → ' + (l.agent || 'the agent') + ' <' + l.email + '>. ' +
+      'Instantly sends the first email within the campaign\'s sending hours, then the follow-ups; it stops when the agent replies. You can close this tab.');
+  } catch (e) {
+    fsiErr_('Board email ' + mls + ': ' + e.message);
+    return fsPage_('Not sent', 'Instantly refused it: ' + e.message);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* ------------------------------------------------------------ stopping -- */
