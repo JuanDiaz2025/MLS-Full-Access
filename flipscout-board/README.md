@@ -46,11 +46,14 @@ Anything ambiguous returns empty. An empty cell someone fills in beats a
 confident wrong date somebody plans around. `python3 -c` the module and feed
 `parse_offer_due` new phrasings before trusting it on a new remark style.
 
-**As of now this yields nothing**, because the pull does not carry listing
-remarks into the sheet. The parser is the half that cannot be done later;
-getting remarks into the Notes column is the half that unlocks it.
+The sheet now carries an **Offer Due** column of its own, and that is
+authoritative: `build_data.py` reads it first (`2026-09-29 (Tue) 2:30 PM` ->
+date plus time) and only falls back to the remarks parser when it is empty.
+`TBD` is kept rather than dropped — the agent confirmed a deadline exists and
+would not name it, which needs a call, not silence.
 
-And that half is nearly done already. `scripts/mls-profile.js` on branch
+The remarks parser still earns its place as the fallback, and this is how it
+came to be written: `scripts/mls-profile.js` on branch
 `claude/navigation-link-training-l0d5a3` — run hourly by the "Hourly
 full-buy-box fixer scan" Routine, against a live MLS session — already scrapes
 both Public Remarks and Agent Remarks off each listing detail page:
@@ -64,6 +67,29 @@ column is the entire remaining step: no new login automation, no new
 credentials, and deadlines start appearing on the board the next morning.
 
 That change belongs on the branch that owns the scraper, not this one.
+
+### The columns that arrived later
+
+The scan added thirteen columns on 2026-09-24. `build_data.py` looks them up by
+name and treats them as optional, so an older export still builds — it just
+shows less. The board uses:
+
+| Column | What it does on the board |
+|---|---|
+| `Offer Due` | the deadline, with its time; `TBD` becomes a call-the-agent chip |
+| `MLS Status` | Active / Pending / Sold chip, a Market filter, and dimming for anything off-market |
+| `Occupied By` | Vacant / Tenant / Owner chip — tenant-occupied is a hard exclusion |
+| `Opportunity Score`, `Bucket` | a sortable Score column |
+| `Price Cut` | a chip; a motivated seller signals here first |
+| `Listing Agent`, `Agent Phone` | shown on the KPI deadline list, where you are about to call someone |
+
+`Private Remarks` feeds the deadline parser's fallback.
+
+**Off-market leads are the thing to watch.** On the day these columns landed,
+44% of the leads carrying an MLS status were already Sold or Pending. They stay
+on the board rather than vanishing — the team may still want the comp — but
+they are dimmed, chipped, filterable, and excluded from the deadline list,
+because a deadline on a sold house is not work.
 
 ### Refresh timing
 
