@@ -11,8 +11,13 @@ first tab, and the leads live on "Leads".
 Emits `window.__MLS__ = {pulled, dates, rows}` where each row is
 [mls, address, price, ppsf, sqft, beds, year, dom, note, pull_date, offer_due,
  agent_phone, agent_email, agent_name, mls_status, offer_time, offer_from,
- offer_phrase, agent_remarks, showing, bucket, score, why]. The last twelve come from the columns the FlipScout app
-writes at the end of the Leads tab; an older sheet without them gives "".
+ offer_phrase, agent_remarks, showing, bucket, score, why, occupied, price_cut].
+Everything from `offer_due` on comes from the columns the FlipScout app writes
+at the end of the Leads tab; an older sheet without them gives "".
+
+`cols` in the payload names every field in order. Read rows through it rather
+than by literal index — two boards already share this file, and appending a
+field must never shift one of them out from under the other.
 The board derives the MLS link from the MLS number, so the sheet's link
 column is dropped.
 
@@ -174,6 +179,14 @@ def offer_sentence(text):
     return re.sub(r"\s+", " ", m.group(0)).strip()[:200] if m else ""
 
 
+# The row layout, named. Append here, never insert: boards read rows through
+# this list, and shifting an index silently rewrites every lead on screen.
+COLUMNS = ["mls", "addr", "price", "ppsf", "sqft", "beds", "year", "dom",
+           "note", "date", "sdue", "phone", "email", "agent", "mstat",
+           "dtime", "dfrom", "dphrase", "remarks", "showing", "bucket",
+           "score", "why", "occ", "cut"]
+
+
 def build(xlsx_path):
     ws = openpyxl.load_workbook(xlsx_path, data_only=True)["Leads"]
     grid = list(ws.iter_rows(min_row=1, values_only=True))
@@ -211,12 +224,15 @@ def build(xlsx_path):
             # "A — Work Now" -> "A"; the board spells the labels itself
             (r.get("Bucket", "")[:1] if r.get("Bucket", "")[:1] in ("A", "B", "C") else ""),
             number(r.get("Opportunity Score", "")), r.get("Why", "")[:240],
+            # appended, never inserted: see the note on `cols` above
+            r.get("Occupied By", ""), r.get("Price Cut", ""),
         ])
 
     # cheapest per square foot first within each pull date — how the team reads it
     rows.sort(key=lambda x: (x[9], x[3] if x[3] is not None else 10 ** 9))
     dates = sorted({x[9] for x in rows if x[9]}, reverse=True)
-    return {"pulled": dates[0] if dates else "", "dates": dates, "rows": rows}
+    return {"pulled": dates[0] if dates else "", "dates": dates,
+            "cols": COLUMNS, "rows": rows}
 
 
 def main():

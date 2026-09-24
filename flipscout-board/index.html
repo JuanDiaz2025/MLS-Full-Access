@@ -253,6 +253,24 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   font-size:11px; font-weight:700; letter-spacing:.03em;
   border-radius:999px; padding:2px 8px; white-space:nowrap;
 }
+.chiprow{display:flex; flex-wrap:wrap; gap:5px; margin-top:5px}
+.tag{
+  display:inline-block; font-family:Archivo,sans-serif; font-size:10.5px; font-weight:700;
+  letter-spacing:.04em; border-radius:4px; padding:2px 7px; white-space:nowrap;
+}
+.ms-active  {background:var(--b-won);    color:var(--t-won)}
+.ms-pending {background:var(--b-offer);  color:var(--t-offer)}
+.ms-sold    {background:var(--b-pass);   color:var(--t-pass)}
+.ms-cont    {background:var(--b-review); color:var(--t-review)}
+.ms-dead    {background:var(--b-removed);color:var(--t-removed)}
+.oc-tenant  {background:var(--b-pass);   color:var(--t-pass)}
+.oc-vacant  {background:var(--b-won);    color:var(--t-won)}
+.oc-other   {background:var(--b-none);   color:var(--t-none)}
+.tag-cut    {background:var(--b-review); color:var(--t-review)}
+tbody tr.offmarket td{opacity:.5}
+.score{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums;
+  font-weight:600}
+.due-tbd{background:var(--b-offer); color:var(--t-offer)}
 .due-src{display:block; margin-top:3px; font-size:10.5px; color:var(--muted); letter-spacing:.02em}
 .due-src.approx{color:var(--t-offer); font-weight:600}
 .due-over {background:var(--b-pass);   color:var(--t-pass)}
@@ -377,6 +395,15 @@ footer .num{font-size:12px}
         <input type="search" id="q" placeholder="Address, MLS #, city, note…">
       </div>
       <div class="field">
+        <label for="marketFilter">Market</label>
+        <select id="marketFilter">
+          <option value="">Any MLS status</option>
+          <option value="Active">Active only</option>
+          <option value="__live__">Active + Contingent</option>
+          <option value="__gone__">Sold / Pending only</option>
+        </select>
+      </div>
+      <div class="field">
         <label for="statusFilter">Status</label>
         <select id="statusFilter">
           <option value="">All statuses</option>
@@ -418,9 +445,10 @@ footer .num{font-size:12px}
     <div class="kpi-head"><span>Offer deadlines</span><span class="rule"></span></div>
     <div class="tablecard kpi-table"><table id="kpiDue"></table></div>
     <p class="kpi-note">Dates marked <span class="due-src approx" style="display:inline">≈</span> were read
-      from a weekday in the MLS remarks (&ldquo;offers due Thursday&rdquo;) and resolved against the pull
-      date — confirm them before planning around one. Typing a date on the Leads screen replaces whatever
-      was read.</p>
+      from a weekday in the remarks and resolved against the pull date — confirm those before planning
+      around one. Everything else comes from the sheet&rsquo;s own Offer Due column. Leads already Sold or
+      Pending are left out: their deadlines are moot. Typing a date on the Leads screen replaces
+      whatever arrived.</p>
 
     <div class="panel">
       <div class="kpi-head" style="margin:0"><span>Status mix</span><span class="rule"></span></div>
@@ -447,7 +475,10 @@ footer .num{font-size:12px}
 (function(){
   "use strict";
   var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
-  var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue"];
+  // The build names its own columns. Two boards read this data now, so a new
+  // field is appended rather than inserted — read by name and a shifted index
+  // can never silently rewrite every lead on screen.
+  var COLS = D.cols || ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue"];
   var LEADS = D.rows.map(function(r){
     var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i];
     o.link = "https://search.mlslistings.com/Matrix/Public/Portal.aspx?ID=" + o.mls;
@@ -500,6 +531,12 @@ footer .num{font-size:12px}
   function removedOf(l){ var e = rec(l.date, l.mls); return !!(e && e.r); }
   function teamDue(l){ var e = rec(l.date, l.mls); return (e && e.d) || ""; }
   function sheetDue(l){ return l.sdue || ""; }
+  // "TBD" means the agent confirmed a deadline exists and would not name it —
+  // a different state from no deadline, and one that needs a phone call.
+  // the build reports a named-but-unstated deadline in its own field
+  function dueIsTBD(l){
+    return !teamDue(l) && !sheetDue(l) && /TBD/i.test(l.dphrase || "");
+  }
   function dueOf(l){
     var t = teamDue(l);
     if (t === "-") return "";
@@ -508,6 +545,18 @@ footer .num{font-size:12px}
   }
   function dueIsRead(l){ return !teamDue(l) && !!sheetDue(l); }
   function dueIsApprox(l){ return dueIsRead(l) && sheetDue(l).charAt(0) === "~"; }
+  function dueTime(l){ return (!teamDue(l) && l.dtime) ? l.dtime : ""; }
+
+  var MSTAT = {"Active":"ms-active","Pending":"ms-pending","Sold":"ms-sold",
+               "Contingent":"ms-cont"};
+  var OFF_MARKET = {"Sold":1,"Canceled":1,"Withdrawn":1,"Expired":1,"Duplicate":1};
+  function msClass(v){ return MSTAT[v] || "ms-dead"; }
+  function offMarket(l){ return !!OFF_MARKET[l.mstat]; }
+  function occClass(v){
+    if (v === "Tenant") return "oc-tenant";
+    if (v === "Vacant") return "oc-vacant";
+    return "oc-other";
+  }
 
   function todayISO(){
     var n = new Date();
@@ -565,8 +614,12 @@ footer .num{font-size:12px}
     var base = view === "__all__" ? LEADS.slice() : (BY_DATE[view] || []).slice();
     var q = $("q").value.trim().toLowerCase();
     var st = $("statusFilter").value;
+    var mk = $("marketFilter").value;
     return base.filter(function(l){
       if (st && statusOf(l) !== st) return false;
+      if (mk === "__live__") { if (l.mstat !== "Active" && l.mstat !== "Contingent") return false; }
+      else if (mk === "__gone__") { if (l.mstat !== "Sold" && l.mstat !== "Pending") return false; }
+      else if (mk && l.mstat !== mk) return false;
       if (!q) return true;
       return (l.addr + " " + l.mls + " " + (l.note || "")).toLowerCase().indexOf(q) !== -1;
     });
@@ -615,6 +668,7 @@ footer .num{font-size:12px}
     '<th data-s="beds">Beds<span class="arrow">▾</span></th>' +
     '<th data-s="year">Built<span class="arrow">▾</span></th>' +
     '<th data-s="dom">DOM<span class="arrow">▾</span></th>' +
+    '<th data-s="score">Score<span class="arrow">▾</span></th>' +
     '<th data-s="due">Offer due<span class="arrow">▾</span></th>' +
     (view === "__all__" ? '<th data-s="date">Pulled<span class="arrow">▾</span></th>' : '') +
     '<th class="plain"></th></tr></thead>'; }
@@ -644,11 +698,19 @@ footer .num{font-size:12px}
     var opts = STATUSES.map(function(s){
       return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>';
     }).join("");
-    return '<tr class="' + STRIPE[st] + (gone ? " gone" : st === "Pass" ? " passed" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+    return '<tr class="' + STRIPE[st] + (offMarket(l) ? " offmarket" : "") +
+      (gone ? " gone" : st === "Pass" ? " passed" : "") + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
       '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + '</td>' +
       '<td data-l="Property" class="wide"><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' + esc(l.addr) + '</a>' +
         '<span class="mls">' + esc(l.mls) + '</span>' +
+        ((l.mstat || l.occ || l.cut)
+          ? '<span class="chiprow">' +
+            (l.mstat ? '<span class="tag ' + msClass(l.mstat) + '">' + esc(l.mstat) + '</span>' : '') +
+            (l.occ ? '<span class="tag ' + occClass(l.occ) + '">' + esc(l.occ) + '</span>' : '') +
+            (l.cut ? '<span class="tag tag-cut">cut ' + esc(l.cut) + '</span>' : '') +
+            '</span>'
+          : '') +
         (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + '</td>' +
       '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
       '<td data-l="$/SqFt" class="num">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
@@ -656,12 +718,16 @@ footer .num{font-size:12px}
       '<td data-l="Beds" class="num">' + (l.beds ? l.beds : "—") + '</td>' +
       '<td data-l="Built" class="num">' + (l.year ? l.year : "—") + '</td>' +
       '<td data-l="DOM"><span class="dom ' + domClass(l.dom) + '">' + (l.dom == null ? "—" : l.dom) + '</span></td>' +
+      '<td data-l="Score" class="score">' + (l.score == null ? "—" : l.score) +
+        (l.bucket ? ' <span class="mls">' + esc(l.bucket) + '</span>' : '') + '</td>' +
       '<td data-l="Offer due" class="wide"><input type="date" class="due-in" value="' + esc(due) +
         '" aria-label="Offer due date for ' + esc(l.mls) + '">' +
-        (dd === null ? '' : '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>') +
+        (dd === null ? '' : '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) +
+          (dueTime(l) ? ' ' + esc(dueTime(l)) : '') + '</span>') +
+        (dueIsTBD(l) ? '<br><span class="due-chip due-tbd">deadline TBD — call agent</span>' : '') +
         (dueIsRead(l)
           ? '<span class="due-src' + (dueIsApprox(l) ? ' approx' : '') + '">' +
-            (dueIsApprox(l) ? '≈ read from MLS remarks — confirm' : 'read from MLS remarks') +
+            (dueIsApprox(l) ? '≈ read from remarks — confirm' : 'from the sheet') +
             '</span>'
           : '') + '</td>' +
       (view === "__all__" ? '<td data-l="Pulled" class="num">' + esc(l.date) + '</td>' : '') +
@@ -691,7 +757,7 @@ footer .num{font-size:12px}
     $("tblActive").innerHTML = active.length
       ? head() + "<tbody>" + active.map(rowHTML).join("") + "</tbody>"
       : '<tbody><tr><td class="empty"><b>Nothing here</b>' +
-        ($("q").value || $("statusFilter").value
+        ($("q").value || $("statusFilter").value || $("marketFilter").value
           ? "No lead in this view matches your filters."
           : passed.length || gone.length
             ? "Every lead on this pull date has been worked. The rest are below."
@@ -814,6 +880,7 @@ footer .num{font-size:12px}
   });
   $("q").addEventListener("input", draw);
   $("statusFilter").addEventListener("change", draw);
+  $("marketFilter").addEventListener("change", draw);
   $("toggleRemoved").addEventListener("click", function(){ showRemoved = !showRemoved; draw(); });
   $("togglePassed").addEventListener("click", function(){ showPassed = !showPassed; draw(); });
 
@@ -906,13 +973,33 @@ footer .num{font-size:12px}
 
     // deadlines only matter on leads still in play: a passed or removed lead
     // has no offer to get out the door
-    var dues = list.filter(function(l){
-      return dueOf(l) && !removedOf(l) && statusOf(l) !== "Pass";
-    }).sort(function(a, b){ return dueOf(a) < dueOf(b) ? -1 : dueOf(a) > dueOf(b) ? 1 : 0; });
+    // A deadline only matters on something still buyable: not removed, not
+    // passed, and not already Sold or Pending on the MLS.
+    function chaseable(l){
+      return !removedOf(l) && statusOf(l) !== "Pass" &&
+             !offMarket(l) && l.mstat !== "Pending";
+    }
+    // Soonest FIRST among deadlines still ahead, then the ones already passed,
+    // most recent first. Plain chronological order buries what is due today
+    // under months of stale deadlines, which is the opposite of the job.
+    var dues = list.filter(function(l){ return dueOf(l) && chaseable(l); })
+      .sort(function(a, b){
+        var da = daysUntil(dueOf(a)), db = daysUntil(dueOf(b));
+        var pa = da < 0, pb = db < 0;
+        if (pa !== pb) return pa ? 1 : -1;
+        return pa ? db - da : da - db;
+      });
+    var tbds = list.filter(function(l){ return dueIsTBD(l) && chaseable(l); });
     var late = dues.filter(function(l){ return daysUntil(dueOf(l)) < 0; }).length;
     var week = dues.filter(function(l){
       var n = daysUntil(dueOf(l)); return n >= 0 && n <= 7;
     }).length;
+    var dueToday = dues.filter(function(l){ return daysUntil(dueOf(l)) === 0; }).length;
+    var onMarket = list.filter(function(l){
+      return l.mstat === "Active" || l.mstat === "Contingent";
+    }).length;
+    var soldN = list.filter(function(l){ return l.mstat === "Sold"; }).length;
+    var pendN = list.filter(function(l){ return l.mstat === "Pending"; }).length;
     $("kpiTiles").innerHTML = [
       ['<div class="kpi"><dt>Leads</dt><dd>' + k.total + '</dd>' +
        '<div class="sub">' + scope + '</div></div>'],
@@ -929,27 +1016,45 @@ footer .num{font-size:12px}
        '<div class="sub">ruled out on review</div></div>'],
       ['<div class="kpi"><dt>Deadlines</dt><dd style="color:var(--t-offer)">' + dues.length + '</dd>' +
        '<div class="sub">' + (dues.length
-          ? late + ' late · ' + week + ' due within 7 days'
-          : 'set an offer due date on the Leads screen') + '</div></div>']
+          ? dueToday + ' due today · ' + week + ' within 7 days · ' + late + ' late'
+          : 'nothing still buyable has a deadline') +
+       (tbds.length ? ' · ' + tbds.length + ' TBD' : '') + '</div></div>'],
+      ['<div class="kpi"><dt>Still on market</dt><dd style="color:var(--t-won)">' + onMarket + '</dd>' +
+       '<div class="sub">' + soldN + ' sold · ' + pendN + ' pending already</div></div>']
     ].join("");
 
     $("kpiDue").innerHTML = dues.length
       ? '<thead><tr><th class="plain">Offer due</th><th class="plain">When</th>' +
         '<th class="plain">Property</th><th class="plain">Status</th>' +
-        '<th class="plain n">Price</th><th class="plain n">$/SqFt</th></tr></thead><tbody>' +
+        '<th class="plain n">Price</th><th class="plain n">$/SqFt</th>' +
+        '<th class="plain">Listing agent</th></tr></thead><tbody>' +
         dues.map(function(l){
           var dd = daysUntil(dueOf(l));
           return '<tr><td class="n">' + esc(dueOf(l)) +
             (dueIsApprox(l) ? ' <span class="due-src approx">≈</span>' : '') + '</td>' +
-            '<td><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span></td>' +
+            '<td><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) +
+              (dueTime(l) ? ' ' + esc(dueTime(l)) : '') + '</span></td>' +
             '<td><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' +
               esc(l.addr) + '</a><span class="mls">' + esc(l.mls) + '</span></td>' +
             '<td><span class="pill ' + STCLASS[statusOf(l)] + '">' + esc(statusOf(l)) + '</span></td>' +
             '<td class="n">' + fmtMoney(l.price) + '</td>' +
-            '<td class="n">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td></tr>';
+            '<td class="n">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
+            '<td>' + (l.agent ? esc(l.agent) : '\u2014') +
+              (l.phone ? '<span class="mls">' + esc(l.phone) + '</span>' : '') + '</td>' + '</tr>';
+        }).join("") +
+        tbds.map(function(l){
+          return '<tr><td class="n">TBD</td>' +
+            '<td><span class="due-chip due-tbd">call agent</span></td>' +
+            '<td><a class="addr" href="' + esc(l.link) + '" target="_blank" rel="noopener">' +
+              esc(l.addr) + '</a><span class="mls">' + esc(l.mls) + '</span></td>' +
+            '<td><span class="pill ' + STCLASS[statusOf(l)] + '">' + esc(statusOf(l)) + '</span></td>' +
+            '<td class="n">' + fmtMoney(l.price) + '</td>' +
+            '<td class="n">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
+            '<td>' + (l.agent ? esc(l.agent) : '\u2014') +
+              (l.phone ? '<span class="mls">' + esc(l.phone) + '</span>' : '') + '</td>' + '</tr>';
         }).join("") + '</tbody>'
-      : '<tbody><tr><td class="empty"><b>No deadlines set</b>' +
-        'Put a date in the Offer due column on the Leads screen and every deadline lands here, soonest first.' +
+      : '<tbody><tr><td class="empty"><b>No deadlines here</b>' +
+        'Nothing still on the market in this view has an offer deadline.' +
         '</td></tr></tbody>';
 
     // one stacked bar; numbers live in the legend and the tables, never inside
@@ -1037,6 +1142,7 @@ footer .num{font-size:12px}
     // search and status filter belong to the lead list, not the numbers
     $("q").closest(".field").hidden = onKpi;
     $("statusFilter").closest(".field").hidden = onKpi;
+    $("marketFilter").closest(".field").hidden = onKpi;
     syncStep();
     if (push) {
       try {
