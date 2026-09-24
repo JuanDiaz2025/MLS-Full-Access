@@ -41,6 +41,10 @@ body{
 }
 .wrap{max-width:1400px; margin:0 auto; padding:0 20px; padding-block:0 56px}
 a{color:var(--accent)}
+a.btn{display:inline-flex; align-items:center; text-decoration:none}
+#unpassDlg{border:1px solid var(--line); border-radius:12px; padding:0; width:min(460px, calc(100% - 32px));
+  background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55)}
+#unpassDlg::backdrop{background:rgba(14,32,46,.45)}
 :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
 @media (prefers-reduced-motion: reduce){*{animation:none!important; transition:none!important}}
 
@@ -595,9 +599,25 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
       <label class="dlg-hint" for="passWhy">Why? <i>(optional — leave blank if you like)</i></label>
       <input type="text" id="passWhy" maxlength="200" placeholder="e.g. already renovated, too far, price too high…"
         style="width:100%; margin-top:6px">
+      <p class="dlg-hint" style="margin-top:10px">“Pass ↗” also opens a tab that writes the pass into the sheet’s Notes,
+        so the app and the Chat alerts skip this lead. Close that tab once it says saved.</p>
       <div class="dlg-actions">
         <button type="button" class="btn" id="passCancel">Cancel</button>
-        <button type="button" class="btn go" id="passGo">Pass</button>
+        <button type="button" class="btn" id="passBoard" title="Pass here without marking the sheet">Board only</button>
+        <a class="btn go" id="passGo" href="#" target="_blank" rel="noopener"
+           title="Passes it here and opens a tab that marks it PASS on the sheet">Pass ↗</a>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="unpassDlg" aria-labelledby="unpassTitle">
+    <div class="dlg">
+      <h2 id="unpassTitle">Take the pass off the sheet too?</h2>
+      <p class="dlg-sub" id="unpassAddr"></p>
+      <p class="dlg-hint">This lead was marked PASS on the sheet. Until that comes off, the app and the Chat alerts keep skipping it.</p>
+      <div class="dlg-actions">
+        <button type="button" class="btn" id="unpassNo">Not now</button>
+        <a class="btn go" id="unpassGo" href="#" target="_blank" rel="noopener">Take it off ↗</a>
       </div>
     </div>
   </dialog>
@@ -1269,25 +1289,51 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
   }
 
   /* ---------- pass, with an optional reason ---------- */
+  // The sheet is reached through the prod sheet's Apps Script web app. A page
+  // cannot send it anything in the background, so "Pass ↗" is a real link the
+  // viewer clicks: it opens a tab where the script writes the pass into Notes
+  // (only for twinhomebuyer.com accounts).
+  var SHEET_BRIDGE = "https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbxK3mV_RmfYLIjd198yH0EtAQeQY-Fghn4UGXsCmtkrN5I7Q5L5CkYj3yL3FQ5UltrX/exec";
+  function bridgeUrl(action, mls, why){
+    return SHEET_BRIDGE + "?action=" + action + "&mls=" + encodeURIComponent(mls) +
+      "&by=" + encodeURIComponent(myName || "") + (why ? "&why=" + encodeURIComponent(why) : "");
+  }
+  function syncPassLink(){
+    if (passFor) $("passGo").href = bridgeUrl("pass", passFor.mls, $("passWhy").value.trim().slice(0, 200));
+  }
   var passFor = null;
   function askPass(date, mls){
     var l = BY_MLS[mls], d = $("passDlg"), e = rec(date, mls);
     passFor = {date: date, mls: mls};
     $("passAddr").textContent = l ? l.addr + " · " + mls : mls;
     $("passWhy").value = (e && e.pr) || "";
+    syncPassLink();
     if (d.showModal) d.showModal(); else d.setAttribute("open", "");
     $("passWhy").focus();
   }
-  function closePass(save){
+  function closePass(save, toSheet){
     var d = $("passDlg"), p = passFor;
     passFor = null;
     if (d.open) d.close();
-    if (save && p) applyEdit(p.date, p.mls, {s: "Pass", pr: $("passWhy").value.trim().slice(0, 200)});
+    if (save && p) applyEdit(p.date, p.mls, {s: "Pass", pr: $("passWhy").value.trim().slice(0, 200), sp: !!toSheet});
     else draw();                                   // cancelled: the menu goes back to what it was
   }
-  $("passGo").addEventListener("click", function(){ closePass(true); });
+  // the link opens its tab by itself; the page only records the pass
+  $("passGo").addEventListener("click", function(){ syncPassLink(); closePass(true, true); });
+  $("passBoard").addEventListener("click", function(){ closePass(true, false); });
+  $("passWhy").addEventListener("input", syncPassLink);
   $("passCancel").addEventListener("click", function(){ closePass(false); });
-  $("passWhy").addEventListener("keydown", function(ev){ if (ev.key === "Enter") { ev.preventDefault(); closePass(true); } });
+  $("passWhy").addEventListener("keydown", function(ev){ if (ev.key === "Enter") { ev.preventDefault(); syncPassLink(); $("passGo").click(); } });
+
+  // Moving a lead off Pass: if its pass went to the sheet, offer the undo there.
+  function askUnpass(mls){
+    var l = BY_MLS[mls], d = $("unpassDlg");
+    $("unpassAddr").textContent = l ? l.addr + " · " + mls : mls;
+    $("unpassGo").href = bridgeUrl("unpass", mls, "");
+    if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+  }
+  $("unpassNo").addEventListener("click", function(){ $("unpassDlg").close(); });
+  $("unpassGo").addEventListener("click", function(){ $("unpassDlg").close(); toast("Taking the pass off the sheet — close that tab when it says done"); });
   $("passDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closePass(false); });
 
   /* ---------- persistence ---------- */
@@ -1298,6 +1344,7 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
       r: !!cur.r,
       d: cur.d || "",
       pr: cur.pr || "",
+      sp: !!cur.sp,
       by: myName || "Someone",
       at: new Date().toISOString()
     };
@@ -1305,7 +1352,8 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
     if ("r" in patch) next.r = patch.r;
     if ("d" in patch) next.d = patch.d;
     if ("pr" in patch) next.pr = patch.pr;
-    if (next.s !== "Pass") next.pr = "";        // a reason only belongs to a pass
+    if ("sp" in patch) next.sp = patch.sp;
+    if (next.s !== "Pass") { next.pr = ""; next.sp = false; }   // a reason only belongs to a pass
     pending[date] = pending[date] || {};
     pending[date][mls] = next;
     draw();
@@ -1316,7 +1364,7 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
       : "r" in patch
         ? (next.r ? "Removed — saved for the team" : "Restored — saved for the team")
         : next.s === "Pass"
-          ? "Marked Pass — moved to Passed, below the list"
+          ? (next.sp ? "Passed — finish in the new tab to mark it on the sheet" : "Marked Pass — moved to Passed, below the list")
           : "Marked " + next.s + " — saved for the team");
     flush();
   }
@@ -1511,7 +1559,9 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
       tr = s.closest("tr");
       if (!tr) return;
       if (s.value === "Pass") { askPass(tr.dataset.date, tr.dataset.mls); return; }
-      applyEdit(tr.dataset.date, tr.dataset.mls, {s: s.value});
+      var was = rec(tr.dataset.date, tr.dataset.mls);
+      applyEdit(tr.dataset.date, tr.dataset.mls, {s: s.value, sp: false});
+      if (was && was.s === "Pass" && was.sp) askUnpass(tr.dataset.mls);
       return;
     }
     var dueIn = ev.target.closest("input.due-in");
