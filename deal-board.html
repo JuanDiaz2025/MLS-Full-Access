@@ -301,7 +301,8 @@ button{cursor:pointer}
 .rbox{display:flex;flex-direction:column;gap:6px}
 .rbox textarea{width:100%;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);padding:8px 10px;resize:vertical;min-height:52px}
 .rbox textarea:focus{outline:0;border-color:var(--accent)}
-.rbar{display:flex;gap:6px;justify-content:flex-end}
+.rbar{display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap}
+.rbox .attrow:empty{display:none}
 .rbar .btn{height:30px;padding:0 12px}
 .pinline{flex:1 1 100%;max-width:720px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#2b2f36;display:flex;flex-direction:column}
 .phd{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#1f2329;color:#e8ecf3;font-size:13px}
@@ -883,17 +884,23 @@ function noteItem(n, people, ro, msg){
       (replies.length||open)?thread:null));
 }
 function replyBox(n){
+  const key="r-"+n.id;
   const ta=h("textarea",{id:"rp-"+n.id,rows:"2",placeholder:"Write a reply…","aria-label":"Reply"});
   const send=async()=>{
-    const text=ta.value.trim(); if(!text) return;
+    if(uploading(key)){ toast("Wait for the attachment to finish uploading."); return; }
+    const text=ta.value.trim(), files=readyAtts(key);
+    if(!text && !files.length) return;
     const mentions=n.author && n.author!==S.me ? [n.author] : [];
-    const ok=await write(()=>S.db.collection("notes").add({property:n.property,taskId:n.taskId||null,parentId:n.id,text,author:S.me||null,mentions,createdAt:Date.now()}),"Reply posted");
-    if(ok){ ta.value=""; S.replyOpen=null; ta.blur(); render(); }
+    const ok=await write(()=>S.db.collection("notes").add({property:n.property,taskId:n.taskId||null,parentId:n.id,text,attachments:files,author:S.me||null,mentions,createdAt:Date.now()}),"Reply posted");
+    if(ok){ ta.value=""; S.att[key]=[]; S.replyOpen=null; ta.blur(); render(); }
   };
-  ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); } if(e.key==="Escape"){ S.replyOpen=null; ta.blur(); render(); } });
+  POSTERS[key]=send;
+  ta.addEventListener("keydown",e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); } if(e.key==="Escape"){ S.replyOpen=null; S.att[key]=[]; ta.blur(); render(); } });
   ta.addEventListener("blur",()=>flush());
-  return h("div",{class:"rbox"}, ta, h("div",{class:"rbar"},
-    h("button",{class:"btn ghost",type:"button",onclick:()=>{ S.replyOpen=null; render(); }},"Cancel"),
+  return h("div",{class:"rbox"}, ta, attachRow(key), h("div",{class:"rbar"},
+    h("button",{class:"fabtn",type:"button",title:"Attach a file — it posts with your reply","aria-label":"Attach a file to this reply",onclick:()=>{ if(uploading(key)){ toast("Still uploading the last file…"); return; } fileKey=key; fileIn.click(); }}, icon(IC_CLIP), "File attachment"),
+    h("span",{style:"flex:1"}),
+    h("button",{class:"btn ghost",type:"button",onclick:()=>{ S.replyOpen=null; S.att[key]=[]; render(); }},"Cancel"),
     h("button",{class:"btn",type:"button",onclick:send},"Reply")));
 }
 function attachRow(key){
