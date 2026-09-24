@@ -231,7 +231,9 @@ def build(xlsx_path):
     # cheapest per square foot first within each pull date — how the team reads it
     rows.sort(key=lambda x: (x[9], x[3] if x[3] is not None else 10 ** 9))
     dates = sorted({x[9] for x in rows if x[9]}, reverse=True)
-    return {"pulled": dates[0] if dates else "", "dates": dates,
+    # when this build ran, so a board can tell it from a newer in-page refresh
+    built = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return {"pulled": dates[0] if dates else "", "dates": dates, "built": built,
             "cols": COLUMNS, "rows": rows}
 
 

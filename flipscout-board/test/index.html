@@ -480,12 +480,13 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
   <div class="wrap">
     <div class="brandrow">
       <h1>FlipScout Lead Board</h1>
-      <span class="src">Latest pull <b id="pulledAt">—</b> · <b id="totAll">0</b> leads · <b id="totDates">0</b> pull dates</span>
+      <span class="src">Latest pull <b id="pulledAt">—</b> · <b id="totAll">0</b> leads · <b id="totDates">0</b> pull dates<span id="sheetStamp"></span></span>
       <div class="viewnav" role="group" aria-label="Screen">
         <button type="button" id="navLeads" aria-current="true">Leads</button>
         <button type="button" id="navKpi" aria-current="false">KPI</button>
       </div>
       <button type="button" class="btn" id="addScan">＋ Add scan</button>
+      <button type="button" class="btn" id="sheetRefresh" hidden title="Read the latest leads from the prod Google Sheet, for the whole team">↻ Refresh from sheet</button>
       <div class="presence"><span id="peerList"></span><input type="text" id="nameIn" placeholder="Your name" aria-label="Your name on this board"></div>
     </div>
 
@@ -663,12 +664,17 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
   // that the scan no longer writes a sheet. Everything since arrives through
   // "Add scan": the FlipScout app's scan file, stored in the shared board
   // under scans/, one document per batch of leads.
-  var SHEET_LEADS = D.rows.map(function(r){
-    // an older data.js stops at sdue; the columns after it read as ""
-    var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i] == null && i > 10 ? "" : r[i];
-
-    return o;
-  });
+  function toLeads(rows){
+    return rows.map(function(r){
+      // an older data.js stops at sdue; the columns after it read as ""
+      var o = {}; for (var i=0;i<COLS.length;i++) o[COLS[i]] = r[i] == null && i > 10 ? "" : r[i];
+      return o;
+    });
+  }
+  var SHEET_LEADS = toLeads(D.rows);
+  // Where the lead list came from: data.js (the daily build) or a teammate's
+  // "Refresh from sheet", whichever is newer.
+  var sheetFrom = {at: D.built || "", by: "", gen: ""};
   var scans = {};     // scan document id -> body, as the shared board has it
   // Team notes, keyed by MLS # so they follow the property, not the pull date:
   // notes/<MLS> holds {entries: {id: {t, by, at, del}}}. Adding a note merges one
@@ -1790,6 +1796,162 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
   showScreen(location.hash === "#kpi" ? "kpi" : "leads", false);
   syncStep();
 
+  /* ---------- refresh from the sheet ---------- */
+  // The page reads the prod sheet through the VIEWER's own Google Drive
+  // connector (their consent, their access), rebuilds the rows exactly as
+  // build_data.py does, and stores them under sheet/ so every teammate's
+  // board switches to the same list. Chunks are written first and the meta
+  // document last, so nobody ever sees half a refresh.
+  var SHEET_ID = "1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ";
+  var XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  var SHEET_FIELDS = ["Status", "MLS #", "Address", "Beds", "Baths", "SqFt", "Lot SqFt", "Year Built", "DOM",
+                      "Purchase Price", "$/SqFt", "Notes", "MLS Link", "First Added"];
+  var BOILERPLATE = "Condition-qualified only — ARV and profit not yet calculated";
+  var CHUNK = 40;
+  var mcp = null, sheetDocs = {};
+
+  function loadXlsx(){
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    return new Promise(function(res, rej){
+      var sc = document.createElement("script");
+      sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+      sc.onload = function(){ window.XLSX ? res(window.XLSX) : rej({code: "lib"}); };
+      sc.onerror = function(){ rej({code: "lib"}); };
+      document.head.appendChild(sc);
+    });
+  }
+  function cellText(X, v){
+    if (v == null) return "";
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(v);
+    return String(v).trim();
+  }
+  function dayText(X, v){
+    if (typeof v === "number" && v > 20000 && v < 80000) {
+      var p = X.SSF.parse_date_code(v);
+      return p.y + "-" + String(p.m).padStart(2, "0") + "-" + String(p.d).padStart(2, "0");
+    }
+    var t = cellText(X, v), m = /^(\d{4}-\d{2}-\d{2})/.exec(t) || null;
+    if (m) return m[1];
+    m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(t);
+    return m ? m[3] + "-" + m[1].padStart(2, "0") + "-" + m[2].padStart(2, "0") : "";
+  }
+  function numOf(v){ var n = parseFloat(String(v == null ? "" : v).replace(/[^0-9.\-]/g, "")); return isFinite(n) ? Math.trunc(n) : null; }
+  var SHEET_DUE = /^(\d{4}-\d{2}-\d{2})(?:\s*\(\w+\))?(?:\s+(\d{1,2}:\d{2} [AP]M))?/;
+  var OFFER_SENTENCE = /[^.!?\n]*\boffers?\b[^.!?\n]*(?:\d|\b(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|\bTBD\b)(?:[^!?\n]*?(?:[ap]\.m\.|[.!?](?=\s|$))|[^.!?\n]*)/i;
+
+  // Same rows, same order as build_data.py (COLS above).
+  function rowsFromWorkbook(X, wb){
+    var ws = wb.Sheets.Leads;
+    if (!ws) throw {code: "sheet", message: "The sheet has no Leads tab."};
+    var grid = X.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
+    var head = (grid[0] || []).map(function(h){ return String(h).trim(); });
+    if (SHEET_FIELDS.some(function(f, i){ return head[i] !== f; }))
+      throw {code: "sheet", message: "The Leads tab's columns have changed, so nothing was refreshed."};
+    var ix = {}; head.forEach(function(h, i){ if (h && !(h in ix)) ix[h] = i; });
+    var out = [];
+    grid.slice(1).forEach(function(raw){
+      var g = function(h){ return h in ix ? cellText(X, raw[ix[h]]) : ""; };
+      var mls = g("MLS #"), addr = g("Address");
+      if (!mls && !addr) return;
+      var note = g("Notes"); if (note === BOILERPLATE) note = "";
+      var m = SHEET_DUE.exec(g("Offer Due")), tbd = /^T\.?B\.?D\b/i.test(g("Offer Due"));
+      var priv = g("Private Remarks"), ph = m ? (OFFER_SENTENCE.exec(priv) || [""])[0].replace(/\s+/g, " ").trim().slice(0, 200) : "";
+      var b = g("Bucket").charAt(0);
+      out.push([mls, addr, numOf(g("Purchase Price")), numOf(g("$/SqFt")), numOf(g("SqFt")), numOf(g("Beds")),
+        numOf(g("Year Built")), numOf(g("DOM")), note, dayText(X, raw[ix["First Added"]]),
+        m ? m[1] : "", g("Agent Phone"), g("Agent Email"), g("Listing Agent").split(",")[0].trim(), g("MLS Status"),
+        m && m[2] ? m[2] : "", m ? "agent remarks" : "", tbd ? "Offer date TBD" : ph,
+        priv.slice(0, 2000), g("Showing").slice(0, 600),
+        /^[ABC]$/.test(b) ? b : "", numOf(g("Opportunity Score")), g("Why").slice(0, 240)]);
+    });
+    out.sort(function(a, c){ return a[9] < c[9] ? -1 : a[9] > c[9] ? 1 : (a[3] == null ? 1e9 : a[3]) - (c[3] == null ? 1e9 : c[3]); });
+    return out;
+  }
+
+  function useRows(rows, from){
+    var before = {}; LEADS.forEach(function(l){ before[l.mls] = true; });
+    SHEET_LEADS = toLeads(rows);
+    sheetFrom = from;
+    rebuild(); buildDateMenu(); draw(); syncStep(); stampSheet();
+    return SHEET_LEADS.filter(function(l){ return !before[l.mls]; }).length;
+  }
+  function stampSheet(){
+    var t = sheetFrom.at ? new Date(sheetFrom.at) : null;
+    $("sheetStamp").textContent = t && !isNaN(t)
+      ? " · read from sheet " + t.toLocaleString("en-US", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}) + (sheetFrom.by ? " by " + sheetFrom.by : "")
+      : "";
+  }
+
+  // A teammate's refresh arrives: switch once every chunk of it is here.
+  function applySheetDocs(){
+    var meta = sheetDocs.meta;
+    if (!meta || !meta.gen || !(meta.at > (sheetFrom.at || "")) || meta.gen === sheetFrom.gen) return;
+    var rows = [];
+    for (var i = 0; i < meta.chunks; i++) {
+      var c = sheetDocs["c" + i];
+      if (!c || c.gen !== meta.gen) return;
+      try { rows = rows.concat(JSON.parse(c.rows)); } catch (e) { return; }
+    }
+    if (rows.length !== meta.total) return;
+    useRows(rows, {at: meta.at, by: meta.by || "", gen: meta.gen});
+  }
+
+  function sheetError(err){
+    var c = err && err.code, sv = "Google Drive";
+    return c === "server_not_connected" || c === "selection_required" ? "Add " + sv + " in claude.ai Settings → Connectors, then try again."
+      : c === "needs_reauth" ? "Reconnect " + sv + " in claude.ai Settings → Connectors, then try again."
+      : c === "not_in_manifest" ? "Google Drive is turned off for this page. Allow it in the page's permissions to refresh."
+      : c === "blocked_by_policy" || c === "approval_required" ? "Your organization doesn't allow this page to use Google Drive."
+      : c === "tool_error" ? "Google Drive couldn't open the sheet — check you have access to it. (" + String(err.message || "").slice(0, 120) + ")"
+      : c === "server_unavailable" ? "Google Drive didn't answer. Try again in a minute."
+      : c === "lib" ? "The spreadsheet reader didn't load. Check your connection and try again."
+      : c === "sheet" ? err.message
+      : c === "save" ? "Read the sheet, but couldn't save it for the team. Reload and try again."
+      : "Couldn't refresh from the sheet. Try again in a minute.";
+  }
+
+  function refreshFromSheet(){
+    var btn = $("sheetRefresh");
+    if (!mcp || btn.disabled) return;
+    btn.disabled = true; btn.textContent = "Reading the sheet…";
+    var call = function(){ return mcp.callTool("Google Drive", "download_file_content", {fileId: SHEET_ID, exportMimeType: XLSX_TYPE}, {cache: false}); };
+    Promise.all([loadXlsx(), call().catch(function(e){
+      if (e && e.retryable) return new Promise(function(r){ setTimeout(r, (e.retryAfterMs || 2000) + Math.random() * 1000); }).then(call);
+      throw e;
+    })]).then(function(got){
+      var X = got[0], p = got[1] && got[1].payload;
+      if (typeof p === "string") { try { p = JSON.parse(p); } catch (e) {} }
+      var b64 = p && typeof p.content === "string" ? p.content : "";
+      if (!b64) throw {code: "tool_error", message: "Google Drive sent back no file"};
+      var bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var rows = rowsFromWorkbook(X, X.read(bytes, {type: "array"}));
+      if (!rows.length) throw {code: "sheet", message: "The Leads tab came back empty, so nothing was refreshed."};
+      // the same safety stop as the daily refresh
+      var have = {}; rows.forEach(function(r){ have[r[0]] = true; });
+      var gone = SHEET_LEADS.filter(function(l){ return l.mls && !have[l.mls]; }).length;
+      if (gone > 20) throw {code: "sheet", message: gone + " leads would disappear from the Board, so nothing was refreshed. Check the sheet."};
+      btn.textContent = "Saving for the team…";
+      var at = new Date().toISOString(), gen = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      var n = Math.ceil(rows.length / CHUNK), writes = [];
+      for (var k = 0; k < n; k++) writes.push(db.doc("sheet/c" + k).set({gen: gen, rows: JSON.stringify(rows.slice(k * CHUNK, (k + 1) * CHUNK))}));
+      return Promise.all(writes).then(function(){
+        return db.doc("sheet/meta").set({gen: gen, at: at, by: myName || "Someone", chunks: n, total: rows.length});
+      }).then(function(){
+        // drop chunks a longer list left behind
+        Object.keys(sheetDocs).forEach(function(id){ var m = /^c(\d+)$/.exec(id); if (m && +m[1] >= n) db.doc("sheet/" + id).delete().catch(function(){}); });
+        var added = useRows(rows, {at: at, by: myName || "Someone", gen: gen});
+        toast("✓ Refreshed from the sheet · " + rows.length + " leads" + (added ? " · " + added + " new" : "") + " — the whole team sees it");
+      }, function(){ throw {code: "save"}; });
+    }).catch(function(err){
+      note(esc(sheetError(err)), true);
+      toast("✗ Not refreshed — see the note at the top");
+    }).then(function(){ btn.disabled = false; btn.textContent = "↻ Refresh from sheet"; });
+  }
+  $("sheetRefresh").addEventListener("click", refreshFromSheet);
+  stampSheet();
+
   /* ---------- add scan ---------- */
   // The FlipScout app cannot write to this board itself — only the page can —
   // so its scan file comes in here, by paste or by file, and is stored under
@@ -1968,6 +2130,13 @@ button.mute.on{background:var(--b-none); color:var(--t-none)}
         Object.keys(pendingMute).forEach(function(m){ if (!!(alerts[m] && alerts[m].muted) === pendingMute[m]) delete pendingMute[m]; });
         draw();
       }, function(){});
+      db.collection("sheet").onSnapshot(function(snap){
+        var next = {};
+        snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
+        sheetDocs = next;
+        applySheetDocs();
+      }, function(){});
+      claude.use("mcp").then(function(m){ mcp = m; $("sheetRefresh").hidden = !m; }).catch(function(){});
       db.collection("scans").onSnapshot(function(snap){
         var next = {};
         snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
