@@ -250,6 +250,10 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
 }
 .addr.nolink{color:var(--ink)}
+.agent{display:block; margin-top:3px; font-size:12px; color:var(--ink); max-width:52ch}
+.agent b{font-family:Archivo,sans-serif; font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-right:3px}
+.agent .office{color:var(--muted)}
+.agent .phone{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; white-space:nowrap; user-select:all}
 .rf-wait{display:block; font-size:11px; color:var(--muted); font-style:italic}
 .team-note{
   display:block; margin-top:6px; max-width:52ch; font-size:12.5px; line-height:1.4;
@@ -585,6 +589,8 @@ footer .num{font-size:12px}
       showing: str(x.showing, 600), offerFrom: str(x.offerFrom, 40),
       offerPhrase: str(x.offerPhrase, 200), why: str(x.why, 240),
       redfin: REDFIN_PAGE.test(str(x.redfin, 400)) ? x.redfin : "",
+      agentName: str(x.agentName, 80), agentOffice: str(x.agentOffice, 100),
+      agentPhone: /^\(\d{3}\) \d{3}-\d{4}$/.test(str(x.agentPhone, 20)) ? x.agentPhone : "",
       fromScan: true
     };
   }
@@ -737,7 +743,8 @@ footer .num{font-size:12px}
       if (st && statusOf(l) !== st) return false;
       if (!q) return true;
       return (l.addr + " " + l.mls + " " + (l.note || "") + " " + (l.remarks || "") + " " +
-              (l.agentRemarks || "") + " " + (l.showing || "") + " " +
+              (l.agentRemarks || "") + " " + (l.showing || "") + " " + (l.agentName || "") + " " +
+              (l.agentOffice || "") + " " + (l.agentPhone || "") + " " +
               noteList(l.mls).map(function(n){ return n.t + " " + n.by; }).join(" ")).toLowerCase().indexOf(q) !== -1;
     });
   }
@@ -818,7 +825,7 @@ footer .num{font-size:12px}
       '<td data-l="Status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '">' + opts + '</select>' +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') + '</td>' +
       '<td data-l="Property" class="wide">' + addrHTML(l) +
-        '<span class="mls">' + esc(l.mls) + '</span>' +
+        '<span class="mls">' + esc(l.mls) + '</span>' + agentHTML(l) +
         (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + saidHTML(l) + '</td>' +
       '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
       '<td data-l="$/SqFt" class="num">' + (l.ppsf == null ? "—" : "$" + l.ppsf) + '</td>' +
@@ -855,6 +862,15 @@ footer .num{font-size:12px}
       ? '<a class="addr" href="' + esc(u) + '" target="_blank" rel="noopener" title="Open this house on Redfin">' + esc(l.addr) + '</a>'
       : '<span class="addr nolink">' + esc(l.addr) + '</span><span class="rf-wait">' +
         (triedLinks[l.mls] ? 'Redfin page not found yet — checking again' : 'Finding this house on Redfin…') + '</span>';
+  }
+
+  // The listing agent, as the MLS names them. The phone is plain, selectable
+  // text: phone links do not dial reliably from inside the board.
+  function agentHTML(l){
+    if (!l.agentName && !l.agentPhone) return "";
+    return '<span class="agent"><b>Listing agent</b> ' + esc(l.agentName || "—") +
+      (l.agentOffice ? ' <span class="office">· ' + esc(l.agentOffice) + '</span>' : '') +
+      (l.agentPhone ? ' · <span class="phone">' + esc(l.agentPhone) + '</span>' : '') + '</span>';
   }
 
   function noteList(mls){
@@ -1417,7 +1433,8 @@ footer .num{font-size:12px}
     return {mls: l.mls, addr: l.addr, price: l.price, ppsf: l.ppsf, sqft: l.sqft, beds: l.beds,
             year: l.year, dom: l.dom, remarks: l.remarks, agentRemarks: l.agentRemarks,
             showing: l.showing, offerDue: l.sdue, offerFrom: l.offerFrom,
-            offerPhrase: l.offerPhrase, why: l.why, redfin: l.redfin};
+            offerPhrase: l.offerPhrase, why: l.why, redfin: l.redfin,
+            agentName: l.agentName, agentOffice: l.agentOffice, agentPhone: l.agentPhone};
   }
 
   function addScan(){

@@ -450,7 +450,53 @@ function parseDetail(text, wantMls) {
     // The MLS's own classification — "Res. Single Family / Attached, Single
     // Family". It outranks any keyword in the remarks about second units.
     propClass: grab(/Class:?\s*([^\n\t]{0,80})/i),
+    // "Listed By:	Karyn Kambur, Coldwell Banker Realty" — every report has it.
+    ...splitListedBy(grab(/Listed By:?[ \t]*([^\n\t]{2,120})/i)),
   };
+}
+
+/** "Karyn Kambur, Coldwell Banker Realty" -> name and brokerage. */
+function splitListedBy(v) {
+  const t = String(v || '').trim();
+  if (!t) return { agentName: '', agentOffice: '' };
+  const i = t.indexOf(',');
+  return i < 0 ? { agentName: t, agentOffice: '' }
+    : { agentName: t.slice(0, i).trim(), agentOffice: t.slice(i + 1).trim() };
+}
+
+// A US phone number, as agents write them: (415) 555-1212, 415-555-1212,
+// 415.555.1212, 415 555 1212.
+const PHONE_RE = /\(?\b([2-9]\d{2})\)?[\s.\-]{0,2}([2-9]\d{2})[\s.\-]([0-9]{4})\b/;
+const fmtPhone = m => `(${m[1]}) ${m[2]}-${m[3]}`;
+
+/**
+ * The listing agent's phone off the Agent Full report. Looked for on a line
+ * that names the listing agent or a cell/direct/phone label; an office, fax or
+ * co-agent line is only a last resort, because the office switchboard is not
+ * the person. Returns { phone, from } or { phone: '' }.
+ */
+function findAgentPhone(block, agentRemarks) {
+  const lines = String(block || '').replace(/\r/g, '').split('\n');
+  const tiers = [
+    /(list(ing)?\s*agent|\bLA\b|agent\s*(cell|phone|direct|mobile)|\bcell\b|mobile|direct)/i,
+    /(agent|phone|\bph\b|contact)/i,
+  ];
+  const skip = /(fax|co-?list|co-?agent|buyer'?s?\s*agent|selling\s*agent|\bSA\b)/i;
+  for (const want of tiers) {
+    for (const ln of lines) {
+      if (!want.test(ln) || skip.test(ln)) continue;
+      const m = ln.match(PHONE_RE);
+      if (m) return { phone: fmtPhone(m), from: 'agent report' };
+    }
+  }
+  const r = String(agentRemarks || '').match(PHONE_RE);
+  if (r) return { phone: fmtPhone(r), from: 'agent remarks' };
+  for (const ln of lines) {
+    if (!/office|\bLO\b|brokerage/i.test(ln) || /fax/i.test(ln)) continue;
+    const m = ln.match(PHONE_RE);
+    if (m) return { phone: fmtPhone(m), from: 'office line' };
+  }
+  return { phone: '', from: '' };
 }
 
 /**
@@ -487,6 +533,12 @@ function parseAgentDetail(text, wantMls) {
   }
   const f = block.match(OFFER_DATE_FIELD);
   if (f && clean(f[1])) out.offerDateField = clean(f[1]);
+  // The listing agent, as the agent report names them (a "List Agent:" field),
+  // and their phone.
+  const la = block.match(/(?:List(?:ing)?\s*Agent|\bLA\b)(?:\s*Name)?\s*:[ \t]*([A-Za-z][A-Za-z .,'-]{2,60}?)(?=[ \t]*(?:\t|\n|\(|\d|$))/i);
+  out.agentName = la ? clean(la[1]).replace(/[,\s]+$/, '') : '';
+  const ph = findAgentPhone(block, out.agentRemarks);
+  out.agentPhone = ph.phone; out.agentPhoneFrom = ph.from;
   return out;
 }
 
@@ -648,6 +700,7 @@ function redfinUrlFrom(body, address) {
 }
 
 module.exports = {
+  findAgentPhone, splitListedBy,
   redfinUrlFrom,
   listingBlock, parseAgentDetail, parseOfferDue, findOfferDue,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,

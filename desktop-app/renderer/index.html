@@ -477,6 +477,13 @@
       ? `Offer deadline: ${off.due.replace(/^~/, '≈ ')}${off.due[0] === '~' ? ' (weekday only — confirm)' : ''} — from ${off.from}: “${off.phrase}”`
       : 'No offer deadline found in the remarks.';
     const said = $('rSaid'); said.textContent = '';
+    if (p.agentName || p.agentPhone) {
+      const d = document.createElement('div'); d.className = 'said';
+      const b = document.createElement('b'); b.textContent = 'Listing agent';
+      d.appendChild(b);
+      d.appendChild(document.createTextNode([[p.agentName, p.agentOffice].filter(Boolean).join(', '), p.agentPhone].filter(Boolean).join(' · ')));
+      said.appendChild(d);
+    }
     [['Public remarks', p.remarks], ['Agent-only remarks', p.agentRemarks], ['Showing instructions', p.showingNotes]]
       .forEach(([h, t]) => {
         const d = document.createElement('div'); d.className = 'said';

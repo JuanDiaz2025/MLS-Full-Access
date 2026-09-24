@@ -112,6 +112,23 @@ for (const [text, pulled, want] of CASES) eq(core.parseOfferDue(text, pulled).du
   eq(core.redfinUrlFrom(body, 'College Terrace'), '', 'Redfin: no street number, no guess');
 }
 
+// ---- the listing agent: name, brokerage, phone ----
+{
+  const d = core.parseDetail(fixture('SF426150277'), 'SF426150277');
+  eq([d.agentName, d.agentOffice], ['Karyn Kambur', 'Coldwell Banker Realty'], 'Listed By -> agent name and brokerage');
+  eq(core.parseDetail(fixture('SF426134156'), 'SF426134156').agentOffice, 'eXp Realty of California, Inc',
+    'a brokerage with a comma in its name stays whole');
+  const t = 'MLS #: ML82099999\tStatus:\tActive\nList Agent:\tJane Q. Doe\tDRE:\t01234567\n' +
+    'Agent Cell:\t(415) 555-0142\tOffice Phone:\t415-555-9000\nFax:\t415-555-0001\n' +
+    'Co-List Agent:\tBob Roe\t510-555-7777\n';
+  const a = core.parseAgentDetail(t, 'ML82099999');
+  eq([a.agentName, a.agentPhone, a.agentPhoneFrom], ['Jane Q. Doe', '(415) 555-0142', 'agent report'],
+    "agent's own cell, not the office, fax or co-listing agent");
+  eq(core.findAgentPhone('nothing here', 'Text Jane 925 555 3434 for access').phone, '(925) 555-3434',
+    'falls back to a number in the agent remarks');
+  eq(core.findAgentPhone('Fax: 650-555-1001', '').phone, '', 'a fax number is never the phone');
+}
+
 // ---- the photo-grid key must survive being sent into the page ----
 // 1.31.0 sent /Key=(d+)/ — a single backslash inside a template string is
 // dropped — so the full photo grid was never found and every listing was judged

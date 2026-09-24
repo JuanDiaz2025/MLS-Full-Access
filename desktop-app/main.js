@@ -370,6 +370,10 @@ async function showGallery(mls) {
     propClass: meta.propClass || '',
     agentRemarks: agent.agentRemarks || '', showingNotes: agent.showing || '',
     offerNotes: agent.offerNotes || '', offer,
+    // The listing agent: name and brokerage off "Listed By", phone off the
+    // agent report (or, failing that, a number in the agent remarks).
+    agentName: agent.agentName || meta.agentName || '', agentOffice: meta.agentOffice || '',
+    agentPhone: agent.agentPhone || '', agentPhoneFrom: agent.agentPhoneFrom || '',
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
 }
 
@@ -751,12 +755,19 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           remarks: gal.remarks || '', agentRemarks: gal.agentRemarks || '',
           showing: gal.showingNotes || '', offerNotes: gal.offerNotes || '',
           offerDue: offer.due || '', offerFrom: offer.from || '', offerPhrase: offer.phrase || '',
+          agentName: gal.agentName || '', agentOffice: gal.agentOffice || '',
+          agentPhone: gal.agentPhone || '', agentPhoneFrom: gal.agentPhoneFrom || '',
         };
+        if (gal.agentName || gal.agentPhone) {
+          log(`  listing agent: ${[gal.agentName, gal.agentOffice].filter(Boolean).join(', ') || '—'}`
+            + (gal.agentPhone ? ` · ${gal.agentPhone} (${gal.agentPhoneFrom})` : ' · no phone on the listing'));
+        }
         if (offer.due) log(`  offer deadline ${offer.due.replace(/^~/, '≈ ')} — from ${offer.from}: "${offer.phrase}"`, 'good');
         const base = { i: i + 1, total: fresh.length, city: cityOf(c), mls: c.mls, addr: c.addr,
           price: c._price, sqft: c._sqft, ppsf: c._ppsf, photos: n,
           remarks: gal.remarks || '', agentRemarks: gal.agentRemarks || '',
-          showingNotes: gal.showingNotes || '', offer, details: gal.details || {} };
+          showingNotes: gal.showingNotes || '', offer, details: gal.details || {},
+          agentName: gal.agentName || '', agentOffice: gal.agentOffice || '', agentPhone: gal.agentPhone || '' };
         // The run NEVER stops to ask. AI vision when a key is configured,
         // otherwise the text rules; when the rules genuinely cannot tell
         // (they read remarks, they never see a photo) the fallback in
@@ -998,6 +1009,9 @@ function boardLead(l) {
     offerDue: /^~?\d{4}-\d{2}-\d{2}$/.test(l.offerDue || '') ? l.offerDue : '',
     offerFrom: clip(l.offerFrom, 40), offerPhrase: clip(l.offerPhrase, 200),
     why: clip(l.why, 240),
+    agentName: clip(l.agentName, 80), agentOffice: clip(l.agentOffice, 100),
+    agentPhone: /^\(\d{3}\) \d{3}-\d{4}$/.test(l.agentPhone || '') ? l.agentPhone : '',
+    agentPhoneFrom: clip(l.agentPhoneFrom, 30),
     redfin: /^https:\/\/www\.redfin\.com\/[A-Z]{2}\/[^\s"<>]+\/home\/\d+$/.test(l.redfin || '') ? l.redfin : '',
   };
 }
