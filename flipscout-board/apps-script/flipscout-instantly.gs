@@ -332,7 +332,14 @@ function fsiPlace_(l, by, force) {
     sh.appendRow([new Date(), l.mls, l.addr, l.agent, l.email, 'Waiting', '', '', '', '', '', 'Agent has ' + FSI_CAMPAIGNS.length + ' houses in progress', '', by || 'Automatic', '']);
     return { slot: 0, waiting: true };
   }
-  const id = fsiSend_(l, slot, rows);
+  let id;
+  try { id = fsiSend_(l, slot, rows); }
+  catch (e) {
+    if (!e.refused) throw e;
+    fsiErr_(e.message);
+    sh.appendRow([new Date(), l.mls, l.addr, l.agent, l.email, 'Waiting', '', '', '', '', '', 'Instantly refused a second entry for this agent — waits for the first to finish', '', by || 'Automatic', '']);
+    return { slot: 0, waiting: true, refused: true };
+  }
   sh.appendRow([new Date(), l.mls, l.addr, l.agent, l.email, 'Emailing', '', '', '', '', '', '', id, by || 'Automatic', slot]);
   return { slot, id };
 }
@@ -344,14 +351,25 @@ function fsiSend_(l, slot, rows) {
     fsiDelete_(r.id);
     sh.getRange(r.row, C.id).setValue('');                  // entry gone from Instantly; the row stays as the record
   });
-  const res = fsiApi_('post', '/leads', {
-    campaign: FSI_CAMPAIGNS[slot - 1], email: l.email, first_name: fsiFirst_(l.agent),
-    last_name: String(l.agent || '').split(/\s+/).slice(1).join(' '),
-    custom_variables: { address: fsiShort_(l.addr), full_address: l.addr, mls: l.mls },
-    skip_if_in_campaign: true
+  // Bulk add says exactly what it did: created_leads (new ids) vs duplicates / skipped.
+  // The single-lead call quietly hands back the agent's EXISTING lead from another
+  // campaign, which looked like success while nothing new was queued.
+  const res = fsiApi_('post', '/leads/add', {
+    campaign_id: FSI_CAMPAIGNS[slot - 1],
+    skip_if_in_workspace: false,        // the same agent may sit in another campaign for another house
+    skip_if_in_campaign: true,
+    leads: [{ email: l.email, first_name: fsiFirst_(l.agent),
+              last_name: String(l.agent || '').split(/\s+/).slice(1).join(' '),
+              custom_variables: { address: fsiShort_(l.addr), full_address: l.addr, mls: l.mls } }]
   });
-  if (!res || !res.id) throw new Error('Instantly did not add ' + l.email + ' to campaign ' + slot + ' (already in it?)');
-  return res.id;
+  const made = (res && res.created_leads || [])[0];
+  if (!made || !made.id) {
+    const e = new Error('Instantly did not create a new lead for ' + l.email + ' in campaign ' + slot +
+      ' (uploaded ' + (res && res.leads_uploaded) + ', skipped ' + (res && res.skipped_count) + ', duplicates ' + JSON.stringify(res && res.duplicated_leads || []).slice(0, 80) + ')');
+    e.refused = true;
+    throw e;
+  }
+  return made.id;
 }
 
 function fsiDelete_(id) {
