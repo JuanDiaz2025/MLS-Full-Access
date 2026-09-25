@@ -138,8 +138,8 @@ function fsiCheck() {
   });
   const rows = fsiRows_(), count = s => rows.filter(r => r.status === s).length;
   ui.alert('Instantly connection',
-    lines.join('\n') +
-    '\n\nAutomatic adding: ' + ({ off: 'OFF', test: 'TEST leads only', on: 'ON' }[fsiMode_()]) +
+    lines.join('\n') + '\n\nScript version: ' + FSI_VERSION +
+    '\nAutomatic adding: ' + ({ off: 'OFF', test: 'TEST leads only', on: 'ON' }[fsiMode_()]) +
     '\nAgent Emails tab: ' + ['Emailing', 'Waiting', 'Replied', 'Paused', 'Done', 'Stopped'].map(s => count(s) + ' ' + s.toLowerCase()).join(' · ') +
     (warn.length ? '\n\nTo fix:\n' + warn.join('\n') : '\n\nEverything looks right.') +
     (fsiProp_('FSI_LAST_ERROR') ? '\n\nLast error: ' + fsiProp_('FSI_LAST_ERROR') : ''),
@@ -468,6 +468,8 @@ function fsiPlaceWaiting_(now) {
 
 // doGet (flipscout-alerts.gs) sends action=email here. A person chose this
 // lead, so any bucket is fine; the safety checks still apply.
+const FSI_VERSION = '2026-09-25c';   // shown on the Check screen and the Board tab, to spot a stale deployment
+
 function fsiWebEmail_(mls, by) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) return fsPage_('Busy', 'FlipScout is updating right now. Close this tab and click the button again in a minute.');
@@ -485,6 +487,9 @@ function fsiWebEmail_(mls, by) {
       if (why) return fsPage_('Not sent', fsiShort_(l.addr) + ': ' + why + '. Nothing was sent.');
     }
     const r = fsiPlace_(l, by || 'Board', test);
+    if (r.refused) return fsPage_('Queued — Instantly refused it for now', 'Instantly would not take a second entry for ' + (l.agent || l.email) +
+      '. ' + fsiShort_(l.addr) + ' is Waiting; the hourly check tries again. If this keeps happening, the web app is running old code: ' +
+      'Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy.');
     if (r.waiting) return fsPage_('Queued', (l.agent || l.email) + ' already has ' + FSI_CAMPAIGNS.length +
       ' houses being emailed. ' + fsiShort_(l.addr) + ' is Waiting and goes out as soon as one of them finishes. You can close this tab.');
     return fsPage_('✓ Sent to Instantly', fsiShort_(l.addr) + ' → ' + (l.agent || 'the agent') + ' <' + l.email + '> (campaign ' + r.slot + '). ' +
