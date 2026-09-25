@@ -520,6 +520,48 @@ body.acq #viewLeads, body.acq #viewKpi{display:none !important}
 .em-meta, .who-meta{display:block; margin-top:3px; font-size:11.5px; color:var(--muted)}
 .txt-none{font-size:12px; color:var(--muted); font-style:italic}
 .mono{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
+
+/* search, tiles-as-filters, chips, sections, deadline edge */
+.acq-find{position:relative; margin:0 0 14px}
+.acq-find input{width:100%; font:15px "IBM Plex Sans",system-ui,sans-serif; padding:12px 44px 12px 14px; border:1px solid var(--line);
+  border-radius:10px; background:var(--surface); color:var(--ink); box-shadow:var(--shadow)}
+.acq-find input:focus{outline:2px solid var(--brand-2); outline-offset:1px}
+.acq-find kbd{position:absolute; right:12px; top:50%; transform:translateY(-50%); font:600 11px "IBM Plex Mono",monospace;
+  color:var(--muted); border:1px solid var(--line); border-radius:5px; padding:1px 6px; pointer-events:none}
+button.acq-tile{text-align:left; cursor:pointer; font:inherit; color:inherit; width:100%}
+button.acq-tile:hover{border-color:var(--brand-2)}
+button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-offset:-1px; background:var(--b-review)}
+.acq-tile .t{display:block; font-family:Archivo,sans-serif; font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
+.acq-tile .v{display:block; font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; font-size:30px; font-weight:500; letter-spacing:-.03em; line-height:1.15; margin-top:2px}
+.acq-filters{display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; margin:0 0 10px}
+.acq-fg{display:flex; flex-wrap:wrap; gap:6px; align-items:center}
+.acq-fg > b{font:600 10px Archivo,sans-serif; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin-right:2px}
+.acq-chip{font:600 12px Archivo,sans-serif; border:1px solid var(--line); background:var(--surface); color:var(--ink);
+  border-radius:999px; padding:4px 10px; cursor:pointer}
+.acq-chip .n{font-family:"IBM Plex Mono",monospace; color:var(--muted); margin-left:4px}
+.acq-chip:hover{border-color:var(--brand-2)}
+.acq-chip[aria-pressed="true"]{background:var(--brand); border-color:var(--brand); color:#FFFFFF}
+.acq-chip[aria-pressed="true"] .n{color:#FFFFFF; opacity:.85}
+.acq-clear{font:600 12.5px Archivo,sans-serif; color:var(--brand); background:none; border:0; cursor:pointer; text-decoration:underline; padding:4px}
+.acq-note{font-size:12.5px; color:var(--muted); margin:0 0 12px; min-height:1em}
+.acq-sec{margin:0 0 6px}
+.acq-sec > summary{list-style:none; cursor:pointer}
+.acq-sec > summary::-webkit-details-marker{display:none}
+.acq-sec > summary::before{content:"▾"; font-size:12px; color:var(--muted); margin-right:2px}
+.acq-sec:not([open]) > summary::before{content:"▸"}
+.acq-sec .sechead .acq-secsub{font:400 12px "IBM Plex Sans",system-ui,sans-serif; letter-spacing:0; text-transform:none; color:var(--muted)}
+#viewAcq tbody tr.due-red td:first-child{box-shadow:inset 5px 0 0 #D64545}
+#viewAcq tbody tr.due-amber td:first-child{box-shadow:inset 5px 0 0 #E3A008}
+.acq-note:empty{display:none}
+@media (min-width:901px){
+  #acqSecs table{table-layout:fixed; width:100%}
+  #acqSecs th:nth-child(1){width:24%} #acqSecs th:nth-child(2){width:13%} #acqSecs th:nth-child(3){width:18%}
+  #acqSecs th:nth-child(4){width:8%}  #acqSecs th:nth-child(5){width:12%} #acqSecs th:nth-child(6){width:11%}
+  #acqSecs th:nth-child(7){width:7%}  #acqSecs th:nth-child(8){width:7%}
+  #acqSecs td{overflow-wrap:anywhere}
+}
+.acq-legend{font-size:12px; color:var(--muted); margin:-4px 0 12px}
+.acq-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin:0 4px 0 10px}
 </style>
 
 <header class="top">
@@ -595,13 +637,15 @@ body.acq #viewLeads, body.acq #viewKpi{display:none !important}
   </div><!-- /viewLeads -->
 
   <div id="viewAcq" hidden>
-    <p class="acq-sub">Every lead the team is working — emailed, visited, or moved past Needs Comps. Offers due soonest first.
+    <p class="acq-sub">Every lead the team is working — emailed, visited, or moved past Needs Comps — grouped by what to do next.
       <a href="#" class="acq-back" id="acqBack">Open the full Lead Board →</a></p>
-    <dl class="acq-tiles" id="acqTiles"></dl>
-    <div class="sechead"><span>Working</span><span class="cnt" id="acqCount"></span><span class="rule"></span></div>
-    <div class="tablecard"><table id="tblAcq"></table></div>
-    <div class="sechead" id="acqWonHead" hidden><span>Won</span><span class="cnt" id="acqWonCount"></span><span class="rule"></span></div>
-    <div class="tablecard" id="acqWonCard" hidden><table id="tblAcqWon"></table></div>
+    <div class="acq-find"><input type="search" id="acqQ" autocomplete="off" spellcheck="false"
+      placeholder="Search address, MLS #, city, agent name, phone or email" aria-label="Search the leads being worked"><kbd>/</kbd></div>
+    <div class="acq-tiles" id="acqTiles"></div>
+    <div class="acq-filters" id="acqFilters"></div>
+    <p class="acq-note" id="acqNote"></p>
+    <p class="acq-legend">Left edge:<i style="background:#D64545"></i>offer due within 24 hours<i style="background:#E3A008"></i>within 3 days</p>
+    <div id="acqSecs"></div>
   </div>
 
   <div id="viewKpi" hidden>
@@ -1447,16 +1491,22 @@ body.acq #viewLeads, body.acq #viewKpi{display:none !important}
       (when && !isNaN(when) ? '<span class="em-meta">' + esc(when.toLocaleDateString("en-US", {month: "short", day: "numeric"})) + '</span>' : '') +
       (x.reply ? '<span class="em-say">“' + esc(x.reply.length > 140 ? x.reply.slice(0, 137) + "…" : x.reply) + '”</span>' : '') +
       (x.juan ? '<br><span class="em-juan">🚨 ' + esc(x.juan) + '</span>' : '') +
-      (!x.reply && x.reason ? '<span class="em-meta">' + esc(x.reason) + '</span>' : '');
+      (!x.reply && x.reason ? '<span class="em-meta">' + esc(x.reason) + '</span>' : '') +
+      (!when && x.added && !isNaN(new Date(x.added)) ? '<span class="em-meta">' + acqAgo(x.added) + '</span>' : '');
+  }
+  function acqAgo(t){
+    var n = Math.floor((Date.now() - new Date(t)) / 864e5);
+    return n <= 0 ? "emailed today" : n === 1 ? "emailed 1 day ago" : "emailed " + n + " days ago";
   }
   function acqRowHTML(l){
     var st = statusOf(l), e = rec(l.date, l.mls) || {}, due = dueOf(l), fromReply = false;
     // no deadline on the sheet yet: use the one the agent gave in a reply
     var xr = EMAIL_BY[l.mls];
     if (!due && xr && /^\d{4}-\d{2}-\d{2}/.test(xr.due)) { due = xr.due.slice(0, 10); fromReply = true; }
+    var edge = acqEdge(l);
     var dd = daysUntil(due);
     var opts = STATUSES.map(function(s){ return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>'; }).join("");
-    return '<tr class="' + STRIPE[st] + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+    return '<tr class="' + STRIPE[st] + edge + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
       '<td data-l="Property" class="wide">' + addrHTML(l) + '<span class="mls">' + esc(l.mls) + '</span>' +
         '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' + mlsStatusHTML(l.mlsStatus) +
         (l.price ? '<span class="em-meta">' + fmtMoney(l.price) + (l.ppsf ? ' · $' + l.ppsf + '/sqft' : '') + '</span>' : '') + '</td>' +
@@ -1475,34 +1525,166 @@ body.acq #viewLeads, body.acq #viewKpi{display:none !important}
         (l.agentPhone ? '<span class="em-meta mono">' + esc(l.agentPhone) + '</span>' : '') + '</td>' +
     '</tr>';
   }
+  // The deadline the dashboard works to: the sheet's, else the one the agent
+  // gave in a reply. t is a clock time when one is known.
+  function acqDueOf(l){
+    var d = dueOf(l), x = EMAIL_BY[l.mls], t = "";
+    if (d) t = teamDue(l) ? "" : (l.offerTime || "");
+    else if (x && /^\d{4}-\d{2}-\d{2}/.test(x.due)) { d = x.due.slice(0, 10); t = (/\d{1,2}:\d{2}\s*[AP]M/i.exec(x.due) || [""])[0]; }
+    return {d: d || "", t: t};
+  }
+  function acqDueDays(l){ return daysUntil(acqDueOf(l).d); }
+  // hours to the deadline; with no time given it counts to the end of that day
+  function acqHoursLeft(l){
+    var o = acqDueOf(l);
+    if (!/^\d{4}-\d{2}-\d{2}/.test(o.d)) return null;
+    var p = o.d.split("-"), h = 23, m = 59, tm = /(\d{1,2}):(\d{2})\s*([AP])M/i.exec(o.t);
+    if (tm) { h = (+tm[1] % 12) + (/p/i.test(tm[3]) ? 12 : 0); m = +tm[2]; }
+    return (new Date(+p[0], p[1] - 1, +p[2], h, m) - Date.now()) / 36e5;
+  }
+  function acqEdge(l){ var h = acqHoursLeft(l); return h === null || h < 0 ? "" : h <= 24 ? " due-red" : h <= 72 ? " due-amber" : ""; }
+  function acqEmailed(l){ return !!(EMAIL_BY[l.mls] || (rec(l.date, l.mls) || {}).em); }
+  function acqReplied(l){ var x = EMAIL_BY[l.mls]; return !!(x && /^Replied/.test(x.status)); }
+  function acqVisitSoon(l){ var v = visitOf(l), n = v.d ? daysUntil(v.d.slice(0, 10)) : null; return v.s === "Scheduled" && n !== null && n >= 0; }
+  // An answer waits on Juan until someone on the team changes the lead's status
+  // after it came in.
+  function acqNeedsYou(l){
+    var x = EMAIL_BY[l.mls];
+    if (!x || !(/^Replied/.test(x.status) || x.juan)) return false;
+    var e = rec(l.date, l.mls) || {}, got = new Date(x.replied), did = new Date(e.at);
+    return !(e.at && !isNaN(did) && !isNaN(got) && did > got);
+  }
+  // Each lead sits in the FIRST section it fits, so nothing is listed twice.
+  var ACQ_SECS = [
+    {k: "juan",  t: "🚨 Needs you",        sub: "the agent answered, and nobody has moved the lead since", fixed: true},
+    {k: "due",   t: "⏰ Offers due soon",  sub: "today to 3 days, soonest first"},
+    {k: "visit", t: "📅 Visits",           sub: "scheduled, next one first"},
+    {k: "wait",  t: "✉️ Waiting on agent", sub: "emailed, no answer yet"},
+    {k: "prog",  t: "🔧 In progress",      sub: "status set, nothing due in the next 3 days"},
+    {k: "won",   t: "🏆 Won",              sub: ""}
+  ];
+  function acqSecOf(l){
+    if (statusOf(l) === "Won") return "won";
+    if (acqNeedsYou(l)) return "juan";
+    var n = acqDueDays(l);
+    if (n !== null && n >= 0 && n <= 3) return "due";
+    if (acqVisitSoon(l)) return "visit";
+    if (acqEmailed(l)) return "wait";
+    return "prog";
+  }
+  var ACQ_TILES = [
+    {k: "",        t: "Working",    c: "",          sub: "show everything"},
+    {k: "emailed", t: "Emailed",    c: "--t-review", sub: "agents contacted", f: acqEmailed},
+    {k: "replied", t: "Replied",    c: "--t-won",    sub: "agents answered",  f: acqReplied},
+    {k: "juan",    t: "Needs Juan", c: "--t-pass",   sub: "reply wants a call or talks price", f: function(l){ var x = EMAIL_BY[l.mls]; return !!(x && x.juan); }},
+    {k: "due",     t: "Offers due", c: "--t-offer",  sub: "today to 3 days", f: function(l){ var n = acqDueDays(l); return n !== null && n >= 0 && n <= 3; }},
+    {k: "visits",  t: "Visits",     c: "--t-offer",  sub: "scheduled, upcoming", f: acqVisitSoon}
+  ];
+  var acqF = {tile: "", who: "", area: "", st: "", bk: ""};
+  var acqClosed = {};
+  try { acqClosed = JSON.parse(localStorage.getItem("fs_acq_closed") || "{}") || {}; } catch (e) {}
+  function acqWho(l){ return (rec(l.date, l.mls) || {}).by || ""; }
+  function acqMatchQ(l, q){
+    var hay = (l.addr + " " + l.mls + " " + cityOf(l) + " " + (l.agentName || "") + " " + (l.agentPhone || "") + " " +
+               (l.agentEmail || "") + " " + acqWho(l)).toLowerCase();
+    if (hay.indexOf(q) !== -1) return true;
+    var dq = q.replace(/\D/g, "");
+    return dq.length >= 3 && (l.agentPhone || "").replace(/\D/g, "").indexOf(dq) !== -1;
+  }
   function acqHead(){
     return '<thead><tr><th class="plain">Property</th><th class="plain">Offer due</th><th class="plain">Email</th><th class="plain">Text</th>' +
       '<th class="plain">Property visit</th><th class="plain">Team status</th><th class="plain">Who</th><th class="plain">Agent</th></tr></thead>';
   }
   function renderAcq(){
     var all = LEADS.filter(function(l){ return acqWorked(l) && !removedOf(l) && statusOf(l) !== "Pass" && !CLOSED.test(l.mlsStatus || ""); });
-    var won = all.filter(function(l){ return statusOf(l) === "Won"; });
     var work = all.filter(function(l){ return statusOf(l) !== "Won"; });
-    var rank = function(l){ var d = dueOf(l), x = EMAIL_BY[l.mls]; if (!d && x && /^\d{4}-\d{2}-\d{2}/.test(x.due)) d = x.due.slice(0, 10);
-      var n = daysUntil(d); return n === null ? [1, 0] : n >= 0 ? [0, n] : [2, -n]; };
-    work.sort(function(a, b){ var x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1]; });
-    var emailed = work.filter(function(l){ return EMAIL_BY[l.mls] || (rec(l.date, l.mls) || {}).em; }).length;
-    var replied = work.filter(function(l){ return EMAIL_BY[l.mls] && /^Replied/.test(EMAIL_BY[l.mls].status); }).length;
-    var juan = work.filter(function(l){ return EMAIL_BY[l.mls] && EMAIL_BY[l.mls].juan; }).length;
-    var acqDue = function(l){ var d = dueOf(l), x = EMAIL_BY[l.mls]; return d || (x && /^\d{4}-\d{2}-\d{2}/.test(x.due) ? x.due.slice(0, 10) : ""); };
-    var due3 = work.filter(function(l){ var n = daysUntil(acqDue(l)); return n !== null && n >= 0 && n <= 3; }).length;
-    var visits = work.filter(function(l){ var v = visitOf(l); return v.s === "Scheduled" && v.d && daysUntil(v.d) >= 0; }).length;
-    var tile = function(k, v, c, sub){ return '<div class="kpi"><dt>' + k + '</dt><dd' + (c ? ' style="color:var(' + c + ')"' : '') + '>' + v + '</dd><div class="sub">' + sub + '</div></div>'; };
-    $("acqTiles").innerHTML = tile("Working", work.length, "", won.length + " won") + tile("Emailed", emailed, "--t-review", "agents contacted") +
-      tile("Replied", replied, "--t-won", "agents answered") + tile("Needs Juan", juan, "--t-pass", "reply wants a call or talks price") +
-      tile("Offers due", due3, "--t-offer", "today to 3 days") + tile("Visits", visits, "--t-offer", "scheduled, upcoming");
-    $("acqCount").textContent = work.length;
-    $("tblAcq").innerHTML = work.length ? acqHead() + '<tbody>' + work.map(acqRowHTML).join("") + '</tbody>'
-      : '<tbody><tr><td class="empty"><b>Nothing is being worked yet</b>A lead shows up here once its agent is emailed, a visit is set, or its status moves past Needs Comps.</td></tr></tbody>';
-    $("acqWonHead").hidden = $("acqWonCard").hidden = !won.length;
-    $("acqWonCount").textContent = won.length;
-    $("tblAcqWon").innerHTML = won.length ? acqHead() + '<tbody>' + won.map(acqRowHTML).join("") + '</tbody>' : '';
+    var q = $("acqQ").value.trim().toLowerCase();
+
+    $("acqTiles").innerHTML = ACQ_TILES.map(function(t){
+      var n = t.f ? work.filter(t.f).length : work.length, on = t.k ? acqF.tile === t.k : !acqF.tile;
+      return '<button type="button" class="kpi acq-tile" data-acq-tile="' + t.k + '" aria-pressed="' + on + '">' +
+        '<span class="t">' + t.t + '</span><span class="v"' + (t.c ? ' style="color:var(' + t.c + ')"' : '') + '>' + n + '</span>' +
+        '<span class="sub">' + (t.k ? t.sub : (all.length - work.length) + ' won · ' + t.sub) + '</span></button>';
+    }).join("");
+
+    var count = function(fn){ var o = {}; all.forEach(function(l){ var k = fn(l); if (k) o[k] = (o[k] || 0) + 1; }); return o; };
+    var groups = [
+      ["who", "Who", count(acqWho), null],
+      ["area", "Area", count(countyOf), COUNTIES.map(function(c){ return c[0]; }).concat(["Other"])],
+      ["st", "Status", count(statusOf), STATUSES],
+      ["bk", "Bucket", count(function(l){ return l.bucket === "A" || l.bucket === "B" ? l.bucket : ""; }), ["A", "B"]]
+    ];
+    var anyF = !!(acqF.tile || acqF.who || acqF.area || acqF.st || acqF.bk);
+    $("acqFilters").innerHTML = groups.map(function(g){
+      var keys = (g[3] || Object.keys(g[2]).sort(function(a, b){ return g[2][b] - g[2][a] || (a < b ? -1 : 1); }))
+        .filter(function(k){ return g[2][k] || acqF[g[0]] === k; });
+      if (!keys.length) return "";
+      return '<div class="acq-fg"><b>' + g[1] + '</b>' + keys.map(function(k){
+        return '<button type="button" class="acq-chip" data-acq-f="' + g[0] + '" data-v="' + esc(k) + '" aria-pressed="' + (acqF[g[0]] === k) + '">' +
+          esc(g[0] === "bk" ? k + " · " + BK_NAME[k] : k) + '<span class="n">' + (g[2][k] || 0) + '</span></button>';
+      }).join("") + '</div>';
+    }).join("") + ((anyF || q) ? '<button type="button" class="acq-clear" id="acqClear">Clear all</button>' : '');
+
+    var tileF = acqF.tile && ACQ_TILES.filter(function(t){ return t.k === acqF.tile; })[0];
+    var rows = all.filter(function(l){
+      if (q) return acqMatchQ(l, q);          // a search looks at every lead; filters wait
+      if (tileF && !tileF.f(l)) return false;
+      if (acqF.who && acqWho(l) !== acqF.who) return false;
+      if (acqF.area && countyOf(l) !== acqF.area) return false;
+      if (acqF.st && statusOf(l) !== acqF.st) return false;
+      if (acqF.bk && l.bucket !== acqF.bk) return false;
+      return true;
+    });
+    $("acqNote").textContent = q
+      ? rows.length + (rows.length === 1 ? " lead matches" : " leads match") + " “" + $("acqQ").value.trim() + "”" + (anyF ? " — searching every lead, the filters are paused" : "")
+      : anyF ? "Showing " + rows.length + " of " + all.length + " leads" : "";
+
+    var by = {};
+    rows.forEach(function(l){ var k = acqSecOf(l); (by[k] = by[k] || []).push(l); });
+    var rank = function(l){ var n = acqDueDays(l); return n === null ? [1, 0] : n >= 0 ? [0, n] : [2, -n]; };
+    var byDue = function(a, b){ var x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1]; };
+    var vkey = function(l){ var v = visitOf(l); return v.d + " " + (v.t || "99:99"); };
+    Object.keys(by).forEach(function(k){
+      by[k].sort(k === "visit" ? function(a, b){ return vkey(a) < vkey(b) ? -1 : vkey(a) > vkey(b) ? 1 : 0; } : byDue);
+    });
+    var html = ACQ_SECS.filter(function(s){ return by[s.k]; }).map(function(s){
+      var head = '<span>' + s.t + '</span><span class="cnt">' + by[s.k].length + '</span>' +
+                 (s.sub ? '<span class="acq-secsub">' + s.sub + '</span>' : '') + '<span class="rule"></span>';
+      var body = '<div class="tablecard"><table>' + acqHead() + '<tbody>' + by[s.k].map(acqRowHTML).join("") + '</tbody></table></div>';
+      if (s.fixed) return '<section class="acq-sec" data-sec="' + s.k + '"><div class="sechead">' + head + '</div>' + body + '</section>';
+      return '<details class="acq-sec" data-sec="' + s.k + '"' + (q || !acqClosed[s.k] ? ' open' : '') + '>' +
+             '<summary class="sechead">' + head + '</summary>' + body + '</details>';
+    }).join("");
+    $("acqSecs").innerHTML = html || '<div class="tablecard"><table><tbody><tr><td class="empty">' +
+      (all.length ? '<b>No lead matches</b>' + (q ? 'Nothing being worked matches “' + esc($("acqQ").value.trim()) + '”.' : 'Nothing fits these filters.') +
+                    ' <button type="button" class="acq-clear" id="acqClear2">Clear all</button>'
+                  : '<b>Nothing is being worked yet</b>A lead shows up here once its agent is emailed, a visit is set, or its status moves past Needs Comps.') +
+      '</td></tr></tbody></table></div>';
   }
+  function acqClearAll(){ acqF = {tile: "", who: "", area: "", st: "", bk: ""}; $("acqQ").value = ""; renderAcq(); }
+  $("acqQ").addEventListener("input", function(){ renderAcq(); });
+  $("acqQ").addEventListener("keydown", function(ev){ if (ev.key === "Escape") { $("acqQ").value = ""; renderAcq(); } });
+  document.addEventListener("keydown", function(ev){
+    if (!ACQ || ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    var t = ev.target, tag = t && t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
+    ev.preventDefault(); $("acqQ").focus(); $("acqQ").select();
+  });
+  $("viewAcq").addEventListener("click", function(ev){
+    var b = ev.target.closest("[data-acq-tile]");
+    if (b) { var k = b.dataset.acqTile; acqF.tile = acqF.tile === k ? "" : k; renderAcq(); return; }
+    b = ev.target.closest("[data-acq-f]");
+    if (b) { var g = b.dataset.acqF; acqF[g] = acqF[g] === b.dataset.v ? "" : b.dataset.v; renderAcq(); return; }
+    if (ev.target.closest("#acqClear, #acqClear2")) { acqClearAll(); return; }
+    var sm = ev.target.closest("details.acq-sec > summary");
+    if (sm && !$("acqQ").value.trim()) {
+      var d = sm.parentNode;
+      setTimeout(function(){
+        if (d.open) delete acqClosed[d.dataset.sec]; else acqClosed[d.dataset.sec] = 1;
+        try { localStorage.setItem("fs_acq_closed", JSON.stringify(acqClosed)); } catch (e) {}
+      }, 0);
+    }
+  });
   function setAcq(on){
     ACQ = on;
     document.body.classList.toggle("acq", on);
