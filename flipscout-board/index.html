@@ -305,6 +305,7 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
   padding:5px 7px; min-height:0; border-radius:6px; width:142px;
 }
+.visit-t{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; padding:4px 7px; border-radius:6px; width:142px; margin-top:4px}
 .vs-sel{font:600 11.5px Archivo,sans-serif; padding:3px 6px; border-radius:6px; margin-top:4px; width:142px}
 .vs-sel.vs-sched{background:var(--b-offer); color:var(--t-offer)}
 .vs-sel.vs-done{background:var(--b-won); color:var(--t-won)}
@@ -1055,7 +1056,7 @@ footer .num{font-size:12px}
   function sortVal(l){
     if (sortKey === "bk") return BK_RANK[l.bucket || ""] * 1e7 + (100 - (l.score || 0)) * 1e4 + Math.min(l.ppsf || 9999, 9999);
     if (sortKey === "due") return dueOf(l) || null;
-    if (sortKey === "visit") return visitOf(l).d || null;
+    if (sortKey === "visit") { var sv = visitOf(l); return sv.d ? sv.d + " " + (sv.t || "99:99") : null; }
     return l[sortKey];
   }
 
@@ -1134,15 +1135,22 @@ footer .num{font-size:12px}
   /* ---------- property visit: a date and a status, saved for the team ---------- */
   var VISIT_ST = ["", "To schedule", "Scheduled", "Visited", "Cancelled"];
   var VISIT_CLASS = {"Scheduled": "vs-sched", "Visited": "vs-done", "Cancelled": "vs-cancel"};
-  function visitOf(l){ var e = rec(l.date, l.mls); return {d: (e && e.vd) || "", s: (e && e.vs) || ""}; }
+  function visitOf(l){ var e = rec(l.date, l.mls); return {d: (e && e.vd) || "", t: (e && e.vt) || "", s: (e && e.vs) || ""}; }
+  // "14:30" -> "2:30 PM"
+  function visitTime(t){
+    var m = /^(\d{1,2}):(\d{2})/.exec(t || ""); if (!m) return "";
+    var h = +m[1]; return ((h + 11) % 12 + 1) + ":" + m[2] + (h < 12 ? " AM" : " PM");
+  }
   function visitHTML(l){
     var v = visitOf(l), dd = v.d ? daysUntil(v.d) : null, off = l.date ? '' : ' disabled';
     return '<td data-l="Property visit" class="wide"><input type="date" class="visit-in" value="' + esc(v.d) + '"' + off +
       ' aria-label="Property visit date for ' + esc(l.mls) + '"><br>' +
+      '<input type="time" class="visit-in visit-t" data-vt="1" value="' + esc(v.t) + '"' + off +
+      ' aria-label="Property visit time for ' + esc(l.mls) + '"><br>' +
       '<select class="vs-sel ' + (VISIT_CLASS[v.s] || '') + '" aria-label="Property visit status for ' + esc(l.mls) + '"' + off + '>' +
       VISIT_ST.map(function(s){ return '<option value="' + s + '"' + (s === v.s ? ' selected' : '') + '>' + (s || 'Visit —') + '</option>'; }).join('') +
       '</select>' +
-      (dd !== null && v.s !== "Visited" && v.s !== "Cancelled" ? '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd).replace(/^due /, '') + '</span>' : '') +
+      (dd !== null && v.s !== "Visited" && v.s !== "Cancelled" ? '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd).replace(/^due /, '') + (v.t ? ' · ' + visitTime(v.t) : '') + '</span>' : '') +
       '</td>';
   }
 
@@ -1439,6 +1447,7 @@ footer .num{font-size:12px}
       eb: cur.eb || "",
       vd: cur.vd || "",
       vs: cur.vs || "",
+      vt: cur.vt || "",
       by: myName || "Someone",
       at: new Date().toISOString()
     };
@@ -1450,13 +1459,15 @@ footer .num{font-size:12px}
     if ("em" in patch) { next.em = patch.em; next.eb = myName || "Someone"; }
     if ("vd" in patch) { next.vd = patch.vd; if (patch.vd && !next.vs) next.vs = "Scheduled"; }   // a date means it is scheduled
     if ("vs" in patch) next.vs = patch.vs;
+    if ("vt" in patch) next.vt = patch.vt;
     if (next.s !== "Pass") { next.pr = ""; next.sp = false; }   // a reason only belongs to a pass
     pending[date] = pending[date] || {};
     pending[date][mls] = next;
     draw();
     // Say "Saving…" now and "Saved" only once the shared board confirms it,
     // so nobody walks away from a change that did not stick.
-    savedMsg[date + "|" + mls] = "vd" in patch ? (next.vd ? "Visit " + next.vd + " — saved for the team" : "Visit date cleared")
+    savedMsg[date + "|" + mls] = "vt" in patch ? (next.vt ? "Visit time " + visitTime(next.vt) + " — saved for the team" : "Visit time cleared")
+      : "vd" in patch ? (next.vd ? "Visit " + next.vd + " — saved for the team" : "Visit date cleared")
       : "vs" in patch ? (next.vs ? "Visit: " + next.vs + " — saved for the team" : "Visit status cleared")
       : "em" in patch ? "Marked emailed — Gmail opened in a new tab" : ("d" in patch
       ? (next.d === "-" ? "Marked no deadline — saved for the team"
@@ -1588,7 +1599,7 @@ footer .num{font-size:12px}
     if (pe && pe.s === "Pass") secs.push(['Passed by the team', esc(pe.by || "Someone") + (pe.at ? ' · ' + esc(noteWhen(pe.at)) : '') +
       (pe.pr ? '<br><span class="quote">“' + esc(pe.pr) + '”</span>' : '<br><i>no reason given</i>')]);
     var vv = visitOf(l);
-    if (vv.d || vv.s) secs.push(['Property visit', (vv.d ? esc(vv.d) : 'no date yet') + (vv.s ? ' · ' + esc(vv.s) : '')]);
+    if (vv.d || vv.s) secs.push(['Property visit', (vv.d ? esc(vv.d) : 'no date yet') + (vv.t ? ' ' + esc(visitTime(vv.t)) : '') + (vv.s ? ' · ' + esc(vv.s) : '')]);
     var me0 = mailedOf(l);
     if (me0) secs.push(['Agent emailed', esc(me0.eb || "Someone") + ' · ' + esc(noteWhen(me0.em))]);
     if (l.why || BK_NAME[l.bucket]) secs.push(['Bucket & score',
@@ -1683,7 +1694,7 @@ footer .num{font-size:12px}
     if (vIn){
       tr = vIn.closest("tr");
       if (!tr) return;
-      applyEdit(tr.dataset.date, tr.dataset.mls, vIn.tagName === "SELECT" ? {vs: vIn.value} : {vd: vIn.value});
+      applyEdit(tr.dataset.date, tr.dataset.mls, vIn.tagName === "SELECT" ? {vs: vIn.value} : vIn.dataset.vt ? {vt: vIn.value} : {vd: vIn.value});
       return;
     }
     var dueIn = ev.target.closest("input.due-in");
