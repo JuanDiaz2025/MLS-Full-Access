@@ -2,47 +2,60 @@
  * FlipScout — automatic listing-agent emails through Instantly.
  *
  * Lives in the prod sheet next to flip-scout-reject.gs and flipscout-alerts.gs,
- * and uses FS_LEADS, FS_PASSED, FS_CLOSED, fsPost_ and fsSafeEmail_ from the
- * alerts file (same project, one namespace). Prefix fsi.
+ * and uses FS_LEADS, FS_PASSED, FS_CLOSED, fsPost_, fsPage_ and fsSafeEmail_
+ * from the alerts file (same project, one namespace). Prefix fsi.
  *
  * The pair: Instantly SENDS (3-step campaign, stop on reply). This script
  * decides WHO and brings the results back.
  *
- *  Every hour (fsiHourly)
- *    1. Stop leads that should not get more emails: listing pending / sold /
- *       withdrawn, passed in Notes (Board passes land there), "no emails" in
- *       Notes, or gone from Leads (rejected). Stopping = removing the lead
- *       from the campaign (Instantly's API has no pause for one lead).
- *    2. If automatic adding is ON: add new A leads — Active on the MLS, a
- *       valid agent email, not passed, offer deadline not past, never added
- *       before — up to FSI_DAILY_MAX a day, soonest deadline first.
- *  Every 15 minutes (fsiReplies)
- *    3. Read new replies from Instantly. Mark the lead Replied, keep the
- *       reply, read an offer deadline out of it by rules, and post it to
- *       Google Chat (🚨 NEEDS JUAN when it asks for a call, talks price, etc.).
- *    4. The agent's deadline goes into Offer Due on Leads when Offer Due is
- *       blank or TBD — and goes back in if the app's Refresh blanks it, since
- *       Refresh rewrites Offer Due from the MLS remarks.
+ * THREE SLOTS. Instantly holds an email address once per campaign, so there
+ * are three identical campaigns (FSI_CAMPAIGNS). Each house goes into the
+ * first slot where its agent has nothing in progress; a finished entry in a
+ * slot is removed first. All three busy → the house is queued as Waiting and
+ * goes in when one frees up (soonest offer deadline first).
  *
- *  The Board's "✉ Email agent" button adds one lead on demand (fsiWebEmail_,
+ *  Every hour (fsiHourly)
+ *    1. Read each campaign's leads: 3 emails sent with no reply → Done,
+ *       bounced → Bounced. Frees the slot.
+ *    2. Stop (remove from its campaign) any house whose listing went pending /
+ *       sold / withdrawn, passed in Notes, "no emails" in Notes, or left Leads.
+ *       Waiting houses in that state are Dropped.
+ *    3. Move Waiting houses into free slots.
+ *    4. If automatic adding is ON: add new A leads (Active, agent email, not
+ *       passed, deadline not past, never added), up to FSI_DAILY_MAX a day.
+ *  Every 15 minutes (fsiReplies)
+ *    5. Read new replies from all three campaigns. Mark that house Replied,
+ *       keep the reply, read an offer deadline by rules, post to Google Chat
+ *       (🚨 NEEDS JUAN on call / price wording or a deadline under 24h), and
+ *       PAUSE the agent's other houses (Juan is talking to them now).
+ *    6. The agent's deadline goes into Offer Due on Leads when Offer Due is
+ *       blank or TBD, and back in if the app's Refresh blanks it.
+ *
+ *  The Board's "✉ Email agent" button adds one house on demand (fsiWebEmail_,
  *  reached through doGet in flipscout-alerts.gs).
  *
- *  Everything is logged on the "Agent Emails" tab (one row per property).
+ *  Everything is logged on the "Agent Emails" tab, one row per house.
+ *  Statuses: Emailing · Waiting · Replied · Paused · Done · Bounced · Stopped · Dropped
  *
  * SETUP (once)
  *   Script Properties: INSTANTLY_API_KEY = <key>   (never in git or chat)
  *   Paste this file, save, run fsiSetup, approve, reload the sheet.
- *   Automatic adding starts OFF. Test with "Add TEST lead", then turn it on
- *   from the menu.
+ *   Automatic adding starts OFF; turn it on from the menu.
  */
 
-const FSI_CAMPAIGN = '98ab8360-fe96-4bf5-812a-d8903f8bd5a8';
+const FSI_CAMPAIGNS = [
+  '98ab8360-fe96-4bf5-812a-d8903f8bd5a8',   // 1  FlipScout – Listing agents
+  '36bf11e0-b532-4a57-96e3-a08af4ecb938',   // 2  FlipScout – Listing agents Pt. 2
+  '1d8d854a-2085-4140-9662-69678d7c61e4'    // 3  FlipScout – Listing agents Pt. 3
+];
 const FSI_API = 'https://api.instantly.ai/api/v2';
 const FSI_TAB = 'Agent Emails';
 const FSI_DAILY_MAX = 10;
 const FSI_TEST = { mls: 'TEST0001', email: 'bryan@twinhomebuyer.com', first: 'Bryan', addr: '123 Test Street, San Francisco, CA 94112' };
 const FSI_HEAD = ['Added On', 'MLS #', 'Address', 'Agent', 'Agent Email', 'Status', 'Replied On',
-                  'Agent Offer Due', 'Needs Juan', 'Reply', 'Stopped On', 'Stop Reason', 'Instantly Lead ID', 'Added By'];
+                  'Agent Offer Due', 'Needs Juan', 'Reply', 'Stopped On', 'Stop Reason', 'Instantly Lead ID', 'Added By', 'Campaign'];
+const C = { added: 1, mls: 2, addr: 3, agent: 4, email: 5, status: 6, replied: 7, due: 8, juan: 9, reply: 10,
+            stopped: 11, reason: 12, id: 13, by: 14, slot: 15 };      // sheet columns, 1-based
 const FSI_EMAIL = /^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i;
 const FSI_PENDING = /pending|contingent|under contract/i;
 const FSI_NO_EMAIL_NOTE = /no (?:outreach|e-?mails?)/i;
@@ -64,9 +77,9 @@ function fsiSetup() {
   ScriptApp.newTrigger('fsiHourly').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('fsiReplies').timeBased().everyMinutes(15).create();
   fsiTab_();
-  const c = fsiApi_('get', '/campaigns/' + FSI_CAMPAIGN);   // throws if the key or campaign is wrong
-  Logger.log('Connected to "' + c.name + '". Automatic adding is ' + (fsiAuto_() ? 'ON' : 'OFF') +
-             '. Reload the sheet for the ✉️ FlipScout Emails menu.');
+  const names = FSI_CAMPAIGNS.map(id => fsiApi_('get', '/campaigns/' + id).name);   // throws if a key or id is wrong
+  Logger.log('Connected to ' + names.map((n, i) => (i + 1) + ') "' + n + '"').join(', ') +
+             '. Automatic adding is ' + (fsiAuto_() ? 'ON' : 'OFF') + '. Reload the sheet for the ✉️ FlipScout Emails menu.');
 }
 
 function fsiOnOpen() {
@@ -77,6 +90,7 @@ function fsiOnOpen() {
     .addSeparator()
     .addItem('Add TEST lead (' + FSI_TEST.email + ')', 'fsiAddTest')
     .addItem('Check replies now', 'fsiRepliesNow')
+    .addItem('Run the hourly check now', 'fsiHourlyNow')
     .addItem('Stop emails for the selected row(s)', 'fsiStopSelected')
     .addSeparator()
     .addItem(on ? 'Automatic adding is ON — turn OFF' : 'Automatic adding is OFF — turn ON', 'fsiToggleAuto')
@@ -88,28 +102,30 @@ function fsiOnOpen() {
 
 function fsiCheck() {
   const ui = SpreadsheetApp.getUi();
-  let c;
-  try { c = fsiApi_('get', '/campaigns/' + FSI_CAMPAIGN); }
-  catch (e) { ui.alert('Instantly connection failed', String(e.message || e), ui.ButtonSet.OK); return; }
-  const status = { 0: 'Draft (not launched)', 1: 'Active', 2: 'Paused', 3: 'Completed', 4: 'Running subsequences',
-                   '-1': 'Accounts unhealthy', '-2': 'Bounce protect', '-99': 'Account suspended' }[c.status] || String(c.status);
-  const steps = ((c.sequences || [])[0] || {}).steps || [];
-  const bodies = steps.map(s => ((s.variants || [])[0] || {}).body || '').join(' ') +
-                 steps.map(s => ((s.variants || [])[0] || {}).subject || '').join(' ');
-  const warn = [];
-  if (!c.stop_on_reply) warn.push('• "Stop sending emails on reply" is OFF — turn it on.');
-  if (steps.length !== 3) warn.push('• The campaign has ' + steps.length + ' email step(s); we planned 3.');
-  if (!/\{\{\s*address\s*\}\}/.test(bodies)) warn.push('• No {{address}} found in the emails.');
-  if (!/\{\{\s*firstName\s*\}\}/.test(bodies)) warn.push('• No {{firstName}} found in the emails.');
-  const t = fsiTab_().getDataRange().getValues().slice(1);
-  const count = s => t.filter(r => String(r[5]).indexOf(s) === 0).length;
-  ui.alert('Instantly: connected ✓',
-    'Campaign: ' + c.name + '\nStatus: ' + status +
-    '\nSending from: ' + ((c.email_list || []).join(', ') || '(no inbox attached)') +
-    '\nEmail steps: ' + steps.length + ' · Stop on reply: ' + (c.stop_on_reply ? 'on' : 'OFF') +
+  const status = { 0: 'Draft — NOT LAUNCHED', 1: 'Active', 2: 'Paused', 3: 'Completed', 4: 'Running subsequences',
+                   '-1': 'Accounts unhealthy', '-2': 'Bounce protect', '-99': 'Account suspended' };
+  const lines = [], warn = [];
+  FSI_CAMPAIGNS.forEach((id, i) => {
+    let c;
+    try { c = fsiApi_('get', '/campaigns/' + id); }
+    catch (e) { lines.push((i + 1) + ') connection failed: ' + e.message); return; }
+    const steps = ((c.sequences || [])[0] || {}).steps || [];
+    const text = steps.map(s => ((s.variants || [])[0] || {})).map(v => (v.subject || '') + ' ' + (v.body || '')).join(' ');
+    lines.push((i + 1) + ') ' + c.name + ' — ' + (status[c.status] || c.status) + ' · ' + steps.length + ' emails · from ' +
+               ((c.email_list || []).join(', ') || 'NO INBOX'));
+    const n = 'Campaign ' + (i + 1) + ': ';
+    if (c.status !== 1) warn.push('• ' + n + 'launch it in Instantly (it sits idle until the script adds someone).');
+    if (!c.stop_on_reply) warn.push('• ' + n + '"Stop sending emails on reply" is OFF.');
+    if (steps.length !== 3) warn.push('• ' + n + steps.length + ' email step(s); we planned 3.');
+    if (!/\{\{\s*address\s*\}\}/.test(text)) warn.push('• ' + n + 'no {{address}} in the emails.');
+    if (!/\{\{\s*firstName\s*\}\}/.test(text)) warn.push('• ' + n + 'no {{firstName}} in the emails.');
+  });
+  const rows = fsiRows_(), count = s => rows.filter(r => r.status === s).length;
+  ui.alert('Instantly connection',
+    lines.join('\n') +
     '\n\nAutomatic adding: ' + (fsiAuto_() ? 'ON' : 'OFF') +
-    '\nOn the Agent Emails tab: ' + count('Emailing') + ' emailing · ' + count('Replied') + ' replied · ' + count('Stopped') + ' stopped' +
-    (warn.length ? '\n\nTo fix:\n' + warn.join('\n') : '') +
+    '\nAgent Emails tab: ' + ['Emailing', 'Waiting', 'Replied', 'Paused', 'Done', 'Stopped'].map(s => count(s) + ' ' + s.toLowerCase()).join(' · ') +
+    (warn.length ? '\n\nTo fix:\n' + warn.join('\n') : '\n\nEverything looks right.') +
     (fsiProp_('FSI_LAST_ERROR') ? '\n\nLast error: ' + fsiProp_('FSI_LAST_ERROR') : ''),
     ui.ButtonSet.OK);
 }
@@ -128,15 +144,12 @@ function fsiPreview() {
 
 function fsiAddTest() {
   const ui = SpreadsheetApp.getUi();
-  // a finished test (replied / completed) is cleared so Instantly takes it again
-  fsiRows_().filter(r => r.mls === FSI_TEST.mls && r.status !== 'Stopped').forEach(r => fsiStop_(r, 'Replaced by a new test'));
-  fsiAddOne_({ mls: FSI_TEST.mls, addr: FSI_TEST.addr, agent: FSI_TEST.first + ' Test', email: FSI_TEST.email }, fsSafeEmail_() || 'menu');
+  const r = fsiLocked_(() => fsiPlace_(fsiTestLead_(), fsSafeEmail_() || 'menu', true));
   ui.alert('TEST lead added',
-    FSI_TEST.email + ' is in the campaign as "' + fsiShort_(FSI_TEST.addr) + '".\n\n' +
-    '1. In Instantly, click Launch (it only has this one lead).\n' +
-    '2. The first email reaches ' + FSI_TEST.email + ' within the sending hours.\n' +
-    '3. Reply to it, e.g. "Offers due Monday at 5pm, call me".\n' +
-    '4. Within 15 minutes (or use "Check replies now") the Agent Emails tab says Replied and Google Chat gets the message.',
+    FSI_TEST.email + ' is in campaign ' + (r && r.slot) + ' as "' + fsiShort_(FSI_TEST.addr) + '".\n\n' +
+    '1. The first email reaches ' + FSI_TEST.email + ' within the sending hours.\n' +
+    '2. Reply to it, e.g. "Offers due Monday at 5pm, call me".\n' +
+    '3. Within 15 minutes (or use "Check replies now") the Agent Emails tab says Replied and Google Chat gets the message.',
     ui.ButtonSet.OK);
 }
 
@@ -144,6 +157,11 @@ function fsiRepliesNow() {
   const n = fsiReplies();
   SpreadsheetApp.getActive().toast(n ? n + ' new repl' + (n === 1 ? 'y' : 'ies') + ' — see the Agent Emails tab and Google Chat.'
                                      : 'No new replies.', 'FlipScout Emails', 8);
+}
+
+function fsiHourlyNow() {
+  fsiHourly();
+  SpreadsheetApp.getActive().toast('Done — see the Agent Emails tab.', 'FlipScout Emails', 6);
 }
 
 function fsiToggleAuto() {
@@ -154,11 +172,11 @@ function fsiToggleAuto() {
 }
 
 function fsiAddNow() {
-  const n = fsiAddNew_(new Date());
-  SpreadsheetApp.getActive().toast(n ? n + ' lead(s) added to Instantly.' : 'Nothing to add (see Preview for why).', 'FlipScout Emails', 8);
+  const n = fsiLocked_(() => fsiAddNew_(new Date())) || 0;
+  SpreadsheetApp.getActive().toast(n ? n + ' house(s) handed to Instantly.' : 'Nothing to add (see Preview for why).', 'FlipScout Emails', 8);
 }
 
-// Rows selected on the Agent Emails tab, or lead rows selected on Leads.
+// Rows selected on the Agent Emails or Leads tab.
 function fsiStopSelected() {
   const ui = SpreadsheetApp.getUi(), sh = SpreadsheetApp.getActiveSheet();
   const name = sh.getName();
@@ -170,10 +188,12 @@ function fsiStopSelected() {
     v.forEach((x, k) => { if (r.getRow() + k > 1 && x[0]) want[String(x[0]).trim().toUpperCase()] = true; });
   });
   const who = fsSafeEmail_() || 'someone';
-  const rows = fsiRows_().filter(r => want[r.mls] && r.status === 'Emailing');
-  if (!rows.length) { ui.alert('None of the selected leads are being emailed right now.'); return; }
-  rows.forEach(r => fsiStop_(r, 'Stopped by ' + who));
-  ui.alert('Stopped ' + rows.length + ' lead(s). Instantly will send them nothing more.');
+  const n = fsiLocked_(() => {
+    const rows = fsiRows_().filter(r => want[r.mls] && (r.status === 'Emailing' || r.status === 'Waiting'));
+    rows.forEach(r => r.status === 'Waiting' ? fsiEnd_(r, 'Dropped', 'Stopped by ' + who) : fsiEnd_(r, 'Stopped', 'Stopped by ' + who, true));
+    return rows.length;
+  }) || 0;
+  ui.alert(n ? 'Stopped ' + n + ' house(s). Instantly will send them nothing more.' : 'None of the selected houses are being emailed or waiting.');
 }
 
 /* ------------------------------------------------------ the timed jobs -- */
@@ -181,7 +201,9 @@ function fsiStopSelected() {
 function fsiHourly() {
   fsiLocked_(() => {
     const now = new Date();
-    fsiStops_(now);
+    fsiSyncDone_();
+    fsiStops_();
+    fsiPlaceWaiting_(now);
     if (fsiAuto_()) fsiAddNew_(now);
   });
 }
@@ -195,53 +217,134 @@ function fsiReplies() {
   }) || 0;
 }
 
+/* --------------------------------------------------------------- slots -- */
+
+const FSI_BUSY = { Emailing: 1 };                     // a house that still holds its slot
+// The first campaign where this agent has nothing in progress, or 0.
+function fsiFreeSlot_(email, rows) {
+  for (let s = 1; s <= FSI_CAMPAIGNS.length; s++) {
+    if (!rows.some(r => r.email === email && r.slot === s && FSI_BUSY[r.status])) return s;
+  }
+  return 0;
+}
+
+// Put a house into Instantly now, or queue it. Returns the row written.
+// force (the test lead): clear the agent's previous rows first.
+function fsiPlace_(l, by, force) {
+  let rows = fsiRows_();
+  if (force) {
+    rows.filter(r => r.email === l.email && (r.status === 'Emailing' || r.status === 'Waiting'))
+      .forEach(r => fsiEnd_(r, 'Stopped', 'Replaced by a new test', true));
+    rows = fsiRows_();
+  }
+  const slot = fsiFreeSlot_(l.email, rows);
+  const sh = fsiTab_();
+  if (!slot) {
+    sh.appendRow([new Date(), l.mls, l.addr, l.agent, l.email, 'Waiting', '', '', '', '', '', 'Agent has ' + FSI_CAMPAIGNS.length + ' houses in progress', '', by || 'Automatic', '']);
+    return { slot: 0, waiting: true };
+  }
+  const id = fsiSend_(l, slot, rows);
+  sh.appendRow([new Date(), l.mls, l.addr, l.agent, l.email, 'Emailing', '', '', '', '', '', '', id, by || 'Automatic', slot]);
+  return { slot, id };
+}
+
+// Add to campaign `slot`, first removing the agent's finished entry there.
+function fsiSend_(l, slot, rows) {
+  const sh = fsiTab_();
+  rows.filter(r => r.email === l.email && r.slot === slot && r.id).forEach(r => {
+    fsiDelete_(r.id);
+    sh.getRange(r.row, C.id).setValue('');                  // entry gone from Instantly; the row stays as the record
+  });
+  const res = fsiApi_('post', '/leads', {
+    campaign: FSI_CAMPAIGNS[slot - 1], email: l.email, first_name: fsiFirst_(l.agent),
+    last_name: String(l.agent || '').split(/\s+/).slice(1).join(' '),
+    custom_variables: { address: fsiShort_(l.addr), full_address: l.addr, mls: l.mls },
+    skip_if_in_campaign: true
+  });
+  if (!res || !res.id) throw new Error('Instantly did not add ' + l.email + ' to campaign ' + slot + ' (already in it?)');
+  return res.id;
+}
+
+function fsiDelete_(id) {
+  try { fsiApi_('delete', '/leads/' + id); }
+  catch (e) { if (!/\b404\b/.test(e.message)) throw e; }      // already gone is fine
+}
+
+// End a house: Stopped / Paused / Done / Dropped / Bounced. remove = take it out of Instantly.
+function fsiEnd_(r, status, why, remove) {
+  const sh = fsiTab_();
+  if (remove && r.id) { fsiDelete_(r.id); sh.getRange(r.row, C.id).setValue(''); }
+  sh.getRange(r.row, C.status).setValue(status);
+  sh.getRange(r.row, C.stopped, 1, 2).setValues([[new Date(), why]]);
+  r.status = status;
+}
+
+function fsiTestLead_() {
+  return { mls: FSI_TEST.mls, addr: FSI_TEST.addr, agent: FSI_TEST.first + ' Test', email: FSI_TEST.email, notes: '', mstat: 'Active' };
+}
+
 /* -------------------------------------------------------------- adding -- */
 
 function fsiPick_(now) {
-  const rows = fsiRows_(), have = {}, busy = {};
-  rows.forEach(r => { have[r.mls] = true; if (r.status === 'Emailing') busy[r.email] = r.addr; });
+  const rows = fsiRows_(), have = {};
+  rows.forEach(r => { have[r.mls] = true; });
   const today = Utilities.formatDate(now, FSI_TZ, 'yyyy-MM-dd');
-  const addedToday = rows.filter(r => r.mls !== FSI_TEST.mls && r.added && Utilities.formatDate(new Date(r.added), FSI_TZ, 'yyyy-MM-dd') === today).length;
+  const addedToday = rows.filter(r => r.mls !== FSI_TEST.mls && r.slot && r.added &&
+    Utilities.formatDate(new Date(r.added), FSI_TZ, 'yyyy-MM-dd') === today).length;
   const room = Math.max(0, FSI_DAILY_MAX - addedToday);
   const ok = [], skipped = {};
   const skip = why => { skipped[why] = (skipped[why] || 0) + 1; };
   fsiLeads_().forEach(l => {
     if (!/^A/i.test(l.bucket)) return;
-    if (have[l.mls]) return skip('already emailed');
-    if (FS_PASSED.test(l.notes)) return skip('passed in Notes');
-    if (FSI_NO_EMAIL_NOTE.test(l.notes)) return skip('"no emails" in Notes');
-    if (!/^active$/i.test(l.mstat)) return skip(l.mstat ? 'not Active on the MLS' : 'no MLS status');
-    if (!l.email) return skip('no agent email');
-    const d = fsiDeadline_(l.due);
-    if (d && d < now) return skip('offer deadline passed');
-    if (busy[l.email]) return skip('agent already being emailed about another house');
+    if (have[l.mls]) return skip('already handled');
+    const why = fsiBlock_(l, now);
+    if (why) return skip(why);
     ok.push(l);
   });
   const t = l => { const d = fsiDeadline_(l.due); return d ? d.getTime() : Infinity; };
   ok.sort((a, b) => t(a) - t(b) || (+b.score || 0) - (+a.score || 0));
-  // one house per agent at a time: Instantly keeps one lead per email per campaign
-  const seen = {}, list = [];
-  ok.forEach(l => { if (!seen[l.email] && list.length < room) { seen[l.email] = true; list.push(l); } });
-  return { list, room, eligible: ok.length, skipped };
+  return { list: ok.slice(0, room), room, eligible: ok.length, skipped };
+}
+
+// Why a lead must not be emailed right now, or ''.
+function fsiBlock_(l, now) {
+  if (FS_PASSED.test(l.notes)) return 'passed in Notes';
+  if (FSI_NO_EMAIL_NOTE.test(l.notes)) return '"no emails" in Notes';
+  if (!/^active$/i.test(l.mstat)) return l.mstat ? 'not Active on the MLS (' + l.mstat.toLowerCase() + ')' : 'no MLS status';
+  if (!l.email) return 'no agent email';
+  const d = fsiDeadline_(l.due);
+  if (d && d < now) return 'offer deadline passed';
+  return '';
 }
 
 function fsiAddNew_(now) {
-  const p = fsiPick_(now);
   let n = 0;
-  p.list.forEach(l => { try { fsiAddOne_(l); n++; } catch (e) { fsiErr_('adding ' + l.mls + ': ' + e.message); } });
+  fsiPick_(now).list.forEach(l => {
+    try { if (fsiPlace_(l, 'Automatic').slot) n++; } catch (e) { fsiErr_('adding ' + l.mls + ': ' + e.message); }
+  });
   return n;
 }
 
-function fsiAddOne_(l, by) {
-  const first = fsiFirst_(l.agent);
-  const res = fsiApi_('post', '/leads', {
-    campaign: FSI_CAMPAIGN, email: l.email, first_name: first,
-    last_name: String(l.agent || '').split(/\s+/).slice(1).join(' '),
-    custom_variables: { address: fsiShort_(l.addr), full_address: l.addr, mls: l.mls },
-    skip_if_in_campaign: true
+// Waiting houses go into free slots, soonest deadline first.
+function fsiPlaceWaiting_(now) {
+  const leads = {};
+  fsiLeads_().forEach(l => { leads[l.mls] = l; });
+  const t = r => { const d = fsiDeadline_((leads[r.mls] || {}).due); return d ? d.getTime() : Infinity; };
+  fsiRows_().filter(r => r.status === 'Waiting').sort((a, b) => t(a) - t(b)).forEach(r => {
+    const l = r.mls === FSI_TEST.mls ? fsiTestLead_() : leads[r.mls];
+    const why = !l ? 'Lead is no longer on the Leads tab' : r.mls === FSI_TEST.mls ? '' : fsiBlock_(l, now);
+    if (why) { fsiEnd_(r, 'Dropped', why); return; }
+    const rows = fsiRows_(), slot = fsiFreeSlot_(r.email, rows);
+    if (!slot) return;
+    try {
+      const id = fsiSend_(l, slot, rows), sh = fsiTab_();
+      sh.getRange(r.row, C.added).setValue(new Date());
+      sh.getRange(r.row, C.status).setValue('Emailing');
+      sh.getRange(r.row, C.reason).setValue('');
+      sh.getRange(r.row, C.id).setValue(id);
+      sh.getRange(r.row, C.slot).setValue(slot);
+    } catch (e) { fsiErr_('placing waiting ' + r.mls + ': ' + e.message); }
   });
-  if (!res || !res.id) throw new Error('Instantly did not add ' + l.email + ' (already in the campaign?)');
-  fsiTab_().appendRow([new Date(), l.mls, l.addr, l.agent, l.email, 'Emailing', '', '', '', '', '', '', res.id, by || 'Automatic']);
 }
 
 /* ----------------------------------------- the Board's Email button -- */
@@ -253,26 +356,22 @@ function fsiWebEmail_(mls, by) {
   if (!lock.tryLock(20000)) return fsPage_('Busy', 'FlipScout is updating right now. Close this tab and click the button again in a minute.');
   try {
     let l;
-    if (mls === FSI_TEST.mls) {
-      // the test lead: clear the previous test so Instantly takes it again
-      fsiRows_().filter(r => r.mls === FSI_TEST.mls && r.status !== 'Stopped').forEach(r => fsiStop_(r, 'Replaced by a new test'));
-      l = { mls, addr: FSI_TEST.addr, agent: FSI_TEST.first + ' Test', email: FSI_TEST.email, notes: '', mstat: 'Active' };
-    } else {
+    const test = mls === FSI_TEST.mls;
+    if (test) l = fsiTestLead_();
+    else {
       l = fsiLeads_().find(x => x.mls === mls);
       if (!l) return fsPage_('Lead not on the sheet', mls + ' is not on the Leads tab (it may have been rejected). Nothing was sent.');
       const done = fsiRows_().filter(r => r.mls === mls).pop();
-      if (done) return fsPage_('Already emailed', fsiShort_(l.addr) + ' was handed to Instantly on ' +
-        Utilities.formatDate(new Date(done.added), FSI_TZ, 'MMM d') + ' (' + done.status.toLowerCase() + '). See the Agent Emails tab.');
-      if (!l.email) return fsPage_('No agent email', 'The sheet has no agent email for ' + fsiShort_(l.addr) + '. Nothing was sent.');
-      if (FS_PASSED.test(l.notes)) return fsPage_('Passed', fsiShort_(l.addr) + ' is marked PASS in Notes. Nothing was sent.');
-      if (FS_CLOSED.test(l.mstat) || FSI_PENDING.test(l.mstat)) return fsPage_('Not active', fsiShort_(l.addr) + ' is ' + l.mstat.toLowerCase() + ' on the MLS. Nothing was sent.');
-      const busy = fsiRows_().find(r => r.email === l.email && r.status === 'Emailing');
-      if (busy) return fsPage_('Agent already in the campaign', (l.agent || l.email) + ' is already being emailed about ' + fsiShort_(busy.addr) +
-        '. Instantly holds one email per agent at a time, so this one waits until that finishes.');
+      if (done) return fsPage_('Already handled', fsiShort_(l.addr) + ' was handed to Instantly on ' +
+        Utilities.formatDate(new Date(done.added), FSI_TZ, 'MMM d') + ' — now ' + done.status.toLowerCase() + '. See the Agent Emails tab.');
+      const why = fsiBlock_(l, new Date());
+      if (why) return fsPage_('Not sent', fsiShort_(l.addr) + ': ' + why + '. Nothing was sent.');
     }
-    fsiAddOne_(l, by);
-    return fsPage_('✓ Sent to Instantly', fsiShort_(l.addr) + ' → ' + (l.agent || 'the agent') + ' <' + l.email + '>. ' +
-      'Instantly sends the first email within the campaign\'s sending hours, then the follow-ups; it stops when the agent replies. You can close this tab.');
+    const r = fsiPlace_(l, by || 'Board', test);
+    if (r.waiting) return fsPage_('Queued', (l.agent || l.email) + ' already has ' + FSI_CAMPAIGNS.length +
+      ' houses being emailed. ' + fsiShort_(l.addr) + ' is Waiting and goes out as soon as one of them finishes. You can close this tab.');
+    return fsPage_('✓ Sent to Instantly', fsiShort_(l.addr) + ' → ' + (l.agent || 'the agent') + ' <' + l.email + '> (campaign ' + r.slot + '). ' +
+      'Instantly sends the first email within the sending hours, then the follow-ups; it stops when the agent replies. You can close this tab.');
   } catch (e) {
     fsiErr_('Board email ' + mls + ': ' + e.message);
     return fsPage_('Not sent', 'Instantly refused it: ' + e.message);
@@ -281,59 +380,89 @@ function fsiWebEmail_(mls, by) {
   }
 }
 
-/* ------------------------------------------------------------ stopping -- */
+/* ------------------------------------------------ finishing and stopping -- */
 
-function fsiStops_(now) {
-  const leads = {};
-  fsiLeads_().forEach(l => { leads[l.mls] = l; });
-  fsiRows_().filter(r => r.status === 'Emailing' && r.mls !== FSI_TEST.mls).forEach(r => {
-    const l = leads[r.mls];
-    const why = !l ? 'Lead is no longer on the Leads tab'
-      : FS_CLOSED.test(l.mstat) ? 'Listing ' + l.mstat.toLowerCase()
-      : FSI_PENDING.test(l.mstat) ? 'Listing ' + l.mstat.toLowerCase()
-      : FS_PASSED.test(l.notes) ? 'Passed in Notes'
-      : FSI_NO_EMAIL_NOTE.test(l.notes) ? '"no emails" in Notes' : '';
-    if (why) { try { fsiStop_(r, why); } catch (e) { fsiErr_('stopping ' + r.mls + ': ' + e.message); } }
+// Instantly's own view of each house: 3 emails sent → Done, bounced → Bounced.
+function fsiSyncDone_() {
+  const open = fsiRows_().filter(r => r.status === 'Emailing' && r.id);
+  if (!open.length) return;
+  const state = {};
+  FSI_CAMPAIGNS.forEach((cid, i) => {
+    if (!open.some(r => r.slot === i + 1)) return;
+    let after = '';
+    for (let page = 0; page < 20; page++) {
+      const res = fsiApi_('post', '/leads/list', after ? { campaign: cid, limit: 100, starting_after: after } : { campaign: cid, limit: 100 });
+      (res.items || []).forEach(x => { state[x.id] = x; });
+      after = res.next_starting_after;
+      if (!after || !(res.items || []).length) break;
+    }
+  });
+  open.forEach(r => {
+    const x = state[r.id];
+    if (!x) return;
+    if (x.status === 3 && !(x.email_reply_count > 0)) fsiEnd_(r, 'Done', 'All 3 emails sent, no reply');
+    else if (x.status === -1) fsiEnd_(r, 'Bounced', 'The agent email bounced');
   });
 }
 
-function fsiStop_(r, why) {
-  if (r.id) {
-    try { fsiApi_('delete', '/leads/' + r.id); }
-    catch (e) { if (!/\b404\b/.test(e.message)) throw e; }    // already gone is fine
-  }
-  const sh = fsiTab_();
-  sh.getRange(r.row, 6).setValue('Stopped');
-  sh.getRange(r.row, 11, 1, 2).setValues([[new Date(), why]]);
+function fsiStops_() {
+  const leads = {};
+  fsiLeads_().forEach(l => { leads[l.mls] = l; });
+  fsiRows_().filter(r => (r.status === 'Emailing' || r.status === 'Waiting') && r.mls !== FSI_TEST.mls).forEach(r => {
+    const l = leads[r.mls];
+    const why = !l ? 'Lead is no longer on the Leads tab'
+      : FS_CLOSED.test(l.mstat) || FSI_PENDING.test(l.mstat) ? 'Listing ' + l.mstat.toLowerCase()
+      : FS_PASSED.test(l.notes) ? 'Passed in Notes'
+      : FSI_NO_EMAIL_NOTE.test(l.notes) ? '"no emails" in Notes' : '';
+    if (!why) return;
+    try { r.status === 'Waiting' ? fsiEnd_(r, 'Dropped', why) : fsiEnd_(r, 'Stopped', why, true); }
+    catch (e) { fsiErr_('stopping ' + r.mls + ': ' + e.message); }
+  });
 }
 
 /* ------------------------------------------------------------- replies -- */
 
 function fsiReadReplies_() {
   const props = PropertiesService.getScriptProperties();
-  const since = props.getProperty('FSI_REPLY_SINCE') || '';
   let seen = [];
   try { seen = JSON.parse(props.getProperty('FSI_REPLY_SEEN') || '[]'); } catch (e) {}
-  const res = fsiApi_('get', '/emails?campaign_id=' + FSI_CAMPAIGN + '&email_type=received&sort_order=desc&limit=100');
-  const items = (res && res.items || []).filter(m => (!since || String(m.timestamp_email || m.timestamp_created) >= since) && seen.indexOf(m.id) < 0);
-  if (!items.length) return 0;
+  const news = [], sh = fsiTab_();
 
-  const rows = fsiRows_(), sh = fsiTab_(), news = [];
-  items.slice().reverse().forEach(m => {                       // oldest first
-    const from = String(m.lead || m.from_address_email || '').toLowerCase();
-    const r = rows.filter(x => x.email === from && x.status !== 'Stopped').pop() || rows.filter(x => x.email === from).pop();
-    if (!r) return;                                            // not one of ours
-    const when = new Date(m.timestamp_email || m.timestamp_created || Date.now());
-    const text = fsiStripQuote_((m.body && (m.body.text || fsiHtmlText_(m.body.html))) || m.content_preview || '');
-    const due = fsiReplyDue_(text, when);
-    const juan = fsiNeedsJuan_(text, due, when);
-    sh.getRange(r.row, 6, 1, 5).setValues([['Replied', when, due || r.agentDue || '', juan || '', text.slice(0, 1500)]]);
-    r.status = 'Replied'; r.agentDue = due || r.agentDue;
-    news.push({ r, text, due, juan });
+  FSI_CAMPAIGNS.forEach((cid, i) => {
+    const slot = i + 1, key = 'FSI_REPLY_SINCE_' + slot;
+    const since = props.getProperty(key) || (slot === 1 ? props.getProperty('FSI_REPLY_SINCE') || '' : '');
+    const res = fsiApi_('get', '/emails?campaign_id=' + cid + '&email_type=received&sort_order=desc&limit=100');
+    const items = (res && res.items || []).filter(m => (!since || String(m.timestamp_email || m.timestamp_created) >= since) && seen.indexOf(m.id) < 0);
+    if (!items.length) return;
+    items.slice().reverse().forEach(m => {                   // oldest first
+      const from = String(m.lead || m.from_address_email || '').toLowerCase();
+      const rows = fsiRows_();
+      // the house this thread is about: same agent, same campaign, newest first
+      const mine = rows.filter(x => x.email === from && (x.slot || 1) === slot);
+      const r = mine.filter(x => x.status === 'Emailing').pop() || mine.filter(x => x.status !== 'Stopped').pop() || mine.pop();
+      if (!r) return;                                        // not one of ours
+      const when = new Date(m.timestamp_email || m.timestamp_created || Date.now());
+      const text = fsiStripQuote_((m.body && (m.body.text || fsiHtmlText_(m.body.html))) || m.content_preview || '');
+      const due = fsiReplyDue_(text, when);
+      const juan = fsiNeedsJuan_(text, due, when);
+      sh.getRange(r.row, C.status, 1, 5).setValues([['Replied', when, due || r.agentDue || '', juan || '', text.slice(0, 1500)]]);
+      r.status = 'Replied';
+      // Juan is talking to this agent now: pause their other houses
+      const paused = [];
+      rows.filter(x => x.email === from && x.row !== r.row && (x.status === 'Emailing' || x.status === 'Waiting')).forEach(x => {
+        try {
+          x.status === 'Waiting' ? fsiEnd_(x, 'Paused', 'Agent replied about ' + fsiShort_(r.addr))
+                                 : fsiEnd_(x, 'Paused', 'Agent replied about ' + fsiShort_(r.addr), true);
+          paused.push(fsiShort_(x.addr));
+        } catch (e) { fsiErr_('pausing ' + x.mls + ': ' + e.message); }
+      });
+      news.push({ r, text, due, juan, paused });
+    });
+    const newest = items.map(m => String(m.timestamp_email || m.timestamp_created || '')).sort().pop();
+    props.setProperty(key, newest || since);
+    seen = seen.concat(items.map(m => m.id)).slice(-300);
   });
-  const newest = items.map(m => String(m.timestamp_email || m.timestamp_created || '')).sort().pop();
-  props.setProperty('FSI_REPLY_SINCE', newest || since);
-  props.setProperty('FSI_REPLY_SEEN', JSON.stringify(seen.concat(items.map(m => m.id)).slice(-300)));
+  props.setProperty('FSI_REPLY_SEEN', JSON.stringify(seen));
   if (news.length) {
     try { fsPost_(fsiChat_(news)); } catch (e) { fsiErr_('Chat: ' + e.message); }
   }
@@ -352,6 +481,7 @@ function fsiChat_(news) {
       '“' + (n.text.length > 220 ? n.text.slice(0, 217).trim() + '…' : n.text) + '”',
       n.due ? '⏰ Offers due: *' + n.due + '* (read from the reply — confirm)' : '',
       n.juan ? '🚨 ' + n.juan : '',
+      n.paused.length ? '⏸ Paused emails about ' + n.paused.join(', ') + ' — Juan is talking to this agent' : '',
       test ? '' : 'MLS: https://www.mlslistings.com/Property/' + r.mls
     ].filter(Boolean).join('\n');
   }).join('\n\n') + '\n\nReply from Instantly → Unibox: https://app.instantly.ai/app/unibox';
@@ -490,7 +620,9 @@ function fsiLeads_() {
 function fsiRows_() {
   return fsiTab_().getDataRange().getValues().slice(1).map((r, i) => ({
     row: i + 2, added: r[0], mls: String(r[1]).trim().toUpperCase(), addr: String(r[2]), agent: String(r[3]),
-    email: String(r[4]).trim().toLowerCase(), status: String(r[5]), agentDue: String(r[7] || ''), id: String(r[12] || '')
+    email: String(r[4]).trim().toLowerCase(), status: String(r[5]), agentDue: String(r[7] || ''), id: String(r[12] || ''),
+    // rows from before the three campaigns have no Campaign cell: they were all in campaign 1
+    slot: +r[14] || (r[12] ? 1 : 0)
   })).filter(r => r.mls);
 }
 
