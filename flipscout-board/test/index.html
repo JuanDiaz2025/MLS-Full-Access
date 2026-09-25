@@ -609,6 +609,37 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   .acq-detail{position:static}
   .lp-grid{grid-template-columns:1fr}
 }
+
+/* v2: wider two-line list, remarks column, compact panel, note files */
+.acq-split{grid-template-columns:minmax(360px,480px) minmax(0,1fr)}
+.acq-item{flex-wrap:wrap; row-gap:2px; padding:7px 12px 7px 10px}
+.acq-item .ai-l1{display:flex; align-items:center; gap:8px; width:100%; min-width:0}
+.acq-item .ai-l2{display:flex; align-items:center; gap:6px; width:100%; min-width:0; padding-left:24px; font-size:11.5px; color:var(--muted)}
+.acq-item .ai-st{font:600 10.5px Archivo,sans-serif; border-radius:999px; padding:1px 7px; flex:none}
+.acq-item .ai-due{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:"IBM Plex Mono",monospace; font-size:11px}
+.acq-item .ai-who{margin-left:auto; white-space:nowrap; flex:none}
+.lp-cols{display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:10px; align-items:start}
+.lp-cols .lp-box{margin-bottom:8px}
+.lp-box{padding:8px 11px; margin-bottom:8px}
+.lp-grid{gap:8px; margin-bottom:8px}
+.lp-rem .rm-sec + .rm-sec{margin-top:10px; padding-top:10px; border-top:1px solid var(--line-soft)}
+.lp-rem h4{margin:0 0 4px; font:600 10px Archivo,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--brand)}
+.lp-rem p{margin:0; font-size:13px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere}
+.lp-rem mark{background:var(--b-offer); color:inherit; border-radius:3px; padding:0 2px}
+.note-file{display:inline-flex; align-items:center; gap:6px; margin-top:4px; font-size:12.5px; font-weight:600; color:var(--brand); text-decoration:none;
+  border:1px solid var(--line); border-radius:7px; padding:4px 8px; background:var(--surface); max-width:100%}
+.note-file:hover{border-color:var(--brand-2)}
+.note-file span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.note-file small{font-weight:400; color:var(--muted); flex:none}
+.note-thumb{display:block; margin-top:6px; max-width:220px; max-height:150px; border-radius:6px; border:1px solid var(--line)}
+.note-attach{position:relative; cursor:pointer}
+.note-attach input{position:absolute; inset:0; opacity:0; cursor:pointer; width:100%}
+.note-attach.busy{opacity:.6; pointer-events:none}
+.acq-item .ai-st{min-width:0; width:auto; appearance:none; pointer-events:none; line-height:1.5}
+.lp-box .notes, .lp-box .notes ol, .lp-box textarea.note-in{max-width:none; width:100%}
+.lp-box .team-note{display:none}
+.lp-box .note-row .btn{white-space:nowrap}
+@media (max-width:1180px){ .lp-cols{grid-template-columns:1fr} }
 .acq-legend{font-size:12px; color:var(--muted); margin:-4px 0 12px}
 .acq-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin:0 4px 0 10px}
 </style>
@@ -1466,8 +1497,10 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     for (k in p) all[k] = p[k];
     return Object.keys(all).map(function(id){
       var n = all[id];
-      if (!n || typeof n !== "object" || n.del || typeof n.t !== "string" || !n.t.trim()) return null;
-      return {id: id, t: n.t.slice(0, 2000), by: str(n.by, 40) || "Someone", at: str(n.at, 40)};
+      if (!n || typeof n !== "object" || n.del) return null;
+      var f = n.f && typeof n.f === "object" && /^[0-9a-f]{32}$/.test(String(n.f.id)) ? {id: n.f.id, n: str(n.f.n, 120) || "file", ty: str(n.f.ty, 60), sz: +n.f.sz || 0} : null;
+      if ((typeof n.t !== "string" || !n.t.trim()) && !f) return null;
+      return {id: id, t: typeof n.t === "string" ? n.t.slice(0, 2000) : "", by: str(n.by, 40) || "Someone", at: str(n.at, 40), f: f};
     }).filter(Boolean).sort(function(a, b){ return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
   }
   function noteDay(at){
@@ -1483,20 +1516,30 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
   // Notes under the address: the latest one always showing, the full list and
   // the box to add one folded underneath.
-  function notesHTML(l){
+  var ASSETS = null;
+  function fileSize(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? Math.round(n / 1024) + " KB" : n + " B"; }
+  function noteFileHTML(f){
+    var url = "/_blob/" + f.id, img = /^image\//.test(f.ty);
+    return '<a class="note-file" href="' + url + '" target="_blank" rel="noopener">' + (img ? '🖼' : /pdf/.test(f.ty) ? '📄' : '📎') +
+      ' <span>' + esc(f.n) + '</span>' + (f.sz ? '<small>' + fileSize(f.sz) + '</small>' : '') + '</a>' +
+      (img ? '<a href="' + url + '" target="_blank" rel="noopener"><img class="note-thumb" src="' + url + '" alt="' + esc(f.n) + '" loading="lazy"></a>' : '');
+  }
+  function notesHTML(l, withFiles){
     var list = noteList(l.mls), last = list[list.length - 1];
     var m = esc(l.mls);
     return (last ? '<span class="team-note"><b>' + esc(last.by) + '</b> <span class="when">' + esc(noteWhen(last.at)) +
-        '</span><br>' + esc(last.t.length > 160 ? last.t.slice(0, 160) + "…" : last.t) + '</span>' : '') +
-      '<details class="notes" data-notes="' + m + '"' + (openNotes[l.mls] ? ' open' : '') + '>' +
+        '</span><br>' + esc(last.t.length > 160 ? last.t.slice(0, 160) + "…" : last.t || ("📎 " + (last.f ? last.f.n : ""))) + '</span>' : '') +
+      '<details class="notes" data-notes="' + m + '"' + (openNotes[l.mls] || withFiles ? ' open' : '') + '>' +
       '<summary>' + (list.length ? 'Notes · ' + list.length : '＋ Add a note') + '</summary>' +
       (list.length ? '<ol>' + list.map(function(n){
-        return '<li><p>' + esc(n.t) + '</p><div class="meta"><span>' + esc(n.by) + ' · ' + esc(noteWhen(n.at)) +
+        return '<li>' + (n.t ? '<p>' + esc(n.t) + '</p>' : '') + (n.f ? noteFileHTML(n.f) : '') + '<div class="meta"><span>' + esc(n.by) + ' · ' + esc(noteWhen(n.at)) +
           '</span><button type="button" data-note-del="' + esc(n.id) + '" data-mls="' + m + '">Delete</button></div></li>';
       }).join("") + '</ol>' : '') +
       '<textarea class="note-in" rows="2" data-mls="' + m + '" aria-label="New note for ' + m +
         '" placeholder="Seller motivated? Talked to agent? Write it here…">' + esc(drafts[l.mls] || "") + '</textarea>' +
       '<div class="note-row"><span class="hint">Saved with your name for the whole team</span>' +
+      (withFiles && ASSETS ? '<label class="btn tiny note-attach" title="Photos, PDFs or text files, up to 20 MB">📎 Attach file' +
+        '<input type="file" data-attach="' + m + '" accept="image/*,application/pdf,.pdf,.txt,.csv,.md,.json"></label>' : '') +
       '<button type="button" class="btn tiny" data-note-save="' + m + '">Save note</button></div>' +
       '</details>';
   }
@@ -1518,6 +1561,40 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     writeNote(mls, id, entry, "Note saved for the team");
   }
 
+  var FILE_TYPES = {txt: "text/plain", csv: "text/csv", md: "text/markdown", json: "application/json", pdf: "application/pdf",
+                    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp"};
+  function attachFile(mls, file, label){
+    if (!ASSETS || !file) return;
+    if (!myName){ toast("Type your name in the box at the top first, so the team knows who added it"); $("nameIn").focus(); return; }
+    var ext = (/\.([a-z0-9]+)$/i.exec(file.name) || [])[1], ty = FILE_TYPES[(ext || "").toLowerCase()] || file.type;
+    if (!/^(image\/(png|jpeg|gif|webp)|application\/pdf|text\/(plain|csv|markdown)|application\/json)$/.test(ty || "")) {
+      toast("That kind of file can't be attached — use a photo, a PDF or a text file"); return;
+    }
+    if (file.size > 20 * 1048576) { toast("That file is over 20 MB — too big to attach"); return; }
+    if (label) label.classList.add("busy");
+    toast("Uploading " + file.name + "…");
+    ASSETS.upload(file, {type: ty}).then(function(r){
+      var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      var t = (drafts[mls] || "").trim();
+      var entry = {t: t.slice(0, 2000), by: myName, at: new Date().toISOString(), f: {id: r.id, n: file.name.slice(0, 120), ty: r.contentType || ty, sz: r.sizeBytes || file.size}};
+      pendingNotes[mls] = pendingNotes[mls] || {}; pendingNotes[mls][id] = entry;
+      drafts[mls] = ""; openNotes[mls] = true;
+      // the panel holds still while someone types; the note is saved, so let it redraw
+      try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
+      draw();
+      writeNote(mls, id, entry, "File attached for the team");
+    }).catch(function(e){
+      if (label) label.classList.remove("busy");
+      var c = e && e.code;
+      toast(c === "too_large" ? "That file is too big to attach" : c === "unsupported_type" ? "That kind of file can't be attached" :
+            c === "quota_or_state" ? "The board's file storage is full" : c === "not_granted" ? "Only people who can edit the board can attach files" :
+            "Couldn't upload that file — try again");
+    });
+  }
+  document.addEventListener("change", function(ev){
+    var inp = ev.target.closest && ev.target.closest("input[data-attach]");
+    if (inp) { attachFile(inp.dataset.attach, inp.files && inp.files[0], inp.closest("label")); inp.value = ""; }
+  });
   function writeNote(mls, id, entry, done){
     if (!db){ note("The shared board isn't connected, so this note is on this screen only. Reload the page.", true); return; }
     var body = {entries: {}}; body.entries[id] = entry;
@@ -1743,13 +1820,18 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     return m ? {s: m[1], c: m[2]} : {s: l.addr || l.mls, c: ""};
   }
   function acqItemHTML(l, sec){
-    var a = acqStreet(l), x = EMAIL_BY[l.mls], n = acqDueDays(l), chip = "";
+    var a = acqStreet(l), x = EMAIL_BY[l.mls], n = acqDueDays(l), chip = "", o = acqDueOf(l), st = statusOf(l), e = rec(l.date, l.mls) || {};
     if (sec === "visit") { var v = visitOf(l); chip = '<span class="due-chip due-later">📅 ' + esc(new Date(v.d + "T12:00:00").toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric"})) + '</span>'; }
     else if (n !== null) chip = '<span class="due-chip ' + dueClass(n) + '">' + dueLabel(n) + '</span>';
     var ic = x && x.juan ? ["🚨", "Needs Juan"] : acqReplied(l) ? ["💬", "Agent replied"] : acqEmailed(l) ? ["✉️", "Emailed, no answer yet"] : ["", ""];
+    var dd = o.d ? new Date(o.d.slice(0, 10) + "T12:00:00") : null;
+    var due = dd && !isNaN(dd) ? dd.toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric"}) + (o.t ? " · " + o.t : "")
+            : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? "offers TBD" : "no offer date");
     return '<button type="button" class="acq-item' + acqEdge(l) + '" data-pick="' + esc(l.mls) + '" aria-current="' + (l.mls === acqSel) + '" title="' + esc(l.addr) + '">' +
-      '<span class="ai-ic" title="' + ic[1] + '">' + ic[0] + '</span>' +
-      '<span class="ai-addr">' + esc(a.s) + (a.c ? ' <span class="ai-city">· ' + esc(a.c) + '</span>' : '') + '</span>' + chip + '</button>';
+      '<span class="ai-l1"><span class="ai-ic" title="' + ic[1] + '">' + ic[0] + '</span>' +
+      '<span class="ai-addr">' + esc(a.s) + (a.c ? ' <span class="ai-city">· ' + esc(a.c) + '</span>' : '') + '</span>' + chip + '</span>' +
+      '<span class="ai-l2"><span class="ai-st st-sel ' + STCLASS[st] + '">' + esc(st) + '</span>' +
+      '<span class="ai-due">' + esc(due) + '</span>' + (e.by ? '<span class="ai-who">' + esc(e.by) + '</span>' : '') + '</span></button>';
   }
   function acqDetailHTML(l){
     if (!l) return '<div class="lp-empty">Pick a lead on the left.</div>';
@@ -1781,17 +1863,29 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
               (dd !== null ? '<span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' : '') +
               (!dueOf(l) ? '<span class="em-meta">from the agent\'s reply</span>' : '')
             : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">No date yet</span>')) +
-          (l.agentRemarks ? '<br><button type="button" class="due-src" data-side="' + esc(l.mls) + '">agent remarks ›</button>' : '') + '</div>' +
+          '</div>' +
         '<div class="lp-box"><h3>Team status</h3><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '"' +
           (l.date ? '' : ' disabled') + '>' + opts + '</select>' +
           (e.by ? '<span class="who-meta">by <b>' + esc(e.by) + '</b> · ' + esc(noteWhen(e.at)) + '</span>' : '<span class="who-meta">nobody has set it yet</span>') + '</div>' +
         '<div class="lp-box"><h3>Property visit</h3>' + visitHTML(l).replace(/^<td[^>]*>/, "").replace(/<\/td>$/, "") + '</div>' +
       '</div>' +
-      '<div class="lp-box"><h3>Email</h3>' + email + '</div>' +
-      '<div class="lp-box"><h3>Agent</h3>' + contactHTML(l) + '</div>' +
-      '<div class="lp-box"><h3>Text</h3><span class="txt-none">Not set up yet</span></div>' +
-      '<div class="lp-box"><h3>Notes</h3>' + (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + '</div>' +
+      '<div class="lp-cols"><div>' +
+        '<div class="lp-box"><h3>Email</h3>' + email + '</div>' +
+        '<div class="lp-box"><h3>Agent</h3>' + contactHTML(l) + '</div>' +
+        '<div class="lp-box"><h3>Notes &amp; files</h3>' + (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l, true) + '</div>' +
+        '<div class="lp-box"><h3>Text</h3><span class="txt-none">Not set up yet</span></div>' +
+      '</div>' + acqRemarksHTML(l) + '</div>' +
     '</div>';
+  }
+  function acqRemarksHTML(l){
+    var secs = [];
+    if (l.agentRemarks) secs.push(["Agent-only remarks", marked(l.agentRemarks, l.offerPhrase)]);
+    if (l.remarks) secs.push(["Public remarks", marked(l.remarks, l.offerPhrase)]);
+    if (l.showing) secs.push(["Showing", esc(l.showing)]);
+    if (l.why) secs.push(["Why this bucket", esc(l.why)]);
+    return '<div class="lp-box lp-rem"><h3>Remarks</h3>' + (secs.length
+      ? secs.map(function(x){ return '<div class="rm-sec"><h4>' + x[0] + '</h4><p>' + x[1] + '</p></div>'; }).join("")
+      : '<span class="txt-none">No remarks on this listing yet</span>') + '</div>';
   }
   function acqPick(mls, scroll){
     acqSel = mls;
@@ -2201,6 +2295,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       if (!nd.classList.contains("sure")) { nd.classList.add("sure"); nd.textContent = "Click again to delete"; return; }
       // Marked, not erased: the note keeps who wrote it and when.
       var entry = {del: true, delBy: myName || "Someone", delAt: new Date().toISOString()};
+      // a deleted note's file goes with it (nothing else points at it)
+      var had = noteList(nd.dataset.mls).filter(function(n){ return n.id === nd.dataset.noteDel && n.f; })[0];
+      if (had && ASSETS) ASSETS.delete(had.f.id).catch(function(){});
       pendingNotes[nd.dataset.mls] = pendingNotes[nd.dataset.mls] || {};
       pendingNotes[nd.dataset.mls][nd.dataset.noteDel] = entry;
       draw();
@@ -2807,6 +2904,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         draw();
       });
     }).catch(function(){});
+
+    // file uploads: granted only to people who can edit the board (null otherwise)
+    claude.use("assets").then(function(a){ if (a) { ASSETS = a; draw(); } }).catch(function(){});
 
     claude.use("db").then(function(x){
       if (!x){ note("This view is running <b>offline</b> — your changes stay in this browser only.", true); return; }
