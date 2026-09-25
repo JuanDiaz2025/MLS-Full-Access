@@ -232,6 +232,15 @@ thead th .arrow{opacity:0; margin-left:4px}
 thead th[aria-sort] .arrow{opacity:1; color:var(--accent)}
 tbody td{padding:10px 12px; border-bottom:1px solid var(--line-soft); vertical-align:top}
 tbody tr:last-child td{border-bottom:0}
+@media (min-width:901px){
+  #viewLeads thead th, #viewLeads tbody td{padding-left:8px; padding-right:8px}
+  #viewLeads thead th:first-child, #viewLeads tbody td:first-child{padding-left:12px}
+  #viewLeads table{min-width:0}
+}
+.btn.tiny.rm-in{display:block; margin-top:8px; font-size:11px; padding:2px 8px; opacity:.75}
+.btn.tiny.rm-in:hover{opacity:1}
+@media (min-width:901px){
+}
 tbody tr:hover td{background:var(--accent-soft)}
 tbody tr td:first-child{box-shadow:inset 4px 0 0 var(--line)}
 tbody tr.s-needs  td:first-child{box-shadow:inset 4px 0 0 var(--m-none)}
@@ -299,13 +308,13 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
 }
 .due-in{
   font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
-  padding:5px 7px; min-height:0; border-radius:6px; width:142px;
+  padding:5px 6px; min-height:0; border-radius:6px; width:128px;
 }
 .visit-in{
   font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
   padding:5px 7px; min-height:0; border-radius:6px; width:142px;
 }
-.visit-btn{display:block; width:150px; text-align:left; border:1px dashed var(--line); background:var(--surface);
+.visit-btn{display:block; width:132px; text-align:left; border:1px dashed var(--line); background:var(--surface);
   border-radius:8px; padding:6px 9px; cursor:pointer; font:inherit; color:var(--muted)}
 .visit-btn:hover{border-color:var(--accent); color:var(--accent)}
 .visit-btn .vb-when{display:block; font:600 12px "IBM Plex Mono",ui-monospace,monospace; color:var(--ink)}
@@ -1222,7 +1231,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     '<th data-s="due">Offer due<span class="arrow">▾</span></th>' +
     '<th data-s="visit" title="Property visit: date and status, set by the team">Property visit<span class="arrow">▾</span></th>' +
     (view === "__all__" ? '<th data-s="date">Pulled<span class="arrow">▾</span></th>' : '') +
-    '<th class="plain"></th></tr></thead>'; }
+    '</tr></thead>'; }
 
   // Default order is the app's own: A before B, then unscored, then C, and
   // the highest score first inside each; cheapest $/SqFt breaks ties.
@@ -1263,7 +1272,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         (l.date ? '' : '<span class="by">No First Added date on the sheet — status can’t be saved</span>') +
         (e && e.by ? '<span class="by">' + esc(e.by) + '</span>' : '') +
         (!(e && e.s) && passedOnSheet(l) ? '<span class="by">passed on the sheet</span>' : '') +
-        (st === "Pass" && e && e.pr ? '<span class="pass-why">“' + esc(e.pr) + '”</span>' : '') + bucketHTML(l) + '</td>' +
+        (st === "Pass" && e && e.pr ? '<span class="pass-why">“' + esc(e.pr) + '”</span>' : '') + bucketHTML(l) +
+        '<button class="btn tiny rm-in" data-act="' + (gone ? "restore" : "remove") + '" type="button">' + (gone ? "Restore" : "Remove") + '</button></td>' +
       '<td data-l="Property" class="wide">' + addrHTML(l) +
         '<span class="mls">' + esc(l.mls) + '</span>' +
         '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' +
@@ -1294,9 +1304,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
               ? '<button type="button" class="due-src" data-side="' + esc(l.mls) + '">agent remarks ›</button>' : '')) +
         '</td>' +
       visitHTML(l) +
-      (view === "__all__" ? '<td data-l="Pulled" class="num">' + esc(l.date) + '</td>' : '') +
-      '<td data-l="" class="act"><button class="btn tiny" data-act="' + (gone ? "restore" : "remove") + '" type="button">' +
-        (gone ? "Restore" : "Remove") + '</button></td>' +
+      (view === "__all__" ? '<td data-l="Pulled" class="num" title="' + esc(l.date) + '">' + esc(pulledShort(l.date)) + '</td>' : '') +
     '</tr>';
   }
 
@@ -1436,6 +1444,12 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   // An address links only to that house's own Redfin page. Until its page is
   // found it is plain text with a note saying so; never an area or search page.
+  // "2026-08-06" → "Aug 6" (the year only when it is not this one)
+  function pulledShort(iso){
+    var d = new Date(String(iso) + "T12:00:00");
+    if (isNaN(d)) return iso || "";
+    return d.toLocaleDateString("en-US", d.getFullYear() === new Date().getFullYear() ? {month: "short", day: "numeric"} : {month: "short", day: "numeric", year: "2-digit"});
+  }
   function addrHTML(l){
     var u = redfinOf(l);
     return u
