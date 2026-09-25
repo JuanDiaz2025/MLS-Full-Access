@@ -587,23 +587,23 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   padding:18px 20px 20px}
 .acq-detail h2{font:600 20px Archivo,sans-serif; margin:0; line-height:1.25}
 .acq-detail h2 a{color:inherit}
-.ad-sub{margin-top:4px; font-size:12.5px; color:var(--muted); display:flex; flex-wrap:wrap; gap:6px; align-items:center}
-.ad-facts{margin:10px 0 14px; font-size:13px; display:flex; flex-wrap:wrap; gap:4px 16px}
-.ad-facts b{font-family:"IBM Plex Mono",monospace; font-weight:600}
-.ad-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px}
-.ad-box{border:1px solid var(--line-soft); border-radius:8px; padding:10px 12px; margin-bottom:10px; font-size:13px}
-.ad-grid .ad-box{margin:0}
-.ad-box h3{margin:0 0 6px; font:600 10px Archivo,sans-serif; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
-.ad-box .em-say{max-width:none; font-size:13px}
-.ad-box .visit-btn{width:100%}
-.ad-box .st-sel{width:100%}
-.ad-due{font:600 15px "IBM Plex Mono",monospace}
-.ad-empty{color:var(--muted); font-size:13px; padding:30px 10px; text-align:center}
+.lp-sub{margin-top:4px; font-size:12.5px; color:var(--muted); display:flex; flex-wrap:wrap; gap:6px; align-items:center}
+.lp-facts{margin:10px 0 14px; font-size:13px; display:flex; flex-wrap:wrap; gap:4px 16px}
+.lp-facts b{font-family:"IBM Plex Mono",monospace; font-weight:600}
+.lp-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px}
+.lp-box{border:1px solid var(--line-soft); border-radius:8px; padding:10px 12px; margin-bottom:10px; font-size:13px}
+.lp-grid .lp-box{margin:0}
+.lp-box h3{margin:0 0 6px; font:600 10px Archivo,sans-serif; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
+.lp-box .em-say{max-width:none; font-size:13px}
+.lp-box .visit-btn{width:100%}
+.lp-box .st-sel{width:100%}
+.lp-due{font:600 15px "IBM Plex Mono",monospace}
+.lp-empty{color:var(--muted); font-size:13px; padding:30px 10px; text-align:center}
 .acq-kbd{font-size:11.5px; color:var(--muted); margin:8px 12px 6px}
 @media (max-width:900px){
   .acq-split{grid-template-columns:1fr}
   .acq-detail{position:static}
-  .ad-grid{grid-template-columns:1fr}
+  .lp-grid{grid-template-columns:1fr}
 }
 .acq-legend{font-size:12px; color:var(--muted); margin:-4px 0 12px}
 .acq-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin:0 4px 0 10px}
@@ -1741,7 +1741,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<span class="ai-addr">' + esc(a.s) + (a.c ? ' <span class="ai-city">· ' + esc(a.c) + '</span>' : '') + '</span>' + chip + '</button>';
   }
   function acqDetailHTML(l){
-    if (!l) return '<div class="ad-empty">Pick a lead on the left.</div>';
+    if (!l) return '<div class="lp-empty">Pick a lead on the left.</div>';
     var st = statusOf(l), e = rec(l.date, l.mls) || {}, o = acqDueOf(l), dd = daysUntil(o.d), x = EMAIL_BY[l.mls], u = redfinOf(l);
     var opts = STATUSES.map(function(s){ return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>'; }).join("");
     var day = function(iso){ var d = new Date(String(iso).slice(0, 10) + "T12:00:00"); return isNaN(d) ? "" : d.toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric"}); };
@@ -1760,26 +1760,26 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var fact = function(v, k){ return v || v === 0 ? '<span><b>' + v + '</b> ' + k + '</span>' : ''; };
     return '<div class="acq-detail-in" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
       '<h2>' + (u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener" title="Open on Redfin">' + esc(l.addr) + ' ↗</a>' : esc(l.addr)) + '</h2>' +
-      '<div class="ad-sub"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
+      '<div class="lp-sub"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
         mlsStatusHTML(l.mlsStatus) + bucketHTML(l).replace(/^<br>/, "") + '</div>' +
-      '<div class="ad-facts">' + (l.price ? '<span><b>' + fmtMoney(l.price) + '</b></span>' : '') + fact(l.ppsf ? "$" + l.ppsf : "", "/sqft") +
+      '<div class="lp-facts">' + (l.price ? '<span><b>' + fmtMoney(l.price) + '</b></span>' : '') + fact(l.ppsf ? "$" + l.ppsf : "", "/sqft") +
         fact(l.sqft ? fmtNum(l.sqft) : "", "sqft") + fact(l.beds, "beds") + fact(l.year, "built") + fact(l.dom, "DOM") + '</div>' +
-      '<div class="ad-grid">' +
-        '<div class="ad-box"><h3>Offer due</h3>' + (o.d
-            ? '<div class="ad-due">' + esc(day(o.d)) + (o.t ? ' · ' + esc(o.t) : '') + '</div>' +
+      '<div class="lp-grid">' +
+        '<div class="lp-box"><h3>Offer due</h3>' + (o.d
+            ? '<div class="lp-due">' + esc(day(o.d)) + (o.t ? ' · ' + esc(o.t) : '') + '</div>' +
               (dd !== null ? '<span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' : '') +
               (!dueOf(l) ? '<span class="em-meta">from the agent\'s reply</span>' : '')
             : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">No date yet</span>')) +
           (l.agentRemarks ? '<br><button type="button" class="due-src" data-side="' + esc(l.mls) + '">agent remarks ›</button>' : '') + '</div>' +
-        '<div class="ad-box"><h3>Team status</h3><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '"' +
+        '<div class="lp-box"><h3>Team status</h3><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '"' +
           (l.date ? '' : ' disabled') + '>' + opts + '</select>' +
           (e.by ? '<span class="who-meta">by <b>' + esc(e.by) + '</b> · ' + esc(noteWhen(e.at)) + '</span>' : '<span class="who-meta">nobody has set it yet</span>') + '</div>' +
-        '<div class="ad-box"><h3>Property visit</h3>' + visitHTML(l).replace(/^<td[^>]*>/, "").replace(/<\/td>$/, "") + '</div>' +
+        '<div class="lp-box"><h3>Property visit</h3>' + visitHTML(l).replace(/^<td[^>]*>/, "").replace(/<\/td>$/, "") + '</div>' +
       '</div>' +
-      '<div class="ad-box"><h3>Email</h3>' + email + '</div>' +
-      '<div class="ad-box"><h3>Agent</h3>' + contactHTML(l) + '</div>' +
-      '<div class="ad-box"><h3>Text</h3><span class="txt-none">Not set up yet</span></div>' +
-      '<div class="ad-box"><h3>Notes</h3>' + (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + '</div>' +
+      '<div class="lp-box"><h3>Email</h3>' + email + '</div>' +
+      '<div class="lp-box"><h3>Agent</h3>' + contactHTML(l) + '</div>' +
+      '<div class="lp-box"><h3>Text</h3><span class="txt-none">Not set up yet</span></div>' +
+      '<div class="lp-box"><h3>Notes</h3>' + (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + '</div>' +
     '</div>';
   }
   function acqPick(mls, scroll){
