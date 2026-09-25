@@ -55,7 +55,11 @@ const FSI_DAILY_MAX = 10;
 const FSI_TESTS = [
   { mls: 'TEST0001', email: 'bryan@twinhomebuyer.com',    agent: 'Bryan Test',    addr: '123 Test Street, San Carlos, CA 94070' },
   { mls: 'TEST0002', email: 'rosanes@twinhomebuyer.com',  agent: 'Jonathan Test', addr: '123 Test Street, San Francisco, CA 94112' },
-  { mls: 'TEST0003', email: 'lawrence@twinhomebuyer.com', agent: 'Lawrence Test', addr: '123 Test Street, Berkeley, CA 94703' }
+  { mls: 'TEST0003', email: 'lawrence@twinhomebuyer.com', agent: 'Lawrence Test', addr: '123 Test Street, Berkeley, CA 94703' },
+  // more houses for the same agent: slots 2 and 3, then a 4th that has to wait
+  { mls: 'TEST0004', email: 'bryan@twinhomebuyer.com',    agent: 'Bryan Test',    addr: '456 Test Avenue, Oakland, CA 94605' },
+  { mls: 'TEST0005', email: 'bryan@twinhomebuyer.com',    agent: 'Bryan Test',    addr: '789 Test Court, San Jose, CA 95112' },
+  { mls: 'TEST0006', email: 'bryan@twinhomebuyer.com',    agent: 'Bryan Test',    addr: '321 Test Lane, Hayward, CA 94545' }
 ];
 const fsiIsTest_ = mls => FSI_TESTS.some(t => t.mls === mls);
 const FSI_HEAD = ['Added On', 'MLS #', 'Address', 'Agent', 'Agent Email', 'Status', 'Replied On',
