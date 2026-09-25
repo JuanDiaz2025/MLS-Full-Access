@@ -305,6 +305,17 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
   padding:5px 7px; min-height:0; border-radius:6px; width:142px;
 }
+.visit-btn{display:block; width:150px; text-align:left; border:1px dashed var(--line); background:var(--surface);
+  border-radius:8px; padding:6px 9px; cursor:pointer; font:inherit; color:var(--muted)}
+.visit-btn:hover{border-color:var(--accent); color:var(--accent)}
+.visit-btn .vb-when{display:block; font:600 12px "IBM Plex Mono",ui-monospace,monospace; color:var(--ink)}
+.visit-btn .vb-st{display:inline-block; margin-top:4px; font:700 10.5px Archivo,sans-serif; letter-spacing:.03em;
+  border-radius:999px; padding:1px 7px; background:var(--b-none); color:var(--t-none)}
+.visit-btn.set{border-style:solid}
+.visit-btn .vb-st.vs-sched{background:var(--b-offer); color:var(--t-offer)}
+.visit-btn .vb-st.vs-done{background:var(--b-won); color:var(--t-won)}
+.visit-btn .vb-st.vs-cancel{background:var(--b-pass); color:var(--t-pass)}
+.visit-btn[disabled]{cursor:not-allowed; opacity:.6}
 .visit-t{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; padding:4px 7px; border-radius:6px; width:142px; margin-top:4px}
 .vs-sel{font:600 11.5px Archivo,sans-serif; padding:3px 6px; border-radius:6px; margin-top:4px; width:142px}
 .vs-sel.vs-sched{background:var(--b-offer); color:var(--t-offer)}
@@ -603,6 +614,23 @@ footer .num{font-size:12px}
     </div>
   </dialog>
 
+  <dialog id="visitDlg" aria-labelledby="visitTitle">
+    <div class="dlg">
+      <h2 id="visitTitle">Property visit</h2>
+      <p class="dlg-sub" id="visitAddr"></p>
+      <label class="dlg-hint" for="visitWhen">Date and time</label>
+      <input type="datetime-local" id="visitWhen" style="width:100%; margin-top:6px">
+      <label class="dlg-hint" for="visitSt" style="display:block; margin-top:10px">Status</label>
+      <select id="visitSt" style="width:100%; margin-top:6px">
+        <option value="">—</option><option>To schedule</option><option>Scheduled</option><option>Visited</option><option>Cancelled</option>
+      </select>
+      <div class="dlg-actions">
+        <button type="button" class="btn" id="visitClear" title="Remove the date, time and status">Clear</button>
+        <button type="button" class="btn" id="visitCancel">Cancel</button>
+        <button type="button" class="btn go" id="visitSave">Save</button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="passDlg" aria-labelledby="passTitle">
     <div class="dlg">
       <h2 id="passTitle">Pass on this lead</h2>
@@ -1133,6 +1161,31 @@ footer .num{font-size:12px}
       BK_NAME[l.bucket] + (l.score != null ? ' <span class="sc">' + esc(String(l.score)) + '</span>' : '') + '</span>';
   }
   /* ---------- property visit: a date and a status, saved for the team ---------- */
+  // One button per lead; it opens a small window with date + time and status.
+  var visitFor = null;
+  document.addEventListener("click", function(ev){
+    var b = ev.target.closest("button[data-visit]"); if (!b) return;
+    var l = BY_MLS[b.dataset.visit], v = l ? visitOf(l) : {d: "", t: "", s: ""};
+    visitFor = {mls: b.dataset.visit, date: b.dataset.date};
+    $("visitAddr").textContent = l ? l.addr + " · " + l.mls : b.dataset.visit;
+    $("visitWhen").value = v.d ? v.d + "T" + (v.t || "10:00") : "";
+    $("visitSt").value = v.s || "";
+    var d = $("visitDlg"); if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+    $("visitWhen").focus();
+  });
+  function closeVisit(patch){
+    var d = $("visitDlg"), f = visitFor; visitFor = null;
+    if (d.open) d.close();
+    if (f && patch) applyEdit(f.date, f.mls, patch);
+  }
+  $("visitSave").addEventListener("click", function(){
+    var w = $("visitWhen").value, st = $("visitSt").value;
+    if (w && !st) st = "Scheduled";                    // a date means it is scheduled
+    closeVisit({vd: w ? w.slice(0, 10) : "", vt: w ? w.slice(11, 16) : "", vs: st});
+  });
+  $("visitClear").addEventListener("click", function(){ closeVisit({vd: "", vt: "", vs: ""}); });
+  $("visitCancel").addEventListener("click", function(){ closeVisit(null); });
+  $("visitDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closeVisit(null); });
   var VISIT_ST = ["", "To schedule", "Scheduled", "Visited", "Cancelled"];
   var VISIT_CLASS = {"Scheduled": "vs-sched", "Visited": "vs-done", "Cancelled": "vs-cancel"};
   function visitOf(l){ var e = rec(l.date, l.mls); return {d: (e && e.vd) || "", t: (e && e.vt) || "", s: (e && e.vs) || ""}; }
@@ -1142,17 +1195,20 @@ footer .num{font-size:12px}
     var h = +m[1]; return ((h + 11) % 12 + 1) + ":" + m[2] + (h < 12 ? " AM" : " PM");
   }
   function visitHTML(l){
-    var v = visitOf(l), dd = v.d ? daysUntil(v.d) : null, off = l.date ? '' : ' disabled';
-    return '<td data-l="Property visit" class="wide"><input type="date" class="visit-in" value="' + esc(v.d) + '"' + off +
-      ' aria-label="Property visit date for ' + esc(l.mls) + '"><br>' +
-      '<input type="time" class="visit-in visit-t" data-vt="1" value="' + esc(v.t) + '"' + off +
-      ' aria-label="Property visit time for ' + esc(l.mls) + '"><br>' +
-      '<select class="vs-sel ' + (VISIT_CLASS[v.s] || '') + '" aria-label="Property visit status for ' + esc(l.mls) + '"' + off + '>' +
-      VISIT_ST.map(function(s){ return '<option value="' + s + '"' + (s === v.s ? ' selected' : '') + '>' + (s || 'Visit —') + '</option>'; }).join('') +
-      '</select>' +
-      (dd !== null && v.s !== "Visited" && v.s !== "Cancelled" ? '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd).replace(/^due /, '') + (v.t ? ' · ' + visitTime(v.t) : '') + '</span>' : '') +
-      '</td>';
+    var v = visitOf(l), dd = v.d ? daysUntil(v.d) : null;
+    var when = v.d ? new Date(v.d + "T12:00:00").toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric"}) +
+                     (v.t ? " · " + visitTime(v.t) : "") : "";
+    var left = dd !== null && v.s !== "Visited" && v.s !== "Cancelled" ? " · " + dueLabel(dd).replace(/^due /, "") : "";
+    return '<td data-l="Property visit" class="wide"><button type="button" class="visit-btn' + (v.d || v.s ? ' set' : '') + '"' +
+      ' data-visit="' + esc(l.mls) + '" data-date="' + esc(l.date) + '"' +
+      (l.date ? '' : ' disabled title="This lead has no First Added date on the sheet, so a visit cannot be saved"') + '>' +
+      (v.d || v.s
+        ? (v.d ? '<span class="vb-when">📅 ' + esc(when) + '</span>' : '<span class="vb-when">no date yet</span>') +
+          '<span class="vb-st ' + (VISIT_CLASS[v.s] || '') + '">' + esc(v.s || 'No status') + esc(left) + '</span>'
+        : '+ Schedule visit') +
+      '</button></td>';
   }
+
 
   // Occupancy and price cut, as the original board showed them.
   function occCutHTML(l){
@@ -1457,7 +1513,7 @@ footer .num{font-size:12px}
     if ("pr" in patch) next.pr = patch.pr;
     if ("sp" in patch) next.sp = patch.sp;
     if ("em" in patch) { next.em = patch.em; next.eb = myName || "Someone"; }
-    if ("vd" in patch) { next.vd = patch.vd; if (patch.vd && !next.vs) next.vs = "Scheduled"; }   // a date means it is scheduled
+    if ("vd" in patch) next.vd = patch.vd;
     if ("vs" in patch) next.vs = patch.vs;
     if ("vt" in patch) next.vt = patch.vt;
     if (next.s !== "Pass") { next.pr = ""; next.sp = false; }   // a reason only belongs to a pass
@@ -1466,9 +1522,8 @@ footer .num{font-size:12px}
     draw();
     // Say "Saving…" now and "Saved" only once the shared board confirms it,
     // so nobody walks away from a change that did not stick.
-    savedMsg[date + "|" + mls] = "vt" in patch ? (next.vt ? "Visit time " + visitTime(next.vt) + " — saved for the team" : "Visit time cleared")
-      : "vd" in patch ? (next.vd ? "Visit " + next.vd + " — saved for the team" : "Visit date cleared")
-      : "vs" in patch ? (next.vs ? "Visit: " + next.vs + " — saved for the team" : "Visit status cleared")
+    savedMsg[date + "|" + mls] = "vd" in patch || "vs" in patch
+        ? (next.vd || next.vs ? "Visit " + [next.vd, visitTime(next.vt), next.vs].filter(Boolean).join(" · ") + " — saved for the team" : "Visit cleared")
       : "em" in patch ? "Marked emailed — Gmail opened in a new tab" : ("d" in patch
       ? (next.d === "-" ? "Marked no deadline — saved for the team"
          : next.d ? "Offer due " + next.d + " — saved for the team"
@@ -1688,13 +1743,6 @@ footer .num{font-size:12px}
       var lead = BY_MLS[tr.dataset.mls];
       if ((was && was.s === "Pass" && was.sp) ||
           (!(was && was.s) && lead && /^PASS \(Board\)/.test(lead.note || ""))) askUnpass(tr.dataset.mls);
-      return;
-    }
-    var vIn = ev.target.closest("input.visit-in, select.vs-sel");
-    if (vIn){
-      tr = vIn.closest("tr");
-      if (!tr) return;
-      applyEdit(tr.dataset.date, tr.dataset.mls, vIn.tagName === "SELECT" ? {vs: vIn.value} : vIn.dataset.vt ? {vt: vIn.value} : {vd: vIn.value});
       return;
     }
     var dueIn = ev.target.closest("input.due-in");
