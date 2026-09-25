@@ -2273,7 +2273,25 @@ footer .num{font-size:12px}
   });
 
   /* ---------- shared board (db) ---------- */
+  var USER = null, ROOM = null;
   if (window.claude && claude.use){
+    // Who is signed in: the Google/claude.ai account names you, so nobody types
+    // a name (and nobody shows up twice under two spellings). The box stays
+    // only for a view that cannot tell who you are.
+    claude.use("user").then(function(u){
+      if (!u) return;
+      USER = u;
+      return u.me().then(function(me){
+        if (!me || !me.name) return;
+        myName = me.name.slice(0, 40);
+        $("nameIn").value = myName;
+        $("nameIn").hidden = true;
+        try { localStorage.setItem("flipscout.name", myName); } catch(e){}
+        if (ROOM) ROOM.presence({name: myName});
+        draw();
+      });
+    }).catch(function(){});
+
     claude.use("db").then(function(x){
       if (!x){ note("This view is running <b>offline</b> — your changes stay in this browser only.", true); return; }
       db = x;
@@ -2341,14 +2359,25 @@ footer .num{font-size:12px}
 
     claude.use("room").then(function(room){
       if (!room) return;
+      ROOM = room;
+      // One chip per PERSON, not per open tab: peers are grouped by their
+      // account id, and the name comes from the account, not from what was typed.
       function paint(peers){
-        $("peerList").innerHTML = (peers || [])
-          .filter(function(p){ return p.kind !== "agent"; })
-          .map(function(p){
-            var st = p.presence || {};
-            return '<span class="who' + (p.isMe ? " me" : "") + '"><span class="dot"></span>' +
-                   esc(st.name || "Teammate") + (p.isMe ? " (you)" : "") + '</span>';
+        var people = [], seen = {};
+        (peers || []).filter(function(p){ return p.kind !== "agent"; }).forEach(function(p){
+          var key = p.by || p.peer;
+          if (seen[key]) { if (p.isMe) seen[key].isMe = true; return; }
+          seen[key] = {by: p.by, isMe: p.isMe, typed: (p.presence || {}).name || ""};
+          people.push(seen[key]);
+        });
+        var ids = people.map(function(x){ return x.by; }).filter(Boolean);
+        (USER && ids.length ? USER.profiles(ids) : Promise.resolve({})).then(function(ps){
+          $("peerList").innerHTML = people.map(function(x){
+            var nm = (x.by && ps[x.by] && ps[x.by].name) || x.typed || "Teammate";
+            return '<span class="who' + (x.isMe ? " me" : "") + '"><span class="dot"></span>' +
+                   esc(nm) + (x.isMe ? " (you)" : "") + '</span>';
           }).join("");
+        });
       }
       $("nameIn").addEventListener("change", function(){ room.presence({name: myName || "Teammate"}); });
       room.presence({name: myName || "Teammate"});
