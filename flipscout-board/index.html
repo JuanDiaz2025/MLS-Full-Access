@@ -496,6 +496,30 @@ footer .num{font-size:12px}
   .addr,.note{max-width:none}
   td.act{text-align:left}
 }
+/* ---------- Acquisitions MLS (#acquisitions) ---------- */
+body.acq .controls, body.acq #presets, body.acq .viewnav, body.acq #addScan,
+body.acq #viewLeads, body.acq #viewKpi{display:none !important}
+#viewAcq{padding-top:14px}
+#viewAcq .acq-sub{color:var(--muted); font-size:13px; margin:2px 0 14px}
+#viewAcq .visit-btn{font-size:12.5px}
+#tblAcq td, #tblAcqWon td{font-size:13px}
+#viewAcq .acq-back{font-size:12.5px; font-weight:600}
+.acq-tiles{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin:0 0 18px}
+.acq-tiles .kpi dd{font-variant-numeric:tabular-nums}
+@media (max-width:900px){ .acq-tiles{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:520px){ .acq-tiles{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.em-pill{display:inline-block; font:700 10.5px Archivo,sans-serif; letter-spacing:.03em; text-transform:uppercase;
+  border-radius:999px; padding:2px 8px; background:var(--b-none); color:var(--t-none)}
+.em-pill.em-go{background:var(--b-review); color:var(--t-review)}
+.em-pill.em-rep{background:var(--b-won); color:var(--t-won)}
+.em-pill.em-wait{background:var(--b-offer); color:var(--t-offer)}
+.em-pill.em-end{background:var(--b-pass); color:var(--t-pass)}
+.em-say{display:block; margin-top:4px; font-size:12px; color:var(--ink); font-style:italic; max-width:34ch; overflow-wrap:anywhere}
+.em-juan{display:inline-block; margin-top:4px; font:700 10.5px Archivo,sans-serif; border-radius:999px; padding:2px 8px;
+  background:var(--b-pass); color:var(--t-pass)}
+.em-meta, .who-meta{display:block; margin-top:3px; font-size:11.5px; color:var(--muted)}
+.txt-none{font-size:12px; color:var(--muted); font-style:italic}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
 </style>
 
 <header class="top">
@@ -567,6 +591,16 @@ footer .num{font-size:12px}
   </div>
   <div class="tablecard" id="removedCard" hidden><table id="tblRemoved"></table></div>
   </div><!-- /viewLeads -->
+
+  <div id="viewAcq" hidden>
+    <p class="acq-sub">Every lead the team is working — emailed, visited, or moved past Needs Comps. Offers due soonest first.
+      <a href="#" class="acq-back" id="acqBack">Open the full Lead Board →</a></p>
+    <dl class="acq-tiles" id="acqTiles"></dl>
+    <div class="sechead"><span>Working</span><span class="cnt" id="acqCount"></span><span class="rule"></span></div>
+    <div class="tablecard"><table id="tblAcq"></table></div>
+    <div class="sechead" id="acqWonHead" hidden><span>Won</span><span class="cnt" id="acqWonCount"></span><span class="rule"></span></div>
+    <div class="tablecard" id="acqWonCard" hidden><table id="tblAcqWon"></table></div>
+  </div>
 
   <div id="viewKpi" hidden>
     <div class="kpi-head"><span id="kpiScopeLabel">Pipeline</span><span class="rule"></span></div>
@@ -724,6 +758,14 @@ footer .num{font-size:12px}
     });
   }
   var SHEET_LEADS = toLeads(D.rows);
+  // The Instantly script's log (sheet tab "Agent Emails"), latest row per MLS #.
+  var EMAIL_BY = {};
+  function useEmails(rows, cols){
+    var c = cols || ["mls","status","replied","due","juan","reply","reason","by","campaign","added"], next = {};
+    (rows || []).forEach(function(r){ var o = {}; c.forEach(function(k, i){ o[k] = r[i] == null ? "" : String(r[i]); }); if (o.mls) next[o.mls.toUpperCase()] = o; });
+    EMAIL_BY = next;
+  }
+  useEmails(D.emails, D.ecols);
   // Where the lead list came from: data.js (the daily build) or a teammate's
   // "Refresh from sheet", whichever is newer.
   var sheetFrom = {at: D.built || "", by: "", gen: ""};
@@ -1381,8 +1423,93 @@ footer .num{font-size:12px}
   }
 
   function draw(){
+    if (ACQ) { renderAcq(); return; }
     if (activeScreen === "kpi") renderKpi(); else render();
   }
+
+  /* ---------- Acquisitions MLS: the leads being worked, one line each ---------- */
+  // Opened with the board's link + "#acquisitions". Same data, same saves:
+  // a status or visit changed here is the Lead Board's status or visit.
+  var ACQ = false;
+  function acqWorked(l){
+    var e = rec(l.date, l.mls) || {}, v = visitOf(l);
+    return !!(v.d || v.s || EMAIL_BY[l.mls] || e.em || (e.s && e.s !== "Needs Comps"));
+  }
+  function acqEmailHTML(l){
+    var x = EMAIL_BY[l.mls], e = rec(l.date, l.mls) || {};
+    if (!x) return e.em ? '<span class="em-pill em-go">Sent from Board</span><span class="em-meta">' + esc(e.eb || "Someone") + ' · ' + esc(noteWhen(e.em)) + '</span>'
+                        : '<span class="txt-none">not emailed</span>';
+    var st = x.status || "", cls = /^Replied/.test(st) ? "em-rep" : /^Emailing/.test(st) ? "em-go" : /^Waiting|^Paused/.test(st) ? "em-wait" : "em-end";
+    var when = x.replied ? new Date(x.replied) : null;
+    return '<span class="em-pill ' + cls + '">' + esc(st.split(" ")[0] || "—") + '</span>' +
+      (when && !isNaN(when) ? '<span class="em-meta">' + esc(when.toLocaleDateString("en-US", {month: "short", day: "numeric"})) + '</span>' : '') +
+      (x.reply ? '<span class="em-say">“' + esc(x.reply.length > 140 ? x.reply.slice(0, 137) + "…" : x.reply) + '”</span>' : '') +
+      (x.juan ? '<br><span class="em-juan">🚨 ' + esc(x.juan) + '</span>' : '') +
+      (!x.reply && x.reason ? '<span class="em-meta">' + esc(x.reason) + '</span>' : '');
+  }
+  function acqRowHTML(l){
+    var st = statusOf(l), e = rec(l.date, l.mls) || {}, due = dueOf(l), fromReply = false;
+    // no deadline on the sheet yet: use the one the agent gave in a reply
+    var xr = EMAIL_BY[l.mls];
+    if (!due && xr && /^\d{4}-\d{2}-\d{2}/.test(xr.due)) { due = xr.due.slice(0, 10); fromReply = true; }
+    var dd = daysUntil(due);
+    var opts = STATUSES.map(function(s){ return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>'; }).join("");
+    return '<tr class="' + STRIPE[st] + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+      '<td data-l="Property" class="wide">' + addrHTML(l) + '<span class="mls">' + esc(l.mls) + '</span>' +
+        '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' + mlsStatusHTML(l.mlsStatus) +
+        (l.price ? '<span class="em-meta">' + fmtMoney(l.price) + (l.ppsf ? ' · $' + l.ppsf + '/sqft' : '') + '</span>' : '') + '</td>' +
+      '<td data-l="Offer due">' + (due ? '<b class="mono">' + esc(due) + '</b>' +
+          (fromReply ? '<span class="em-meta">' + esc((/\d{1,2}:\d{2} [AP]M/.exec(xr.due) || [""])[0]) + ' · from the agent\'s reply</span>'
+                     : l.offerTime && !teamDue(l) ? '<span class="em-meta">' + esc(l.offerTime) + '</span>' : '') +
+          (dd !== null ? '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' : '')
+        : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">no date</span>')) + '</td>' +
+      '<td data-l="Email">' + acqEmailHTML(l) + '</td>' +
+      '<td data-l="Text"><span class="txt-none">not set up yet</span></td>' +
+      visitHTML(l) +
+      '<td data-l="Team status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '"' +
+        (l.date ? '' : ' disabled') + '>' + opts + '</select></td>' +
+      '<td data-l="Who">' + (e.by ? '<b>' + esc(e.by) + '</b><span class="who-meta">' + esc(noteWhen(e.at)) + '</span>' : '<span class="txt-none">—</span>') + '</td>' +
+      '<td data-l="Agent">' + (l.agentName ? esc(l.agentName) : '<span class="txt-none">—</span>') +
+        (l.agentPhone ? '<span class="em-meta mono">' + esc(l.agentPhone) + '</span>' : '') + '</td>' +
+    '</tr>';
+  }
+  function acqHead(){
+    return '<thead><tr><th class="plain">Property</th><th class="plain">Offer due</th><th class="plain">Email</th><th class="plain">Text</th>' +
+      '<th class="plain">Property visit</th><th class="plain">Team status</th><th class="plain">Who</th><th class="plain">Agent</th></tr></thead>';
+  }
+  function renderAcq(){
+    var all = LEADS.filter(function(l){ return acqWorked(l) && !removedOf(l) && statusOf(l) !== "Pass" && !CLOSED.test(l.mlsStatus || ""); });
+    var won = all.filter(function(l){ return statusOf(l) === "Won"; });
+    var work = all.filter(function(l){ return statusOf(l) !== "Won"; });
+    var rank = function(l){ var d = dueOf(l), x = EMAIL_BY[l.mls]; if (!d && x && /^\d{4}-\d{2}-\d{2}/.test(x.due)) d = x.due.slice(0, 10);
+      var n = daysUntil(d); return n === null ? [1, 0] : n >= 0 ? [0, n] : [2, -n]; };
+    work.sort(function(a, b){ var x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1]; });
+    var emailed = work.filter(function(l){ return EMAIL_BY[l.mls] || (rec(l.date, l.mls) || {}).em; }).length;
+    var replied = work.filter(function(l){ return EMAIL_BY[l.mls] && /^Replied/.test(EMAIL_BY[l.mls].status); }).length;
+    var juan = work.filter(function(l){ return EMAIL_BY[l.mls] && EMAIL_BY[l.mls].juan; }).length;
+    var acqDue = function(l){ var d = dueOf(l), x = EMAIL_BY[l.mls]; return d || (x && /^\d{4}-\d{2}-\d{2}/.test(x.due) ? x.due.slice(0, 10) : ""); };
+    var due3 = work.filter(function(l){ var n = daysUntil(acqDue(l)); return n !== null && n >= 0 && n <= 3; }).length;
+    var visits = work.filter(function(l){ var v = visitOf(l); return v.s === "Scheduled" && v.d && daysUntil(v.d) >= 0; }).length;
+    var tile = function(k, v, c, sub){ return '<div class="kpi"><dt>' + k + '</dt><dd' + (c ? ' style="color:var(' + c + ')"' : '') + '>' + v + '</dd><div class="sub">' + sub + '</div></div>'; };
+    $("acqTiles").innerHTML = tile("Working", work.length, "", won.length + " won") + tile("Emailed", emailed, "--t-review", "agents contacted") +
+      tile("Replied", replied, "--t-won", "agents answered") + tile("Needs Juan", juan, "--t-pass", "reply wants a call or talks price") +
+      tile("Offers due", due3, "--t-offer", "today to 3 days") + tile("Visits", visits, "--t-offer", "scheduled, upcoming");
+    $("acqCount").textContent = work.length;
+    $("tblAcq").innerHTML = work.length ? acqHead() + '<tbody>' + work.map(acqRowHTML).join("") + '</tbody>'
+      : '<tbody><tr><td class="empty"><b>Nothing is being worked yet</b>A lead shows up here once its agent is emailed, a visit is set, or its status moves past Needs Comps.</td></tr></tbody>';
+    $("acqWonHead").hidden = $("acqWonCard").hidden = !won.length;
+    $("acqWonCount").textContent = won.length;
+    $("tblAcqWon").innerHTML = won.length ? acqHead() + '<tbody>' + won.map(acqRowHTML).join("") + '</tbody>' : '';
+  }
+  function setAcq(on){
+    ACQ = on;
+    document.body.classList.toggle("acq", on);
+    $("viewAcq").hidden = !on;
+    document.querySelector("header.top h1").textContent = on ? "Acquisitions MLS" : "FlipScout Lead Board";
+    try { document.title = on ? "Acquisitions MLS" : BASE_TITLE; } catch (e) {}
+    if (!on) showScreen(location.hash === "#kpi" ? "kpi" : "leads", false); else draw();
+  }
+  var BASE_TITLE = document.title;
 
   function render(){
     // A teammate's change re-draws the table; keep whoever is typing a note
@@ -1987,10 +2114,18 @@ footer .num{font-size:12px}
   $("navLeads").addEventListener("click", function(){ showScreen("leads", true); });
   $("navKpi").addEventListener("click", function(){ showScreen("kpi", true); });
   window.addEventListener("hashchange", function(){
+    if (location.hash === "#acquisitions") { setAcq(true); return; }
+    if (ACQ) setAcq(false);
     showScreen(location.hash === "#kpi" ? "kpi" : "leads", false);
   });
 
   showScreen(location.hash === "#kpi" ? "kpi" : "leads", false);
+  if (location.hash === "#acquisitions") setAcq(true);
+  $("acqBack").addEventListener("click", function(ev){
+    ev.preventDefault();
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    setAcq(false);
+  });
   syncStep();
 
   /* ---------- refresh from the sheet ---------- */
@@ -2067,6 +2202,22 @@ footer .num{font-size:12px}
     return out;
   }
 
+  function emailsFromWorkbook(X, wb){
+    var ws = wb.Sheets["Agent Emails"];
+    if (!ws) return [];
+    var grid = X.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
+    var head = (grid[0] || []).map(function(h){ return String(h).trim(); }), ix = {};
+    head.forEach(function(h, i){ if (h && !(h in ix)) ix[h] = i; });
+    var last = {};
+    grid.slice(1).forEach(function(raw){
+      var g = function(h){ return h in ix ? cellText(X, raw[ix[h]]) : ""; };
+      var mls = g("MLS #").toUpperCase(); if (!mls) return;
+      last[mls] = [mls, g("Status"), g("Replied On"), g("Agent Offer Due"), g("Needs Juan"), g("Reply").slice(0, 400),
+                   g("Stop Reason").slice(0, 160), g("Added By"), g("Campaign"), g("Added On")];
+    });
+    return Object.keys(last).map(function(k){ return last[k]; });
+  }
+
   function useRows(rows, from){
     var before = {}; LEADS.forEach(function(l){ before[l.mls] = true; });
     SHEET_LEADS = toLeads(rows);
@@ -2092,6 +2243,8 @@ footer .num{font-size:12px}
       try { rows = rows.concat(JSON.parse(c.rows)); } catch (e) { return; }
     }
     if (rows.length !== meta.total) return;
+    var em = sheetDocs.emails;
+    if (em && em.gen === meta.gen) { try { useEmails(JSON.parse(em.rows)); } catch (e) {} }
     useRows(rows, {at: meta.at, by: meta.by || "", gen: meta.gen});
   }
 
@@ -2124,7 +2277,8 @@ footer .num{font-size:12px}
       if (!b64) throw {code: "tool_error", message: "Google Drive sent back no file"};
       var bin = atob(b64), bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      var rows = rowsFromWorkbook(X, X.read(bytes, {type: "array"}));
+      var wbk = X.read(bytes, {type: "array"});
+      var rows = rowsFromWorkbook(X, wbk), erows = emailsFromWorkbook(X, wbk);
       if (!rows.length) throw {code: "sheet", message: "The Leads tab came back empty, so nothing was refreshed."};
       // the same safety stop as the daily refresh
       var have = {}; rows.forEach(function(r){ have[r[0]] = true; });
@@ -2135,10 +2289,13 @@ footer .num{font-size:12px}
       var n = Math.ceil(rows.length / CHUNK), writes = [];
       for (var k = 0; k < n; k++) writes.push(db.doc("sheet/c" + k).set({gen: gen, rows: JSON.stringify(rows.slice(k * CHUNK, (k + 1) * CHUNK))}));
       return Promise.all(writes).then(function(){
+        return db.doc("sheet/emails").set({gen: gen, rows: JSON.stringify(erows)});
+      }).then(function(){
         return db.doc("sheet/meta").set({gen: gen, at: at, by: myName || "Someone", chunks: n, total: rows.length});
       }).then(function(){
         // drop chunks a longer list left behind
         Object.keys(sheetDocs).forEach(function(id){ var m = /^c(\d+)$/.exec(id); if (m && +m[1] >= n) db.doc("sheet/" + id).delete().catch(function(){}); });
+        useEmails(erows);
         var added = useRows(rows, {at: at, by: myName || "Someone", gen: gen});
         toast("✓ Refreshed from the sheet · " + rows.length + " leads" + (added ? " · " + added + " new" : "") + " — the whole team sees it");
       }, function(){ throw {code: "save"}; });

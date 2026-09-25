@@ -234,7 +234,33 @@ def build(xlsx_path):
     # when this build ran, so a board can tell it from a newer in-page refresh
     built = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     return {"pulled": dates[0] if dates else "", "dates": dates, "built": built,
-            "cols": COLUMNS, "rows": rows}
+            "cols": COLUMNS, "rows": rows, "ecols": EMAIL_COLS, "emails": agent_emails(xlsx_path)}
+
+
+# The Instantly script's log, one row per house it handed to Instantly. The
+# Acquisitions view shows the latest row per MLS # (status, reply, the
+# deadline the agent gave). No tab yet = no emails.
+EMAIL_COLS = ["mls", "status", "replied", "due", "juan", "reply", "reason", "by", "campaign", "added"]
+
+
+def agent_emails(xlsx_path):
+    wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+    if "Agent Emails" not in wb.sheetnames:
+        return []
+    grid = list(wb["Agent Emails"].iter_rows(values_only=True))
+    if not grid:
+        return []
+    head = [cell(h) for h in grid[0]]
+    ix = {h: i for i, h in enumerate(head) if h}
+    g = lambda raw, h: cell(raw[ix[h]]) if h in ix and ix[h] < len(raw) else ""
+    out = {}
+    for raw in grid[1:]:
+        mls = g(raw, "MLS #").upper()
+        if not mls:
+            continue
+        out[mls] = [mls, g(raw, "Status"), g(raw, "Replied On"), g(raw, "Agent Offer Due"), g(raw, "Needs Juan"),
+                    g(raw, "Reply")[:400], g(raw, "Stop Reason")[:160], g(raw, "Added By"), g(raw, "Campaign"), g(raw, "Added On")]
+    return list(out.values())
 
 
 def main():
