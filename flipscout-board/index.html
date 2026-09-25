@@ -525,6 +525,10 @@ body.acq .acq-backbtn{display:inline-flex}
 
 /* search, tiles-as-filters, chips, sections, deadline edge */
 .acq-find{position:relative; margin:0 0 14px}
+.acq-list .acq-find{margin:6px 8px 4px}
+.acq-list .acq-find input{box-shadow:none; font-size:14px; padding:9px 38px 9px 12px; background:var(--bg, #F4F6F8)}
+.acq-none{padding:18px 14px; font-size:13px; color:var(--muted)}
+.acq-none b{display:block; color:var(--ink); margin-bottom:4px}
 .acq-find input{width:100%; font:15px "IBM Plex Sans",system-ui,sans-serif; padding:12px 44px 12px 14px; border:1px solid var(--line);
   border-radius:10px; background:var(--surface); color:var(--ink); box-shadow:var(--shadow)}
 .acq-find input:focus{outline:2px solid var(--brand-2); outline-offset:1px}
@@ -684,13 +688,19 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   <div id="viewAcq" hidden>
     <p class="acq-sub">Every lead the team is working — emailed, visited, or moved past Needs Comps — grouped by what to do next.
       <a href="#" class="acq-back" id="acqBack">Open the full Lead Board →</a></p>
-    <div class="acq-find"><input type="search" id="acqQ" autocomplete="off" spellcheck="false"
-      placeholder="Search address, MLS #, city, agent name, phone or email" aria-label="Search the leads being worked"><kbd>/</kbd></div>
     <div class="acq-tiles" id="acqTiles"></div>
     <div class="acq-filters" id="acqFilters"></div>
     <p class="acq-note" id="acqNote"></p>
     <p class="acq-legend">Left edge on the list:<i style="background:#D64545"></i>offer due within 24 hours<i style="background:#E3A008"></i>within 3 days</p>
-    <div id="acqSecs"></div>
+    <div id="acqSecs"><div class="acq-split">
+      <nav class="acq-list" aria-label="Leads being worked">
+    <div class="acq-find"><input type="search" id="acqQ" autocomplete="off" spellcheck="false"
+      placeholder="Search address, MLS #, city, agent…" aria-label="Search the leads being worked"><kbd>/</kbd></div>
+        <div id="acqListBody"></div>
+        <p class="acq-kbd">↑ ↓ to move · / to search</p>
+      </nav>
+      <aside class="acq-detail" aria-live="polite"></aside>
+    </div></div>
   </div>
 
   <div id="viewKpi" hidden>
@@ -1707,11 +1717,13 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       return '<details class="acq-lsec acq-sec" data-sec="' + s.k + '"' + (open ? ' open' : '') + '><summary>' + head + '</summary>' + items + '</details>';
     }).join("");
     if (!rows.length) {
-      $("acqSecs").innerHTML = '<div class="tablecard"><table><tbody><tr><td class="empty">' +
+      $("acqListBody").innerHTML = '<div class="acq-none">' +
         (all.length ? '<b>No lead matches</b>' + (q ? 'Nothing being worked matches “' + esc($("acqQ").value.trim()) + '”.' : 'Nothing fits these filters.') +
                       ' <button type="button" class="acq-clear" id="acqClear2">Clear all</button>'
                     : '<b>Nothing is being worked yet</b>A lead shows up here once its agent is emailed, a visit is set, or its status moves past Needs Comps.') +
-        '</td></tr></tbody></table></div>';
+        '</div>';
+      acqFlat = [];
+      document.querySelector("#acqSecs .acq-detail").innerHTML = '<div class="lp-empty">No lead to show.</div>';
       return;
     }
     // keep the lead that is open; else the first one on the list
@@ -1719,10 +1731,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     acqFlat = flat;
     // a teammate's change must not wipe a note being typed in the panel
     var act = document.activeElement, typing = act && act.closest && act.closest(".acq-detail") && /^(TEXTAREA|INPUT)$/.test(act.tagName);
-    var keepDetail = typing ? document.querySelector("#acqSecs .acq-detail") : null;
-    $("acqSecs").innerHTML = '<div class="acq-split"><nav class="acq-list" aria-label="Leads being worked">' + list +
-      '<p class="acq-kbd">↑ ↓ to move · / to search</p></nav><aside class="acq-detail" aria-live="polite"></aside></div>';
-    if (keepDetail) { var slot = document.querySelector("#acqSecs .acq-detail"); slot.parentNode.replaceChild(keepDetail, slot); act.focus(); }
+    $("acqListBody").innerHTML = list;
+    if (typing) [].forEach.call(document.querySelectorAll("#acqSecs .acq-item"), function(b){ b.setAttribute("aria-current", String(b.dataset.pick === acqSel)); });
     else acqPick(acqSel, false);
   }
   // ---------- list + detail ----------
