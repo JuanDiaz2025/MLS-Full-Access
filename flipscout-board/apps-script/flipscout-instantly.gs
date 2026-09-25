@@ -102,6 +102,7 @@ function fsiOnOpen() {
     .addItem('Check replies now', 'fsiRepliesNow')
     .addItem('Run the hourly check now', 'fsiHourlyNow')
     .addItem('Stop emails for the selected row(s)', 'fsiStopSelected')
+    .addItem('Diagnose — ask Instantly about every open row', 'fsiDiagnose')
     .addSeparator()
     .addItem('Automatic adding is ' + label + ' — change it', 'fsiChooseMode')
     .addItem('Add new leads now (up to ' + FSI_DAILY_MAX + ' a day)', 'fsiAddNow')
@@ -143,6 +144,35 @@ function fsiCheck() {
     (warn.length ? '\n\nTo fix:\n' + warn.join('\n') : '\n\nEverything looks right.') +
     (fsiProp_('FSI_LAST_ERROR') ? '\n\nLast error: ' + fsiProp_('FSI_LAST_ERROR') : ''),
     ui.ButtonSet.OK);
+}
+
+// What Instantly itself says about each campaign and each lead on the tab.
+function fsiDiagnose() {
+  const ui = SpreadsheetApp.getUi();
+  const cstat = { 0: 'Draft', 1: 'Active', 2: 'Paused', 3: 'Completed', 4: 'Running subsequences', '-1': 'Accounts unhealthy', '-2': 'Bounce protect', '-99': 'Suspended' };
+  const lstat = { 1: 'Active', 2: 'Paused', 3: 'Completed', '-1': 'Bounced', '-2': 'Unsubscribed', '-3': 'Skipped' };
+  const out = [];
+  FSI_CAMPAIGNS.forEach((id, i) => {
+    try {
+      const c = fsiApi_('get', '/campaigns/' + id);
+      const l = fsiApi_('post', '/leads/list', { campaign: id, limit: 100 });
+      out.push('Campaign ' + (i + 1) + ': ' + (cstat[c.status] || c.status) + ' · ' + ((l.items || []).length) + ' lead(s): ' +
+        ((l.items || []).map(x => x.email + ' [' + (lstat[x.status] || x.status) + ']').join(', ') || 'none'));
+    } catch (e) { out.push('Campaign ' + (i + 1) + ': ' + e.message); }
+  });
+  out.push('');
+  const slotOf = cid => FSI_CAMPAIGNS.indexOf(cid) + 1;
+  fsiRows_().filter(r => r.id && (r.status === 'Emailing' || r.status === 'Waiting')).forEach(r => {
+    try {
+      const x = fsiApi_('get', '/leads/' + r.id);
+      const cv = x.payload || x.custom_variables || {};
+      out.push(r.mls + ' ' + fsiShort_(r.addr) + ' → Instantly: campaign ' + (slotOf(x.campaign) || ('?' + x.campaign)) +
+        ', ' + (lstat[x.status] || x.status) + ', address var "' + (cv.address || '—') + '"' +
+        ', last emailed ' + (x.timestamp_last_contact || 'never') + ', replies ' + (x.email_reply_count || 0));
+    } catch (e) { out.push(r.mls + ' ' + fsiShort_(r.addr) + ' → ' + e.message); }
+  });
+  Logger.log(out.join('\n'));
+  ui.alert('What Instantly says', out.join('\n'), ui.ButtonSet.OK);
 }
 
 function fsiPreview() {
