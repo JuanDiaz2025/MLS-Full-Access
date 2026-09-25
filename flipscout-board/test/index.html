@@ -582,7 +582,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .acq-item .ai-ic{flex:none; font-size:12px; width:16px; text-align:center}
 .acq-item .due-chip{flex:none; font-size:10.5px; padding:1px 7px; margin:0}
 .acq-detail{position:sticky; top:12px; background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow);
-  padding:18px 20px 20px; max-height:calc(100vh - 24px); overflow:auto}
+  padding:18px 20px 20px}
 .acq-detail h2{font:600 20px Archivo,sans-serif; margin:0; line-height:1.25}
 .acq-detail h2 a{color:inherit}
 .ad-sub{margin-top:4px; font-size:12.5px; color:var(--muted); display:flex; flex-wrap:wrap; gap:6px; align-items:center}
@@ -600,7 +600,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .acq-kbd{font-size:11.5px; color:var(--muted); margin:8px 12px 6px}
 @media (max-width:900px){
   .acq-split{grid-template-columns:1fr}
-  .acq-detail{position:static; max-height:none}
+  .acq-detail{position:static}
   .ad-grid{grid-template-columns:1fr}
 }
 .acq-legend{font-size:12px; color:var(--muted); margin:-4px 0 12px}
@@ -1781,7 +1781,6 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var d = document.querySelector("#acqSecs .acq-detail");
     if (d) {
       d.innerHTML = acqDetailHTML(BY_MLS[mls]);
-      d.scrollTop = 0;
       var r = d.getBoundingClientRect();
       if (scroll && (r.top < 0 || r.top > window.innerHeight - 80)) { try { d.scrollIntoView({block: "start", behavior: "smooth"}); } catch (e) {} }
     }
