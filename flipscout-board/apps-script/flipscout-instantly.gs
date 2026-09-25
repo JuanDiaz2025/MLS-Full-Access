@@ -51,7 +51,13 @@ const FSI_CAMPAIGNS = [
 const FSI_API = 'https://api.instantly.ai/api/v2';
 const FSI_TAB = 'Agent Emails';
 const FSI_DAILY_MAX = 10;
-const FSI_TEST = { mls: 'TEST0001', email: 'bryan@twinhomebuyer.com', first: 'Bryan', addr: '123 Test Street, San Francisco, CA 94112' };
+// Test houses: not on the Leads tab, never counted against the daily limit, never auto-stopped.
+const FSI_TESTS = [
+  { mls: 'TEST0001', email: 'bryan@twinhomebuyer.com',    agent: 'Bryan Test',    addr: '123 Test Street, San Carlos, CA 94070' },
+  { mls: 'TEST0002', email: 'rosanes@twinhomebuyer.com',  agent: 'Jonathan Test', addr: '123 Test Street, San Francisco, CA 94112' },
+  { mls: 'TEST0003', email: 'lawrence@twinhomebuyer.com', agent: 'Lawrence Test', addr: '123 Test Street, Berkeley, CA 94703' }
+];
+const fsiIsTest_ = mls => FSI_TESTS.some(t => t.mls === mls);
 const FSI_HEAD = ['Added On', 'MLS #', 'Address', 'Agent', 'Agent Email', 'Status', 'Replied On',
                   'Agent Offer Due', 'Needs Juan', 'Reply', 'Stopped On', 'Stop Reason', 'Instantly Lead ID', 'Added By', 'Campaign'];
 const C = { added: 1, mls: 2, addr: 3, agent: 4, email: 5, status: 6, replied: 7, due: 8, juan: 9, reply: 10,
@@ -88,7 +94,7 @@ function fsiOnOpen() {
     .addItem('Check Instantly connection', 'fsiCheck')
     .addItem('Preview — who would be added next (adds nothing)', 'fsiPreview')
     .addSeparator()
-    .addItem('Add TEST lead (' + FSI_TEST.email + ')', 'fsiAddTest')
+    .addItem('Add the ' + FSI_TESTS.length + ' TEST leads', 'fsiAddTest')
     .addItem('Check replies now', 'fsiRepliesNow')
     .addItem('Run the hourly check now', 'fsiHourlyNow')
     .addItem('Stop emails for the selected row(s)', 'fsiStopSelected')
@@ -144,11 +150,11 @@ function fsiPreview() {
 
 function fsiAddTest() {
   const ui = SpreadsheetApp.getUi();
-  const r = fsiLocked_(() => fsiPlace_(fsiTestLead_(), fsSafeEmail_() || 'menu', true));
-  ui.alert('TEST lead added',
-    FSI_TEST.email + ' is in campaign ' + (r && r.slot) + ' as "' + fsiShort_(FSI_TEST.addr) + '".\n\n' +
-    '1. The first email reaches ' + FSI_TEST.email + ' within the sending hours.\n' +
-    '2. Reply to it, e.g. "Offers due Monday at 5pm, call me".\n' +
+  const got = fsiLocked_(() => FSI_TESTS.map(t => ({ t, r: fsiPlace_(fsiTestLead_(t.mls), fsSafeEmail_() || 'menu', true) }))) || [];
+  ui.alert('TEST leads added',
+    got.map(x => '• ' + fsiShort_(x.t.addr) + ' → ' + x.t.email + (x.r.slot ? ' (campaign ' + x.r.slot + ')' : ' (waiting)')).join('\n') +
+    '\n\n1. The first emails arrive within the sending hours.\n' +
+    '2. Reply to one, e.g. "Offers due Monday at 5pm, call me".\n' +
     '3. Within 15 minutes (or use "Check replies now") the Agent Emails tab says Replied and Google Chat gets the message.',
     ui.ButtonSet.OK);
 }
@@ -233,7 +239,7 @@ function fsiFreeSlot_(email, rows) {
 function fsiPlace_(l, by, force) {
   let rows = fsiRows_();
   if (force) {
-    rows.filter(r => r.email === l.email && (r.status === 'Emailing' || r.status === 'Waiting'))
+    rows.filter(r => r.mls === l.mls && (r.status === 'Emailing' || r.status === 'Waiting'))
       .forEach(r => fsiEnd_(r, 'Stopped', 'Replaced by a new test', true));
     rows = fsiRows_();
   }
@@ -279,8 +285,9 @@ function fsiEnd_(r, status, why, remove) {
   r.status = status;
 }
 
-function fsiTestLead_() {
-  return { mls: FSI_TEST.mls, addr: FSI_TEST.addr, agent: FSI_TEST.first + ' Test', email: FSI_TEST.email, notes: '', mstat: 'Active' };
+function fsiTestLead_(mls) {
+  const t = FSI_TESTS.find(x => x.mls === mls) || FSI_TESTS[0];
+  return { mls: t.mls, addr: t.addr, agent: t.agent, email: t.email, notes: '', mstat: 'Active' };
 }
 
 /* -------------------------------------------------------------- adding -- */
@@ -289,7 +296,7 @@ function fsiPick_(now) {
   const rows = fsiRows_(), have = {};
   rows.forEach(r => { have[r.mls] = true; });
   const today = Utilities.formatDate(now, FSI_TZ, 'yyyy-MM-dd');
-  const addedToday = rows.filter(r => r.mls !== FSI_TEST.mls && r.slot && r.added &&
+  const addedToday = rows.filter(r => !fsiIsTest_(r.mls) && r.slot && r.added &&
     Utilities.formatDate(new Date(r.added), FSI_TZ, 'yyyy-MM-dd') === today).length;
   const room = Math.max(0, FSI_DAILY_MAX - addedToday);
   const ok = [], skipped = {};
@@ -331,8 +338,8 @@ function fsiPlaceWaiting_(now) {
   fsiLeads_().forEach(l => { leads[l.mls] = l; });
   const t = r => { const d = fsiDeadline_((leads[r.mls] || {}).due); return d ? d.getTime() : Infinity; };
   fsiRows_().filter(r => r.status === 'Waiting').sort((a, b) => t(a) - t(b)).forEach(r => {
-    const l = r.mls === FSI_TEST.mls ? fsiTestLead_() : leads[r.mls];
-    const why = !l ? 'Lead is no longer on the Leads tab' : r.mls === FSI_TEST.mls ? '' : fsiBlock_(l, now);
+    const test = fsiIsTest_(r.mls), l = test ? fsiTestLead_(r.mls) : leads[r.mls];
+    const why = !l ? 'Lead is no longer on the Leads tab' : test ? '' : fsiBlock_(l, now);
     if (why) { fsiEnd_(r, 'Dropped', why); return; }
     const rows = fsiRows_(), slot = fsiFreeSlot_(r.email, rows);
     if (!slot) return;
@@ -356,8 +363,8 @@ function fsiWebEmail_(mls, by) {
   if (!lock.tryLock(20000)) return fsPage_('Busy', 'FlipScout is updating right now. Close this tab and click the button again in a minute.');
   try {
     let l;
-    const test = mls === FSI_TEST.mls;
-    if (test) l = fsiTestLead_();
+    const test = fsiIsTest_(mls);
+    if (test) l = fsiTestLead_(mls);
     else {
       l = fsiLeads_().find(x => x.mls === mls);
       if (!l) return fsPage_('Lead not on the sheet', mls + ' is not on the Leads tab (it may have been rejected). Nothing was sent.');
@@ -408,7 +415,7 @@ function fsiSyncDone_() {
 function fsiStops_() {
   const leads = {};
   fsiLeads_().forEach(l => { leads[l.mls] = l; });
-  fsiRows_().filter(r => (r.status === 'Emailing' || r.status === 'Waiting') && r.mls !== FSI_TEST.mls).forEach(r => {
+  fsiRows_().filter(r => (r.status === 'Emailing' || r.status === 'Waiting') && !fsiIsTest_(r.mls)).forEach(r => {
     const l = leads[r.mls];
     const why = !l ? 'Lead is no longer on the Leads tab'
       : FS_CLOSED.test(l.mstat) || FSI_PENDING.test(l.mstat) ? 'Listing ' + l.mstat.toLowerCase()
@@ -474,7 +481,7 @@ function fsiChat_(news) {
   const head = (juan ? '🚨 *FLIPSCOUT NEEDS JUAN — AGENT REPLIED*' : '📬 *FLIPSCOUT — AGENT REPLIED*') +
                (news.length > 1 ? ' (' + news.length + ')' : '');
   return head + '\n\n' + news.map(n => {
-    const r = n.r, test = r.mls === FSI_TEST.mls;
+    const r = n.r, test = fsiIsTest_(r.mls);
     return [
       (test ? '🧪 TEST — ' : '') + '*' + r.addr + '*',
       (r.agent || 'Agent') + ' <' + r.email + '>',
