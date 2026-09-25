@@ -614,6 +614,20 @@ footer .num{font-size:12px}
     </div>
   </dialog>
 
+  <dialog id="mailDlg" aria-labelledby="mailTitle">
+    <div class="dlg">
+      <h2 id="mailTitle">Email this agent?</h2>
+      <p class="dlg-sub" id="mailAddr"></p>
+      <p style="margin:0">To: <b id="mailTo"></b></p>
+      <p class="dlg-hint" style="margin-top:10px">This adds the lead to the Instantly campaign: the first email goes out within minutes
+        during sending hours, then 2 follow-ups. It stops when the agent replies.</p>
+      <p id="mailWarn" hidden style="margin:10px 0 0; color:var(--t-offer); font-weight:600; font-size:13px"></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn" id="mailCancel">Cancel</button>
+        <a class="btn go" id="mailGo" href="#" target="_blank" rel="noopener">Yes, send ↗</a>
+      </div>
+    </div>
+  </dialog>
   <dialog id="visitDlg" aria-labelledby="visitTitle">
     <div class="dlg">
       <h2 id="visitTitle">Property visit</h2>
@@ -1243,6 +1257,30 @@ footer .num{font-size:12px}
   // the button is a real link: it opens a tab where the Apps Script adds this
   // lead to the Instantly campaign (3 emails, stops when the agent replies) and
   // says whether it worked. The Board remembers who clicked and when.
+  var mailFor = null;
+  function askMail(mls, date, href){
+    var l = BY_MLS[mls], m = l ? mailedOf(l) : null;
+    mailFor = {mls: mls, date: date};
+    $("mailAddr").textContent = l ? l.addr + " · " + mls : mls;
+    $("mailTo").textContent = l ? (l.agentName ? l.agentName + " <" + l.agentEmail + ">" : l.agentEmail) : "";
+    $("mailWarn").hidden = !m;
+    if (m) $("mailWarn").textContent = "⚠ Already sent to Instantly by " + (m.eb || "Someone") + " on " + noteWhen(m.em) + ". Sending again is usually not needed.";
+    $("mailGo").href = href;
+    var d = $("mailDlg"); if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+    $("mailCancel").focus();
+  }
+  function closeMail(sent){
+    var d = $("mailDlg"), f = mailFor; mailFor = null;
+    if (d.open) d.close();
+    if (!sent || !f) return;
+    if (!f.date) { toast("Sending to Instantly — this lead has no First Added date, so the Board can't record it"); return; }
+    applyEdit(f.date, f.mls, {em: new Date().toISOString()});
+  }
+  // the link opens its tab by itself; the page only records it and closes
+  $("mailGo").addEventListener("click", function(){ closeMail(true); });
+  $("mailCancel").addEventListener("click", function(){ closeMail(false); });
+  $("mailDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closeMail(false); });
+
   function mailedOf(l){ var e = rec(l.date, l.mls); return e && e.em ? e : null; }
   function mailHTML(l){
     if (!l.agentEmail) return "";
@@ -1663,16 +1701,10 @@ footer .num{font-size:12px}
     if (ev.target.closest("[data-side-close]")){ closeSide(); return; }
     var ml = ev.target.closest("a[data-mail]");
     if (ml){
-      var ll = BY_MLS[ml.dataset.mail];
-      // emailed before: the first click only arms it, so nobody writes to the
-      // same agent twice about the same house by accident
-      if (ll && mailedOf(ll) && !ml.classList.contains("sure")) {
-        ev.preventDefault(); ml.classList.add("sure");
-        ml.textContent = "Already emailed — click again to open";
-        return;
-      }
-      if (!ml.dataset.date) { toast("Sending to Instantly — this lead has no First Added date, so the Board can't record it"); return; }
-      applyEdit(ml.dataset.date, ml.dataset.mail, {em: new Date().toISOString()});
+      // never straight to Instantly: a confirmation window first, with the
+      // real link inside it (a page may only open a tab from a real link)
+      ev.preventDefault();
+      askMail(ml.dataset.mail, ml.dataset.date, ml.getAttribute("href"));
       return;
     }
     var cp = ev.target.closest("button[data-copy]");
