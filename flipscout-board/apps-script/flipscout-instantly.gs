@@ -89,22 +89,25 @@ function fsiSetup() {
   fsiTab_();
   const names = FSI_CAMPAIGNS.map(id => fsiApi_('get', '/campaigns/' + id).name);   // throws if a key or id is wrong
   Logger.log('Connected to ' + names.map((n, i) => (i + 1) + ') "' + n + '"').join(', ') +
-             '. Automatic adding is ' + (fsiAuto_() ? 'ON' : 'OFF') + '. Reload the sheet for the ✉️ FlipScout Emails menu.');
+             '. Automatic adding is ' + ({ off: 'OFF', test: 'TEST leads only', on: 'ON' }[fsiMode_()]) + '. Reload the sheet for the ✉️ FlipScout Emails menu.');
 }
 
 function fsiOnOpen() {
-  const on = fsiAuto_();
+  const mode = fsiMode_();
+  const label = { off: 'OFF', test: 'TEST leads only', on: 'ON (real A leads)' }[mode];
   SpreadsheetApp.getUi().createMenu('✉️ FlipScout Emails')
     .addItem('Check Instantly connection', 'fsiCheck')
     .addItem('Preview — who would be added next (adds nothing)', 'fsiPreview')
     .addSeparator()
-    .addItem('Add the ' + FSI_TESTS.length + ' TEST leads', 'fsiAddTest')
     .addItem('Check replies now', 'fsiRepliesNow')
     .addItem('Run the hourly check now', 'fsiHourlyNow')
     .addItem('Stop emails for the selected row(s)', 'fsiStopSelected')
     .addSeparator()
-    .addItem(on ? 'Automatic adding is ON — turn OFF' : 'Automatic adding is OFF — turn ON', 'fsiToggleAuto')
+    .addItem('Automatic adding is ' + label + ' — change it', 'fsiChooseMode')
     .addItem('Add new leads now (up to ' + FSI_DAILY_MAX + ' a day)', 'fsiAddNow')
+    .addSeparator()
+    .addItem('TEST: put the ' + FSI_TESTS.length + ' TEST leads on the Leads tab', 'fsiPutTests')
+    .addItem('TEST: remove the TEST leads (and stop their emails)', 'fsiRemoveTests')
     .addToUi();
 }
 
@@ -133,7 +136,7 @@ function fsiCheck() {
   const rows = fsiRows_(), count = s => rows.filter(r => r.status === s).length;
   ui.alert('Instantly connection',
     lines.join('\n') +
-    '\n\nAutomatic adding: ' + (fsiAuto_() ? 'ON' : 'OFF') +
+    '\n\nAutomatic adding: ' + ({ off: 'OFF', test: 'TEST leads only', on: 'ON' }[fsiMode_()]) +
     '\nAgent Emails tab: ' + ['Emailing', 'Waiting', 'Replied', 'Paused', 'Done', 'Stopped'].map(s => count(s) + ' ' + s.toLowerCase()).join(' · ') +
     (warn.length ? '\n\nTo fix:\n' + warn.join('\n') : '\n\nEverything looks right.') +
     (fsiProp_('FSI_LAST_ERROR') ? '\n\nLast error: ' + fsiProp_('FSI_LAST_ERROR') : ''),
@@ -152,15 +155,65 @@ function fsiPreview() {
     ui.ButtonSet.OK);
 }
 
-function fsiAddTest() {
+// Put the test houses on the Leads tab as ordinary A / Active leads, so they
+// travel the same road as real ones: the hourly job (in TEST-only mode) or the
+// Board's button hands them to Instantly.
+function fsiPutTests() {
+  // start clean: earlier test runs leave rows here and entries in Instantly
+  fsiLocked_(() => {
+    const tab = fsiTab_();
+    fsiRows_().filter(r => fsiIsTest_(r.mls)).reverse().forEach(r => {
+      if (r.id) fsiDelete_(r.id);
+      tab.deleteRow(r.row);
+    });
+  });
+  const sh = SpreadsheetApp.getActive().getSheetByName(FS_LEADS);
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  const have = {};
+  fsiLeads_().forEach(l => { have[l.mls] = true; });
+  const today = Utilities.formatDate(new Date(), FSI_TZ, 'yyyy-MM-dd');
+  let n = 0;
+  FSI_TESTS.filter(t => !have[t.mls]).forEach(t => {
+    const v = { 'Status': 'Needs Comps', 'MLS #': t.mls, 'Address': t.addr, 'Beds': 3, 'SqFt': 1000, 'Year Built': 1950, 'DOM': 1,
+                'Purchase Price': 100000, '$/SqFt': 100, 'Notes': 'TEST lead — not a real property', 'First Added': today,
+                'Bucket': 'A — Work Now', 'Opportunity Score': 99, 'Why': 'TEST lead for the Instantly emails',
+                'Listing Agent': t.agent, 'MLS Status': 'Active', 'Agent Phone': '(000) 000-0000', 'Agent Email': t.email };
+    sh.appendRow(head.map(h => v[h] === undefined ? '' : v[h]));
+    n++;
+  });
+  SpreadsheetApp.getUi().alert(n ? n + ' TEST lead(s) added to the bottom of the Leads tab.' : 'The TEST leads are already on the Leads tab.',
+    'Next: ✉️ FlipScout Emails → Automatic adding → TEST leads only, then "Run the hourly check now" (or wait for the hour).\n\n' +
+    'Do not run the app\'s Refresh while testing — it would look the TEST numbers up on the MLS, not find them, and the script would then stop them as "not active".',
+    SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function fsiRemoveTests() {
   const ui = SpreadsheetApp.getUi();
-  const got = fsiLocked_(() => FSI_TESTS.map(t => ({ t, r: fsiPlace_(fsiTestLead_(t.mls), fsSafeEmail_() || 'menu', true) }))) || [];
-  ui.alert('TEST leads added',
-    got.map(x => '• ' + fsiShort_(x.t.addr) + ' → ' + x.t.email + (x.r.slot ? ' (campaign ' + x.r.slot + ')' : ' (waiting)')).join('\n') +
-    '\n\n1. The first emails arrive within the sending hours.\n' +
-    '2. Reply to one, e.g. "Offers due Monday at 5pm, call me".\n' +
-    '3. Within 15 minutes (or use "Check replies now") the Agent Emails tab says Replied and Google Chat gets the message.',
-    ui.ButtonSet.OK);
+  if (ui.alert('Remove the TEST leads?', 'Deletes the TEST rows from the Leads tab and stops any TEST emails still going out. The Agent Emails tab keeps its record.',
+               ui.ButtonSet.OK_CANCEL) !== ui.Button.OK) return;
+  fsiLocked_(() => {
+    fsiRows_().filter(r => fsiIsTest_(r.mls) && (r.status === 'Emailing' || r.status === 'Waiting'))
+      .forEach(r => r.status === 'Waiting' ? fsiEnd_(r, 'Dropped', 'Test finished') : fsiEnd_(r, 'Stopped', 'Test finished', true));
+    const sh = SpreadsheetApp.getActive().getSheetByName(FS_LEADS);
+    const v = sh.getDataRange().getValues(), iM = v[0].map(h => String(h).trim()).indexOf('MLS #');
+    for (let i = v.length - 1; i >= 1; i--) if (fsiIsTest_(String(v[i][iM]).trim().toUpperCase())) sh.deleteRow(i + 1);
+  });
+  if (fsiMode_() === 'test') PropertiesService.getScriptProperties().setProperty('FSI_AUTO', 'off');
+  ui.alert('TEST leads removed. Automatic adding is ' + (fsiMode_() === 'on' ? 'ON' : 'OFF') + '.');
+}
+
+function fsiChooseMode() {
+  const ui = SpreadsheetApp.getUi();
+  const r = ui.prompt('Automatic adding',
+    'Now: ' + { off: 'OFF', test: 'TEST leads only', on: 'ON (real A leads)' }[fsiMode_()] + '\n\n' +
+    'Type one word and press OK:\n  off   — nothing is added automatically\n  test  — only the TEST leads on the Leads tab\n' +
+    '  on    — real A leads, up to ' + FSI_DAILY_MAX + ' a day', ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  const m = String(r.getResponseText()).trim().toLowerCase();
+  if (['off', 'test', 'on'].indexOf(m) < 0) { ui.alert('Type off, test or on.'); return; }
+  PropertiesService.getScriptProperties().setProperty('FSI_AUTO', m);
+  ui.alert('Automatic adding is now ' + { off: 'OFF', test: 'TEST leads only', on: 'ON (real A leads)' }[m] +
+           '. It runs every hour; "Run the hourly check now" runs it straight away. Reload the sheet to refresh the menu label.');
 }
 
 function fsiRepliesNow() {
@@ -174,12 +227,6 @@ function fsiHourlyNow() {
   SpreadsheetApp.getActive().toast('Done — see the Agent Emails tab.', 'FlipScout Emails', 6);
 }
 
-function fsiToggleAuto() {
-  const on = !fsiAuto_();
-  PropertiesService.getScriptProperties().setProperty('FSI_AUTO', on ? 'on' : 'off');
-  SpreadsheetApp.getActive().toast('Automatic adding is ' + (on ? 'ON — new A leads go to Instantly every hour.' : 'OFF.') +
-                                   ' Reload the sheet to refresh the menu.', 'FlipScout Emails', 8);
-}
 
 function fsiAddNow() {
   const n = fsiLocked_(() => fsiAddNew_(new Date())) || 0;
@@ -214,7 +261,7 @@ function fsiHourly() {
     fsiSyncDone_();
     fsiStops_();
     fsiPlaceWaiting_(now);
-    if (fsiAuto_()) fsiAddNew_(now);
+    if (fsiMode_() !== 'off') fsiAddNew_(now);
   });
 }
 
@@ -305,8 +352,10 @@ function fsiPick_(now) {
   const room = Math.max(0, FSI_DAILY_MAX - addedToday);
   const ok = [], skipped = {};
   const skip = why => { skipped[why] = (skipped[why] || 0) + 1; };
+  const testOnly = fsiMode_() === 'test';
   fsiLeads_().forEach(l => {
     if (!/^A/i.test(l.bucket)) return;
+    if (testOnly && !fsiIsTest_(l.mls)) return;
     if (have[l.mls]) return skip('already handled');
     const why = fsiBlock_(l, now);
     if (why) return skip(why);
@@ -342,8 +391,8 @@ function fsiPlaceWaiting_(now) {
   fsiLeads_().forEach(l => { leads[l.mls] = l; });
   const t = r => { const d = fsiDeadline_((leads[r.mls] || {}).due); return d ? d.getTime() : Infinity; };
   fsiRows_().filter(r => r.status === 'Waiting').sort((a, b) => t(a) - t(b)).forEach(r => {
-    const test = fsiIsTest_(r.mls), l = test ? fsiTestLead_(r.mls) : leads[r.mls];
-    const why = !l ? 'Lead is no longer on the Leads tab' : test ? '' : fsiBlock_(l, now);
+    const l = leads[r.mls] || (fsiIsTest_(r.mls) ? fsiTestLead_(r.mls) : null);
+    const why = !l ? 'Lead is no longer on the Leads tab' : fsiBlock_(l, now);
     if (why) { fsiEnd_(r, 'Dropped', why); return; }
     const rows = fsiRows_(), slot = fsiFreeSlot_(r.email, rows);
     if (!slot) return;
@@ -367,7 +416,7 @@ function fsiWebEmail_(mls, by) {
   if (!lock.tryLock(20000)) return fsPage_('Busy', 'FlipScout is updating right now. Close this tab and click the button again in a minute.');
   try {
     let l;
-    const test = fsiIsTest_(mls);
+    const test = fsiIsTest_(mls) && !fsiLeads_().some(x => x.mls === mls);   // a TEST lead that is not on the sheet
     if (test) l = fsiTestLead_(mls);
     else {
       l = fsiLeads_().find(x => x.mls === mls);
@@ -419,7 +468,7 @@ function fsiSyncDone_() {
 function fsiStops_() {
   const leads = {};
   fsiLeads_().forEach(l => { leads[l.mls] = l; });
-  fsiRows_().filter(r => (r.status === 'Emailing' || r.status === 'Waiting') && !fsiIsTest_(r.mls)).forEach(r => {
+  fsiRows_().filter(r => (r.status === 'Emailing' || r.status === 'Waiting') && !(fsiIsTest_(r.mls) && !leads[r.mls])).forEach(r => {
     const l = leads[r.mls];
     const why = !l ? 'Lead is no longer on the Leads tab'
       : FS_CLOSED.test(l.mstat) || FSI_PENDING.test(l.mstat) ? 'Listing ' + l.mstat.toLowerCase()
@@ -671,7 +720,8 @@ function fsiShort_(a) {
   return p.length >= 3 ? p[0] + ', ' + p[1] : p.join(', ').replace(/\s+\d{5}(?:-\d{4})?$/, '');
 }
 
-function fsiAuto_() { return fsiProp_('FSI_AUTO') === 'on'; }
+// off · test (only the TEST leads) · on (real A leads)
+function fsiMode_() { const m = fsiProp_('FSI_AUTO'); return m === 'on' || m === 'test' ? m : 'off'; }
 function fsiProp_(k) { return PropertiesService.getScriptProperties().getProperty(k) || ''; }
 function fsiErr_(msg) {
   Logger.log(msg);
