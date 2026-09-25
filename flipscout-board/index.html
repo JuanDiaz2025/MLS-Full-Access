@@ -555,11 +555,28 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .acq-note:empty{display:none}
 @media (min-width:901px){
   #acqSecs table{table-layout:fixed; width:100%}
-  #acqSecs th:nth-child(1){width:24%} #acqSecs th:nth-child(2){width:13%} #acqSecs th:nth-child(3){width:18%}
-  #acqSecs th:nth-child(4){width:8%}  #acqSecs th:nth-child(5){width:12%} #acqSecs th:nth-child(6){width:11%}
-  #acqSecs th:nth-child(7){width:7%}  #acqSecs th:nth-child(8){width:7%}
+  #acqSecs th:nth-child(1){width:30%} #acqSecs th:nth-child(2){width:15%} #acqSecs th:nth-child(3){width:17%}
+  #acqSecs th:nth-child(4){width:13%} #acqSecs th:nth-child(5){width:10%} #acqSecs th:nth-child(6){width:7%}
+  #acqSecs th:nth-child(7){width:8%}
   #acqSecs td{overflow-wrap:anywhere}
 }
+
+/* compact rows: one lead ≈ two short lines */
+#acqSecs tbody td{padding:6px 10px; vertical-align:middle; font-size:12.5px}
+#acqSecs .acq-addr{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13.5px}
+#acqSecs .acq-sub2{font-size:11.5px; color:var(--muted); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+#acqSecs .acq-sub2 .mst{font-size:9.5px; padding:0 5px}
+#acqSecs .acq-due{white-space:nowrap}
+#acqSecs .due-chip{font-size:10.5px; padding:1px 6px}
+#acqSecs .em-say{font-size:11.5px; margin-top:2px}
+#acqSecs .visit-btn{padding:3px 8px; font-size:12px; min-height:0}
+#acqSecs .st-sel{font-size:11.5px; padding:3px 6px}
+#acqSecs .acq-agent{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+#acqSecs .acq-ph{display:block; font-size:11.5px; color:var(--muted); white-space:nowrap}
+#acqSecs .who-meta{display:inline; margin-left:4px}
+.acq-more{display:block; width:100%; margin:6px 0 12px; padding:7px; font:600 12.5px Archivo,sans-serif; color:var(--brand);
+  background:var(--surface); border:1px dashed var(--line); border-radius:8px; cursor:pointer}
+.acq-more:hover{border-color:var(--brand-2)}
 .acq-legend{font-size:12px; color:var(--muted); margin:-4px 0 12px}
 .acq-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin:0 4px 0 10px}
 </style>
@@ -643,7 +660,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     <div class="acq-tiles" id="acqTiles"></div>
     <div class="acq-filters" id="acqFilters"></div>
     <p class="acq-note" id="acqNote"></p>
-    <p class="acq-legend">Left edge:<i style="background:#D64545"></i>offer due within 24 hours<i style="background:#E3A008"></i>within 3 days</p>
+    <p class="acq-legend">Left edge:<i style="background:#D64545"></i>offer due within 24 hours<i style="background:#E3A008"></i>within 3 days · Text messages: coming later</p>
     <div id="acqSecs"></div>
   </div>
 
@@ -1483,12 +1500,12 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   function acqEmailHTML(l){
     var x = EMAIL_BY[l.mls], e = rec(l.date, l.mls) || {};
     if (!x) return e.em ? '<span class="em-pill em-go">Sent from Board</span><span class="em-meta">' + esc(e.eb || "Someone") + ' · ' + esc(noteWhen(e.em)) + '</span>'
-                        : '<span class="txt-none">not emailed</span>';
+                        : '<span class="txt-none">—</span>';
     var st = x.status || "", cls = /^Replied/.test(st) ? "em-rep" : /^Emailing/.test(st) ? "em-go" : /^Waiting|^Paused/.test(st) ? "em-wait" : "em-end";
     var when = x.replied ? new Date(x.replied) : null;
     return '<span class="em-pill ' + cls + '">' + esc(st.split(" ")[0] || "—") + '</span>' +
       (when && !isNaN(when) ? '<span class="em-meta">' + esc(when.toLocaleDateString("en-US", {month: "short", day: "numeric"})) + '</span>' : '') +
-      (x.reply ? '<span class="em-say">“' + esc(x.reply.length > 140 ? x.reply.slice(0, 137) + "…" : x.reply) + '”</span>' : '') +
+      (x.reply ? '<span class="em-say">“' + esc(x.reply.length > 90 ? x.reply.slice(0, 87) + "…" : x.reply) + '”</span>' : '') +
       (x.juan ? '<br><span class="em-juan">🚨 ' + esc(x.juan) + '</span>' : '') +
       (!x.reply && x.reason ? '<span class="em-meta">' + esc(x.reason) + '</span>' : '') +
       (!when && x.added && !isNaN(new Date(x.added)) ? '<span class="em-meta">' + acqAgo(x.added) + '</span>' : '');
@@ -1498,30 +1515,30 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     return n <= 0 ? "emailed today" : n === 1 ? "emailed 1 day ago" : "emailed " + n + " days ago";
   }
   function acqRowHTML(l){
-    var st = statusOf(l), e = rec(l.date, l.mls) || {}, due = dueOf(l), fromReply = false;
-    // no deadline on the sheet yet: use the one the agent gave in a reply
-    var xr = EMAIL_BY[l.mls];
-    if (!due && xr && /^\d{4}-\d{2}-\d{2}/.test(xr.due)) { due = xr.due.slice(0, 10); fromReply = true; }
-    var edge = acqEdge(l);
-    var dd = daysUntil(due);
+    var st = statusOf(l), e = rec(l.date, l.mls) || {}, o = acqDueOf(l), dd = daysUntil(o.d);
+    var fromReply = !!o.d && !dueOf(l);
     var opts = STATUSES.map(function(s){ return '<option' + (s === st ? ' selected' : '') + '>' + s + '</option>'; }).join("");
-    return '<tr class="' + STRIPE[st] + edge + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
-      '<td data-l="Property" class="wide">' + addrHTML(l) + '<span class="mls">' + esc(l.mls) + '</span>' +
-        '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' + mlsStatusHTML(l.mlsStatus) +
-        (l.price ? '<span class="em-meta">' + fmtMoney(l.price) + (l.ppsf ? ' · $' + l.ppsf + '/sqft' : '') + '</span>' : '') + '</td>' +
-      '<td data-l="Offer due">' + (due ? '<b class="mono">' + esc(due) + '</b>' +
-          (fromReply ? '<span class="em-meta">' + esc((/\d{1,2}:\d{2} [AP]M/.exec(xr.due) || [""])[0]) + ' · from the agent\'s reply</span>'
-                     : l.offerTime && !teamDue(l) ? '<span class="em-meta">' + esc(l.offerTime) + '</span>' : '') +
-          (dd !== null ? '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' : '')
-        : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">no date</span>')) + '</td>' +
+    var u = redfinOf(l), day = function(iso, wd){ var d = new Date(String(iso).slice(0, 10) + "T12:00:00");
+      return isNaN(d) ? "" : d.toLocaleDateString("en-US", wd ? {weekday: "short", month: "short", day: "numeric"} : {month: "short", day: "numeric"}); };
+    var at = e.at ? new Date(e.at) : null;
+    return '<tr class="' + STRIPE[st] + acqEdge(l) + '" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+      '<td data-l="Property"><div class="acq-addr">' +
+        (u ? '<a class="addr" href="' + esc(u) + '" target="_blank" rel="noopener" title="' + esc(l.addr) + ' — open on Redfin">' + esc(l.addr) + '</a>'
+           : '<span class="addr nolink" title="' + esc(l.addr) + '">' + esc(l.addr) + '</span>') + '</div>' +
+        '<div class="acq-sub2"><span class="mono">' + esc(l.mls) + '</span> <a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a> ' +
+        mlsStatusHTML(l.mlsStatus) + (l.price ? ' ' + fmtMoney(l.price) + (l.ppsf ? ' · $' + l.ppsf + '/sf' : '') : '') + '</div></td>' +
+      '<td data-l="Offer due">' + (o.d
+          ? '<span class="acq-due"><b>' + esc(day(o.d, true)) + '</b>' + (o.t ? ' <span class="mono">' + esc(o.t) + '</span>' : '') + '</span>' +
+            (dd !== null ? ' <span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' : '') +
+            (fromReply ? '<span class="em-meta">from the agent\'s reply</span>' : '')
+          : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">—</span>')) + '</td>' +
       '<td data-l="Email">' + acqEmailHTML(l) + '</td>' +
-      '<td data-l="Text"><span class="txt-none">not set up yet</span></td>' +
       visitHTML(l) +
       '<td data-l="Team status"><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '"' +
         (l.date ? '' : ' disabled') + '>' + opts + '</select></td>' +
-      '<td data-l="Who">' + (e.by ? '<b>' + esc(e.by) + '</b><span class="who-meta">' + esc(noteWhen(e.at)) + '</span>' : '<span class="txt-none">—</span>') + '</td>' +
-      '<td data-l="Agent">' + (l.agentName ? esc(l.agentName) : '<span class="txt-none">—</span>') +
-        (l.agentPhone ? '<span class="em-meta mono">' + esc(l.agentPhone) + '</span>' : '') + '</td>' +
+      '<td data-l="Who">' + (e.by ? '<b>' + esc(e.by) + '</b>' + (at && !isNaN(at) ? '<span class="who-meta">' + esc(day(at.toISOString())) + '</span>' : '') : '<span class="txt-none">—</span>') + '</td>' +
+      '<td data-l="Agent">' + (l.agentName ? '<span class="acq-agent">' + esc(l.agentName) + '</span>' : '<span class="txt-none">—</span>') +
+        (l.agentPhone ? '<span class="mono acq-ph">' + esc(l.agentPhone) + '</span>' : '') + '</td>' +
     '</tr>';
   }
   // The deadline the dashboard works to: the sheet's, else the one the agent
@@ -1560,6 +1577,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     {k: "visit", t: "📅 Visits",           sub: "scheduled, next one first"},
     {k: "wait",  t: "✉️ Waiting on agent", sub: "emailed, no answer yet"},
     {k: "prog",  t: "🔧 In progress",      sub: "status set, nothing due in the next 3 days"},
+    {k: "late",  t: "⌛ Deadline passed",   sub: "the offer date is behind us — check whether it is still alive", closed: true},
     {k: "won",   t: "🏆 Won",              sub: ""}
   ];
   function acqSecOf(l){
@@ -1568,6 +1586,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var n = acqDueDays(l);
     if (n !== null && n >= 0 && n <= 3) return "due";
     if (acqVisitSoon(l)) return "visit";
+    if (n !== null && n < 0) return "late";
     if (acqEmailed(l)) return "wait";
     return "prog";
   }
@@ -1580,7 +1599,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     {k: "visits",  t: "Visits",     c: "--t-offer",  sub: "scheduled, upcoming", f: acqVisitSoon}
   ];
   var acqF = {tile: "", who: "", area: "", st: "", bk: ""};
-  var acqClosed = {};
+  var acqClosed = {}, acqMore = {}, ACQ_TOP = 8;
   try { acqClosed = JSON.parse(localStorage.getItem("fs_acq_closed") || "{}") || {}; } catch (e) {}
   function acqWho(l){ return (rec(l.date, l.mls) || {}).by || ""; }
   function acqMatchQ(l, q){
@@ -1591,7 +1610,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     return dq.length >= 3 && (l.agentPhone || "").replace(/\D/g, "").indexOf(dq) !== -1;
   }
   function acqHead(){
-    return '<thead><tr><th class="plain">Property</th><th class="plain">Offer due</th><th class="plain">Email</th><th class="plain">Text</th>' +
+    return '<thead><tr><th class="plain">Property</th><th class="plain">Offer due</th><th class="plain">Email</th>' +
       '<th class="plain">Property visit</th><th class="plain">Team status</th><th class="plain">Who</th><th class="plain">Agent</th></tr></thead>';
   }
   function renderAcq(){
@@ -1649,9 +1668,12 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var html = ACQ_SECS.filter(function(s){ return by[s.k]; }).map(function(s){
       var head = '<span>' + s.t + '</span><span class="cnt">' + by[s.k].length + '</span>' +
                  (s.sub ? '<span class="acq-secsub">' + s.sub + '</span>' : '') + '<span class="rule"></span>';
-      var body = '<div class="tablecard"><table>' + acqHead() + '<tbody>' + by[s.k].map(acqRowHTML).join("") + '</tbody></table></div>';
+      var list = by[s.k], all8 = q || acqMore[s.k] || list.length <= ACQ_TOP;
+      var body = '<div class="tablecard"><table>' + acqHead() + '<tbody>' + (all8 ? list : list.slice(0, ACQ_TOP)).map(acqRowHTML).join("") + '</tbody></table></div>' +
+        (list.length > ACQ_TOP && !q ? '<button type="button" class="acq-more" data-acq-more="' + s.k + '">' +
+          (acqMore[s.k] ? 'Show fewer ↑' : 'Show all ' + list.length + ' ↓') + '</button>' : '');
       if (s.fixed) return '<section class="acq-sec" data-sec="' + s.k + '"><div class="sechead">' + head + '</div>' + body + '</section>';
-      return '<details class="acq-sec" data-sec="' + s.k + '"' + (q || !acqClosed[s.k] ? ' open' : '') + '>' +
+      return '<details class="acq-sec" data-sec="' + s.k + '"' + (q || !(s.k in acqClosed ? acqClosed[s.k] : s.closed) ? ' open' : '') + '>' +
              '<summary class="sechead">' + head + '</summary>' + body + '</details>';
     }).join("");
     $("acqSecs").innerHTML = html || '<div class="tablecard"><table><tbody><tr><td class="empty">' +
@@ -1675,11 +1697,13 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     b = ev.target.closest("[data-acq-f]");
     if (b) { var g = b.dataset.acqF; acqF[g] = acqF[g] === b.dataset.v ? "" : b.dataset.v; renderAcq(); return; }
     if (ev.target.closest("#acqClear, #acqClear2")) { acqClearAll(); return; }
+    b = ev.target.closest("[data-acq-more]");
+    if (b) { var m = b.dataset.acqMore; acqMore[m] = !acqMore[m]; renderAcq(); return; }
     var sm = ev.target.closest("details.acq-sec > summary");
     if (sm && !$("acqQ").value.trim()) {
       var d = sm.parentNode;
       setTimeout(function(){
-        if (d.open) delete acqClosed[d.dataset.sec]; else acqClosed[d.dataset.sec] = 1;
+        acqClosed[d.dataset.sec] = d.open ? 0 : 1;
         try { localStorage.setItem("fs_acq_closed", JSON.stringify(acqClosed)); } catch (e) {}
       }, 0);
     }
