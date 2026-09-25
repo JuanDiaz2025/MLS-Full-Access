@@ -115,7 +115,7 @@ function fsiOnOpen() {
 
 function fsiCheck() {
   const ui = SpreadsheetApp.getUi();
-  const status = { 0: 'Draft — NOT LAUNCHED', 1: 'Active', 2: 'Paused', 3: 'Completed', 4: 'Running subsequences',
+  const status = { 0: 'Draft — NOT LAUNCHED', 1: 'Active', 2: 'Paused', 3: 'Idle (resumes when a lead is added)', 4: 'Running subsequences',
                    '-1': 'Accounts unhealthy', '-2': 'Bounce protect', '-99': 'Account suspended' };
   const lines = [], warn = [];
   FSI_CAMPAIGNS.forEach((id, i) => {
@@ -127,7 +127,9 @@ function fsiCheck() {
     lines.push((i + 1) + ') ' + c.name + ' — ' + (status[c.status] || c.status) + ' · ' + steps.length + ' emails · from ' +
                ((c.email_list || []).join(', ') || 'NO INBOX'));
     const n = 'Campaign ' + (i + 1) + ': ';
-    if (c.status !== 1) warn.push('• ' + n + 'launch it in Instantly (it sits idle until the script adds someone).');
+    // 1 active, 3 "completed" = launched with nothing left to send; Instantly resumes it when a lead is added
+    if (c.status === 0) warn.push('• ' + n + 'not launched — click Launch in Instantly.');
+    else if (c.status !== 1 && c.status !== 3 && c.status !== 4) warn.push('• ' + n + 'Instantly shows "' + (status[c.status] || c.status) + '" — check it in Instantly.');
     if (!c.stop_on_reply) warn.push('• ' + n + '"Stop sending emails on reply" is OFF.');
     if (steps.length !== 3) warn.push('• ' + n + steps.length + ' email step(s); we planned 3.');
     if (!/\{\{\s*address\s*\}\}/.test(text)) warn.push('• ' + n + 'no {{address}} in the emails.');
