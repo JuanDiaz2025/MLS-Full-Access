@@ -301,6 +301,14 @@ tbody tr.gone .addr{text-decoration:line-through; text-decoration-thickness:1px}
   font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
   padding:5px 7px; min-height:0; border-radius:6px; width:142px;
 }
+.visit-in{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
+  padding:5px 7px; min-height:0; border-radius:6px; width:142px;
+}
+.vs-sel{font:600 11.5px Archivo,sans-serif; padding:3px 6px; border-radius:6px; margin-top:4px; width:142px}
+.vs-sel.vs-sched{background:var(--b-offer); color:var(--t-offer)}
+.vs-sel.vs-done{background:var(--b-won); color:var(--t-won)}
+.vs-sel.vs-cancel{background:var(--b-pass); color:var(--t-pass)}
 .due-chip{
   display:inline-block; margin-top:4px; font-family:Archivo,sans-serif;
   font-size:11px; font-weight:700; letter-spacing:.03em;
@@ -939,6 +947,8 @@ footer .num{font-size:12px}
               test: function(l){ return l.bucket === "B" && isLive(l) && teamOpen(l) && notLate(l); }},
     pending: {label: "Pending", hint: "Pending or contingent on the MLS — worth watching in case it falls through", sort: "bk",
               test: function(l){ return PENDING.test(l.mlsStatus || "") && teamOpen(l); }},
+    visits:  {label: "Visits", hint: "Leads with a property visit date or status, soonest visit first", sort: "visit",
+              test: function(l){ var v = visitOf(l); return !!(v.d || v.s); }},
     mailed:  {label: "Emailed", hint: "Leads the team sent to the Instantly campaign from the Board", sort: "bk",
               test: function(l){ return !!mailedOf(l); }},
     closed:  {label: "Sold / off market", hint: "Sold, withdrawn, cancelled or expired on the MLS", sort: "bk",
@@ -1034,6 +1044,7 @@ footer .num{font-size:12px}
     '<th data-s="year">Built<span class="arrow">▾</span></th>' +
     '<th data-s="dom">DOM<span class="arrow">▾</span></th>' +
     '<th data-s="due">Offer due<span class="arrow">▾</span></th>' +
+    '<th data-s="visit" title="Property visit: date and status, set by the team">Property visit<span class="arrow">▾</span></th>' +
     (view === "__all__" ? '<th data-s="date">Pulled<span class="arrow">▾</span></th>' : '') +
     '<th class="plain"></th></tr></thead>'; }
 
@@ -1045,6 +1056,7 @@ footer .num{font-size:12px}
   function sortVal(l){
     if (sortKey === "bk") return BK_RANK[l.bucket || ""] * 1e7 + (100 - (l.score || 0)) * 1e4 + Math.min(l.ppsf || 9999, 9999);
     if (sortKey === "due") return dueOf(l) || null;
+    if (sortKey === "visit") return visitOf(l).d || null;
     return l[sortKey];
   }
 
@@ -1105,6 +1117,7 @@ footer .num{font-size:12px}
           : (!(!due && l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase)) && (l.agentRemarks || l.remarks || l.showing)
               ? '<button type="button" class="due-src" data-side="' + esc(l.mls) + '">agent remarks ›</button>' : '')) +
         '</td>' +
+      visitHTML(l) +
       (view === "__all__" ? '<td data-l="Pulled" class="num">' + esc(l.date) + '</td>' : '') +
       '<td data-l="" class="act"><button class="btn tiny" data-act="' + (gone ? "restore" : "remove") + '" type="button">' +
         (gone ? "Restore" : "Remove") + '</button></td>' +
@@ -1119,6 +1132,21 @@ footer .num{font-size:12px}
     return '<br><span class="bk bk-' + l.bucket + '" title="' + esc(l.why || BK_NAME[l.bucket]) + '">' + l.bucket + ' · ' +
       BK_NAME[l.bucket] + (l.score != null ? ' <span class="sc">' + esc(String(l.score)) + '</span>' : '') + '</span>';
   }
+  /* ---------- property visit: a date and a status, saved for the team ---------- */
+  var VISIT_ST = ["", "To schedule", "Scheduled", "Visited", "Cancelled"];
+  var VISIT_CLASS = {"Scheduled": "vs-sched", "Visited": "vs-done", "Cancelled": "vs-cancel"};
+  function visitOf(l){ var e = rec(l.date, l.mls); return {d: (e && e.vd) || "", s: (e && e.vs) || ""}; }
+  function visitHTML(l){
+    var v = visitOf(l), dd = v.d ? daysUntil(v.d) : null, off = l.date ? '' : ' disabled';
+    return '<td data-l="Property visit" class="wide"><input type="date" class="visit-in" value="' + esc(v.d) + '"' + off +
+      ' aria-label="Property visit date for ' + esc(l.mls) + '"><br>' +
+      '<select class="vs-sel ' + (VISIT_CLASS[v.s] || '') + '" aria-label="Property visit status for ' + esc(l.mls) + '"' + off + '>' +
+      VISIT_ST.map(function(s){ return '<option value="' + s + '"' + (s === v.s ? ' selected' : '') + '>' + (s || 'Visit —') + '</option>'; }).join('') +
+      '</select>' +
+      (dd !== null && v.s !== "Visited" && v.s !== "Cancelled" ? '<br><span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd).replace(/^due /, '') + '</span>' : '') +
+      '</td>';
+  }
+
   // Occupancy and price cut, as the original board showed them.
   function occCutHTML(l){
     var o = l.occ || "", c = l.cut || "";
@@ -1389,6 +1417,8 @@ footer .num{font-size:12px}
       sp: !!cur.sp,
       em: cur.em || "",
       eb: cur.eb || "",
+      vd: cur.vd || "",
+      vs: cur.vs || "",
       by: myName || "Someone",
       at: new Date().toISOString()
     };
@@ -1398,13 +1428,17 @@ footer .num{font-size:12px}
     if ("pr" in patch) next.pr = patch.pr;
     if ("sp" in patch) next.sp = patch.sp;
     if ("em" in patch) { next.em = patch.em; next.eb = myName || "Someone"; }
+    if ("vd" in patch) { next.vd = patch.vd; if (patch.vd && !next.vs) next.vs = "Scheduled"; }   // a date means it is scheduled
+    if ("vs" in patch) next.vs = patch.vs;
     if (next.s !== "Pass") { next.pr = ""; next.sp = false; }   // a reason only belongs to a pass
     pending[date] = pending[date] || {};
     pending[date][mls] = next;
     draw();
     // Say "Saving…" now and "Saved" only once the shared board confirms it,
     // so nobody walks away from a change that did not stick.
-    savedMsg[date + "|" + mls] = "em" in patch ? "Marked emailed — finish in the new tab" : ("d" in patch
+    savedMsg[date + "|" + mls] = "vd" in patch ? (next.vd ? "Visit " + next.vd + " — saved for the team" : "Visit date cleared")
+      : "vs" in patch ? (next.vs ? "Visit: " + next.vs + " — saved for the team" : "Visit status cleared")
+      : "em" in patch ? "Marked emailed — finish in the new tab" : ("d" in patch
       ? (next.d === "-" ? "Marked no deadline — saved for the team"
          : next.d ? "Offer due " + next.d + " — saved for the team"
          : "Deadline cleared")
@@ -1533,6 +1567,8 @@ footer .num{font-size:12px}
     var pe = rec(l.date, l.mls);
     if (pe && pe.s === "Pass") secs.push(['Passed by the team', esc(pe.by || "Someone") + (pe.at ? ' · ' + esc(noteWhen(pe.at)) : '') +
       (pe.pr ? '<br><span class="quote">“' + esc(pe.pr) + '”</span>' : '<br><i>no reason given</i>')]);
+    var vv = visitOf(l);
+    if (vv.d || vv.s) secs.push(['Property visit', (vv.d ? esc(vv.d) : 'no date yet') + (vv.s ? ' · ' + esc(vv.s) : '')]);
     var me0 = mailedOf(l);
     if (me0) secs.push(['Agent emailed', esc(me0.eb || "Someone") + ' · ' + esc(noteWhen(me0.em))]);
     if (l.why || BK_NAME[l.bucket]) secs.push(['Bucket & score',
@@ -1621,6 +1657,13 @@ footer .num{font-size:12px}
       var lead = BY_MLS[tr.dataset.mls];
       if ((was && was.s === "Pass" && was.sp) ||
           (!(was && was.s) && lead && /^PASS \(Board\)/.test(lead.note || ""))) askUnpass(tr.dataset.mls);
+      return;
+    }
+    var vIn = ev.target.closest("input.visit-in, select.vs-sel");
+    if (vIn){
+      tr = vIn.closest("tr");
+      if (!tr) return;
+      applyEdit(tr.dataset.date, tr.dataset.mls, vIn.tagName === "SELECT" ? {vs: vIn.value} : {vd: vIn.value});
       return;
     }
     var dueIn = ev.target.closest("input.due-in");
