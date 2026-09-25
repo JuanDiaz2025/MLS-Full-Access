@@ -1139,8 +1139,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   function drawPresets(){
     var keys = Object.keys(PRESETS), ar = $("areaFilter").value;
-    // counts follow the chosen area, so "Work now 5" means five in that area
-    var inScope = ar ? LEADS.filter(function(l){ return inArea(l, ar); }) : LEADS;
+    // counts follow the chosen pull date and area, so "Work now 5" means five of the leads you are looking at
+    var base = view === "__all__" ? LEADS : (BY_DATE[view] || []);
+    var inScope = ar ? base.filter(function(l){ return inArea(l, ar); }) : base;
     $("presets").innerHTML = '<span class="lbl">Show</span>' + keys.map(function(k){
       var n = inScope.filter(PRESETS[k].test).length;
       return '<button type="button" data-preset="' + k + '" aria-pressed="' + (preset === k) + '" title="' + esc(PRESETS[k].hint) + '">' +
@@ -1151,10 +1152,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   document.addEventListener("click", function(ev){
     var b = ev.target.closest("button[data-preset]"); if (!b) return;
     preset = b.dataset.preset;
-    if (preset) {                                   // a quick view spans every pull date
-      view = "__all__"; sel.value = view; scopeFor.leads = view;
-      sortKey = PRESETS[preset].sort; sortDir = 1;
-    }
+    // the pull date you picked stays picked; a quick view filters within it
+    if (preset) { sortKey = PRESETS[preset].sort; sortDir = 1; }
     draw(); syncStep();
   });
 
