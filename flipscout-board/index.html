@@ -500,6 +500,8 @@ footer .num{font-size:12px}
 body.acq .controls, body.acq #presets, body.acq .viewnav, body.acq #addScan,
 body.acq #viewLeads, body.acq #viewKpi{display:none !important}
 #viewAcq{padding-top:14px}
+.acq-backbtn{display:none}
+body.acq .acq-backbtn{display:inline-flex}
 #viewAcq .acq-sub{color:var(--muted); font-size:13px; margin:2px 0 14px}
 #viewAcq .visit-btn{font-size:12.5px}
 #tblAcq td, #tblAcqWon td{font-size:13px}
@@ -612,6 +614,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     <div class="brandrow">
       <h1>FlipScout Lead Board</h1>
       <span class="src">Latest pull <b id="pulledAt">—</b> · <b id="totAll">0</b> leads · <b id="totDates">0</b> pull dates<span id="sheetStamp"></span></span>
+      <button type="button" class="btn acq-backbtn" id="acqBackTop" title="Back to the full Lead Board">← Back to Lead Board</button>
       <div class="viewnav" role="group" aria-label="Screen">
         <button type="button" id="navLeads" aria-current="true">Leads</button>
         <button type="button" id="navKpi" aria-current="false">KPI</button>
@@ -2446,6 +2449,10 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   try { savedView = localStorage.getItem("fs_view") || ""; } catch (e) {}
   if (location.hash === "#acquisitions" || savedView === "acq") setAcq(true);
   $("navAcq").addEventListener("click", function(){ setAcq(true); });
+  $("acqBackTop").addEventListener("click", function(){
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    setAcq(false);
+  });
   $("acqBack").addEventListener("click", function(ev){
     ev.preventDefault();
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
