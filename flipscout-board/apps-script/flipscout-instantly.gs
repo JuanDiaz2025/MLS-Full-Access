@@ -468,9 +468,10 @@ function fsiPlaceWaiting_(now) {
 
 // doGet (flipscout-alerts.gs) sends action=email here. A person chose this
 // lead, so any bucket is fine; the safety checks still apply.
-const FSI_VERSION = '2026-09-25c';   // shown on the Check screen and the Board tab, to spot a stale deployment
+const FSI_VERSION = '2026-09-25d';   // shown on the Check screen and the Board tab, to spot a stale deployment
 
 function fsiWebEmail_(mls, by) {
+  const fsPage_ = (t, b) => fsPageBase_(t, b + ' (code ' + FSI_VERSION + ')');
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) return fsPage_('Busy', 'FlipScout is updating right now. Close this tab and click the button again in a minute.');
   try {
@@ -501,6 +502,8 @@ function fsiWebEmail_(mls, by) {
     lock.releaseLock();
   }
 }
+
+function fsPageBase_(t, b) { return fsPage_(t, b); }   // the alerts file's page, before fsiWebEmail_ adds the version
 
 /* ------------------------------------------------ finishing and stopping -- */
 
