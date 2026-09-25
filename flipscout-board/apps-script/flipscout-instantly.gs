@@ -356,8 +356,15 @@ function fsiSend_(l, slot, rows) {
   // campaign, which looked like success while nothing new was queued.
   const res = fsiApi_('post', '/leads/add', {
     campaign_id: FSI_CAMPAIGNS[slot - 1],
-    skip_if_in_workspace: false,        // the same agent may sit in another campaign for another house
-    skip_if_in_campaign: true,
+    // The three flags are the upload screen's "Check for duplicates across all
+    // Campaigns · Lists · The Workspace" boxes: skip_if_in_campaign means ANY
+    // campaign, not this one. All off, so the same agent can hold a house in each
+    // campaign. Instantly still never duplicates a lead inside one campaign (that
+    // comes back in duplicated_leads), and this script only picks a campaign where
+    // the agent has nothing in progress.
+    skip_if_in_workspace: false,
+    skip_if_in_campaign: false,
+    skip_if_in_list: false,
     leads: [{ email: l.email, first_name: fsiFirst_(l.agent),
               last_name: String(l.agent || '').split(/\s+/).slice(1).join(' '),
               custom_variables: { address: fsiShort_(l.addr), full_address: l.addr, mls: l.mls } }]
