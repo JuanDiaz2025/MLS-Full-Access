@@ -51,6 +51,8 @@ const FSI_CAMPAIGNS = [
 const FSI_API = 'https://api.instantly.ai/api/v2';
 const FSI_TAB = 'Agent Emails';
 const FSI_DAILY_MAX = 10;
+const FSI_SEQUENCE_DAYS = 5;          // email 1, +1 day, +4 days: the whole sequence
+
 // Test houses: not on the Leads tab, never counted against the daily limit, never auto-stopped.
 const FSI_TESTS = [
   { mls: 'TEST0001', email: 'bryan@twinhomebuyer.com',    agent: 'Bryan Test',    addr: '123 Test Street, San Carlos, CA 94070' },
@@ -468,7 +470,7 @@ function fsiPlaceWaiting_(now) {
 
 // doGet (flipscout-alerts.gs) sends action=email here. A person chose this
 // lead, so any bucket is fine; the safety checks still apply.
-const FSI_VERSION = '2026-09-25d';   // shown on the Check screen and the Board tab, to spot a stale deployment
+const FSI_VERSION = '2026-09-25e';   // shown on the Check screen and the Board tab, to spot a stale deployment
 
 function fsiWebEmail_(mls, by) {
   const fsPage_ = (t, b) => fsPageBase_(t, b + ' (code ' + FSI_VERSION + ')');
@@ -525,7 +527,11 @@ function fsiSyncDone_() {
   open.forEach(r => {
     const x = state[r.id];
     if (!x) return;
-    if (x.status === 3 && !(x.email_reply_count > 0)) fsiEnd_(r, 'Done', 'All 3 emails sent, no reply');
+    // Instantly also marks a lead Completed when the agent replied on ANOTHER
+    // campaign (it stops that person everywhere). Only call it Done once the
+    // whole sequence could have gone out; before that the reply check pauses it.
+    const oldEnough = r.added && (Date.now() - new Date(r.added).getTime()) > FSI_SEQUENCE_DAYS * 864e5;
+    if (x.status === 3 && !(x.email_reply_count > 0) && oldEnough) fsiEnd_(r, 'Done', 'All 3 emails sent, no reply');
     else if (x.status === -1) fsiEnd_(r, 'Bounced', 'The agent email bounced');
   });
 }
