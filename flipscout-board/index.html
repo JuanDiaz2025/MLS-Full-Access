@@ -640,6 +640,31 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .lp-box .team-note{display:none}
 .lp-box .note-row .btn{white-space:nowrap}
 @media (max-width:1180px){ .lp-cols{grid-template-columns:1fr} }
+
+/* pick several, remove them together */
+.acq-row{display:flex; align-items:stretch; border-left:4px solid transparent}
+.acq-row.due-red{border-left-color:#D64545}
+.acq-row.due-amber{border-left-color:#E3A008}
+.acq-row .acq-item{border-left:0; padding-left:4px; flex:1; min-width:0}
+.acq-row .acq-item[aria-current="true"]{box-shadow:inset 3px 0 0 var(--brand-2)}
+.ai-chk{display:flex; align-items:flex-start; padding:9px 2px 0 8px; cursor:pointer}
+.ai-chk input{width:15px; height:15px; margin:0; cursor:pointer; accent-color:var(--brand)}
+.acq-row.picked{background:var(--b-pass)}
+.acq-row.gone .ai-addr{text-decoration:line-through; text-decoration-thickness:1px}
+.acq-row.gone .acq-item{opacity:.55}
+.acq-selbar{position:sticky; bottom:0; display:flex; align-items:center; gap:8px; padding:9px 12px; margin-top:4px;
+  background:var(--brand); color:#FFFFFF; font:600 13px Archivo,sans-serif; border-radius:0 0 10px 10px}
+.acq-selbar[hidden]{display:none}
+.acq-selbar .n{flex:1}
+.acq-selbar .btn{min-height:0; padding:5px 10px; font-size:12.5px}
+.acq-selbar .btn.rm{background:#FFFFFF; color:#B42318; border-color:#FFFFFF}
+.acq-selbar .lnk{background:none; border:0; color:#FFFFFF; text-decoration:underline; cursor:pointer; font:inherit; font-weight:500}
+.rm-list{margin:8px 0 0; padding:0 0 0 18px; max-height:240px; overflow:auto; font-size:13px}
+.rm-list li{margin:2px 0}
+.lp-gone{display:flex; align-items:center; gap:10px; margin:0 0 10px; padding:8px 12px; border-radius:8px;
+  background:var(--b-pass); color:var(--t-pass); font-size:13px}
+.lp-gone b{font-weight:700}
+.lp-gone .btn{margin-left:auto; min-height:0; padding:4px 10px; font-size:12.5px}
 .acq-legend{font-size:12px; color:var(--muted); margin:-4px 0 12px}
 .acq-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin:0 4px 0 10px}
 </style>
@@ -728,6 +753,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     <div class="acq-find"><input type="search" id="acqQ" autocomplete="off" spellcheck="false"
       placeholder="Search address, MLS #, city, agent…" aria-label="Search the leads being worked"><kbd>/</kbd></div>
         <div id="acqListBody"></div>
+        <div class="acq-selbar" id="acqSelBar" hidden><span class="n" id="acqSelN"></span>
+          <button type="button" class="btn rm" id="acqSelRm">Remove…</button><button type="button" class="lnk" id="acqSelClear">Clear</button></div>
         <p class="acq-kbd">↑ ↓ to move · / to search</p>
       </nav>
       <aside class="acq-detail" aria-live="polite"></aside>
@@ -780,6 +807,17 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     </div>
   </dialog>
 
+  <dialog id="rmDlg" aria-labelledby="rmTitle">
+    <div class="dlg">
+      <h2 id="rmTitle">Remove these leads?</h2>
+      <p class="dlg-sub">They move to <b>Removed</b> at the bottom of the list, crossed out — the same as Remove on the Lead Board. You can restore any of them.</p>
+      <ol class="rm-list" id="rmList"></ol>
+      <div class="dlg-actions">
+        <button type="button" class="btn" id="rmNo">No, keep them</button>
+        <button type="button" class="btn go" id="rmYes">Yes, remove</button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="mailDlg" aria-labelledby="mailTitle">
     <div class="dlg">
       <h2 id="mailTitle">Email this agent?</h2>
@@ -1698,7 +1736,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     {k: "visit", t: "📅 Visits",           sub: "scheduled, next one first"},
     {k: "wait",  t: "✉️ Waiting on agent", sub: "emailed, no answer yet"},
     {k: "prog",  t: "🔧 In progress",      sub: "status set, nothing due in the next 3 days"},
-    {k: "won",   t: "🏆 Won",              sub: ""}
+    {k: "won",   t: "🏆 Won",              sub: ""},
+    {k: "gone",  t: "🗑 Removed",          sub: "", closed: true}
   ];
   function acqSecOf(l){
     if (statusOf(l) === "Won") return "won";
@@ -1734,6 +1773,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   function renderAcq(){
     var all = LEADS.filter(function(l){ return acqWorked(l) && !removedOf(l) && statusOf(l) !== "Pass" && !CLOSED.test(l.mlsStatus || ""); });
+    var gone = LEADS.filter(function(l){ return acqWorked(l) && removedOf(l); });
     var work = all.filter(function(l){ return statusOf(l) !== "Won"; });
     var q = $("acqQ").value.trim().toLowerCase();
 
@@ -1778,6 +1818,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
     var by = {};
     rows.forEach(function(l){ var k = acqSecOf(l); (by[k] = by[k] || []).push(l); });
+    var goneRows = q ? gone.filter(function(l){ return acqMatchQ(l, q); }) : gone;
+    if (goneRows.length) by.gone = goneRows;
     var rank = function(l){ var n = acqDueDays(l); return n === null ? [1, 0] : n >= 0 ? [0, n] : [2, -n]; };
     var byDue = function(a, b){ var x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1]; };
     var vkey = function(l){ var v = visitOf(l); return v.d + " " + (v.t || "99:99"); };
@@ -1786,14 +1828,15 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     });
     var flat = [];
     var list = ACQ_SECS.filter(function(s){ return by[s.k]; }).map(function(s){
-      var open = s.fixed || q || !acqClosed[s.k];
+      var open = s.fixed || q || !(s.k in acqClosed ? acqClosed[s.k] : s.closed);
       if (open) flat = flat.concat(by[s.k]);
       var head = '<span>' + s.t + '</span><span class="cnt">' + by[s.k].length + '</span>';
       var items = by[s.k].map(function(l){ return acqItemHTML(l, s.k); }).join("");
       if (s.fixed) return '<div class="acq-lsec" data-sec="' + s.k + '"><div class="acq-lhead">' + head + '</div>' + items + '</div>';
       return '<details class="acq-lsec acq-sec" data-sec="' + s.k + '"' + (open ? ' open' : '') + '><summary>' + head + '</summary>' + items + '</details>';
     }).join("");
-    if (!rows.length) {
+    acqSelSync();
+    if (!rows.length && !goneRows.length) {
       $("acqListBody").innerHTML = '<div class="acq-none">' +
         (all.length ? '<b>No lead matches</b>' + (q ? 'Nothing being worked matches “' + esc($("acqQ").value.trim()) + '”.' : 'Nothing fits these filters.') +
                       ' <button type="button" class="acq-clear" id="acqClear2">Clear all</button>'
@@ -1804,7 +1847,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       return;
     }
     // keep the lead that is open; else the first one on the list
-    if (!rows.some(function(l){ return l.mls === acqSel; })) acqSel = (flat[0] || rows[0]).mls;
+    if (!rows.concat(goneRows).some(function(l){ return l.mls === acqSel; })) acqSel = (flat[0] || rows[0] || goneRows[0]).mls;
     acqFlat = flat;
     // a teammate's change must not wipe a note being typed in the panel
     var act = document.activeElement, typing = act && act.closest && act.closest(".acq-detail") && /^(TEXTAREA|INPUT)$/.test(act.tagName);
@@ -1826,11 +1869,15 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var dd = o.d ? new Date(o.d.slice(0, 10) + "T12:00:00") : null;
     var due = dd && !isNaN(dd) ? dd.toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric"}) + (o.t ? " · " + o.t : "")
             : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? "offers TBD" : "no offer date");
-    return '<button type="button" class="acq-item' + acqEdge(l) + '" data-pick="' + esc(l.mls) + '" aria-current="' + (l.mls === acqSel) + '" title="' + esc(l.addr) + '">' +
+    var isGone = sec === "gone";
+    return '<div class="acq-row' + (isGone ? ' gone' : acqEdge(l)) + (acqPicked[l.mls] ? ' picked' : '') + '">' +
+      (isGone ? '<span class="ai-chk"></span>' : '<label class="ai-chk" title="Select to remove"><input type="checkbox" data-chk="' + esc(l.mls) + '"' +
+        (acqPicked[l.mls] ? ' checked' : '') + ' aria-label="Select ' + esc(l.addr) + '"></label>') +
+      '<button type="button" class="acq-item" data-pick="' + esc(l.mls) + '" aria-current="' + (l.mls === acqSel) + '" title="' + esc(l.addr) + '">' +
       '<span class="ai-l1"><span class="ai-ic" title="' + ic[1] + '">' + ic[0] + '</span>' +
       '<span class="ai-addr">' + esc(a.s) + (a.c ? ' <span class="ai-city">· ' + esc(a.c) + '</span>' : '') + '</span>' + chip + '</span>' +
       '<span class="ai-l2"><span class="ai-st st-sel ' + STCLASS[st] + '">' + esc(st) + '</span>' +
-      '<span class="ai-due">' + esc(due) + '</span>' + (e.by ? '<span class="ai-who">' + esc(e.by) + '</span>' : '') + '</span></button>';
+      '<span class="ai-due">' + esc(due) + '</span>' + (e.by ? '<span class="ai-who">' + esc(e.by) + '</span>' : '') + '</span></button></div>';
   }
   function acqDetailHTML(l){
     if (!l) return '<div class="lp-empty">Pick a lead on the left.</div>';
@@ -1851,6 +1898,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
                         : '<span class="txt-none">Not emailed yet</span>';
     var fact = function(v, k){ return v || v === 0 ? '<span><b>' + v + '</b> ' + k + '</span>' : ''; };
     return '<div class="acq-detail-in" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+      (e.r ? '<div class="lp-gone">🗑 <span>Removed by <b>' + esc(e.by || "Someone") + '</b>' + (e.at ? ' · ' + esc(noteWhen(e.at)) : '') + '</span>' +
+        '<button type="button" class="btn tiny" data-acq-restore="' + esc(l.mls) + '">Restore</button></div>' : '') +
       '<h2>' + (u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener" title="Open on Redfin">' + esc(l.addr) + ' ↗</a>' : esc(l.addr)) + '</h2>' +
       '<div class="lp-sub"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
         mlsStatusHTML(l.mlsStatus) + bucketHTML(l).replace(/^<br>/, "") + '</div>' +
@@ -1896,6 +1945,42 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       if (scroll && (r.top < 0 || r.top > window.innerHeight - 80)) { try { d.scrollIntoView({block: "start", behavior: "smooth"}); } catch (e) {} }
     }
   }
+  var acqPicked = {};
+  function acqSelSync(){
+    var live = {}; LEADS.forEach(function(l){ if (acqPicked[l.mls] && !removedOf(l)) live[l.mls] = true; });
+    acqPicked = live;
+    var n = Object.keys(acqPicked).length;
+    $("acqSelBar").hidden = !n;
+    $("acqSelN").textContent = n + (n === 1 ? " lead selected" : " leads selected");
+  }
+  function acqAskRemove(){
+    var ls = Object.keys(acqPicked).map(function(m){ return BY_MLS[m]; }).filter(Boolean);
+    if (!ls.length) return;
+    $("rmList").innerHTML = ls.map(function(l){ return '<li>' + esc(l.addr) + ' <span class="mono" style="color:var(--muted)">' + esc(l.mls) + '</span></li>'; }).join("");
+    $("rmTitle").textContent = ls.length === 1 ? "Remove this lead?" : "Remove these " + ls.length + " leads?";
+    $("rmYes").textContent = ls.length === 1 ? "Yes, remove it" : "Yes, remove " + ls.length;
+    var d = $("rmDlg"); if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+    $("rmNo").focus();
+  }
+  function acqCloseRemove(){ var d = $("rmDlg"); if (d.open) d.close(); }
+  $("rmNo").addEventListener("click", acqCloseRemove);
+  $("rmYes").addEventListener("click", function(){
+    var ls = Object.keys(acqPicked).map(function(m){ return BY_MLS[m]; }).filter(Boolean);
+    acqCloseRemove();
+    acqPicked = {};
+    // one save at a time, a moment apart — the same save as Remove on the Lead Board
+    ls.forEach(function(l, i){ setTimeout(function(){ applyEdit(l.date, l.mls, {r: true}); }, i * 250); });
+    if (!ls.length) renderAcq();
+  });
+  document.addEventListener("change", function(ev){
+    var c = ev.target.closest && ev.target.closest("input[data-chk]");
+    if (!c) return;
+    if (c.checked) acqPicked[c.dataset.chk] = true; else delete acqPicked[c.dataset.chk];
+    var row = c.closest(".acq-row"); if (row) row.classList.toggle("picked", c.checked);
+    acqSelSync();
+  });
+  $("acqSelRm").addEventListener("click", acqAskRemove);
+  $("acqSelClear").addEventListener("click", function(){ acqPicked = {}; renderAcq(); });
   function acqClearAll(){ acqF = {tile: "", who: "", area: "", st: "", bk: ""}; $("acqQ").value = ""; renderAcq(); }
   $("acqQ").addEventListener("input", function(){ renderAcq(); });
   $("acqQ").addEventListener("keydown", function(ev){
@@ -1922,13 +2007,15 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     b = ev.target.closest("[data-acq-f]");
     if (b) { var g = b.dataset.acqF; acqF[g] = acqF[g] === b.dataset.v ? "" : b.dataset.v; renderAcq(); return; }
     if (ev.target.closest("#acqClear, #acqClear2")) { acqClearAll(); return; }
+    b = ev.target.closest("[data-acq-restore]");
+    if (b) { var rl = BY_MLS[b.dataset.acqRestore]; if (rl) applyEdit(rl.date, rl.mls, {r: false}); return; }
     b = ev.target.closest("[data-pick]");
     if (b) { acqPick(b.dataset.pick, true); return; }
     var sm = ev.target.closest("details.acq-sec > summary");
     if (sm && !$("acqQ").value.trim()) {
       var d = sm.parentNode;
       setTimeout(function(){
-        if (d.open) delete acqClosed[d.dataset.sec]; else acqClosed[d.dataset.sec] = 1;
+        acqClosed[d.dataset.sec] = d.open ? 0 : 1;
         try { localStorage.setItem("fs_acq_closed", JSON.stringify(acqClosed)); } catch (e) {}
       }, 0);
     }
