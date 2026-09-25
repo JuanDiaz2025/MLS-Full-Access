@@ -667,7 +667,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .lp-gone .btn{margin-left:auto; min-height:0; padding:4px 10px; font-size:12.5px}
 /* the list scrolls inside its own box; search on top and the selection bar stay put.
    max() keeps a usable height even where the frame reports a tiny viewport */
-#acqListBody{max-height:max(460px, calc(100vh - 300px)); overflow-y:auto; overscroll-behavior:contain; border-top:1px solid var(--line-soft)}
+#acqListBody{height:600px; overflow-y:auto; overscroll-behavior:contain; border-top:1px solid var(--line-soft)}
 .acq-list .acq-kbd{border-top:1px solid var(--line-soft); margin:0; padding:6px 12px}
 .acq-row .acq-item{padding-top:5px; padding-bottom:5px; min-height:0}
 .acq-item .ai-addr{font-size:13px}
