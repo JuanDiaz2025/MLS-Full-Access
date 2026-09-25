@@ -530,6 +530,7 @@ body.acq #viewLeads, body.acq #viewKpi{display:none !important}
       <div class="viewnav" role="group" aria-label="Screen">
         <button type="button" id="navLeads" aria-current="true">Leads</button>
         <button type="button" id="navKpi" aria-current="false">KPI</button>
+        <button type="button" id="navAcq" aria-current="false" title="Acquisitions MLS: a condensed dashboard of the leads being worked">Acquisitions</button>
       </div>
       <button type="button" class="btn" id="addScan">＋ Add scan</button>
       <button type="button" class="btn" id="sheetRefresh" hidden title="Read the latest leads from the prod Google Sheet, for the whole team">↻ Refresh from sheet</button>
@@ -1508,6 +1509,8 @@ body.acq #viewLeads, body.acq #viewKpi{display:none !important}
     $("viewAcq").hidden = !on;
     document.querySelector("header.top h1").textContent = on ? "Acquisitions MLS" : "FlipScout Lead Board";
     try { document.title = on ? "Acquisitions MLS" : BASE_TITLE; } catch (e) {}
+    // remembered for this viewer, so Juan lands on the dashboard every time
+    try { on ? localStorage.setItem("fs_view", "acq") : localStorage.removeItem("fs_view"); } catch (e) {}
     if (!on) showScreen(location.hash === "#kpi" ? "kpi" : "leads", false); else draw();
   }
   var BASE_TITLE = document.title;
@@ -2121,7 +2124,10 @@ body.acq #viewLeads, body.acq #viewKpi{display:none !important}
   });
 
   showScreen(location.hash === "#kpi" ? "kpi" : "leads", false);
-  if (location.hash === "#acquisitions") setAcq(true);
+  var savedView = "";
+  try { savedView = localStorage.getItem("fs_view") || ""; } catch (e) {}
+  if (location.hash === "#acquisitions" || savedView === "acq") setAcq(true);
+  $("navAcq").addEventListener("click", function(){ setAcq(true); });
   $("acqBack").addEventListener("click", function(ev){
     ev.preventDefault();
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
