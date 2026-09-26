@@ -881,6 +881,24 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .wk-own{align-items:center; gap:8px}
 .wk-row.dim .wk-item{opacity:.6}
 .wk-l2 .mst{margin-left:0}
+
+/* v6: every group in the list wears its stage's colour */
+.wk-gh{padding:8px 14px 7px; font-size:11px; letter-spacing:.07em; border-left:4px solid #8A96A8; background:#EEF1F5; color:#3E4A59; border-top:1px solid var(--line-soft)}
+.wk-gh b{background:rgba(255,255,255,.75); border-radius:999px; padding:0 7px; color:inherit}
+.wk-gh small{color:inherit; opacity:.8}
+.wk-dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:currentColor; flex:none; align-self:center}
+.wk-grp + .wk-grp{border-top:0}
+.wk-gh-new{background:#E8ECF3; color:#334155; border-left-color:#64748B}
+.wk-gh-interest{background:var(--st-int-b); color:var(--st-int-t); border-left-color:var(--st-int-t)}
+.wk-gh-visit{background:var(--st-visit-b); color:var(--st-visit-t); border-left-color:var(--st-visit-t)}
+.wk-gh-visited{background:#E3EED9; color:#35591C; border-left-color:#35591C}
+.wk-gh-offer{background:var(--st-offer-b); color:var(--st-offer-t); border-left-color:var(--st-offer-t)}
+.wk-gh-won{background:var(--st-won-b); color:var(--st-won-t); border-left-color:var(--st-won-t)}
+.wk-gh-passed{background:var(--st-pass-b); color:var(--st-pass-t); border-left-color:var(--st-pass-t)}
+.wk-gh-hot, .wk-grp.hot .wk-gh{background:#FDE7E4; color:#8E1F16; border-left-color:#C62828}
+.wk-gh-hits{background:var(--b-review); color:var(--t-review); border-left-color:var(--t-review)}
+.wk-gh-others, .wk-gh-gone{background:#F1F3F6; color:#57687C; border-left-color:#B8C2CF}
+.wk-st-new{background:#E8ECF3; color:#334155}
 </style>
 
 <header class="top">
@@ -2107,7 +2125,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     // a teammate's change must not wipe a note being typed in the panel
     var act = document.activeElement, typing = act && act.closest && act.closest(".acq-detail") && (/^(TEXTAREA|INPUT)$/.test(act.tagName) || (act.tagName === "SELECT" && /^acqVis/.test(act.id)));
     $("acqListBody").innerHTML = groups.map(function(g){
-      return '<div class="wk-grp' + (g.hot ? ' hot' : '') + '">' + (g.t ? '<div class="wk-gh"><span>' + esc(g.t) + '</span><b>' + g.rows.length + '</b>' +
+      return '<div class="wk-grp' + (g.hot ? ' hot' : '') + '">' + (g.t ? '<div class="wk-gh wk-gh-' + esc(g.k) + '"><i class="wk-dot"></i><span>' + esc(g.t) + '</span><b>' + g.rows.length + '</b>' +
         (g.sub ? '<small>' + esc(g.sub) + '</small>' : '') + '</div>' : '') +
         g.rows.map(function(l){ return acqItemHTML(l, g); }).join("") + '</div>';
     }).join("");
