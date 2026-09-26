@@ -19,13 +19,16 @@
  * Anyone within Twin Home Buyer → Deploy → authorize → copy the Web app URL
  * and send it to Claude (it goes into the board as VIDEO_BRIDGE).
  *
- * Runs as the person who deploys it, so every video lands in that
- * person's Drive, in one place. The upload session stays on the server
+ * Runs as the person who deploys it (Bryan), so every video lands in that
+ * person's Drive, in one place. To use a company Shared drive instead, put
+ * the id of a folder in it in ROOT_ID (the part of the folder's link after
+ * /folders/); the deployer needs to be able to add files there. The upload session stays on the server
  * (CacheService); the page only ever holds an opaque id for it.
  */
 
 var SHEET_ID = '1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ';
 var ROOT_NAME = 'FlipScout property videos';
+var ROOT_ID = '';                         // optional: a folder id (e.g. in a Shared drive)
 var TAB = 'Videos';
 var HEAD = ['Added On', 'MLS #', 'Address', 'File', 'Link', 'Download', 'Added By', 'Size MB', 'File Id'];
 var CHUNK = 4 * 1024 * 1024;              // a multiple of 256 KB, as Drive requires
@@ -55,7 +58,7 @@ function startUpload(meta) {
   var type = /^[\w.+-]+\/[\w.+-]+$/.test(meta.type || '') ? meta.type : 'application/octet-stream';
   var folder = propertyFolder_(mls, String(meta.addr || ''));
 
-  var res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id', {
+  var res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id', {
     method: 'post',
     contentType: 'application/json; charset=UTF-8',
     headers: {
@@ -110,8 +113,9 @@ function finish_(fileId, up) {
 }
 
 function propertyFolder_(mls, addr) {
-  var roots = DriveApp.getFoldersByName(ROOT_NAME);
-  var root = roots.hasNext() ? roots.next() : DriveApp.createFolder(ROOT_NAME);
+  var root;
+  if (ROOT_ID) root = DriveApp.getFolderById(ROOT_ID);
+  else { var roots = DriveApp.getFoldersByName(ROOT_NAME); root = roots.hasNext() ? roots.next() : DriveApp.createFolder(ROOT_NAME); }
   // one folder per property; the MLS # in the name is what finds it again
   var it = root.getFolders();
   while (it.hasNext()) { var f = it.next(); if (f.getName().indexOf(mls) !== -1) return f; }
