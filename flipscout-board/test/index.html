@@ -1893,7 +1893,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   // an OWNER (ow); a visit also records who is going (vw).
   var ACQ = false;
   var STAGES = [
-    {k: "new",      t: "New",             sub: "being worked, no stage set yet"},
+    {k: "new",      t: "To review",       sub: "being worked, no stage picked yet"},
     {k: "interest", t: "Juan interested", sub: "on our radar: Juan wants this one"},
     {k: "visit",    t: "Visit booked",    sub: "someone is going to see it"},
     {k: "visited",  t: "Visit done",      sub: "someone has seen it"},
@@ -1903,7 +1903,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   ];
   var STAGE_BY = {}; STAGES.forEach(function(s, i){ s.i = i; STAGE_BY[s.k] = s; });
   var OPEN_STAGES = ["new", "interest", "visit", "visited", "offer"];
-  var PEOPLE = ["Juan", "Jairo", "Seth"];
+  var PEOPLE = ["Juan", "Jairo"];
   function acqStage(l){
     // a Won / Pass / Offer Sent set on the Lead Board wins over an older stage
     // "On our radar" was folded into "Juan interested" (Seth: they are the same)
@@ -2208,7 +2208,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<div class="lp-due-ed"><input type="date" id="acqVisD" value="' + esc(v.d) + '" aria-label="Visit date">' +
       '<input type="time" id="acqVisT" value="' + esc(v.t) + '" aria-label="Visit time (optional)"></div>' +
       '<div class="lp-due-ed"><select id="acqVisW" aria-label="Who is going"><option value="">Who’s going?</option>' +
-        PEOPLE.map(function(p){ return '<option' + (vw === p ? ' selected' : '') + '>' + p + '</option>'; }).join("") + '</select>' +
+        PEOPLE.map(function(p){ return '<option' + ((vw || "Juan") === p ? ' selected' : '') + '>' + p + '</option>'; }).join("") + '</select>' +
       '<select id="acqVisS" aria-label="Visit status">' + VISIT_ST.map(function(s){ return '<option value="' + s + '"' + ((v.s || "Scheduled") === s ? ' selected' : '') + '>' + (s || "No status") + '</option>'; }).join("") + '</select></div>' +
       '<div class="lp-due-ed"><button type="button" class="btn tiny go" data-vis-save="' + esc(l.mls) + '">Save</button>' +
       (v.d || v.s ? '<button type="button" class="btn tiny" data-vis-clear="' + esc(l.mls) + '">Clear</button>' : '') +
