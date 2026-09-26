@@ -680,6 +680,16 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .lp-due-ed{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px}
 .lp-due-ed input{font:13px "IBM Plex Mono",monospace; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--ink)}
 .lp-due-ed .btn{min-height:0; padding:4px 10px; font-size:12px}
+
+/* filter bar: four dropdowns instead of rows of chips */
+.acq-fbar{flex:1 1 100%; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:9px 12px; margin:0 0 10px;
+  background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow)}
+.acq-fbar > b{font:600 10.5px Archivo,sans-serif; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin-right:4px}
+.acq-fbar select{font:500 13px "IBM Plex Sans",system-ui,sans-serif; color:var(--ink); background:var(--surface);
+  border:1px solid var(--line); border-radius:7px; padding:6px 28px 6px 10px; min-width:140px; cursor:pointer}
+.acq-fbar select.on{border-color:var(--brand); background:var(--b-review); font-weight:600}
+.acq-fbar .acq-clear{margin-left:auto}
+.acq-fbar .acq-clear[disabled]{opacity:.35; cursor:default; text-decoration:none}
 .acq-legend{font-size:12px; color:var(--muted); margin:-4px 0 12px}
 .acq-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin:0 4px 0 10px}
 </style>
@@ -1808,15 +1818,18 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       ["bk", "Bucket", count(function(l){ return l.bucket === "A" || l.bucket === "B" ? l.bucket : ""; }), ["A", "B"]]
     ];
     var anyF = !!(acqF.tile || acqF.who || acqF.area || acqF.st || acqF.bk);
-    $("acqFilters").innerHTML = groups.map(function(g){
+    // one dropdown per group; the open one is left alone when a teammate's change redraws
+    var fAct = document.activeElement && document.activeElement.tagName === "SELECT" && document.activeElement.closest("#acqFilters");
+    if (!fAct) $("acqFilters").innerHTML = '<div class="acq-fbar"><b>Filter</b>' + groups.map(function(g){
       var keys = (g[3] || Object.keys(g[2]).sort(function(a, b){ return g[2][b] - g[2][a] || (a < b ? -1 : 1); }))
         .filter(function(k){ return g[2][k] || acqF[g[0]] === k; });
-      if (!keys.length) return "";
-      return '<div class="acq-fg"><b>' + g[1] + '</b>' + keys.map(function(k){
-        return '<button type="button" class="acq-chip" data-acq-f="' + g[0] + '" data-v="' + esc(k) + '" aria-pressed="' + (acqF[g[0]] === k) + '">' +
-          esc(g[0] === "bk" ? k + " · " + BK_NAME[k] : k) + '<span class="n">' + (g[2][k] || 0) + '</span></button>';
-      }).join("") + '</div>';
-    }).join("") + ((anyF || q) ? '<button type="button" class="acq-clear" id="acqClear">Clear all</button>' : '');
+      var all0 = {who: "Who: Everyone", area: "Area: All", st: "Status: All", bk: "Bucket: All"}[g[0]];
+      return '<select data-acq-fsel="' + g[0] + '" class="' + (acqF[g[0]] ? 'on' : '') + '" aria-label="Filter by ' + g[1] + '">' +
+        '<option value="">' + all0 + '</option>' + keys.map(function(k){
+          return '<option value="' + esc(k) + '"' + (acqF[g[0]] === k ? ' selected' : '') + '>' + g[1] + ': ' +
+            esc(g[0] === "bk" ? k + " · " + BK_NAME[k] : k) + ' (' + (g[2][k] || 0) + ')</option>';
+        }).join("") + '</select>';
+    }).join("") + '<button type="button" class="acq-clear" id="acqClear"' + ((anyF || q) ? '' : ' disabled') + '>Clear filters</button></div>';
 
     var tileF = acqF.tile && ACQ_TILES.filter(function(t){ return t.k === acqF.tile; })[0];
     var rows = all.filter(function(l){
@@ -2008,6 +2021,11 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   $("acqSelClear").addEventListener("click", function(){ acqPicked = {}; renderAcq(); });
   function acqClearAll(){ acqF = {tile: "", who: "", area: "", st: "", bk: ""}; $("acqQ").value = ""; renderAcq(); }
   $("acqQ").addEventListener("input", function(){ renderAcq(); });
+  $("acqFilters").addEventListener("change", function(ev){
+    var sl = ev.target.closest("select[data-acq-fsel]"); if (!sl) return;
+    acqF[sl.dataset.acqFsel] = sl.value;
+    sl.blur(); renderAcq();
+  });
   $("acqQ").addEventListener("keydown", function(ev){
     if (ev.key === "Escape") { $("acqQ").value = ""; renderAcq(); }
     if (ev.key === "Enter" && acqFlat.length) { ev.preventDefault(); acqPick(acqFlat[0].mls, true); }
