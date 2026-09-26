@@ -940,6 +940,12 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
 .lk-hint{margin-top:6px; font-size:11.5px; color:var(--muted)}
 
+
+.lk-big{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:6px; padding:9px 11px; border-radius:8px; background:var(--b-review); color:var(--t-review); font-size:12.5px}
+.lk-big b{font-weight:700}
+.lk-here{flex-direction:column; align-items:stretch}
+.lk-row1{display:flex; align-items:center; gap:10px}
+.lk-here .note-video{max-width:none; max-height:360px; margin-top:8px}
 </style>
 
 <header class="top">
@@ -1882,11 +1888,50 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       .sort(function(a, b){ return (a.at || "") < (b.at || "") ? -1 : 1; });
   }
   function noteVideoHTML(v){
+    if (v.a) return '<div class="lk-card lk-here"><div class="lk-row1"><span class="lk-t"><b>' + esc(v.n || "Video") + '</b><small>plays here · copy in Google Drive' +
+        (v.by ? ' · ' + esc(v.by) : '') + (v.sz ? ' · ' + esc(String(v.sz)) + ' MB' : '') + '</small></span>' +
+        '<a class="btn tiny" href="' + esc(v.u) + '" target="_blank" rel="noopener">Drive ↗</a></div>' +
+        '<video class="note-video" src="/_blob/' + esc(v.a) + '" controls preload="metadata" playsinline></video></div>';
+    var canHere = ASSETS && mcp && v.sz && v.sz <= 15 && driveId(v.u);
     return '<div class="lk-card"><span class="lk-ic" aria-hidden="true">▶</span><span class="lk-t"><b>' + esc(v.n || "Video") + '</b><small>Google Drive' +
       (v.by ? ' · ' + esc(v.by) : '') + (v.at ? ' · ' + esc(noteDay(v.at)) : '') + (v.sz ? ' · ' + esc(String(v.sz)) + ' MB' : '') + '</small></span>' +
-      '<a class="btn tiny go" href="' + esc(v.u) + '" target="_blank" rel="noopener" title="Plays in Google Drive, in a new tab">▶ Watch ↗</a>' +
+      (canHere ? '<button type="button" class="btn tiny go" data-vhere="' + esc(v.id) + '" data-vmls="' + esc(v.mls) + '" title="Copies it onto the board once, then it plays here">▶ Play here</button>' : '') +
+      '<a class="btn tiny' + (canHere ? '' : ' go') + '" href="' + esc(v.u) + '" target="_blank" rel="noopener" title="Plays in Google Drive, in a new tab">' + (canHere ? 'Drive ↗' : '▶ Watch ↗') + '</a>' +
       (LINK_OK.test(v.d || "") ? '<a class="btn tiny" href="' + esc(v.d) + '" target="_blank" rel="noopener">Download ↗</a>' : '') + '</div>';
   }
+  var hereBusy = {};
+  function playHere(mls, id, btn){
+    var v = (VIDEOS[mls] || {})[id];
+    if (!v || !ASSETS || !mcp || hereBusy[id]) return;
+    hereBusy[id] = true; if (btn) { btn.disabled = true; btn.textContent = "Copying…"; }
+    toast("Copying the video onto the board — a few seconds…");
+    mcp.callTool("Google Drive", "download_file_content", {fileId: id}, {cache: false}).then(function(got){
+      var p = got && got.payload;
+      if (typeof p === "string") { try { p = JSON.parse(p); } catch (e) {} }
+      var b64 = p && typeof p.content === "string" ? p.content : "";
+      if (!b64) throw {code: "empty"};
+      var bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var ty = /\.webm$/i.test(v.n || "") ? "video/webm" : "video/mp4";
+      return ASSETS.upload(new Blob([bytes], {type: ty}), {type: ty});
+    }).then(function(r){
+      var item = Object.assign({}, v, {a: r.id});
+      VIDEOS[mls] = Object.assign({}, VIDEOS[mls]); VIDEOS[mls][id] = item;
+      var body = {items: {}}; body.items[id] = item;
+      var ref = db.doc("videos/" + mls);
+      return ref.update(body).catch(function(){ return ref.set(body); });
+    }).then(function(){ toast("✓ It plays here now, for the whole team"); draw(); })
+      .catch(function(e){
+        var c = e && e.code;
+        toast(c === "too_large" ? "Too big to copy onto the board — watch it in Drive" :
+              c === "not_granted" ? "Only people who can edit the board can do this" :
+              "Couldn't copy it (" + (c || "error") + ") — watch it in Drive");
+        if (btn) { btn.disabled = false; btn.textContent = "▶ Play here"; }
+      }).then(function(){ delete hereBusy[id]; });
+  }
+  document.addEventListener("click", function(ev){
+    var b = ev.target.closest && ev.target.closest("button[data-vhere]"); if (b) playHere(b.dataset.vmls, b.dataset.vhere, b);
+  });
   function videoUrl(l){
     return VIDEO_BRIDGE + "?mls=" + encodeURIComponent(l.mls) + "&addr=" + encodeURIComponent(l.addr || "") + "&by=" + encodeURIComponent(myName || "");
   }
@@ -1912,8 +1957,21 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   });
   document.addEventListener("input", function(ev){ if (ev.target.classList && ev.target.classList.contains("lk-in")) linkDrafts[ev.target.dataset.mls] = ev.target.value; });
   document.addEventListener("keydown", function(ev){ if (ev.key === "Enter" && ev.target.classList && ev.target.classList.contains("lk-in")) { ev.preventDefault(); saveLink(ev.target.dataset.mls); } });
+  var bigPick = {};
+  document.addEventListener("change", function(ev){
+    var inp = ev.target.closest && ev.target.closest("input[data-vpick]"); if (!inp) return;
+    var f = inp.files && inp.files[0], m = inp.dataset.vpick; inp.value = "";
+    if (!f) return;
+    if (f.size <= 20 * 1048576) { delete bigPick[m]; attachFile(m, f, inp.closest("label")); return; }
+    if (!VIDEO_BRIDGE) { toast("That video is over 20 MB — too big for the board"); return; }
+    bigPick[m] = {n: f.name, sz: f.size}; draw();
+  });
+  document.addEventListener("click", function(ev){
+    var x = ev.target.closest && ev.target.closest("[data-big-x]"); if (x) { delete bigPick[x.dataset.bigX]; draw(); }
+  });
   document.addEventListener("click", function(ev){
     var a = ev.target.closest && ev.target.closest("a[data-vup]"); if (!a) return;
+    delete bigPick[a.dataset.vup];
     vidWait[a.dataset.vup] = Date.now(); keepWait();
     toast("Upload in the new tab — come back here when it says Uploaded");
     watchVideos(); draw();
@@ -2052,6 +2110,10 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     return (last ? '<span class="team-note"><b>' + esc(last.by) + '</b> <span class="when">' + esc(noteWhen(last.at)) +
         '</span><br>' + esc(last.t.length > 160 ? last.t.slice(0, 160) + "…" : last.t || ("📎 " + (last.f ? last.f.n : ""))) + '</span>' : '') +
       (withFiles ? videoList(l.mls).map(noteVideoHTML).join("") +
+        (bigPick[l.mls] && VIDEO_BRIDGE ? '<div class="lk-big"><b>' + esc(bigPick[l.mls].n) + '</b> is ' + (bigPick[l.mls].sz / 1048576).toFixed(1) +
+          ' MB — too big for the board (20 MB). It goes to the property\'s Drive folder instead; choose it once more there.' +
+          '<a class="btn tiny go" data-vup="' + m + '" href="' + esc(videoUrl(l)) + '" target="_blank" rel="noopener">Send to Drive ↗</a>' +
+          '<button type="button" class="wk-link" data-big-x="' + m + '">Cancel</button></div>' : '') +
         (vidWait[l.mls] ? '<div class="lk-wait">Waiting for the upload to finish in the other tab — the video appears here by itself.</div>' : '') +
         (videoList(l.mls).some(function(v){ return Date.now() - new Date(v.at) < 20 * 60000; }) ? '<div class="lk-hint">Just uploaded: Drive needs a few minutes before it can play a new video. Download works right away.</div>' : '') : '') +
       '<details class="notes" data-notes="' + m + '"' + (openNotes[l.mls] || withFiles ? ' open' : '') + '>' +
@@ -2065,8 +2127,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<div class="note-row"><span class="hint">Saved with your name for the whole team</span>' +
       (withFiles && ASSETS ? '<label class="btn tiny note-attach" title="Photos, short videos (MP4, MOV, WebM), PDFs or text files, up to 20 MB each — longer videos: 🎬 Video link">📎 Attach file' +
         '<input type="file" data-attach="' + m + '" accept="image/*,video/mp4,video/webm,video/quicktime,.mp4,.m4v,.mov,.webm,application/pdf,.pdf,.txt,.csv,.md,.json,.svg"></label>' : '') +
-      (withFiles ? (VIDEO_BRIDGE
-          ? '<a class="btn tiny go" data-vup="' + m + '" href="' + esc(videoUrl(l)) + '" target="_blank" rel="noopener" title="Any length — it goes to this property\'s folder in Google Drive">🎬 Upload video</a>'
+      (withFiles ? (ASSETS
+          ? '<label class="btn tiny go note-attach" title="Up to 20 MB: kept on the board and plays here. Bigger: goes to Google Drive">🎬 Upload video<input type="file" data-vpick="' + m + '" accept="video/*,.mov,.m4v,.mp4,.webm"></label>'
+          : VIDEO_BRIDGE ? '<a class="btn tiny go" data-vup="' + m + '" href="' + esc(videoUrl(l)) + '" target="_blank" rel="noopener" title="It goes to this property\'s folder in Google Drive">🎬 Upload video</a>'
           : '<button type="button" class="btn tiny" disabled title="The upload script is not connected yet">🎬 Upload video</button>') +
         '<button type="button" class="btn tiny" data-link-open="' + m + '" title="Already in Drive, Photos or YouTube? Paste its share link">🔗 Paste link</button>' +
         (VIDEO_BRIDGE ? '<button type="button" class="wk-link" data-vid-check="1">↻ Check for videos</button>' : '') : '') +
@@ -2109,7 +2172,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     }
     if (file.size > 20 * 1048576) { toast("That file is over 20 MB — too big to attach" + (/^video/.test(ty) ? ". Put it in Google Drive and use 🎬 Video link instead." : "")); return; }
     if (label) label.classList.add("busy");
-    toast("Uploading " + file.name + "…");
+    toast("Uploading " + file.name + (file.size > 5 * 1048576 ? " (" + (file.size / 1048576).toFixed(1) + " MB) — keep this tab open" : "") + "…");
     ASSETS.upload(file, {type: ty}).then(function(r){
       var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       var t = (drafts[mls] || "").trim();
