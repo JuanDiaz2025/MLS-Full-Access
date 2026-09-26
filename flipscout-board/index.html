@@ -924,6 +924,17 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .vz-row{display:grid; grid-template-columns:auto 1fr; gap:0 22px}
 .vz-sum{margin:16px 0 0; padding:10px 12px; border-radius:8px; background:var(--b-review); color:var(--t-review); font:600 13.5px Archivo,sans-serif}
 @media (max-width:560px){ .vz-row{grid-template-columns:1fr} }
+
+/* long videos: a Google Drive link on a note */
+.lk-card{display:flex; align-items:center; gap:10px; margin-top:6px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:var(--surface)}
+.lk-ic{display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:50%; background:var(--brand); color:#FFFFFF; font-size:12px; flex:none}
+.lk-t{flex:1; min-width:0; display:flex; flex-direction:column; font-size:12.5px}
+.lk-t small{color:var(--muted); font-size:11.5px}
+.lk-card .btn{white-space:nowrap}
+.lk-row{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px; padding:8px; border-radius:8px; background:var(--surface-2); border:1px solid var(--line-soft)}
+.lk-row .lk-in{flex:1 1 240px; min-width:0; min-height:32px; font-size:13px; padding:5px 9px; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--ink)}
+.lk-row .hint{flex-basis:100%; font-size:11.5px; color:var(--muted)}
+.note-row{flex-wrap:wrap}
 </style>
 
 <header class="top">
@@ -1832,10 +1843,46 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       var n = all[id];
       if (!n || typeof n !== "object" || n.del) return null;
       var f = n.f && typeof n.f === "object" && /^[0-9a-f]{32}$/.test(String(n.f.id)) ? {id: n.f.id, n: str(n.f.n, 120) || "file", ty: str(n.f.ty, 60), sz: +n.f.sz || 0} : null;
-      if ((typeof n.t !== "string" || !n.t.trim()) && !f) return null;
-      return {id: id, t: typeof n.t === "string" ? n.t.slice(0, 2000) : "", by: str(n.by, 40) || "Someone", at: str(n.at, 40), f: f};
+      var lk = typeof n.lk === "string" && LINK_OK.test(n.lk) ? n.lk.slice(0, 600) : "";
+      if ((typeof n.t !== "string" || !n.t.trim()) && !f && !lk) return null;
+      return {id: id, t: typeof n.t === "string" ? n.t.slice(0, 2000) : "", by: str(n.by, 40) || "Someone", at: str(n.at, 40), f: f, lk: lk};
     }).filter(Boolean).sort(function(a, b){ return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
   }
+  // Long videos live in Google Drive (the board's own storage stops at 20 MB a
+  // file); a note keeps the share link. Only plain https links are kept.
+  var LINK_OK = /^https:\/\/[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:[\/?#][^\s"'<>]*)?$/;
+  function driveId(u){ var m = /\/file\/d\/([\w-]{10,})/.exec(u) || /[?&]id=([\w-]{10,})/.exec(u); return /drive\.google\.com|docs\.google\.com/.test(u) && m ? m[1] : ""; }
+  function noteLinkHTML(u){
+    var host = (/^https:\/\/([^\/?#]+)/.exec(u) || ["", ""])[1].replace(/^www\./, "");
+    var id = driveId(u), dl = id ? "https://drive.google.com/uc?export=download&id=" + id : "";
+    var src = /drive\.google|docs\.google/.test(host) ? "Google Drive" : /photos\.(google|app\.goo)/.test(host) ? "Google Photos" : /youtu/.test(host) ? "YouTube" : host;
+    return '<div class="lk-card"><span class="lk-ic" aria-hidden="true">▶</span><span class="lk-t"><b>Video</b><small>' + esc(src) + '</small></span>' +
+      '<a class="btn tiny go" href="' + esc(u) + '" target="_blank" rel="noopener">Watch ↗</a>' +
+      (dl ? '<a class="btn tiny" href="' + esc(dl) + '" target="_blank" rel="noopener">Download ↗</a>' : '') + '</div>';
+  }
+  var linkOpen = {}, linkDrafts = {};
+  function saveLink(mls){
+    var u = (linkDrafts[mls] || "").trim();
+    if (!LINK_OK.test(u)) { toast("Paste the whole share link — it starts with https://"); return; }
+    if (!myName){ toast("Type your name in the box at the top first, so the team knows who added it"); $("nameIn").focus(); return; }
+    var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    var t = (drafts[mls] || "").trim();
+    var entry = {t: t.slice(0, 2000), by: myName, at: new Date().toISOString(), lk: u.slice(0, 600)};
+    pendingNotes[mls] = pendingNotes[mls] || {}; pendingNotes[mls][id] = entry;
+    drafts[mls] = ""; linkDrafts[mls] = ""; linkOpen[mls] = false; openNotes[mls] = true;
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
+    draw();
+    writeNote(mls, id, entry, "Video link saved for the team");
+  }
+  document.addEventListener("click", function(ev){
+    var b = ev.target.closest && ev.target.closest("button[data-link-open], button[data-link-save], button[data-link-cancel]"); if (!b) return;
+    var m = b.dataset.linkOpen || b.dataset.linkSave || b.dataset.linkCancel;
+    if (b.dataset.linkSave) { saveLink(m); return; }
+    linkOpen[m] = !!b.dataset.linkOpen; b.blur(); draw();
+    if (linkOpen[m]) { var inp = document.querySelector('input.lk-in[data-mls="' + m + '"]'); if (inp) inp.focus(); }
+  });
+  document.addEventListener("input", function(ev){ if (ev.target.classList && ev.target.classList.contains("lk-in")) linkDrafts[ev.target.dataset.mls] = ev.target.value; });
+  document.addEventListener("keydown", function(ev){ if (ev.key === "Enter" && ev.target.classList && ev.target.classList.contains("lk-in")) { ev.preventDefault(); saveLink(ev.target.dataset.mls); } });
   function noteDay(at){
     var d = new Date(at);
     return isNaN(d) ? "" : d.toLocaleDateString("en-US", {month: "short", day: "numeric"});
@@ -1888,15 +1935,20 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<details class="notes" data-notes="' + m + '"' + (openNotes[l.mls] || withFiles ? ' open' : '') + '>' +
       '<summary>' + (list.length ? 'Notes · ' + list.length : '＋ Add a note') + '</summary>' +
       (list.length ? '<ol>' + list.map(function(n){
-        return '<li>' + (n.t ? '<p>' + esc(n.t) + '</p>' : '') + (n.f ? noteFileHTML(n.f) : '') + '<div class="meta"><span>' + esc(n.by) + ' · ' + esc(noteWhen(n.at)) +
+        return '<li>' + (n.t ? '<p>' + esc(n.t) + '</p>' : '') + (n.f ? noteFileHTML(n.f) : '') + (n.lk ? noteLinkHTML(n.lk) : '') + '<div class="meta"><span>' + esc(n.by) + ' · ' + esc(noteWhen(n.at)) +
           '</span><button type="button" data-note-del="' + esc(n.id) + '" data-mls="' + m + '">Delete</button></div></li>';
       }).join("") + '</ol>' : '') +
       '<textarea class="note-in" rows="2" data-mls="' + m + '" aria-label="New note for ' + m +
         '" placeholder="Seller motivated? Talked to agent? Write it here…">' + esc(drafts[l.mls] || "") + '</textarea>' +
       '<div class="note-row"><span class="hint">Saved with your name for the whole team</span>' +
-      (withFiles && ASSETS ? '<label class="btn tiny note-attach" title="Photos, videos (MP4, MOV, WebM), PDFs or text files, up to 20 MB each">📎 Attach file' +
+      (withFiles && ASSETS ? '<label class="btn tiny note-attach" title="Photos, short videos (MP4, MOV, WebM), PDFs or text files, up to 20 MB each — longer videos: 🎬 Video link">📎 Attach file' +
         '<input type="file" data-attach="' + m + '" accept="image/*,video/mp4,video/webm,video/quicktime,.mp4,.m4v,.mov,.webm,application/pdf,.pdf,.txt,.csv,.md,.json,.svg"></label>' : '') +
+      (withFiles ? '<button type="button" class="btn tiny" data-link-open="' + m + '" title="For long videos: paste a Google Drive share link">🎬 Video link</button>' : '') +
       '<button type="button" class="btn tiny" data-note-save="' + m + '">Save note</button></div>' +
+      (withFiles && linkOpen[l.mls] ? '<div class="lk-row"><input type="url" class="lk-in" data-mls="' + m + '" value="' + esc(linkDrafts[l.mls] || "") + '"' +
+        ' placeholder="Paste the Google Drive share link" aria-label="Video share link">' +
+        '<button type="button" class="btn tiny go" data-link-save="' + m + '">Add</button><button type="button" class="btn tiny" data-link-cancel="' + m + '">Cancel</button>' +
+        '<span class="hint">In Drive: open the video → Share → General access: <b>Twin Home Buyer</b> (anyone with the link) → Copy link. Anything you typed above is saved with it.</span></div>' : '') +
       '</details>';
   }
 
@@ -1929,7 +1981,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     if (!/^(image\/(png|jpeg|gif|webp|svg\+xml)|video\/(mp4|webm)|application\/pdf|text\/(plain|csv|markdown)|application\/json)$/.test(ty || "")) {
       toast("That kind of file can't be attached — use a photo, a video (MP4, MOV, WebM), a PDF or a text file. Save Word or Excel files as PDF first."); return;
     }
-    if (file.size > 20 * 1048576) { toast("That file is over 20 MB — too big to attach" + (/^video/.test(ty) ? ". Trim the video or send a shorter clip." : "")); return; }
+    if (file.size > 20 * 1048576) { toast("That file is over 20 MB — too big to attach" + (/^video/.test(ty) ? ". Put it in Google Drive and use 🎬 Video link instead." : "")); return; }
     if (label) label.classList.add("busy");
     toast("Uploading " + file.name + "…");
     ASSETS.upload(file, {type: ty}).then(function(r){
