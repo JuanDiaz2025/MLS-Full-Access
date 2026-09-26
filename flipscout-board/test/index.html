@@ -1871,6 +1871,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   // the script files them in Drive and logs a row on the sheet's Videos tab; the
   // board copies those rows into videos/<MLS> so every teammate sees the card.
   var VIDEO_BRIDGE = "https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbzR9cAFZAWOQrb2T8T5c8ykg54k4fXaES2Y9bjGB-edy8iCIC9a_CX5DAfPgQYUGnk/exec";
+  var VIDEO_LIST = "1-F5r2NiEUsyCOQB4i54KynDvxn0m2JTI";   // flipscout-videos.json in the videos folder, kept by the script
   var VIDEOS = {}, vidWait = {}, vidTimer = null, vidBusy = false, vidLast = 0;
   try { vidWait = JSON.parse(localStorage.getItem("fs_vid_wait") || "{}") || {}; } catch (e) {}
   function keepWait(){ try { localStorage.setItem("fs_vid_wait", JSON.stringify(vidWait)); } catch (e) {} }
@@ -1977,23 +1978,28 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     vidBusy = true; vidLast = Date.now();
     if (loud) toast("Looking for new videos…");
     var ac = typeof AbortController === "function" ? new AbortController() : null, kill = ac ? setTimeout(function(){ ac.abort(); }, 45000) : null;
-    Promise.all([loadXlsx(), mcp.callTool("Google Drive", "download_file_content", {fileId: SHEET_ID, exportMimeType: XLSX_TYPE}, ac ? {cache: false, signal: ac.signal} : {cache: false})]).then(function(got){
-      var X = got[0], p = got[1] && got[1].payload;
+    mcp.callTool("Google Drive", "download_file_content", {fileId: VIDEO_LIST}, ac ? {cache: false, signal: ac.signal} : {cache: false}).then(function(got){
+      var p = got && got.payload;
       if (typeof p === "string") { try { p = JSON.parse(p); } catch (e) {} }
       var b64 = p && typeof p.content === "string" ? p.content : "";
-      if (!b64) return;
+      if (!b64) throw {code: "empty", message: "Drive sent back no file"};
       var bin = atob(b64), bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      var rows = videosFromWorkbook(X, X.read(bytes, {type: "array"}));
+      var list = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+      var rows = (Array.isArray(list) ? list : []).map(function(v){
+        return {mls: str(v.mls, 20).toUpperCase(), id: str(v.id, 80), n: str(v.n, 150), u: str(v.u, 600), d: str(v.d, 600), by: str(v.by, 60),
+                at: str(v.at, 40), sz: typeof v.sz === "number" ? v.sz : 0,
+                rep: str(v.rep, 400).split(",").map(function(x){ return x.trim(); }).filter(function(x){ return /^[\w-]{10,}$/.test(x); })};
+      }).filter(function(v){ return /^[A-Z0-9]{5,20}$/.test(v.mls) && /^[\w-]{10,}$/.test(v.id) && LINK_OK.test(v.u); });
       var n = saveVideos(rows, quiet), here = rows.filter(function(v){ return v.mls === acqSel; }).length;
       // say what the sheet holds, so a missing video can be traced to the sheet or the board
       if (loud) toast(n ? "✓ " + n + " new video" + (n === 1 ? "" : "s") + " added"
-        : "No new videos — the sheet's Videos tab has " + rows.length + " row" + (rows.length === 1 ? "" : "s") + ", " + here + " for this lead");
+        : "No new videos — the video list has " + rows.length + " video" + (rows.length === 1 ? "" : "s") + ", " + here + " for this lead");
     }).catch(function(e){
       var c = e && e.code;
       if (loud) toast(c === "cancelled" ? "Google Drive didn't answer in time — try again" :
         c === "not_in_manifest" || c === "server_not_connected" || c === "needs_reauth" ? "Allow Google Drive for this board, then try again (" + c + ")" :
-        "Couldn't check for videos — " + (c || "try again"));
+        "Couldn't check for videos — " + (c || "") + (e && e.message ? " " + String(e.message).slice(0, 120) : " try again"));
     }).then(function(){ vidBusy = false; if (kill) clearTimeout(kill); });
   }
   function noteDay(at){

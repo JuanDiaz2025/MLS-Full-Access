@@ -28,7 +28,10 @@
 
 var SHEET_ID = '1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ';
 var ROOT_NAME = 'FlipScout property videos';
-var ROOT_ID = '1RCHgifHH80Fzi9nwtl3cXeA31K2yKWmr';                         // optional: a folder id (e.g. in a Shared drive)
+var ROOT_ID = '1RCHgifHH80Fzi9nwtl3cXeA31K2yKWmr';
+// A small copy of the Videos tab that the board reads — a few hundred bytes
+// instead of the whole lead sheet. Rewritten after every upload.
+var LIST_ID = '1-F5r2NiEUsyCOQB4i54KynDvxn0m2JTI';                         // optional: a folder id (e.g. in a Shared drive)
 var TAB = 'Videos';
 var HEAD = ['Added On', 'MLS #', 'Address', 'File', 'Link', 'Download', 'Added By', 'Size MB', 'File Id', 'Replaces'];
 var CHUNK = 4 * 1024 * 1024;              // a multiple of 256 KB, as Drive requires
@@ -36,6 +39,7 @@ var MAX_BYTES = 2 * 1024 * 1024 * 1024;   // 2 GB — a sanity bound, not a real
 
 function doGet(e) {
   var p = (e && e.parameter) || {};
+  try { if (DriveApp.getFileById(LIST_ID).getBlob().getDataAsString().trim() === '[]') writeList_(); } catch (err) {}
   var ctx = {
     mls: String(p.mls || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20),
     addr: String(p.addr || '').slice(0, 160),
@@ -134,8 +138,23 @@ function finish_(fileId, up) {
   });
   var sh = videosTab_();
   sh.appendRow([new Date(), up.mls, up.addr, up.name, link, dl, up.by, Math.round(up.size / 1048576 * 10) / 10, fileId, gone.join(',')]);
+  try { writeList_(); } catch (err) {}
   return {done: true, link: link, download: dl, folder: file.getParents().hasNext() ? file.getParents().next().getUrl() : ''};
 }
+
+/** The Videos tab as JSON, into the small file the board reads. Run it by hand once to fill it. */
+function writeList_() {
+  var rows = videosTab_().getDataRange().getValues().slice(1), out = [];
+  rows.forEach(function(r){
+    if (!r[1] || !r[8]) return;
+    out.push({mls: String(r[1]), n: String(r[3]), u: String(r[4]), d: String(r[5]), by: String(r[6]),
+              at: r[0] instanceof Date ? r[0].toISOString() : String(r[0]), sz: Number(r[7]) || 0,
+              id: String(r[8]), rep: String(r[9] || '')});
+  });
+  DriveApp.getFileById(LIST_ID).setContent(JSON.stringify(out));
+  return out.length;
+}
+function rebuildVideoList() { return writeList_(); }
 
 function propertyFolder_(mls, addr) {
   var root;
