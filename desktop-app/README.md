@@ -51,8 +51,13 @@ install (creates a desktop shortcut) or run the portable exe directly.
      too few photos): never reaches the board; logged on **Rejected** with the
      score and the reason.
    Tenant-occupied is **not** a drop — it counts toward the score. The run never
-   stops to ask. With an Anthropic API key and **Use AI vision** ticked, Claude
-   also judges the photos and can turn a keep into a C.
+   stops to ask. With an API key and **Use AI vision** ticked, the AI also judges
+   the photos and can turn a keep into a C. Either an **OpenAI (ChatGPT)** key
+   (`sk-…`, default model `gpt-4.1`) or an **Anthropic (Claude)** key (`sk-ant-…`,
+   default `claude-opus-5-5`) works — the app tells them apart by the key. Press
+   **Test key** before a scan. The key is saved on this computer only. A failed
+   AI call never drops a listing: the text rules decide and the log says why,
+   and after 3 failures in a row the run carries on without AI.
 4. **Report** — kept candidates get size-matched sold comps → ARV (what it's worth
    after repair), Light/Heavy rehab, holding, days on market, and the dollar profit
    gate (Strong Deal / Marginal / Pass, with a Flip Quality label). **Export** to

@@ -611,6 +611,20 @@ live-verified with `scripts/mls-photos.js`.
 AI vision would have failed on its first call. It is now `claude-opus-5-5`
 (`claude-sonnet-5` is the cheaper option), and a saved old value is migrated.
 
+**OpenAI works too (v1.40.0, Seth, 26 Sep — the team has a ChatGPT key).** The
+provider comes from the key: `sk-ant-…` = Anthropic, anything else = OpenAI
+Chat Completions (`gpt-4.1` by default; photos go as `image_url` data URLs;
+`max_completion_tokens`, which the newer models require). Same prompt, same
+KEEP/DROP parsing (`aiCall()` in `main.js`). A Claude model name on an OpenAI
+key (or the reverse) is swapped for that provider's default. **Test key** in
+section 2 makes one tiny call. Key + model persist in `ai-settings.json` under
+userData.
+
+**A failed AI call is not a verdict.** It used to return DROP, so one typo in
+the model name auto-passed every listing in a run. Now the text rules' verdict
+stands, the log says `AI call failed: <provider message>`, and after 3
+failures in a row AI is off for the rest of that run.
+
 **The run never stops to ask.** There is no Keep/Drop approval step — it was
 removed per Bryan. AI vision decides when an API key is set, otherwise the text
 rules do, and `whenUnsure` (keep/drop) settles the cases the rules cannot read.

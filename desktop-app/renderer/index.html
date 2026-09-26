@@ -81,13 +81,20 @@
       <option value="drop">Drop it and carry on</option>
     </select>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:12px">
-      <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — reads every photo (needs an Anthropic API key)
+      <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — reads every photo (needs an OpenAI or Anthropic API key)
     </label>
     <div id="aiFields" style="display:none;margin-top:10px">
-      <label>Anthropic API key</label>
-      <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
+      <label>API key — OpenAI (ChatGPT) <code>sk-…</code> or Anthropic (Claude) <code>sk-ant-…</code></label>
+      <input id="apiKey" type="password" autocomplete="off" placeholder="sk-proj-... or sk-ant-...">
+      <div id="aiProv" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
       <label>Model</label>
-      <input id="model" type="text" value="claude-opus-5-5" placeholder="claude-opus-5-5 (or claude-sonnet-5, cheaper)">
+      <input id="model" type="text" value="" placeholder="gpt-4.1">
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+        <button id="aiTest" type="button">Test key</button>
+        <span id="aiTestOut" style="font-size:12.5px"></span>
+      </div>
+      <div style="color:var(--muted);font-size:12px;margin-top:6px">The key and model are saved on this computer only. If the AI can't be reached,
+        the text rules decide and the log says why; after 3 failures in a row the run carries on without AI.</div>
     </div>
   </div>
 
@@ -309,13 +316,42 @@
 
   function pushConfig(){ window.fs.setConfig({
     useAI: $('useAI').checked,
-    apiKey: $('apiKey').value, model: ($('model').value||'claude-opus-5-5').trim(),
+    apiKey: $('apiKey').value.trim(), model: ($('model').value||'').trim(),
     readSeconds: Number($('readSeconds').value||6),
     whenUnsure: $('whenUnsure').value,
     runComps: false,   // comping is off; see CLAUDE.md §5
   }); }
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
-  $('apiKey').oninput = pushConfig; $('model').oninput = pushConfig;
+  // which service the key belongs to, and a model that suits it
+  const AI_DEFAULT = { openai: 'gpt-4.1', anthropic: 'claude-opus-5-5' };
+  function aiProvOf(k){ return /^sk-ant-/.test(k) ? 'anthropic' : 'openai'; }
+  function aiSync(){
+    const k = $('apiKey').value.trim(), prov = aiProvOf(k), m = $('model').value.trim();
+    $('aiProv').textContent = k ? 'Using ' + (prov === 'openai' ? 'OpenAI (ChatGPT)' : 'Anthropic (Claude)') : '';
+    // a model from the other service would fail every call: swap it for this one's default
+    if (k && (!m || (prov === 'openai') === /^claude/i.test(m))) $('model').value = AI_DEFAULT[prov];
+    $('model').placeholder = prov === 'openai' ? 'gpt-4.1 (or another vision model, e.g. gpt-4o)' : 'claude-opus-5-5 (or claude-sonnet-5, cheaper)';
+    $('aiTestOut').textContent = '';
+  }
+  $('apiKey').oninput = () => { aiSync(); pushConfig(); };
+  $('model').oninput = () => { $('aiTestOut').textContent = ''; pushConfig(); };
+  $('aiTest').onclick = async () => {
+    $('aiTest').disabled = true; $('aiTestOut').style.color = ''; $('aiTestOut').textContent = 'Testing…';
+    pushConfig();
+    const r = await window.fs.aiTest();
+    $('aiTest').disabled = false;
+    $('aiTestOut').style.color = r.ok ? 'var(--strong, #1a7f37)' : 'var(--pass, #b42318)';
+    $('aiTestOut').textContent = r.ok ? `✓ Works — ${r.provider} · ${r.model}` : `✗ ${r.provider || ''} ${r.model ? '· ' + r.model : ''}: ${r.error}`;
+  };
+  // the saved key, model and on/off come back on launch
+  window.fs.aiSettings().then(a => {
+    if (!a) return;
+    if (a.apiKey) $('apiKey').value = a.apiKey;
+    if (a.model) $('model').value = a.model;
+    $('useAI').checked = !!a.useAI;
+    $('aiFields').style.display = $('useAI').checked ? 'block' : 'none';
+    aiSync(); pushConfig();
+  }).catch(() => {});
   $('readSeconds').oninput = pushConfig;
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }

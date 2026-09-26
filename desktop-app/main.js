@@ -15,6 +15,7 @@ const gsheets = require('./google-sheets');
 
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
+let aiFailStreak = 0;   // consecutive failed AI calls in this run
 const cfg = {
   apiKey: '', model: 'claude-opus-5-5', useAI: false,   // AI vision (optional)
   readSeconds: 6,                                                      // dwell per listing
@@ -27,11 +28,85 @@ const cfg = {
   runComps: false,     // OFF for now — qualify on CONDITION first, comp later
 };
 
-ipcMain.on('set-config', (_e, c) => {
-  Object.assign(cfg, c || {});
+// ---------- AI provider: Anthropic or OpenAI, told apart by the key ----------
+// Anthropic keys start "sk-ant-"; any other key is treated as OpenAI (ChatGPT).
+// The photo prompt and the KEEP/DROP rules are the same for both — only the
+// request and response shapes differ (see aiCall).
+const OPENAI_DEFAULT_MODEL = 'gpt-4.1';
+const ANTHROPIC_DEFAULT_MODEL = 'claude-opus-5-5';
+function aiProvider(key) { return /^sk-ant-/.test(String(key || '').trim()) ? 'anthropic' : 'openai'; }
+function aiModel() {
+  const prov = aiProvider(cfg.apiKey), m = String(cfg.model || '').trim();
   // "claude-opus-5" was never a model id; a saved setting from an older build
   // would make every AI call fail.
-  if (!cfg.model || cfg.model === 'claude-opus-5') cfg.model = 'claude-opus-5-5';
+  if (prov === 'anthropic') return !m || m === 'claude-opus-5' || !/^claude/i.test(m) ? ANTHROPIC_DEFAULT_MODEL : m;
+  // a Claude model name sent to OpenAI would fail every call
+  return !m || /^claude/i.test(m) ? OPENAI_DEFAULT_MODEL : m;
+}
+
+// The key and model survive a restart (they used to be retyped every launch).
+// Kept on this computer only, next to the Google sign-in.
+const AI_FILE = () => path.join(app.getPath('userData'), 'ai-settings.json');
+function loadAi() {
+  try { const j = JSON.parse(fs.readFileSync(AI_FILE(), 'utf8')); return j && typeof j === 'object' ? j : {}; } catch (_) { return {}; }
+}
+function saveAi() {
+  try { fs.writeFileSync(AI_FILE(), JSON.stringify({ apiKey: cfg.apiKey || '', model: cfg.model || '', useAI: !!cfg.useAI }, null, 2)); } catch (_) {}
+}
+ipcMain.handle('ai-settings', () => {
+  const j = loadAi();
+  return { apiKey: j.apiKey || '', model: j.model || '', useAI: !!j.useAI, provider: aiProvider(j.apiKey) };
+});
+
+ipcMain.on('set-config', (_e, c) => {
+  Object.assign(cfg, c || {});
+  cfg.model = aiModel();
+  if (c && ('apiKey' in c || 'model' in c || 'useAI' in c)) saveAi();
+});
+
+/**
+ * One call to whichever provider the key belongs to. `photos` are base64
+ * JPEGs, `text` is the prompt. Resolves {text} or throws with the provider's
+ * own error message, so a wrong key or model name says so in the log.
+ */
+async function aiCall(photos, text, maxTokens) {
+  const key = String(cfg.apiKey || '').trim(), model = aiModel();
+  if (aiProvider(key) === 'anthropic') {
+    const content = photos.map(b64 => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }));
+    content.push({ type: 'text', text });
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 1024, messages: [{ role: 'user', content }] }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.type === 'error') throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+    return { text: (j.content || []).filter(b => b.type === 'text').map(b => b.text).join(' '), model, provider: 'Anthropic' };
+  }
+  // OpenAI Chat Completions: images go in as data URLs.
+  const content = [{ type: 'text', text }].concat(photos.map(b64 => ({
+    type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64, detail: 'auto' },
+  })));
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
+    // max_completion_tokens, not max_tokens: the newer models refuse the old name
+    body: JSON.stringify({ model, max_completion_tokens: maxTokens || 1024, messages: [{ role: 'user', content }] }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  const msg = j.choices && j.choices[0] && j.choices[0].message;
+  return { text: (msg && typeof msg.content === 'string' ? msg.content : '') || '', model, provider: 'OpenAI' };
+}
+
+// "Test key" in section 2: a tiny text-only call, so a bad key or model name
+// shows up before a scan, not as a run full of failed reviews.
+ipcMain.handle('ai-test', async () => {
+  if (!cfg.apiKey) return { ok: false, error: 'Paste an API key first.' };
+  try {
+    const r = await aiCall([], 'Reply with the single word: ready', 20);
+    return { ok: true, provider: r.provider, model: r.model, reply: (r.text || '').trim().slice(0, 40) };
+  } catch (e) { return { ok: false, provider: aiProvider(cfg.apiKey) === 'anthropic' ? 'Anthropic' : 'OpenAI', model: aiModel(), error: e.message }; }
 });
 
 // ---------- daily KPIs ----------
@@ -540,19 +615,12 @@ async function autoDecide(c) {
       return { decision: 'drop', reason: 'no photos could be loaded — insufficient photos to judge' };
     }
     log(`  analysing ${photos.length} photo(s)…`);
-    const content = photos.map(b64 => ({
-      type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 },
-    }));
-    content.push({ type: 'text', text: rulesPrompt(c, photos.length, gal) });
-    const body = { model: cfg.model || 'claude-opus-5-5', max_tokens: 1024, messages: [{ role: 'user', content }] };
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const j = await r.json();
-    if (j.type === 'error') return { decision: 'drop', reason: 'AI error: ' + (j.error && j.error.message || 'unknown') };
-    const text = (j.content || []).filter(b => b.type === 'text').map(b => b.text).join(' ');
+    let text;
+    try { text = (await aiCall(photos, rulesPrompt(c, photos.length, gal), 1024)).text; }
+    // A failed CALL is not a verdict on the house: say so, and let the text
+    // rules stand. (It used to return DROP, so a typo in the model name
+    // auto-passed every listing in the run.)
+    catch (e) { return { error: true, reason: 'AI call failed: ' + e.message }; }
     let o = {}; const m = text.match(/\{[\s\S]*\}/);
     try { o = JSON.parse(m ? m[0] : text); } catch (_) {}
     const decision = /^keep$/i.test(String(o.decision || '').trim()) ? 'keep' : 'drop';
@@ -562,7 +630,7 @@ async function autoDecide(c) {
       o.quickFlip && ('rehab: ' + o.quickFlip)].filter(Boolean).join(' | ');
     const reason = [(o.reason || text || '').trim(), seen].filter(Boolean).join(' — ');
     return { decision, reason: reason.slice(0, 300), photos: photos.length };
-  } catch (e) { return { decision: 'drop', reason: 'AI call failed: ' + e.message }; }
+  } catch (e) { return { error: true, reason: 'AI call failed: ' + e.message }; }
 }
 
 // ---------- full run ----------
@@ -583,6 +651,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
   if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
   control.running = true; control.stopped = false; control.paused = false;
   samplesThisRun = 0;
+  aiFailStreak = 0;
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
   // Only a run that actually started closes the browser window at the end.
   // Bailing out for "not signed in" and then shutting the window the user is
@@ -712,14 +781,21 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         });
         if (!gal.gridOk && n) log(`  photo grid did not load — only ${n} carousel photo(s) seen, photo count not used`, 'warn');
         if (gal.privateRemarks) log(`  private remarks read (${gal.privateRemarks.length} chars)`);
-        if (cfg.useAI && cfg.apiKey && !core.isConfirmed(c.addr) && !q.hard) {
+        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard) {
           // AI vision still has the final say on condition when it is on: a
           // DROP from the photos is an auto-pass whatever the text scored.
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
-          if (v.decision !== 'keep') {
+          if (v.error) {
+            // the text verdict stands; three failures in a row = stop asking this run
+            aiFailStreak++;
+            log(`  ${v.reason} — kept the text rules' verdict`, 'warn');
+            if (aiFailStreak >= 3) log('AI vision failed 3 times in a row — turned off for the rest of this run. Check the key and model in section 2 (Test key).', 'error');
+          } else if (v.decision !== 'keep') {
+            aiFailStreak = 0;
             Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop',
               score: Math.min(q.score, 15), why: 'AI (vision): ' + v.reason });
           } else {
+            aiFailStreak = 0;
             q.why = q.why + ' + AI (vision) keep: ' + v.reason;
           }
         }
