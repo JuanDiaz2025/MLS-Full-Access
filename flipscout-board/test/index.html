@@ -1892,7 +1892,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         (v.by ? ' · ' + esc(v.by) : '') + (v.sz ? ' · ' + esc(String(v.sz)) + ' MB' : '') + '</small></span>' +
         '<a class="btn tiny" href="' + esc(v.u) + '" target="_blank" rel="noopener">Drive ↗</a></div>' +
         '<video class="note-video" src="/_blob/' + esc(v.a) + '" controls preload="metadata" playsinline></video></div>';
-    var canHere = ASSETS && mcp && v.sz && v.sz <= 15 && driveId(v.u);
+    var canHere = false;   // copying from Drive: the connector refuses the response (response_too_large, 9.4 MB)
     return '<div class="lk-card"><span class="lk-ic" aria-hidden="true">▶</span><span class="lk-t"><b>' + esc(v.n || "Video") + '</b><small>Google Drive' +
       (v.by ? ' · ' + esc(v.by) : '') + (v.at ? ' · ' + esc(noteDay(v.at)) : '') + (v.sz ? ' · ' + esc(String(v.sz)) + ' MB' : '') + '</small></span>' +
       (canHere ? '<button type="button" class="btn tiny go" data-vhere="' + esc(v.id) + '" data-vmls="' + esc(v.mls) + '" title="Copies it onto the board once, then it plays here">▶ Play here</button>' : '') +
