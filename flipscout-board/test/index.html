@@ -905,6 +905,25 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 #viewAcq .acq-tile{padding:10px 14px}
 #viewAcq .acq-tile .v{font-size:24px}
 #viewAcq .acq-tile .sub{font-size:11.5px}
+
+/* visit window: tap a day and a time */
+#visitDlg{border:1px solid var(--line); border-radius:14px; padding:0; width:min(560px, calc(100% - 32px));
+  background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55)}
+#visitDlg::backdrop{background:rgba(14,32,46,.45)}
+.vz-sec{margin-top:14px}
+.vz-lbl{font:600 10.5px Archivo,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:6px}
+.vz-chips{display:flex; flex-wrap:wrap; gap:6px}
+.vz-chips button{min-height:38px; min-width:58px; padding:6px 12px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
+  font:600 13px Archivo,sans-serif; color:var(--ink); cursor:pointer}
+.vz-chips button small{font:500 11px "IBM Plex Mono",monospace; color:var(--muted); margin-left:3px}
+.vz-chips button:hover{border-color:var(--brand-2)}
+.vz-chips button[aria-pressed="true"]{background:var(--brand); border-color:var(--brand); color:#FFFFFF}
+.vz-chips button[aria-pressed="true"] small{color:#FFFFFF}
+.vz-other{display:inline-flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:var(--muted)}
+.vz-other input{min-height:32px; padding:4px 8px; font-size:13px}
+.vz-row{display:grid; grid-template-columns:auto 1fr; gap:0 22px}
+.vz-sum{margin:16px 0 0; padding:10px 12px; border-radius:8px; background:var(--b-review); color:var(--t-review); font:600 13.5px Archivo,sans-serif}
+@media (max-width:560px){ .vz-row{grid-template-columns:1fr} }
 </style>
 
 <header class="top">
@@ -1074,12 +1093,17 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     <div class="dlg">
       <h2 id="visitTitle">Property visit</h2>
       <p class="dlg-sub" id="visitAddr"></p>
-      <label class="dlg-hint" for="visitWhen">Date and time</label>
-      <input type="datetime-local" id="visitWhen" style="width:100%; margin-top:6px">
-      <label class="dlg-hint" for="visitSt" style="display:block; margin-top:10px">Status</label>
-      <select id="visitSt" style="width:100%; margin-top:6px">
-        <option value="">—</option><option>To schedule</option><option>Scheduled</option><option>Visited</option><option>Cancelled</option>
-      </select>
+      <div class="vz-sec"><div class="vz-lbl">Day</div>
+        <div class="vz-chips" id="visitDays" role="group" aria-label="Day"></div>
+        <label class="vz-other">or pick a date <input type="date" id="visitD"></label></div>
+      <div class="vz-sec"><div class="vz-lbl">Time</div>
+        <div class="vz-chips" id="visitTimes" role="group" aria-label="Time"></div>
+        <label class="vz-other">or another time <input type="time" id="visitT" step="900"></label></div>
+      <div class="vz-row">
+        <div class="vz-sec"><div class="vz-lbl">Who’s going</div><div class="vz-chips" id="visitWho" role="group" aria-label="Who is going"></div></div>
+        <div class="vz-sec"><div class="vz-lbl">Status</div><div class="vz-chips" id="visitStat" role="group" aria-label="Visit status"></div></div>
+      </div>
+      <p class="vz-sum" id="visitSum" aria-live="polite"></p>
       <div class="dlg-actions">
         <button type="button" class="btn" id="visitClear" title="Remove the date, time and status">Clear</button>
         <button type="button" class="btn" id="visitCancel">Cancel</button>
@@ -1626,27 +1650,62 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   /* ---------- property visit: a date and a status, saved for the team ---------- */
   // One button per lead; it opens a small window with date + time and status.
   var visitFor = null;
+  // Tap a day, tap a time: native date-time pickers were too fiddly to hit.
+  var vz = {d: "", t: "", w: "", s: ""};
+  var VZ_TIMES = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"];
+  var VZ_WHO = ["Juan", "Jairo"], VZ_ST = ["Scheduled", "Visited", "To schedule", "Cancelled"];
+  function vzISO(dt){ return dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0"); }
+  function vzChip(attr, val, label, on){ return '<button type="button" ' + attr + '="' + esc(val) + '" aria-pressed="' + on + '">' + label + '</button>'; }
+  function vzDraw(){
+    var days = [], t0 = new Date();
+    for (var i = 0; i < 7; i++) { var dt = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + i); days.push(vzISO(dt)); }
+    $("visitDays").innerHTML = days.map(function(d, i){
+      var dt = new Date(d + "T12:00:00");
+      var lab = i === 0 ? "Today" : i === 1 ? "Tomorrow" : dt.toLocaleDateString("en-US", {weekday: "short"}) + ' <small>' + dt.getDate() + '</small>';
+      return vzChip("data-vz-d", d, lab, vz.d === d);
+    }).join("");
+    $("visitTimes").innerHTML = VZ_TIMES.map(function(t){ return vzChip("data-vz-t", t, visitTime(t).replace(":00", ""), vz.t === t); }).join("");
+    $("visitWho").innerHTML = VZ_WHO.map(function(p){ return vzChip("data-vz-w", p, p, vz.w === p); }).join("");
+    $("visitStat").innerHTML = VZ_ST.map(function(x){ return vzChip("data-vz-s", x, x, vz.s === x); }).join("");
+    $("visitD").value = days.indexOf(vz.d) === -1 ? vz.d : "";
+    $("visitT").value = VZ_TIMES.indexOf(vz.t) === -1 ? vz.t : "";
+    $("visitSum").textContent = vz.d ? new Date(vz.d + "T12:00:00").toLocaleDateString("en-US", {weekday: "long", month: "short", day: "numeric"}) +
+      (vz.t ? " at " + visitTime(vz.t) : " — no time yet") + (vz.w ? " · " + vz.w : "") + " · " + (vz.s || "Scheduled") : "Pick a day";
+  }
   document.addEventListener("click", function(ev){
     var b = ev.target.closest("button[data-visit]"); if (!b) return;
-    var l = BY_MLS[b.dataset.visit], v = l ? visitOf(l) : {d: "", t: "", s: ""};
+    var l = BY_MLS[b.dataset.visit], v = l ? visitOf(l) : {d: "", t: "", s: ""}, e0 = l ? (rec(l.date, l.mls) || {}) : {};
     visitFor = {mls: b.dataset.visit, date: b.dataset.date};
     $("visitAddr").textContent = l ? l.addr + " · " + l.mls : b.dataset.visit;
-    $("visitWhen").value = v.d ? v.d + "T" + (v.t || "10:00") : "";
-    $("visitSt").value = v.s || "";
+    vz = {d: v.d || "", t: v.t || "", w: VZ_WHO.indexOf(e0.vw) !== -1 ? e0.vw : "Juan", s: v.s || "Scheduled"};
+    vzDraw();
     var d = $("visitDlg"); if (d.showModal) d.showModal(); else d.setAttribute("open", "");
-    $("visitWhen").focus();
+    var first = $("visitDays").querySelector("button"); if (first) first.focus();
   });
+  $("visitDlg").addEventListener("click", function(ev){
+    var c = ev.target.closest("button[data-vz-d], button[data-vz-t], button[data-vz-w], button[data-vz-s]"); if (!c) return;
+    if (c.dataset.vzD) vz.d = c.dataset.vzD;
+    if (c.dataset.vzT) vz.t = vz.t === c.dataset.vzT ? "" : c.dataset.vzT;
+    if (c.dataset.vzW) vz.w = c.dataset.vzW;
+    if (c.dataset.vzS) vz.s = c.dataset.vzS;
+    vzDraw();
+  });
+  $("visitD").addEventListener("change", function(){ if (this.value) { vz.d = this.value; vzDraw(); } });
+  $("visitT").addEventListener("change", function(){ vz.t = this.value; vzDraw(); });
   function closeVisit(patch){
     var d = $("visitDlg"), f = visitFor; visitFor = null;
     if (d.open) d.close();
     if (f && patch) applyEdit(f.date, f.mls, patch);
   }
   $("visitSave").addEventListener("click", function(){
-    var w = $("visitWhen").value, st = $("visitSt").value;
-    if (w && !st) st = "Scheduled";                    // a date means it is scheduled
-    closeVisit({vd: w ? w.slice(0, 10) : "", vt: w ? w.slice(11, 16) : "", vs: st});
+    if (!vz.d && vz.s === "Scheduled") { toast("Pick a day first"); return; }
+    var p = {vd: vz.d, vt: vz.t, vs: vz.s, vw: vz.w}, l = visitFor && BY_MLS[visitFor.mls];
+    // booking it moves an early lead along the Acquisitions pipeline, as there
+    var to = p.vs === "Visited" ? "visited" : p.vs === "Scheduled" ? "visit" : "";
+    if (l && to && STAGE_BY[acqStage(l)].i < STAGE_BY[to].i) { var sp = stagePatch(l, to); p.pl = sp.pl; if (sp.s) p.s = sp.s; }
+    closeVisit(p);
   });
-  $("visitClear").addEventListener("click", function(){ closeVisit({vd: "", vt: "", vs: ""}); });
+  $("visitClear").addEventListener("click", function(){ closeVisit({vd: "", vt: "", vs: "", vw: ""}); });
   $("visitCancel").addEventListener("click", function(){ closeVisit(null); });
   $("visitDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closeVisit(null); });
   var VISIT_ST = ["", "To schedule", "Scheduled", "Visited", "Cancelled"];
