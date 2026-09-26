@@ -899,6 +899,12 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .wk-gh-hits{background:var(--b-review); color:var(--t-review); border-left-color:var(--t-review)}
 .wk-gh-others, .wk-gh-gone{background:#F1F3F6; color:#57687C; border-left-color:#B8C2CF}
 .wk-st-new{background:#E8ECF3; color:#334155}
+
+/* v7: the summary cards are back, compact */
+#viewAcq .acq-tiles{gap:10px; margin:0 0 10px}
+#viewAcq .acq-tile{padding:10px 14px}
+#viewAcq .acq-tile .v{font-size:24px}
+#viewAcq .acq-tile .sub{font-size:11.5px}
 </style>
 
 <header class="top">
@@ -975,6 +981,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   </div><!-- /viewLeads -->
 
   <div id="viewAcq" hidden>
+    <div class="acq-tiles" id="acqTiles"></div>
     <div class="wk-head"><div class="wk-tabs" id="acqTabs" role="tablist" aria-label="Stage"></div></div>
     <p class="acq-note" id="acqNote"></p>
     <div id="acqSecs"><div class="acq-split">
@@ -1998,7 +2005,16 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   function stagePill(k){ var s = STAGE_BY[k] || STAGE_BY["new"]; return '<span class="wk-pill wk-st-' + s.k + '">' + esc(s.t) + '</span>'; }
 
-  var acqF = {tab: "active", who: "", area: "", bk: "", sort: "due"};
+  var acqF = {tab: "active", who: "", area: "", bk: "", sort: "due", tile: ""};
+  function acqVisitSoon(l){ var v = visitOf(l), n = v.d ? daysUntil(v.d) : null; return v.s === "Scheduled" && n !== null && n >= 0; }
+  var ACQ_TILES = [
+    {k: "",        t: "Working",    sub: "being worked"},
+    {k: "emailed", t: "Emailed",    c: "--t-review", sub: "agents contacted", f: acqEmailed},
+    {k: "replied", t: "Replied",    c: "--t-won",    sub: "agents answered",  f: acqReplied},
+    {k: "juan",    t: "Needs Juan", c: "--t-pass",   sub: "reply wants a call or talks price", f: function(l){ var x = EMAIL_BY[l.mls]; return !!(x && x.juan); }},
+    {k: "due",     t: "Offers due", c: "--t-offer",  sub: "today to 3 days", f: function(l){ var n = acqDueDays(l); return n !== null && n >= 0 && n <= 3; }},
+    {k: "visits",  t: "Visits",     c: "--st-visit-t", sub: "booked, upcoming", f: acqVisitSoon}
+  ];
   var acqSel = "", acqFlat = [], acqPicked = {}, acqDueEdit = "", acqVisEdit = "", acqSelecting = false;
   try { var tv = localStorage.getItem("fs_acq_tab"); if (tv) acqF.tab = tv; var sv = localStorage.getItem("fs_acq_sort"); if (/^(due|new|price)$/.test(sv || "")) acqF.sort = sv; localStorage.removeItem("fs_acq_who"); } catch (e) {}
   function acqKeep(){ try { localStorage.setItem("fs_acq_tab", acqF.tab); localStorage.setItem("fs_acq_sort", acqF.sort); } catch (e) {} }
@@ -2044,8 +2060,16 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var who = function(l){ return acqWhoMatch(l, acqF.who); };
     var extra = function(l){ return (!acqF.area || countyOf(l) === acqF.area) && (!acqF.bk || l.bucket === acqF.bk); };
 
-    // the stage tabs: counts follow the person and area filters, not the tab
-    var base = open.filter(function(l){ return who(l) && extra(l); });
+    // the cards: counts over everything being worked (filters aside); one picked narrows the list
+    var tileF = acqF.tile && ACQ_TILES.filter(function(t){ return t.k === acqF.tile; })[0];
+    $("acqTiles").innerHTML = ACQ_TILES.map(function(t){
+      var n = t.f ? open.filter(t.f).length : open.length, on = t.k ? acqF.tile === t.k : !acqF.tile;
+      return '<button type="button" class="kpi acq-tile" data-acq-tile="' + t.k + '" aria-pressed="' + on + '">' +
+        '<span class="t">' + t.t + '</span><span class="v"' + (t.c ? ' style="color:var(' + t.c + ')"' : '') + '>' + n + '</span>' +
+        '<span class="sub">' + (t.k ? t.sub : closed.filter(function(l){ return acqStage(l) === "won"; }).length + ' won · show everything') + '</span></button>';
+    }).join("");
+    // the stage tabs: counts follow the card and the area filters, not the tab
+    var base = open.filter(function(l){ return who(l) && extra(l) && (!tileF || tileF.f(l)); });
     var cnt = {active: base.length, closed: closed.filter(function(l){ return who(l) && extra(l); }).length};
     OPEN_STAGES.forEach(function(k){ cnt[k] = base.filter(function(l){ return acqStage(l) === k; }).length; });
     var tabs = [["active", "All active"]].concat(OPEN_STAGES.map(function(k){ return [k, STAGE_BY[k].t]; })).concat([["closed", "Won · Passed · Removed"]]);
@@ -2059,7 +2083,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       var fAct = document.activeElement && document.activeElement.tagName === "SELECT" && document.activeElement.closest("#acqBar");
     if (!fAct) {
       var areas = {}; open.forEach(function(l){ var c = countyOf(l); areas[c] = (areas[c] || 0) + 1; });
-      var anyF = !!(acqF.who || acqF.area || acqF.bk);
+      var anyF = !!(acqF.who || acqF.area || acqF.bk || acqF.tile);
       $("acqBar").innerHTML =
         '<select data-acq-fsel="sort" aria-label="Sort the list">' +
           [["due", "Deadline"], ["new", "Newest"], ["price", "Price"]].map(function(o){
@@ -2098,7 +2122,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       var hot = rows.filter(function(l){ return acqUrgent(l); });
       var rest = rows.filter(function(l){ return !acqUrgent(l); });
       if (hot.length) groups.push({k: "hot", t: "Needs someone now", rows: hot, hot: true});
-      if (acqF.tab === "active") OPEN_STAGES.forEach(function(k){
+      if (acqF.tab === "active") OPEN_STAGES.slice().reverse().forEach(function(k){
         var r = rest.filter(function(l){ return acqStage(l) === k; });
         if (r.length) groups.push({k: k, t: STAGE_BY[k].t, rows: r});
       });
@@ -2308,7 +2332,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   $("acqSelRm").addEventListener("click", acqAskRemove);
   $("acqSelClear").addEventListener("click", function(){ acqPicked = {}; renderAcq(); });
   $("acqSelToggle").addEventListener("click", function(){ acqSelecting = !acqSelecting; if (!acqSelecting) acqPicked = {}; renderAcq(); });
-  function acqClearAll(){ acqF.who = ""; acqF.area = ""; acqF.bk = ""; $("acqQ").value = ""; acqKeep(); renderAcq(); }
+  function acqClearAll(){ acqF.who = ""; acqF.area = ""; acqF.bk = ""; acqF.tile = ""; $("acqQ").value = ""; acqKeep(); renderAcq(); }
   $("acqQ").addEventListener("input", function(){ renderAcq(); });
   $("viewAcq").addEventListener("change", function(ev){
     var cur = BY_MLS[acqSel], sl = ev.target;
@@ -2340,7 +2364,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     }
   });
   $("viewAcq").addEventListener("click", function(ev){
-    var b = ev.target.closest("[data-acq-tab]");
+    var b = ev.target.closest("[data-acq-tile]");
+    if (b) { var tk = b.dataset.acqTile; acqF.tile = acqF.tile === tk ? "" : tk; renderAcq(); return; }
+    b = ev.target.closest("[data-acq-tab]");
     if (b) { acqF.tab = b.dataset.acqTab; acqKeep(); renderAcq(); return; }
     b = ev.target.closest("[data-acq-who]");
     if (b) { var w = b.dataset.acqWho; acqF.who = acqF.who === w ? "" : w; acqKeep(); renderAcq(); return; }
