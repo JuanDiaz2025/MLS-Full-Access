@@ -1952,7 +1952,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     Object.keys(replaced).forEach(function(r){
       var m = replaced[r], cur = VIDEOS[m] && VIDEOS[m][r];
       if (!db || !cur || cur.gone) return;
-      VIDEOS[m][r] = {gone: true};
+      VIDEOS[m] = Object.assign({}, VIDEOS[m]); VIDEOS[m][r] = {gone: true};
       var body = {items: {}}; body.items[r] = {gone: true};
       var ref = db.doc("videos/" + m);
       ref.update(body).catch(function(){ return ref.set(body); }).catch(function(){});
@@ -1961,7 +1961,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     rows.forEach(function(v){
       if (!db || replaced[v.id] || (VIDEOS[v.mls] && VIDEOS[v.mls][v.id])) return;
       var item = {u: v.u, d: LINK_OK.test(v.d) ? v.d : "", n: v.n, by: v.by, at: v.at, sz: v.sz};
-      VIDEOS[v.mls] = VIDEOS[v.mls] || {}; VIDEOS[v.mls][v.id] = item;
+      VIDEOS[v.mls] = Object.assign({}, VIDEOS[v.mls] || {}); VIDEOS[v.mls][v.id] = item;
       var body = {items: {}}; body.items[v.id] = item;
       var ref = db.doc("videos/" + v.mls);
       ref.update(body).catch(function(){ return ref.set(body); }).catch(function(){});
@@ -3684,7 +3684,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       });
       db.collection("videos").onSnapshot(function(snap){
         var next = {};
-        snap.docs.forEach(function(d){ var b = d.data() || {}; next[d.id] = b.items && typeof b.items === "object" ? b.items : {}; });
+        snap.docs.forEach(function(d){ var b = d.data() || {}; next[d.id] = b.items && typeof b.items === "object" ? Object.assign({}, b.items) : {}; });
         VIDEOS = next;
         draw();
       }, function(){});
