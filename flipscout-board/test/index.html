@@ -1983,8 +1983,11 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       if (!b64) return;
       var bin = atob(b64), bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      var n = saveVideos(videosFromWorkbook(X, X.read(bytes, {type: "array"})), quiet);
-      if (loud && !n) toast("No new videos yet — a big one can take a minute after it says Uploaded");
+      var rows = videosFromWorkbook(X, X.read(bytes, {type: "array"}));
+      var n = saveVideos(rows, quiet), here = rows.filter(function(v){ return v.mls === acqSel; }).length;
+      // say what the sheet holds, so a missing video can be traced to the sheet or the board
+      if (loud) toast(n ? "✓ " + n + " new video" + (n === 1 ? "" : "s") + " added"
+        : "No new videos — the sheet's Videos tab has " + rows.length + " row" + (rows.length === 1 ? "" : "s") + ", " + here + " for this lead");
     }).catch(function(e){ if (loud) toast("Couldn't check for videos — " + ((e && e.code) || "try again")); }).then(function(){ vidBusy = false; });
   }
   function noteDay(at){
