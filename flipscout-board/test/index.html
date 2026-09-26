@@ -715,6 +715,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .wk-tab-interest[aria-selected="true"]{border-bottom-color:var(--st-int-t)}
 .wk-tab-visit[aria-selected="true"]{border-bottom-color:var(--st-visit-t)}
 .wk-tab-offer[aria-selected="true"]{border-bottom-color:var(--st-offer-t)}
+.wk-tab-visited[aria-selected="true"]{border-bottom-color:#35591C}
+.note-video{display:block; margin-top:6px; width:100%; max-width:480px; max-height:320px; border-radius:6px; border:1px solid var(--line); background:#000}
+.note-dl{margin-left:6px; font-size:11.5px; padding:2px 4px}
 
 .wk-bar{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 12px}
 .wk-bar-gap{flex:1}
@@ -743,6 +746,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .wk-st-radar{background:var(--st-radar-b); color:var(--st-radar-t)}
 .wk-st-interest{background:var(--st-int-b); color:var(--st-int-t)}
 .wk-st-visit{background:var(--st-visit-b); color:var(--st-visit-t)}
+.wk-st-visited{background:#E3EED9; color:#35591C}
 .wk-st-offer{background:var(--st-offer-b); color:var(--st-offer-t)}
 .wk-st-won{background:var(--st-won-b); color:var(--st-won-t)}
 .wk-st-passed{background:var(--st-pass-b); color:var(--st-pass-t)}
@@ -1707,13 +1711,36 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
   // Notes under the address: the latest one always showing, the full list and
   // the box to add one folded underneath.
-  var ASSETS = null;
+  var ASSETS = null, DOWNLOADS = null;
+  // Saving a file goes through the viewer's own confirmation; the save list
+  // has no .mov / .m4v, which are MP4 inside, so those save as .mp4.
+  function saveFile(id, name){
+    if (!DOWNLOADS) return;
+    var fn = String(name || "file").replace(/\.(mov|m4v)$/i, ".mp4");
+    toast("Getting " + fn + "…");
+    fetch("/_blob/" + id).then(function(r){ if (!r.ok) throw {code: "gone"}; return r.blob(); })
+      .then(function(b){ return DOWNLOADS.save({filename: fn, data: b}); })
+      .then(function(){ toast("✓ Saved " + fn); })
+      .catch(function(e){
+        var c = e && e.code;
+        if (c === "declined") return;
+        toast(c === "gone" ? "That file is no longer on the board" : c === "rejected_extension" ? "That kind of file can't be saved from here — open it and save it from the new tab" :
+              c === "rate_limited" ? "Finish the save that's already open first" : "Couldn't save that file — try again");
+      });
+  }
+  document.addEventListener("click", function(ev){
+    var b = ev.target.closest && ev.target.closest("button[data-dl]");
+    if (b) saveFile(b.dataset.dl, b.dataset.dlN);
+  });
   function fileSize(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? Math.round(n / 1024) + " KB" : n + " B"; }
   function noteFileHTML(f){
     var url = "/_blob/" + f.id, img = /^image\//.test(f.ty);
-    return '<a class="note-file" href="' + url + '" target="_blank" rel="noopener">' + (img ? '🖼' : /pdf/.test(f.ty) ? '📄' : '📎') +
+    var vid = /^video\//.test(f.ty);
+    return '<a class="note-file" href="' + url + '" target="_blank" rel="noopener">' + (img ? '🖼' : vid ? '🎬' : /pdf/.test(f.ty) ? '📄' : '📎') +
       ' <span>' + esc(f.n) + '</span>' + (f.sz ? '<small>' + fileSize(f.sz) + '</small>' : '') + '</a>' +
-      (img ? '<a href="' + url + '" target="_blank" rel="noopener"><img class="note-thumb" src="' + url + '" alt="' + esc(f.n) + '" loading="lazy"></a>' : '');
+      (DOWNLOADS ? '<button type="button" class="wk-link note-dl" data-dl="' + esc(f.id) + '" data-dl-n="' + esc(f.n) + '">Download</button>' : '') +
+      (img ? '<a href="' + url + '" target="_blank" rel="noopener"><img class="note-thumb" src="' + url + '" alt="' + esc(f.n) + '" loading="lazy"></a>' : '') +
+      (vid ? '<video class="note-video" src="' + url + '" controls preload="metadata" playsinline></video>' : '');
   }
   function notesHTML(l, withFiles){
     var list = noteList(l.mls), last = list[list.length - 1];
@@ -1729,8 +1756,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<textarea class="note-in" rows="2" data-mls="' + m + '" aria-label="New note for ' + m +
         '" placeholder="Seller motivated? Talked to agent? Write it here…">' + esc(drafts[l.mls] || "") + '</textarea>' +
       '<div class="note-row"><span class="hint">Saved with your name for the whole team</span>' +
-      (withFiles && ASSETS ? '<label class="btn tiny note-attach" title="Photos, PDFs or text files, up to 20 MB">📎 Attach file' +
-        '<input type="file" data-attach="' + m + '" accept="image/*,application/pdf,.pdf,.txt,.csv,.md,.json"></label>' : '') +
+      (withFiles && ASSETS ? '<label class="btn tiny note-attach" title="Photos, videos (MP4, MOV, WebM), PDFs or text files, up to 20 MB each">📎 Attach file' +
+        '<input type="file" data-attach="' + m + '" accept="image/*,video/mp4,video/webm,video/quicktime,.mp4,.m4v,.mov,.webm,application/pdf,.pdf,.txt,.csv,.md,.json,.svg"></label>' : '') +
       '<button type="button" class="btn tiny" data-note-save="' + m + '">Save note</button></div>' +
       '</details>';
   }
@@ -1752,16 +1779,19 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     writeNote(mls, id, entry, "Note saved for the team");
   }
 
+  // What the board's file storage accepts. A phone's .mov/.m4v is the MP4 family and is stored as one;
+  // Word, Excel and zip files are not accepted by the storage at all.
   var FILE_TYPES = {txt: "text/plain", csv: "text/csv", md: "text/markdown", json: "application/json", pdf: "application/pdf",
-                    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp"};
+                    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+                    mp4: "video/mp4", m4v: "video/mp4", mov: "video/mp4", webm: "video/webm"};
   function attachFile(mls, file, label){
     if (!ASSETS || !file) return;
     if (!myName){ toast("Type your name in the box at the top first, so the team knows who added it"); $("nameIn").focus(); return; }
     var ext = (/\.([a-z0-9]+)$/i.exec(file.name) || [])[1], ty = FILE_TYPES[(ext || "").toLowerCase()] || file.type;
-    if (!/^(image\/(png|jpeg|gif|webp)|application\/pdf|text\/(plain|csv|markdown)|application\/json)$/.test(ty || "")) {
-      toast("That kind of file can't be attached — use a photo, a PDF or a text file"); return;
+    if (!/^(image\/(png|jpeg|gif|webp|svg\+xml)|video\/(mp4|webm)|application\/pdf|text\/(plain|csv|markdown)|application\/json)$/.test(ty || "")) {
+      toast("That kind of file can't be attached — use a photo, a video (MP4, MOV, WebM), a PDF or a text file. Save Word or Excel files as PDF first."); return;
     }
-    if (file.size > 20 * 1048576) { toast("That file is over 20 MB — too big to attach"); return; }
+    if (file.size > 20 * 1048576) { toast("That file is over 20 MB — too big to attach" + (/^video/.test(ty) ? ". Trim the video or send a shorter clip." : "")); return; }
     if (label) label.classList.add("busy");
     toast("Uploading " + file.name + "…");
     ASSETS.upload(file, {type: ty}).then(function(r){
@@ -1809,25 +1839,28 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   var ACQ = false;
   var STAGES = [
     {k: "new",      t: "New",             sub: "being worked, no stage set yet"},
-    {k: "radar",    t: "On our radar",    sub: "watching it"},
-    {k: "interest", t: "Juan interested", sub: "Juan wants this one"},
+    {k: "interest", t: "Juan interested", sub: "on our radar: Juan wants this one"},
     {k: "visit",    t: "Visit booked",    sub: "someone is going to see it"},
+    {k: "visited",  t: "Visit done",      sub: "someone has seen it"},
     {k: "offer",    t: "Offer out",       sub: "offer sent to the agent"},
     {k: "won",      t: "Won",             sub: ""},
     {k: "passed",   t: "Passed",          sub: ""}
   ];
   var STAGE_BY = {}; STAGES.forEach(function(s, i){ s.i = i; STAGE_BY[s.k] = s; });
-  var OPEN_STAGES = ["new", "radar", "interest", "visit", "offer"];
+  var OPEN_STAGES = ["new", "interest", "visit", "visited", "offer"];
   var PEOPLE = ["Juan", "Jairo", "Seth"];
   function acqStage(l){
     // a Won / Pass / Offer Sent set on the Lead Board wins over an older stage
-    var e = rec(l.date, l.mls) || {}, s = statusOf(l), pl = STAGE_BY[e.pl] ? e.pl : "";
+    // "On our radar" was folded into "Juan interested" (Seth: they are the same)
+    var e = rec(l.date, l.mls) || {}, s = statusOf(l), pl = e.pl === "radar" ? "interest" : STAGE_BY[e.pl] ? e.pl : "";
     if (s === "Won") return "won";
     if (s === "Pass") return "passed";
     if (s === "Offer Sent" && (!pl || STAGE_BY[pl].i < STAGE_BY.offer.i)) return "offer";
-    if (pl) return pl;
-    if (visitOf(l).s === "Scheduled") return "visit";
-    return "new";
+    // the visit's own status moves an earlier lead along
+    var vs = visitOf(l).s, at = pl || "new";
+    if (vs === "Visited" && STAGE_BY[at].i < STAGE_BY.visited.i) return "visited";
+    if (vs === "Scheduled" && STAGE_BY[at].i < STAGE_BY.visit.i) return "visit";
+    return at;
   }
   function acqOwner(l){ var e = rec(l.date, l.mls) || {}; return PEOPLE.indexOf(e.ow) !== -1 ? e.ow : ""; }
   function acqVisitWho(l){ var e = rec(l.date, l.mls) || {}; return PEOPLE.indexOf(e.vw) !== -1 ? e.vw : ""; }
@@ -1894,8 +1927,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
   var acqF = {tab: "active", who: "", area: "", bk: ""};
   var acqSel = "", acqFlat = [], acqPicked = {}, acqDueEdit = "", acqVisEdit = "", acqSelecting = false;
-  try { var tv = localStorage.getItem("fs_acq_tab"); if (tv) acqF.tab = tv; var wv = localStorage.getItem("fs_acq_who"); if (wv) acqF.who = wv; } catch (e) {}
-  function acqKeep(){ try { localStorage.setItem("fs_acq_tab", acqF.tab); localStorage.setItem("fs_acq_who", acqF.who); } catch (e) {} }
+  try { var tv = localStorage.getItem("fs_acq_tab"); if (tv) acqF.tab = tv; localStorage.removeItem("fs_acq_who"); } catch (e) {}
+  function acqKeep(){ try { localStorage.setItem("fs_acq_tab", acqF.tab); } catch (e) {} }
   function acqWhoMatch(l, p){
     if (!p) return true;
     if (p === "none") return !acqOwner(l);
@@ -1942,17 +1975,11 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     }).join("");
 
     // people, then the two rarely used filters
-    var pc = function(p){ return open.filter(function(l){ return acqWhoMatch(l, p) && extra(l); }).length; };
-    var fAct = document.activeElement && document.activeElement.tagName === "SELECT" && document.activeElement.closest("#acqBar");
+      var fAct = document.activeElement && document.activeElement.tagName === "SELECT" && document.activeElement.closest("#acqBar");
     if (!fAct) {
       var areas = {}; open.forEach(function(l){ var c = countyOf(l); areas[c] = (areas[c] || 0) + 1; });
       var anyF = !!(acqF.who || acqF.area || acqF.bk);
       $("acqBar").innerHTML =
-        '<div class="wk-seg" role="group" aria-label="Whose leads">' +
-          [["", "Everyone"]].concat(PEOPLE.map(function(p){ return [p, p]; })).concat([["none", "Nobody yet"]]).map(function(p){
-            return '<button type="button" data-acq-who="' + p[0] + '" aria-pressed="' + (acqF.who === p[0]) + '">' +
-              (p[0] && p[0] !== "none" ? ownerBadge(p[0], true) : '') + '<span>' + p[1] + '</span><b>' + pc(p[0]) + '</b></button>';
-          }).join("") + '</div>' +
         '<span class="wk-bar-gap"></span>' +
         '<select data-acq-fsel="area" class="' + (acqF.area ? 'on' : '') + '" aria-label="Filter by area"><option value="">All areas</option>' +
           COUNTIES.map(function(c){ return c[0]; }).concat(["Other"]).filter(function(k){ return areas[k] || acqF.area === k; }).map(function(k){
@@ -2251,8 +2278,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       var p = {vd: $("acqVisD").value, vt: $("acqVisT").value, vw: $("acqVisW").value, vs: $("acqVisS").value};
       if (!p.vd && !p.vs) { toast("Pick a date or a status first — or Clear to remove the visit"); return; }
       acqVisEdit = ""; b.blur();
-      // booking a visit moves an early lead to "Visit booked"
-      if (vl && p.vs === "Scheduled" && STAGE_BY[acqStage(vl)].i < STAGE_BY.visit.i) { var sp = stagePatch(vl, "visit"); p.pl = sp.pl; if (sp.s) p.s = sp.s; }
+      // booking a visit moves an early lead to "Visit booked", marking it Visited to "Visit done"
+      var to = p.vs === "Visited" ? "visited" : p.vs === "Scheduled" ? "visit" : "";
+      if (vl && to && STAGE_BY[acqStage(vl)].i < STAGE_BY[to].i) { var sp = stagePatch(vl, to); p.pl = sp.pl; if (sp.s) p.s = sp.s; }
       if (vl) applyEdit(vl.date, vl.mls, p);
       return;
     }
@@ -3247,6 +3275,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
     // file uploads: granted only to people who can edit the board (null otherwise)
     claude.use("assets").then(function(a){ if (a) { ASSETS = a; draw(); } }).catch(function(){});
+    claude.use("downloads").then(function(d){ if (d) { DOWNLOADS = d; draw(); } }).catch(function(){});
 
     claude.use("db").then(function(x){
       if (!x){ note("This view is running <b>offline</b> — your changes stay in this browser only.", true); return; }
