@@ -250,15 +250,28 @@ const SLOW_KW = new RegExp([
   '\\bmold\\b', 'dry ?rot throughout', 'sinking', 'landslide', 'slide zone',
 ].join('|'), 'i');
 
-// Tenant-occupied is NO LONGER a drop (Seth, 23 Sep). An occupied house is
-// harder to show and slower to deliver, but a seller stuck with a tenant is
-// often a motivated one — so it now scores as an opportunity signal in
-// qualify() instead of being thrown away here.
+// Tenant-occupied is a DROP again (Seth, 26 Sep: "Juan won't take tenant
+// occupied" — reverses the 23 Sep rule that scored it as an opportunity).
+// The one exception: the listing says the house is delivered VACANT at close
+// ("tenant is expected to vacate prior to Close of Escrow"). That stays, with
+// a note to confirm it with the agent. The MLS's own "Occupied By: Tenant"
+// field counts as much as any word in the remarks.
 const TENANT_KW = new RegExp([
   'tenant[- ]occupied', 'occupied by (?:a )?tenant', 'tenants? in place',
   'currently rented', 'lease in place', 'subject to (?:a )?lease',
   'do not disturb (?:the )?tenant', 'month[- ]to[- ]month tenan',
 ].join('|'), 'i');
+
+const VACANT_AT_CLOSE_RE = new RegExp([
+  'delivered vacant', 'deliver(?:ed)? (?:the property )?vacant', 'vacant (?:at|upon|by|before|prior to) (?:the )?(?:close|closing|coe)',
+  'tenants? (?:is |are )?(?:expected |scheduled |set |going )?to (?:vacate|move out|leave)',
+  'tenants? will (?:vacate|move out|be (?:gone|out))', 'vacate (?:prior to|before|by) (?:the )?(?:close|closing|coe)',
+].join('|'), 'i');
+function tenantInfo(meta, t) {
+  const occ = String((meta && meta.occupiedBy) || '');
+  const tenant = /tenant/i.test(occ) || TENANT_KW.test(t);
+  return { tenant, vacantAtClose: tenant && VACANT_AT_CLOSE_RE.test(t) };
+}
 
 // Deals Bryan has looked at and confirmed he wants. Nothing may drop these —
 // not a keyword, not the vision model, not a DOM cap. The mirror of
@@ -325,6 +338,10 @@ function rulesDecide(meta) {
   const photos = meta.photos || 0;
   if (isConfirmed(meta.addr)) return { decision: 'keep', reason: 'confirmed deal — Bryan wants this one' };
   if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
+  const ten = tenantInfo(meta, t);
+  if (ten.tenant && !ten.vacantAtClose) {
+    return { decision: 'drop', reason: 'tenant occupied — we don’t buy tenant-occupied houses (hard exclusion)' };
+  }
   // The MLS's own classification beats a word in the remarks. The search asks
   // for Single Family Home and the report says so again on every listing, so a
   // keyword is not grounds to overrule it.
@@ -423,7 +440,8 @@ function qualify(m) {
   if (ORIGINAL_KW.test(t)) add(10, `original / long-held — "${hit(ORIGINAL_KW)}"`);
   // The MLS's own "Occupied By" field beats a word in the remarks.
   const occ = String(m.occupiedBy || '');
-  if (/tenant/i.test(occ) || TENANT_KW.test(t)) add(5, 'tenant occupied — possible motivated seller');
+  const ten = tenantInfo(m, t);   // tenant without "vacant at close" was already a hard drop above
+  if (ten.vacantAtClose) signals.push({ pts: 0, what: 'tenant now, to be delivered vacant at close — confirm with the agent' });
   if (/vacant/i.test(occ) || VACANT_KW.test(t)) add(5, 'vacant');
   if (HOARD_KW.test(t)) add(10, `clutter / hoarder — "${hit(HOARD_KW)}"`);
   if (MOTIVATED_KW.test(t)) add(5, `motivated seller — "${hit(MOTIVATED_KW)}"`);
@@ -464,7 +482,8 @@ function qualify(m) {
   let bucket = score >= BUCKET_A ? 'A' : score >= BUCKET_B ? 'B' : 'C';
   // Remarks silent on condition and the reviewer asked for unsure = drop.
   if (r.decision === 'manual' && m.whenUnsure === 'drop' && bucket === 'B' && !top.length) bucket = 'C';
-  const why = [...top, ...neg].join(' + ') || r.reason;
+  const note = signals.filter(x => x.pts === 0 && /tenant now/.test(x.what)).map(x => x.what);
+  const why = [...top, ...neg, ...note].join(' + ') || r.reason;
   return { bucket, label: BUCKET_LABEL[bucket], score, decision: bucket === 'C' ? 'drop' : 'keep',
     hard: false, why, signals };
 }

@@ -594,9 +594,11 @@ and the state of the finishes. Pay closest attention to the KITCHEN and BATHROOM
 that is where renovation shows first, and a listing is often photographed to hide it.
 Do not answer from the exterior shots alone.
 
-KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, tenant-occupied (NOT a reason to drop), old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
+KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
 
 ONE UPDATED SURFACE IS NOT A FLIP. An older house where ONE thing was redone (granite on old cabinets, one remodeled bathroom, a new water heater) while the rest is original — dated kitchen, other baths original, old carpet or flooring — is a KEEP: a flipper still has a full job there. DROP for renovation only when the house as a whole has been flipped: the kitchen is new end to end (cabinets AND counters AND appliances) and the bathrooms are redone, or new finishes run throughout.
+
+Occupants, furniture and belongings are not finishes: judge the house, not who lives in it (occupancy is handled by other rules).
 
 The ONLY question that matters is: HAS WORK BEEN DONE TO THIS HOUSE? Judge the FINISHES, not the housekeeping or the staging. A house that is tidy, empty, swept, or professionally staged but still has ORIGINAL DATED FINISHES is a KEEP — "clean" is not "renovated". When torn between "clean but dated" and "lightly updated", choose KEEP.
 
@@ -1625,7 +1627,7 @@ ipcMain.handle('refresh-board', async () => {
         const hard = val(r, 'Bucket') && !/^C/.test(val(r, 'Bucket')) && !core.isConfirmed(gal.address || val(r, 'Address'))
           ? core.rulesDecide({ addr: gal.address || val(r, 'Address'), photos: 0,
               remarks: [gal.remarks, gal.privateRemarks].filter(Boolean).join(' '),
-              condition: gal.condition, propClass: gal.propClass })
+              condition: gal.condition, propClass: gal.propClass, occupiedBy: gal.occupiedBy || val(r, 'Occupied By') })
           : null;
         if (hard && hard.decision === 'drop') {
           Object.assign(rec, { 'Bucket': core.BUCKET_LABEL.C, 'Opportunity Score': 15,

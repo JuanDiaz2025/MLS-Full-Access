@@ -313,10 +313,16 @@ headless-scrape workflow):
   multi-unit, vacant lot, **fire-damaged** (any listing noting a
   past fire / fire damage / fire-gutted interior — drop even if it reads as a genuine
   as-is fixer).
-- **Tenant-occupied is NOT a drop any more** (Seth, 23 Sep). It scores as an
-  opportunity signal (a seller stuck with a tenant is often motivated) in the
-  qualification gate below. Foundation / roof / fire / water / non-permitted, DOM
-  over 45 and too few interior photos all stay auto-passed.
+- **Tenant-occupied is a DROP again** (Seth, 26 Sep: *"Juan won't take tenant
+  occupied"* — reverses the 23 Sep rule that scored it as an opportunity). A hard
+  exclusion in `rulesDecide`, so the AI is never asked: `Occupied By: Tenant` on
+  Agent Full, or tenant wording in the remarks (`TENANT_KW`). **Exception:** the
+  listing says it is delivered **vacant at close** ("tenant is expected to vacate
+  prior to Close of Escrow", "delivered vacant" — `VACANT_AT_CLOSE_RE`); that
+  stays, and its Why says "confirm with the agent". "↻ Refresh leads on the
+  board" moves tenant A/B leads already on the sheet to C "(found on refresh)".
+  Foundation / roof / fire / water / non-permitted, DOM over 45 and too few
+  interior photos all stay auto-passed.
 - **🚦 Qualification gate — Opportunity Score + A / B / C** (Seth, 23 Sep).
   Nothing enters the working board until the gate finds a plausible value-add
   opportunity. `core.qualify()` in `scan-core.js` scores every reviewed listing

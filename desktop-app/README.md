@@ -50,7 +50,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
    - **C — Auto-Pass** (under 35, or renovated / multi-unit / fire / structural /
      too few photos): never reaches the board; logged on **Rejected** with the
      score and the reason.
-   Tenant-occupied is **not** a drop — it counts toward the score. The run never
+   Tenant-occupied is a **drop** (Juan doesn't buy them), unless the listing says it
+   is delivered vacant at close — then it stays, with "confirm with the agent" in
+   the Why. The run never
    stops to ask. With an API key and **Use AI vision** ticked, the AI also judges
    the photos and can turn a keep into a C. Either an **OpenAI (ChatGPT)** key
    (`sk-…`, default model `gpt-4.1`) or an **Anthropic (Claude)** key (`sk-ant-…`,

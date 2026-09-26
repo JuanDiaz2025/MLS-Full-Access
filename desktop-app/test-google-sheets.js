@@ -191,7 +191,17 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(rules('Tear-down opportunity, value is in the land.'), 'drop', 'tear-down dropped');
   eq(rules('Probate sale. Property is red-tagged and uninhabitable.'), 'drop', 'red-tagged dropped');
   eq(rules('Bring your contractor \u2014 needs a full gut.'), 'drop', 'full gut dropped');
-  eq(rules('Fixer upper. This level is currently tenant-occupied.'), 'keep', 'tenant-occupied is no longer a drop');
+  // Tenant-occupied is a drop again (Seth, 26 Sep: Juan won't take them), unless delivered vacant at close.
+  eq(rules('Fixer upper. This level is currently tenant-occupied.'), 'drop', 'tenant-occupied is dropped');
+  eq(rules('Fixer upper. Property is currently occupied by one tenant; tenant is expected to vacate prior to Close of Escrow.'), 'keep',
+    'tenant leaving before close of escrow is kept');
+  eq(rules('Fixer upper. Tenant occupied, to be delivered vacant.'), 'keep', '"delivered vacant" is kept');
+  eq(require('./scan-core').rulesDecide({ remarks: 'Fixer upper. Please do not disturb occupant.', occupiedBy: 'Tenant', photos: 20 }).decision,
+    'drop', 'Occupied By: Tenant drops even when the remarks never say "tenant"');
+  eq(require('./scan-core').rulesDecide({ remarks: 'Fixer upper.', occupiedBy: 'Owner', photos: 20 }).decision,
+    'keep', 'owner-occupied is not affected');
+  eq(require('./scan-core').rulesDecide({ remarks: 'Tenant occupied.', addr: '21 College Terrace, San Francisco, CA 94112', photos: 20 }).decision,
+    'keep', 'a confirmed deal is never dropped for a tenant');
   eq(rules('Beautifully updated with quartz counters and stainless appliances.'), 'drop', 'renovated dropped');
   eq(rules('Lovely garden, three bedrooms, close to transit.'), 'manual', 'silent remarks go to the fallback');
 
@@ -272,10 +282,14 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(Q({ remarks: 'Beautifully renovated turnkey home.' }).score <= 15, true, 'and scores low');
   eq(Q({ remarks: 'Fixer. Foundation repair needed.' }).bucket, 'C', 'structural work is still C');
   eq(Q({ remarks: 'Rare duplex, two separate units, each with a full kitchen.' }).bucket, 'C', 'an actual duplex is still C');
-  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant occupied, do not disturb.' }).decision, 'keep',
-    'tenant-occupied is kept');
-  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant occupied, do not disturb.' }).why.includes('tenant'), true,
-    'and named as a signal');
+  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant occupied, do not disturb.' }).bucket, 'C',
+    'tenant-occupied is C');
+  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant occupied, do not disturb.' }).hard, true,
+    'as a hard exclusion (the AI is not asked)');
+  eq(Q({ remarks: 'Fixer upper, sold as-is. Tenant to vacate prior to COE.', occupiedBy: 'Tenant' }).decision, 'keep',
+    'tenant leaving before COE is kept');
+  eq(/delivered vacant at close — confirm with the agent/.test(Q({ remarks: 'Fixer upper, sold as-is. Tenant to vacate prior to COE.', occupiedBy: 'Tenant' }).why),
+    true, 'and the Why says to confirm it');
   eq(Q({ remarks: 'Fixer upper, sold as-is.', origPrice: 1000000, price: 900000, ppsfRatio: 0.7 }).bucket, 'A',
     'fixer + 10% price cut + cheap $/sqft is A — work now');
   eq(Q({ remarks: 'Fixer upper, sold as-is.' }).bucket, 'B', 'fixer language alone is B — needs a deeper look');
@@ -320,7 +334,7 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
   eq(ap.privateRemarks.startsWith('Seller makes'), true, 'the private remarks are read');
   eq(parseDetail(agentPage.replace('Prop Condition:\t', 'Prop Condition:\tFixer Upper'), 'SF1234567').condition,
     'Fixer Upper', 'a filled Prop Condition is read');
-  eq(Q({ remarks: 'Nice.', occupiedBy: 'Tenant' }).why.includes('tenant'), true, 'Occupied By: Tenant counts');
+  eq(Q({ remarks: 'Nice.', occupiedBy: 'Tenant' }).bucket, 'C', 'Occupied By: Tenant is a C');
 
   //     Offer deadline — the MLS has no field for it, agents write it into
   //     the remarks. Shapes seen on live Agent Full pages (23 Sep).
