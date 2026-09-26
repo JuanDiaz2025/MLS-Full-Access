@@ -867,6 +867,20 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .dx-foot .wk-rm{font-size:11.5px; font-weight:500}
 @media (max-width:1180px){ .dx-info{grid-template-columns:1fr 1fr} .dx-cols{grid-template-columns:1fr} }
 @media (max-width:900px){ .wk-head{flex-direction:column; align-items:stretch} .dx-info{grid-template-columns:1fr} }
+
+/* v5: filters and sort inside the list; NEW, pull date */
+.wk-filt{display:flex; flex-wrap:wrap; gap:6px; margin:0; padding:0 8px 8px}
+.wk-filt select{flex:1 1 0; min-width:0; min-height:30px; font-size:12px; padding:4px 22px 4px 8px; border-radius:7px}
+.wk-filt .wk-link{flex:none; font-size:12px}
+.wk-gh small{flex-basis:100%; margin-top:1px}
+.wk-gh{flex-wrap:wrap}
+.wk-find .wk-link.on{color:var(--t-pass)}
+.wk-find kbd{right:92px}
+.wk-new{flex:none; font:700 9.5px Archivo,sans-serif; letter-spacing:.06em; text-transform:uppercase; color:#FFFFFF; background:#C2410C; border-radius:4px; padding:1px 5px}
+.wk-pulled{font:500 11px "IBM Plex Mono",monospace; color:var(--muted); white-space:nowrap}
+.wk-own{align-items:center; gap:8px}
+.wk-row.dim .wk-item{opacity:.6}
+.wk-l2 .mst{margin-left:0}
 </style>
 
 <header class="top">
@@ -943,14 +957,14 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   </div><!-- /viewLeads -->
 
   <div id="viewAcq" hidden>
-    <div class="wk-head"><div class="wk-tabs" id="acqTabs" role="tablist" aria-label="Stage"></div>
-      <div class="wk-bar" id="acqBar"></div></div>
+    <div class="wk-head"><div class="wk-tabs" id="acqTabs" role="tablist" aria-label="Stage"></div></div>
     <p class="acq-note" id="acqNote"></p>
     <div id="acqSecs"><div class="acq-split">
       <nav class="acq-list" aria-label="Leads being worked">
         <div class="wk-find"><input type="search" id="acqQ" autocomplete="off" spellcheck="false"
           placeholder="Search any lead: address, MLS #, agent…" aria-label="Search every lead"><kbd>/</kbd>
-          <button type="button" class="wk-link" id="acqSelToggle">Select</button></div>
+          <button type="button" class="wk-link" id="acqSelToggle">Remove…</button></div>
+        <div class="wk-bar wk-filt" id="acqBar"></div>
         <div id="acqListBody"></div>
         <div class="acq-selbar" id="acqSelBar" hidden><span class="n" id="acqSelN"></span>
           <button type="button" class="btn rm" id="acqSelRm">Remove…</button><button type="button" class="lnk" id="acqSelClear">Clear</button></div>
@@ -1966,10 +1980,10 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   function stagePill(k){ var s = STAGE_BY[k] || STAGE_BY["new"]; return '<span class="wk-pill wk-st-' + s.k + '">' + esc(s.t) + '</span>'; }
 
-  var acqF = {tab: "active", who: "", area: "", bk: ""};
+  var acqF = {tab: "active", who: "", area: "", bk: "", sort: "due"};
   var acqSel = "", acqFlat = [], acqPicked = {}, acqDueEdit = "", acqVisEdit = "", acqSelecting = false;
-  try { var tv = localStorage.getItem("fs_acq_tab"); if (tv) acqF.tab = tv; localStorage.removeItem("fs_acq_who"); } catch (e) {}
-  function acqKeep(){ try { localStorage.setItem("fs_acq_tab", acqF.tab); } catch (e) {} }
+  try { var tv = localStorage.getItem("fs_acq_tab"); if (tv) acqF.tab = tv; var sv = localStorage.getItem("fs_acq_sort"); if (/^(due|new|price)$/.test(sv || "")) acqF.sort = sv; localStorage.removeItem("fs_acq_who"); } catch (e) {}
+  function acqKeep(){ try { localStorage.setItem("fs_acq_tab", acqF.tab); localStorage.setItem("fs_acq_sort", acqF.sort); } catch (e) {} }
   function acqWhoMatch(l, p){
     if (!p) return true;
     if (p === "none") return !acqOwner(l);
@@ -1993,7 +2007,15 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     if (v.d && v.s === "Scheduled") { var n = daysUntil(v.d); if (n !== null && n >= 0) return [1, n]; }
     return [2, h === null ? 0 : -h];
   };
-  function acqSort(a, b){ var x = acqRank(a), y = acqRank(b); return x[0] - y[0] || x[1] - y[1]; }
+  // newest pull first breaks every tie, so fresh leads float up
+  function acqNewer(a, b){ return (a.date || "") < (b.date || "") ? 1 : (a.date || "") > (b.date || "") ? -1 : 0; }
+  function acqSort(a, b){
+    if (acqF.sort === "new") return acqNewer(a, b);
+    if (acqF.sort === "price") return (a.price == null ? 1e12 : a.price) - (b.price == null ? 1e12 : b.price) || acqNewer(a, b);
+    var x = acqRank(a), y = acqRank(b); return x[0] - y[0] || x[1] - y[1] || acqNewer(a, b);
+  }
+  // pulled today or yesterday
+  function acqIsNew(l){ var n = daysUntil(l.date); return n !== null && n >= -1; }
 
   function renderAcq(){
     var worked = LEADS.filter(acqWorked);
@@ -2021,22 +2043,27 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       var areas = {}; open.forEach(function(l){ var c = countyOf(l); areas[c] = (areas[c] || 0) + 1; });
       var anyF = !!(acqF.who || acqF.area || acqF.bk);
       $("acqBar").innerHTML =
+        '<select data-acq-fsel="sort" aria-label="Sort the list">' +
+          [["due", "Deadline"], ["new", "Newest"], ["price", "Price"]].map(function(o){
+            return '<option value="' + o[0] + '"' + (acqF.sort === o[0] ? ' selected' : '') + '>Sort: ' + o[1] + '</option>'; }).join("") + '</select>' +
         '<select data-acq-fsel="area" class="' + (acqF.area ? 'on' : '') + '" aria-label="Filter by area"><option value="">All areas</option>' +
           COUNTIES.map(function(c){ return c[0]; }).concat(["Other"]).filter(function(k){ return areas[k] || acqF.area === k; }).map(function(k){
             return '<option value="' + esc(k) + '"' + (acqF.area === k ? ' selected' : '') + '>' + esc(k) + ' (' + (areas[k] || 0) + ')</option>';
           }).join("") + '</select>' +
         '<select data-acq-fsel="bk" class="' + (acqF.bk ? 'on' : '') + '" aria-label="Filter by bucket"><option value="">All buckets</option>' +
           ["A", "B"].map(function(k){ return '<option value="' + k + '"' + (acqF.bk === k ? ' selected' : '') + '>' + k + ' · ' + BK_NAME[k] + '</option>'; }).join("") + '</select>' +
-        (anyF || q ? '<button type="button" class="wk-link" id="acqClear">Clear</button>' : '');
+        (anyF ? '<button type="button" class="wk-link" id="acqClear">Clear</button>' : '');
     }
 
     // what the list shows
     var groups = [];
     if (q) {
-      var hits = worked.filter(function(l){ return acqMatchQ(l, q); }).sort(acqSort);
-      var others = LEADS.filter(function(l){ return !acqWorked(l) && !removedOf(l) && acqMatchQ(l, q); }).slice(0, 25);
+      var hits = worked.filter(function(l){ return acqMatchQ(l, q) && extra(l); }).sort(acqSort);
+      var pool = LEADS.filter(function(l){ return !acqWorked(l) && !removedOf(l) && acqMatchQ(l, q) && extra(l); });
+      var sold = pool.filter(function(l){ return CLOSED.test(l.mlsStatus || ""); }).length;
+      var others = pool.filter(function(l){ return !CLOSED.test(l.mlsStatus || ""); }).sort(acqSort).slice(0, 25);
       if (hits.length) groups.push({k: "hits", t: "Being worked", rows: hits});
-      if (others.length) groups.push({k: "others", t: "Other leads on the board", sub: "open one and set a stage to start working it", rows: others});
+      if (others.length) groups.push({k: "others", t: "Not worked yet", sub: "open one and pick a stage to start" + (sold ? " · " + sold + " sold / off market left out" : ""), rows: others});
       $("acqNote").textContent = (hits.length + others.length) + " match" + (hits.length + others.length === 1 ? "" : "es") + " for “" + $("acqQ").value.trim() + "” — searching every lead";
     } else if (acqF.tab === "closed") {
       var cl = closed.filter(function(l){ return who(l) && extra(l); });
@@ -2065,7 +2092,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var flat = [];
     groups.forEach(function(g){ flat = flat.concat(g.rows); });
     acqFlat = flat;
-    $("acqSelToggle").textContent = acqSelecting ? "Done" : "Select";
+    $("acqSelToggle").textContent = acqSelecting ? "Cancel" : "Remove…";
+    $("acqSelToggle").classList.toggle("on", acqSelecting);
+    if (acqSelecting && !q) $("acqNote").textContent = "Tick the leads to take off the dashboard, then press Remove at the bottom of the list.";
     if (!flat.length) {
       $("acqListBody").innerHTML = '<div class="acq-none">' + (q
         ? '<b>No lead matches</b>Nothing on the board matches “' + esc($("acqQ").value.trim()) + '”.'
@@ -2088,20 +2117,20 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
   function acqItemHTML(l, g){
     var a = acqStreet(l), st = acqStage(l), o = acqDueOf(l), n = daysUntil(o.d), v = visitOf(l), urg = acqUrgent(l);
-    var gone = removedOf(l) || CLOSED.test(l.mlsStatus || "");
+    var gone = removedOf(l) || CLOSED.test(l.mlsStatus || ""), cut = removedOf(l);
     var chip = n !== null && n >= 0 ? '<span class="due-chip ' + dueClass(n) + '">' + dueLabel(n) + '</span>' : '';
     var meta = urg ? '<span class="wk-urg">' + esc(urg) + '</span>'
       : v.d && v.s === "Scheduled" ? '<span>Visit ' + esc(acqDay(v.d)) + (v.t ? ' · ' + esc(visitTime(v.t)) : '') + (acqVisitWho(l) ? ' · ' + esc(acqVisitWho(l)) : '') + '</span>'
       : o.d ? '<span>Offer ' + esc(acqDay(o.d)) + (o.t ? ' · ' + esc(o.t) : '') + '</span>'
       : acqReplied(l) ? '<span>Agent replied</span>' : acqEmailed(l) ? '<span>Emailed, no answer yet</span>' : '<span>No offer date</span>';
     var pick = acqSelecting && !gone && g.k !== "others";
-    return '<div class="wk-row' + (gone ? ' gone' : acqEdge(l)) + (acqPicked[l.mls] ? ' picked' : '') + '">' +
+    return '<div class="wk-row' + (cut ? ' gone' : gone ? ' dim' : acqEdge(l)) + (acqPicked[l.mls] ? ' picked' : '') + '">' +
       (pick ? '<label class="wk-chk"><input type="checkbox" data-chk="' + esc(l.mls) + '"' + (acqPicked[l.mls] ? ' checked' : '') +
         ' aria-label="Select ' + esc(l.addr) + '"></label>' : '') +
       '<button type="button" class="wk-item" data-pick="' + esc(l.mls) + '" aria-current="' + (l.mls === acqSel) + '" title="' + esc(l.addr) + '">' +
-        '<span class="wk-l1"><span class="wk-addr">' + esc(a.s) + (a.c ? '<span class="wk-city"> · ' + esc(a.c) + '</span>' : '') + '</span>' + chip + '</span>' +
-        '<span class="wk-l2">' + (g.k === "others" ? '<span class="wk-pill wk-st-none">Not worked yet</span>' : stagePill(st)) + meta +
-          '<span class="wk-own">' + ownerBadge(acqOwner(l), true) + '</span></span>' +
+        '<span class="wk-l1">' + (acqIsNew(l) && !gone ? '<span class="wk-new" title="Pulled ' + esc(pulledShort(l.date)) + '">New</span>' : '') + '<span class="wk-addr">' + esc(a.s) + (a.c ? '<span class="wk-city"> · ' + esc(a.c) + '</span>' : '') + '</span>' + chip + '</span>' +
+        '<span class="wk-l2">' + (g.k === "others" ? '' : stagePill(st)) + (CLOSED.test(l.mlsStatus || "") ? mlsStatusHTML(l.mlsStatus) : '') + meta +
+          '<span class="wk-own">' + (l.date ? '<span class="wk-pulled" title="Pulled ' + esc(l.date) + '">' + esc(pulledShort(l.date)) + '</span>' : '') + ownerBadge(acqOwner(l), true) + '</span></span>' +
       '</button></div>';
   }
 
