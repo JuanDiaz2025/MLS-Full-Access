@@ -946,6 +946,10 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .lk-here{flex-direction:column; align-items:stretch}
 .lk-row1{display:flex; align-items:center; gap:10px}
 .lk-here .note-video{max-width:none; max-height:360px; margin-top:8px}
+
+#vpDlg{border:1px solid var(--line); border-radius:14px; padding:0; width:min(980px, calc(100% - 32px)); background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55)}
+#vpDlg::backdrop{background:rgba(14,32,46,.7)}
+.vp-video{display:block; width:100%; max-height:70vh; margin-top:12px; background:#000; border-radius:10px}
 </style>
 
 <header class="top">
@@ -1131,6 +1135,13 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         <button type="button" class="btn" id="visitCancel">Cancel</button>
         <button type="button" class="btn go" id="visitSave">Save</button>
       </div>
+    </div>
+  </dialog>
+  <dialog id="vpDlg" aria-labelledby="vpTitle">
+    <div class="dlg">
+      <h2 id="vpTitle">Video</h2>
+      <video id="vpVideo" class="vp-video" controls playsinline preload="metadata"></video>
+      <div class="dlg-actions"><button type="button" class="btn go" id="vpClose">Close</button></div>
     </div>
   </dialog>
   <dialog id="passDlg" aria-labelledby="passTitle">
@@ -1857,7 +1868,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       var f = n.f && typeof n.f === "object" && /^[0-9a-f]{32}$/.test(String(n.f.id)) ? {id: n.f.id, n: str(n.f.n, 120) || "file", ty: str(n.f.ty, 60), sz: +n.f.sz || 0} : null;
       var lk = typeof n.lk === "string" && LINK_OK.test(n.lk) ? n.lk.slice(0, 600) : "";
       if ((typeof n.t !== "string" || !n.t.trim()) && !f && !lk) return null;
-      return {id: id, t: typeof n.t === "string" ? n.t.slice(0, 2000) : "", by: str(n.by, 40) || "Someone", at: str(n.at, 40), f: f, lk: lk};
+      var dr = typeof n.dr === "string" && LINK_OK.test(n.dr) ? n.dr.slice(0, 400) : "";
+      return {id: id, t: typeof n.t === "string" ? n.t.slice(0, 2000) : "", by: str(n.by, 40) || "Someone", at: str(n.at, 40), f: f, lk: lk, dr: dr, dx: n.dx === 1 ? 1 : 0};
     }).filter(Boolean).sort(function(a, b){ return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
   }
   // Long videos live in Google Drive (the board's own storage stops at 20 MB a
@@ -1931,6 +1943,60 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   document.addEventListener("click", function(ev){
     var b = ev.target.closest && ev.target.closest("button[data-vhere]"); if (b) playHere(b.dataset.vmls, b.dataset.vhere, b);
+  });
+  // The Drive connector takes a file of up to 16 MB (a platform limit), so a
+  // board video that size also lands in the property's folder in Drive.
+  var DRIVE_COPY_MAX = 16 * 1048576, VIDEO_ROOT = "1RCHgifHH80Fzi9nwtl3cXeA31K2yKWmr";
+  var copying = {}, fileArgsOk = null;
+  function canSendFiles(){
+    if (fileArgsOk !== null) return Promise.resolve(fileArgsOk);
+    return mcp.listTools().then(function(r){ fileArgsOk = !!(r && r.fileArgs); return fileArgsOk; }, function(){ return false; });
+  }
+  function drivePayload(got){ var p = got && got.payload; if (typeof p === "string") { try { p = JSON.parse(p); } catch (e) {} } return p || {}; }
+  function propertyFolder(mls){
+    var l = BY_MLS[mls] || {}, street = String(l.addr || "").split(",")[0].trim();
+    return mcp.callTool("Google Drive", "search_files", {query: "parentId = '" + VIDEO_ROOT + "' and mimeType = 'application/vnd.google-apps.folder' and title contains '" + mls + "'",
+      excludeContentSnippets: true, pageSize: 5}, {cache: false}).then(function(got){
+      var f = (drivePayload(got).files || [])[0];
+      if (f && f.id) return f.id;
+      return mcp.callTool("Google Drive", "create_file", {title: (street ? street + " · " : "") + mls, contentMimeType: "application/vnd.google-apps.folder", parentId: VIDEO_ROOT})
+        .then(function(g2){ return drivePayload(g2).id; });
+    });
+  }
+  function driveCopy(mls, noteId, entry, file){
+    if (!mcp || !file || file.size > DRIVE_COPY_MAX) { draw(); return; }
+    copying[entry.f.id] = true; draw();
+    var ty = /^video\/webm/.test(entry.f.ty) ? "video/webm" : "video/mp4";
+    var name = String(file.name || "video").replace(/\.(mov|m4v)$/i, ".mp4");
+    if (!/\.(mp4|webm)$/i.test(name)) name += ty === "video/webm" ? ".webm" : ".mp4";
+    canSendFiles().then(function(ok){
+      if (!ok) throw {code: "no_file_route"};
+      return propertyFolder(mls);
+    }).then(function(folder){
+      if (!folder) throw {code: "no_folder"};
+      return mcp.callTool("Google Drive", "create_file", {title: name, base64Content: {$file: {data: file, name: name, type: ty}},
+        contentMimeType: ty, disableConversionToGoogleType: true, parentId: folder});
+    }).then(function(got){
+      var d = drivePayload(got), link = d.id ? "https://drive.google.com/file/d/" + d.id + "/view" : d.viewUrl;
+      if (!link) throw {code: "no_link"};
+      var next = Object.assign({}, entry, {dr: link});
+      pendingNotes[mls] = pendingNotes[mls] || {}; pendingNotes[mls][noteId] = next;
+      writeNote(mls, noteId, next, "✓ Saved on the board and in Google Drive");
+    }).catch(function(e){
+      var next = Object.assign({}, entry, {dx: 1});
+      pendingNotes[mls] = pendingNotes[mls] || {}; pendingNotes[mls][noteId] = next;
+      writeNote(mls, noteId, next, "Saved on the board — couldn't copy it to Drive (" + ((e && e.code) || "error") + ")");
+    }).then(function(){ delete copying[entry.f.id]; draw(); });
+  }
+  function openPlayer(id, name){
+    $("vpTitle").textContent = name || "Video";
+    var v = $("vpVideo"); v.src = "/_blob/" + id;
+    var d = $("vpDlg"); if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+    try { v.play().catch(function(){}); } catch (e) {}
+  }
+  function closePlayer(){ var v = $("vpVideo"); try { v.pause(); } catch (e) {} v.removeAttribute("src"); v.load(); var d = $("vpDlg"); if (d.open) d.close(); }
+  document.addEventListener("click", function(ev){
+    var b = ev.target.closest && ev.target.closest("button[data-vpop]"); if (b) openPlayer(b.dataset.vpop, b.dataset.vpopN);
   });
   function videoUrl(l){
     return VIDEO_BRIDGE + "?mls=" + encodeURIComponent(l.mls) + "&addr=" + encodeURIComponent(l.addr || "") + "&by=" + encodeURIComponent(myName || "");
@@ -2095,9 +2161,18 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     if (b) saveFile(b.dataset.dl, b.dataset.dlN);
   });
   function fileSize(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? Math.round(n / 1024) + " KB" : n + " B"; }
-  function noteFileHTML(f){
+  function noteFileHTML(f, n){
     var url = "/_blob/" + f.id, img = /^image\//.test(f.ty);
     var vid = /^video\//.test(f.ty);
+    if (vid) {
+      n = n || {};
+      var where = n.dr ? "on the board · copy in Google Drive" : copying[f.id] ? "on the board · copying to Drive…" :
+                  f.sz > DRIVE_COPY_MAX ? "on the board only — over 16 MB, too big to copy to Drive from here" : n.dx ? "on the board only — the Drive copy failed" : "on the board";
+      return '<div class="lk-card"><span class="lk-ic" aria-hidden="true">▶</span><span class="lk-t"><b>' + esc(f.n) + '</b><small>' + esc(where) + (f.sz ? ' · ' + fileSize(f.sz) : '') + '</small></span>' +
+        '<button type="button" class="btn tiny go" data-vpop="' + esc(f.id) + '" data-vpop-n="' + esc(f.n) + '">▶ Play</button>' +
+        (n.dr ? '<a class="btn tiny" href="' + esc(n.dr) + '" target="_blank" rel="noopener">Drive ↗</a>' : '') +
+        (DOWNLOADS ? '<button type="button" class="btn tiny" data-dl="' + esc(f.id) + '" data-dl-n="' + esc(f.n) + '">Download</button>' : '') + '</div>';
+    }
     return '<a class="note-file" href="' + url + '" target="_blank" rel="noopener">' + (img ? '🖼' : vid ? '🎬' : /pdf/.test(f.ty) ? '📄' : '📎') +
       ' <span>' + esc(f.n) + '</span>' + (f.sz ? '<small>' + fileSize(f.sz) + '</small>' : '') + '</a>' +
       (DOWNLOADS ? '<button type="button" class="wk-link note-dl" data-dl="' + esc(f.id) + '" data-dl-n="' + esc(f.n) + '">Download</button>' : '') +
@@ -2119,7 +2194,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<details class="notes" data-notes="' + m + '"' + (openNotes[l.mls] || withFiles ? ' open' : '') + '>' +
       '<summary>' + (list.length ? 'Notes · ' + list.length : '＋ Add a note') + '</summary>' +
       (list.length ? '<ol>' + list.map(function(n){
-        return '<li>' + (n.t ? '<p>' + esc(n.t) + '</p>' : '') + (n.f ? noteFileHTML(n.f) : '') + (n.lk ? noteLinkHTML(n.lk) : '') + '<div class="meta"><span>' + esc(n.by) + ' · ' + esc(noteWhen(n.at)) +
+        return '<li>' + (n.t ? '<p>' + esc(n.t) + '</p>' : '') + (n.f ? noteFileHTML(n.f, n) : '') + (n.lk ? noteLinkHTML(n.lk) : '') + '<div class="meta"><span>' + esc(n.by) + ' · ' + esc(noteWhen(n.at)) +
           '</span><button type="button" data-note-del="' + esc(n.id) + '" data-mls="' + m + '">Delete</button></div></li>';
       }).join("") + '</ol>' : '') +
       '<textarea class="note-in" rows="2" data-mls="' + m + '" aria-label="New note for ' + m +
@@ -2183,6 +2258,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
       draw();
       writeNote(mls, id, entry, "File attached for the team");
+      if (/^video\//.test(entry.f.ty)) driveCopy(mls, id, entry, file);
     }).catch(function(e){
       if (label) label.classList.remove("busy");
       var c = e && e.code;
@@ -2853,6 +2929,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   $("unpassNo").addEventListener("click", function(){ $("unpassDlg").close(); });
   $("unpassGo").addEventListener("click", function(){ $("unpassDlg").close(); toast("Taking the pass off the sheet — close that tab when it says done"); });
   $("passDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closePass(false); });
+  $("vpClose").addEventListener("click", closePlayer);
+  $("vpDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closePlayer(); });
+  $("vpDlg").addEventListener("click", function(ev){ if (ev.target === $("vpDlg")) closePlayer(); });
 
 
   /* ---------- persistence ---------- */
