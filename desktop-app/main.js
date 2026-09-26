@@ -346,7 +346,18 @@ async function scanArea(area) {
   log(`  ${label}: ${count} matches`);
   if (count === '0') return { city: label, county: area.county, count, rows: [] };
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
-  await sleep(3500);
+  // The grid can take far longer than a fixed pause to fill (a slow MLS left
+  // San Francisco at "280 matches → scraped 0 rows" and the run moved on), so
+  // poll for rows instead of reading once.
+  const gridRows = async (notFirst, waitMs) => {
+    const until = Date.now() + waitMs;
+    for (;;) {
+      const r = await js(core.JS_SCRAPE_GRID).catch(() => []);
+      if (r.length && r[0].mls !== notFirst) return r;
+      if (Date.now() > until || control.stopped) return r;
+      await sleep(1000);
+    }
+  };
   // Whole counties run to hundreds of listings — Contra Costa alone returns
   // ~800. A 12-page cap silently truncated anything past ~600 and the run would
   // report a clean finish having never seen the rest, so the cap is now high
@@ -356,12 +367,14 @@ async function scanArea(area) {
   for (let pg = 1; pg <= PAGE_CAP; pg++) {
     await waitIfPaused();
     if (control.stopped) break;
-    const rows = await js(core.JS_SCRAPE_GRID).catch(() => []);
+    // page 1: wait for the grid to fill; later pages: wait until the first
+    // row is a different listing, i.e. the page really turned
+    const rows = await gridRows(prev, pg === 1 ? 25000 : 20000);
     if (!rows.length || rows[0].mls === prev) break;
     prev = rows[0].mls; all = all.concat(rows); pagesRead = pg;
     const moved = await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/^\\s*Next/i.test(x.textContent)); if(a){a.click(); return true;} return false; })()`).catch(() => false);
     if (!moved) break;
-    await sleep(3200);
+    await sleep(1500);
   }
   const seen = new Set();
   all = all.filter(r => r.mls && !seen.has(r.mls) && seen.add(r.mls));
@@ -369,6 +382,9 @@ async function scanArea(area) {
     log(`  ⚠ hit the ${PAGE_CAP}-page cap in ${label} — some listings were NOT scanned`, 'warn');
   }
   log(`  scraped ${all.length} rows`);
+  if (!all.length && count !== '0' && count !== '?') {
+    log(`  ⚠ ${label}: the MLS showed ${count} matches but no rows could be read — the results grid did not load. Scan this area again.`, 'error');
+  }
   return { city: label, county: area.county, count, rows: all };
 }
 
@@ -580,6 +596,8 @@ Do not answer from the exterior shots alone.
 
 KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, tenant-occupied (NOT a reason to drop), old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
 
+ONE UPDATED SURFACE IS NOT A FLIP. An older house where ONE thing was redone (granite on old cabinets, one remodeled bathroom, a new water heater) while the rest is original — dated kitchen, other baths original, old carpet or flooring — is a KEEP: a flipper still has a full job there. DROP for renovation only when the house as a whole has been flipped: the kitchen is new end to end (cabinets AND counters AND appliances) and the bathrooms are redone, or new finishes run throughout.
+
 The ONLY question that matters is: HAS WORK BEEN DONE TO THIS HOUSE? Judge the FINISHES, not the housekeeping or the staging. A house that is tidy, empty, swept, or professionally staged but still has ORIGINAL DATED FINISHES is a KEEP — "clean" is not "renovated". When torn between "clean but dated" and "lightly updated", choose KEEP.
 
 DROP if ANY of:
@@ -596,7 +614,7 @@ reason "no kitchen/bath photos".
 Respond with ONLY a JSON object, no other text:
 {"kitchen":"<what the kitchen photos show, or 'none seen'>",
  "bathroom":"<what the bathroom photos show, or 'none seen'>",
- "quickFlip":"<cosmetic | structural — and why, in a few words>",
+ "quickFlip":"<cosmetic | structural — and why, in a few words. 'structural' means foundation, framing, settlement, roof or water damage ONLY; renovated finishes are never 'structural'>",
  "decision":"KEEP"|"DROP",
  "reason":"<8-15 words citing the specific finishes you saw>"}`;
 }
@@ -661,11 +679,14 @@ async function autoDecide(c) {
     }
     log(`  analysing ${photos.length} photo(s)…`);
     let text;
-    try { text = (await aiCall(photos, rulesPrompt(c, photos.length, gal), 1024)).text; }
+    try { text = (await aiCall(photos, rulesPrompt(c, photos.length, gal), aiProvider(cfg.apiKey) === 'openai' ? 4000 : 1024)).text; }
     // A failed CALL is not a verdict on the house: say so, and let the text
     // rules stand. (It used to return DROP, so a typo in the model name
     // auto-passed every listing in the run.)
     catch (e) { return { error: true, reason: 'AI call failed: ' + e.message }; }
+    // An empty or unreadable answer is not a DROP either (a "thinking" model
+    // can spend its whole budget before writing anything).
+    if (!/\{[\s\S]*"decision"[\s\S]*\}/.test(text || '')) return { error: true, reason: 'AI gave no usable answer' + (text ? ': "' + String(text).trim().slice(0, 80) + '"' : ' (empty reply)') };
     let o = {}; const m = text.match(/\{[\s\S]*\}/);
     try { o = JSON.parse(m ? m[0] : text); } catch (_) {}
     const decision = /^keep$/i.test(String(o.decision || '').trim()) ? 'keep' : 'drop';
@@ -826,7 +847,9 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         });
         if (!gal.gridOk && n) log(`  photo grid did not load — only ${n} carousel photo(s) seen, photo count not used`, 'warn');
         if (gal.privateRemarks) log(`  private remarks read (${gal.privateRemarks.length} chars)`);
-        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard) {
+        // Only A and B go to the AI: it can only move a lead DOWN, so asking
+        // about a C (hard exclusion or low score) costs money and changes nothing.
+        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C') {
           // AI vision still has the final say on condition when it is on: a
           // DROP from the photos is an auto-pass whatever the text scored.
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });

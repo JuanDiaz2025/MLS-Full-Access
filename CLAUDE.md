@@ -649,6 +649,22 @@ v1.41.0 is built from `Flip-scout-Filters` after merging `claude/inspiring-ride-
 which shipped the Sep 24 "Flip Scout Filters v1.40.0" — so the new download keeps
 that line's Lead Board hand-off, Redfin links and report scrolling.
 
+**v1.42.0 (Seth's first live AI run, 26 Sep):**
+- *San Francisco: "280 matches → scraped 0 rows".* The grid was read ONCE, 3.5 s
+  after clicking Results; a slow MLS left it empty and the area was skipped as
+  "nothing new". `scanArea` now polls up to 25 s for rows, waits for each next
+  page's first MLS # to change (20 s) instead of a fixed 3.2 s, and logs an
+  error when matches > 0 but no rows were read.
+- *147 Sweetberry Ct dropped for ONE remodeled bath* next to a dated kitchen
+  with formica counters. The vision prompt now carries the calibration rule
+  ("one updated surface is not a flip") and says `structural` means
+  foundation/framing/settlement/roof/water only — gpt-4o-mini was labelling
+  renovated finishes "structural".
+- Only **A and B** go to AI vision (it can only move a lead down, so a C was a
+  paid call that changed nothing).
+- An empty or unreadable AI reply is treated like a failed call, not a DROP;
+  OpenAI gets 4000 completion tokens so "thinking" models can answer.
+
 **A failed AI call is not a verdict.** It used to return DROP, so one typo in
 the model name auto-passed every listing in a run. Now the text rules' verdict
 stands, the log says `AI call failed: <provider message>`, and after 3
