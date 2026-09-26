@@ -30,7 +30,7 @@ var SHEET_ID = '1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ';
 var ROOT_NAME = 'FlipScout property videos';
 var ROOT_ID = '1RCHgifHH80Fzi9nwtl3cXeA31K2yKWmr';                         // optional: a folder id (e.g. in a Shared drive)
 var TAB = 'Videos';
-var HEAD = ['Added On', 'MLS #', 'Address', 'File', 'Link', 'Download', 'Added By', 'Size MB', 'File Id'];
+var HEAD = ['Added On', 'MLS #', 'Address', 'File', 'Link', 'Download', 'Added By', 'Size MB', 'File Id', 'Replaces'];
 var CHUNK = 4 * 1024 * 1024;              // a multiple of 256 KB, as Drive requires
 var MAX_BYTES = 2 * 1024 * 1024 * 1024;   // 2 GB — a sanity bound, not a real limit
 
@@ -48,13 +48,28 @@ function doGet(e) {
   return out;
 }
 
+function cleanName_(n) { return String(n || 'video').replace(/[\\\/:*?"<>|\u0000-\u001f]/g, ' ').slice(0, 150); }
+
+/** Before uploading: is a file with this name already in the property's folder? */
+function checkName(meta) {
+  var mls = String(meta.mls || '').toUpperCase();
+  if (!/^[A-Z0-9]{5,20}$/.test(mls)) throw new Error('This link has no MLS # — open it from the board.');
+  var name = cleanName_(meta.name), folder = propertyFolder_(mls, String(meta.addr || ''));
+  var ids = [], it = folder.getFilesByName(name);
+  while (it.hasNext()) { var f = it.next(); if (!f.isTrashed()) ids.push(f.getId()); }
+  if (!ids.length) return {exists: false};
+  var dot = name.lastIndexOf('.'), base = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : '';
+  for (var i = 2; i < 100; i++) { var cand = base + ' (' + i + ')' + ext; if (!folder.getFilesByName(cand).hasNext()) return {exists: true, ids: ids, suggestion: cand}; }
+  return {exists: true, ids: ids, suggestion: base + ' ' + Date.now() + ext};
+}
+
 /** Start one upload: make the folders, open a resumable session in Drive. */
 function startUpload(meta) {
   var mls = String(meta.mls || '').toUpperCase();
   if (!/^[A-Z0-9]{5,20}$/.test(mls)) throw new Error('This link has no MLS # — open it from the board.');
   var size = Number(meta.size) || 0;
   if (size <= 0 || size > MAX_BYTES) throw new Error('That file is empty or too large.');
-  var name = String(meta.name || 'video').replace(/[\\\/:*?"<>|\u0000-\u001f]/g, ' ').slice(0, 150);
+  var name = cleanName_(meta.name);
   var type = /^[\w.+-]+\/[\w.+-]+$/.test(meta.type || '') ? meta.type : 'application/octet-stream';
   var folder = propertyFolder_(mls, String(meta.addr || ''));
 
@@ -75,7 +90,9 @@ function startUpload(meta) {
   var id = Utilities.getUuid();
   CacheService.getUserCache().put('up_' + id, JSON.stringify({
     loc: loc, size: size, mls: mls, addr: String(meta.addr || '').slice(0, 160),
-    name: name, by: String(meta.by || '').slice(0, 60) || Session.getActiveUser().getEmail()
+    name: name, by: String(meta.by || '').slice(0, 60) || Session.getActiveUser().getEmail(),
+    // "Replace it": only files already in this property's folder, checked again at the end
+    replace: (meta.replace || []).filter(function(x){ return /^[\w-]{10,}$/.test(x); }).slice(0, 10), folder: folder.getId()
   }), 6 * 60 * 60);
   return {upload: id, chunk: CHUNK};
 }
@@ -107,8 +124,16 @@ function finish_(fileId, up) {
   try { file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
   var link = 'https://drive.google.com/file/d/' + fileId + '/view';
   var dl = 'https://drive.google.com/uc?export=download&id=' + fileId;
+  var gone = [];
+  (up.replace || []).forEach(function(id){
+    try {
+      var old = DriveApp.getFileById(id), ps = old.getParents(), inFolder = false;
+      while (ps.hasNext()) if (ps.next().getId() === up.folder) inFolder = true;
+      if (inFolder && id !== fileId) { old.setTrashed(true); gone.push(id); }
+    } catch (e) {}
+  });
   var sh = videosTab_();
-  sh.appendRow([new Date(), up.mls, up.addr, up.name, link, dl, up.by, Math.round(up.size / 1048576 * 10) / 10, fileId]);
+  sh.appendRow([new Date(), up.mls, up.addr, up.name, link, dl, up.by, Math.round(up.size / 1048576 * 10) / 10, fileId, gone.join(',')]);
   return {done: true, link: link, download: dl, folder: file.getParents().hasNext() ? file.getParents().next().getUrl() : ''};
 }
 
@@ -144,9 +169,15 @@ var PAGE = '<!doctype html><html><head><base target="_top"><style>' +
   'button[disabled]{background:#9FB4CC}.bar{height:10px;border-radius:99px;background:#E6EDF6;overflow:hidden;margin-top:16px}' +
   '.bar i{display:block;height:100%;width:0;background:#0E8585;transition:width .3s}.msg{margin-top:10px;font-size:14px}' +
   '.ok{color:#146B4C;font-weight:600}.err{color:#8B1A36;font-weight:600}a{color:#0B6FB0}' +
+  '.dup{margin-top:14px;padding:12px;border-radius:10px;background:#FBEBC8;color:#5A3A00;font-size:14px}.dup[hidden]{display:none}' +
+  '.dup .alt{background:#fff;color:#0D5A87;border:1px solid #9FB4CC}.keep{margin-top:12px;font-size:13px}.keep input{width:100%;margin-top:6px;padding:9px;font:14px system-ui;border:1px solid #9FB4CC;border-radius:8px;box-sizing:border-box}' +
+  '.dup a{display:block;margin-top:10px;text-align:center}' +
   '</style></head><body><div class="w"><h1>Upload a property video</h1><p class="sub" id="for"></p><div class="card">' +
   '<label class="pick" for="f">Tap to choose a video</label><input type="file" id="f" accept="video/*,image/*">' +
-  '<div class="name" id="n"></div><button id="go" disabled>Upload</button><div class="bar"><i id="b"></i></div><div class="msg" id="m"></div>' +
+  '<div class="name" id="n"></div><div class="dup" id="dup" hidden><b>A video with this name is already in this property\'s folder.</b>' +
+  '<button class="alt" id="rep">Replace it — the old one goes to the trash</button>' +
+  '<div class="keep">Keep both, save this one as <input id="nn"></div><button class="alt" id="keep">Keep both</button><a href="#" id="cx">Cancel</a></div>' +
+  '<button id="go" disabled>Upload</button><div class="bar"><i id="b"></i></div><div class="msg" id="m"></div>' +
   '</div></div><script>var C=__CTX__;' +
   'var $=function(i){return document.getElementById(i)};' +
   '$("for").textContent=C.mls?((C.addr||"")+" · "+C.mls):"Open this page from the Lead Board so the video goes to the right property.";' +
@@ -154,12 +185,20 @@ var PAGE = '<!doctype html><html><head><base target="_top"><style>' +
   'function run(fn,args){return new Promise(function(res,rej){var r=google.script.run.withSuccessHandler(res).withFailureHandler(function(e){rej(e)});r[fn].apply(r,args);});}' +
   'function b64(blob){return new Promise(function(res,rej){var fr=new FileReader();fr.onload=function(){res(String(fr.result).split(",")[1]||"")};fr.onerror=rej;fr.readAsDataURL(blob);});}' +
   'function say(t,c){$("m").className="msg "+(c||"");$("m").innerHTML=t;}' +
-  '$("go").onclick=function(){if(!file)return;$("go").disabled=true;$("f").disabled=true;say("Starting…");' +
-  'run("startUpload",[{mls:C.mls,addr:C.addr,by:C.by,name:file.name,type:file.type,size:file.size}]).then(function(s){' +
+  'function lock(on){$("go").disabled=on;$("f").disabled=on;}' +
+  '$("go").onclick=function(){if(!file)return;lock(true);say("Checking the folder…");' +
+  'run("checkName",[{mls:C.mls,addr:C.addr,name:file.name}]).then(function(c){if(!c.exists){say("");return send(file.name,[]);}' +
+  'say("");$("nn").value=c.suggestion;$("dup").hidden=false;$("go").hidden=true;' +
+  '$("rep").onclick=function(){$("dup").hidden=true;send(file.name,c.ids);};' +
+  '$("keep").onclick=function(){var v=$("nn").value.trim();if(!v)return;$("dup").hidden=true;send(v,[]);};' +
+  '$("cx").onclick=function(e){e.preventDefault();$("dup").hidden=true;$("go").hidden=false;lock(false);};' +
+  '}).catch(function(e){say("✗ "+((e&&e.message)||e),"err");lock(false);});};' +
+  'function send(name,replace){$("go").hidden=false;$("go").disabled=true;say("Starting…");' +
+  'run("startUpload",[{mls:C.mls,addr:C.addr,by:C.by,name:name,type:file.type,size:file.size,replace:replace}]).then(function(s){' +
   'var pos=0,tries=0;function next(){var part=file.slice(pos,Math.min(pos+s.chunk,file.size));' +
   'return b64(part).then(function(d){return run("putChunk",[s.upload,pos,d]);}).then(function(r){tries=0;' +
   'if(r.done){$("b").style.width="100%";say("✓ Uploaded. Go back to the board — the video shows on the lead in a moment.<br><a href=\\""+r.link+"\\" target=\\"_blank\\">Watch it in Drive</a>","ok");return;}' +
   'pos=r.next;$("b").style.width=(pos/file.size*100).toFixed(1)+"%";say("Uploading… "+Math.round(pos/file.size*100)+"% — keep this tab open");return next();' +
   '},function(e){if(++tries<=3){say("Connection hiccup — retrying…");return new Promise(function(r){setTimeout(r,2000*tries)}).then(next);}throw e;});}' +
-  'return next();}).catch(function(e){say("✗ "+((e&&e.message)||e)+" — nothing was saved on the board. Try again.","err");$("go").disabled=false;$("f").disabled=false;});};' +
+  'return next();}).catch(function(e){say("✗ "+((e&&e.message)||e)+" — nothing was saved on the board. Try again.","err");lock(false);});}' +
   '</script></body></html>';
