@@ -127,6 +127,11 @@
         <input id="readSeconds" type="number" min="0" max="60" value="6" style="width:70px">
         seconds
       </label>
+      <label style="display:flex;align-items:center;gap:6px;margin:0">
+        Scroll pause per screen
+        <input id="scrollPause" type="number" min="0.2" max="5" step="0.1" value="0.7" style="width:70px">
+        seconds
+      </label>
     </div>
     <div class="hint"><b>What it looks for</b> — Active · single-family ·
       <b>45 days on market or less</b> · 25+ years old · <b>quick flips only</b>
@@ -179,7 +184,23 @@
   </div>
 
   <div class="card">
-    <h2>7 · Your Google Sheet</h2>
+    <h2>7 · FlipScout Lead Board</h2>
+    <div id="boardStatus" class="status">No leads kept today yet.</div>
+    <div class="row" style="margin-top:10px">
+      <button id="boardCopy" class="primary">Copy for the board</button>
+      <button id="boardOpen">Open Lead Board</button>
+      <button id="boardShow">Show scan file</button>
+    </div>
+    <div class="hint">Every A and B lead goes into today's scan file with its public and private
+      remarks, offer deadline, listing agent (name, phone, email), bucket and its exact Redfin page.
+      When a run finishes the leads are already copied: open the Lead Board, click <b>Add scan</b>,
+      and paste (or drop the file in). The board skips anything it already has.</div>
+    <label style="margin-top:10px">Lead Board link</label>
+    <input id="boardUrl" type="text" autocomplete="off">
+  </div>
+
+  <div class="card">
+    <h2>8 · Google Sheet (optional)</h2>
     <div id="gStatus" class="status">Not connected.</div>
 
     <label style="margin-top:10px">Your spreadsheet (paste the URL)</label>
@@ -318,10 +339,12 @@
     useAI: $('useAI').checked,
     apiKey: $('apiKey').value.trim(), model: ($('model').value||'').trim(),
     readSeconds: Number($('readSeconds').value||6),
+    scrollPauseMs: Math.round(Number($('scrollPause').value||0.7) * 1000),
+    boardUrl: ($('boardUrl').value||'').trim() || BOARD_URL,
     whenUnsure: $('whenUnsure').value,
     runComps: false,   // comping is off; see CLAUDE.md §5
   }); }
-  $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); };
+  $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); saveAiFields(); };
   // which service the key belongs to, and a model that suits it
   const AI_DEFAULT = { openai: 'gpt-4.1', anthropic: 'claude-opus-5-5' };
   function aiProvOf(k){ return /^sk-ant-/.test(k) ? 'anthropic' : 'openai'; }
@@ -333,8 +356,9 @@
     $('model').placeholder = prov === 'openai' ? 'gpt-4.1 (or another vision model, e.g. gpt-4o)' : 'claude-opus-5-5 (or claude-sonnet-5, cheaper)';
     $('aiTestOut').textContent = '';
   }
-  $('apiKey').oninput = () => { aiSync(); pushConfig(); };
-  $('model').oninput = () => { $('aiTestOut').textContent = ''; pushConfig(); };
+  function saveAiFields(){ window.fs.setConfig({ aiSave: true, useAI: $('useAI').checked, apiKey: $('apiKey').value.trim(), model: ($('model').value||'').trim() }); }
+  $('apiKey').oninput = () => { aiSync(); pushConfig(); saveAiFields(); };
+  $('model').oninput = () => { $('aiTestOut').textContent = ''; pushConfig(); saveAiFields(); };
   $('aiTest').onclick = async () => {
     $('aiTest').disabled = true; $('aiTestOut').style.color = ''; $('aiTestOut').textContent = 'Testing…';
     pushConfig();
@@ -353,6 +377,8 @@
     aiSync(); pushConfig();
   }).catch(() => {});
   $('readSeconds').oninput = pushConfig;
+  $('scrollPause').oninput = () => { try { localStorage.setItem('fs.scrollPause', $('scrollPause').value); } catch(_) {} pushConfig(); };
+  { let v = null; try { v = localStorage.getItem('fs.scrollPause'); } catch(_) {} if (v) $('scrollPause').value = v; }
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
 
@@ -439,6 +465,32 @@
   }
   $('openBackup').onclick = async () => { const s = await window.fs.backupStatus(); if(s.path) window.fs.showFile(s.path); };
   refreshBackup();
+
+  // --- the Lead Board hand-off ---
+  var BOARD_URL = 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1';
+  { let v = null; try { v = localStorage.getItem('fs.boardUrl'); } catch(_) {} $('boardUrl').value = v || BOARD_URL; }
+  $('boardUrl').oninput = () => { try { localStorage.setItem('fs.boardUrl', $('boardUrl').value.trim()); } catch(_) {} pushConfig(); };
+  function paintBoard(b){
+    const box = $('boardStatus');
+    box.className = 'status' + (b.count ? ' good' : '');
+    box.textContent = b.count
+      ? `Today (${b.pulled}): ${b.count} lead(s) ready for the board` + (b.offers ? `, ${b.offers} with an offer deadline` : '') + '.'
+      : `No leads kept today (${b.pulled}) yet.`;
+  }
+  async function refreshBoardFile(){ paintBoard(await window.fs.boardStatus()); }
+  $('boardCopy').onclick = async () => {
+    const r = await window.fs.boardCopy();
+    $('boardStatus').className = 'status ' + (r.ok ? 'good' : 'warn');
+    $('boardStatus').textContent = r.ok ? `Copied ${r.count} lead(s). Open the Lead Board, click "Add scan", paste.`
+                                        : 'Nothing to copy — ' + r.error + '.';
+  };
+  $('boardOpen').onclick = async () => { const r = await window.fs.boardOpen(); if (!r.ok) log(r.error, 'warn'); };
+  $('boardShow').onclick = () => window.fs.boardShow();
+  window.fs.on('board', paintBoard);
+  refreshBoardFile();
+  // Send the saved settings once at start, so what the screen shows is what
+  // the scan uses.
+  pushConfig();
 
   function hideReview(){ $('review').classList.remove('on'); currentMls=null; }
   function log(msg, level){ const el=$('log'); const d=document.createElement('div'); d.className=level||'info'; d.textContent=new Date().toLocaleTimeString()+'  '+msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }

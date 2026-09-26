@@ -159,3 +159,10 @@ By default the Keep/Drop call is yours (Rule #2 is a judgment call). Turn on
 rules — useful for running the whole buy box hands-off. Either way, the app scans,
 filters, comps, scores, and reports; auto-verify just automates the gallery
 decision.
+
+## The FlipScout Lead Board (v1.40)
+Section 7. Every A and B lead also goes into `Documents/FlipScout/FlipScout-scan-<date>.json`
+with its public and private remarks, offer deadline, listing agent (name, phone, email), bucket and
+score, and its exact Redfin page (looked up from this computer). When a run finishes the leads are
+already copied: open the Lead Board, click **Add scan**, paste. The Google Sheet (section 8) is optional.
+Each report is scrolled top to bottom before it is read — "Scroll pause per screen" in section 3.

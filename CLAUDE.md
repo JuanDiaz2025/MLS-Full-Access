@@ -492,6 +492,30 @@ reading whatever is displayed; the app skips that listing **without a ledger
 entry**, so the next run retries instead of writing it off. Never read "the
 first address on the page."
 
+**Both reports are scrolled top to bottom before being read** (v1.40,
+`readWholePage()` in `main.js`; the "Scroll pause per screen" setting). The
+facts-only refresh skips the scroll. Private remarks, offer due and the
+agent's phone/email are read by the live-verified parsers described under the
+qualification gate and the `Leads` columns above.
+
+**Leads also go to the FlipScout Lead Board artifact** (v1.40; Bryan does not
+want to depend on the Google Sheet — it stays optional). Every A/B lead is
+merged into `Documents/FlipScout/FlipScout-scan-<date>.json` by
+`core.boardLead()` — public + private remarks, offer date and time (split from
+`core.offerDue()`'s "2026-09-30 (Wed) 12:00 PM"), listing agent name/phone/
+email, MLS status, bucket + score, and the house's exact Redfin page — copied
+to the clipboard when a run ends, and added on the board with **Add scan**. An
+artifact's shared data can only be written from the page, hence the paste.
+The field names are the board's `scanLead()` names; change both together.
+
+**Redfin links: only the house's own page, never a search or an area page.**
+Redfin page URLs carry Redfin's home id, so they cannot be built from the
+address. The app asks Redfin's location lookup from the user's machine for each
+kept lead and keeps a result only when the slug's house number and zip match
+(`core.redfinUrlFrom`, tested). Redfin blocks this lookup from cloud servers.
+For the older board leads the links were filled in by web search into the
+board's `links/_found` document; ~56% of addresses have a findable page.
+
 `core.fullAddress()` composes the sheet value, stripping a trailing zip/state
 off the street line before recomposing — appending blindly gave
 "…San Francisco 94112, CA". Fixtures of real report text live in
@@ -611,14 +635,19 @@ live-verified with `scripts/mls-photos.js`.
 AI vision would have failed on its first call. It is now `claude-opus-5-5`
 (`claude-sonnet-5` is the cheaper option), and a saved old value is migrated.
 
-**OpenAI works too (v1.40.0, Seth, 26 Sep — the team has a ChatGPT key).** The
+**OpenAI works too (v1.41.0, Seth, 26 Sep — the team has a ChatGPT key).** The
 provider comes from the key: `sk-ant-…` = Anthropic, anything else = OpenAI
 Chat Completions (`gpt-4.1` by default; photos go as `image_url` data URLs;
 `max_completion_tokens`, which the newer models require). Same prompt, same
 KEEP/DROP parsing (`aiCall()` in `main.js`). A Claude model name on an OpenAI
 key (or the reverse) is swapped for that provider's default. **Test key** in
 section 2 makes one tiny call. Key + model persist in `ai-settings.json` under
-userData.
+userData. They are written only on an edit to the AI fields (`aiSave`): the
+screen's startup settings push carries an empty key box and would wipe it.
+
+v1.41.0 is built from `Flip-scout-Filters` after merging `claude/inspiring-ride-6er6pe`,
+which shipped the Sep 24 "Flip Scout Filters v1.40.0" — so the new download keeps
+that line's Lead Board hand-off, Redfin links and report scrolling.
 
 **A failed AI call is not a verdict.** It used to return DROP, so one typo in
 the model name auto-passed every listing in a run. Now the text rules' verdict

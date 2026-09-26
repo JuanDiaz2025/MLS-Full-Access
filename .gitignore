@@ -227,3 +227,13 @@ multi-scan.json
 
 # Root-level MLS debug screenshots
 prodashboard.png
+
+# Lead Board: data.js holds lead data exported from the sheet; never commit it
+flipscout-board/data.js
+*.xlsx
+
+# signed-in MLS session + recon output: credential-equivalent, never commit
+flipscout-board/mls-session.json
+flipscout-board/recon.json
+flipscout-board/recon.png
+.mlsenv

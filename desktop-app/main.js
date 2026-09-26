@@ -7,7 +7,7 @@
  * detects the dashboard. Scanning navigates the MLS window through Matrix and
  * runs the same extraction used by the headless pipeline.
  */
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, net } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
@@ -26,6 +26,8 @@ const cfg = {
   // anything wrong — with that rejection feeding straight back into the ledger.
   whenUnsure: 'keep',
   runComps: false,     // OFF for now — qualify on CONDITION first, comp later
+  scrollPauseMs: 700,  // pause per screen while scrolling a report — reading slowly
+  boardUrl: 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1',   // FlipScout Lead Board
 };
 
 // ---------- AI provider: Anthropic or OpenAI, told apart by the key ----------
@@ -61,7 +63,10 @@ ipcMain.handle('ai-settings', () => {
 ipcMain.on('set-config', (_e, c) => {
   Object.assign(cfg, c || {});
   cfg.model = aiModel();
-  if (c && ('apiKey' in c || 'model' in c || 'useAI' in c)) saveAi();
+  // Saved only when the AI fields themselves change: every other settings push
+  // (including the one at startup, before the saved key is back in the box)
+  // carries an empty key and must not wipe the saved one.
+  if (c && c.aiSave) saveAi();
 });
 
 /**
@@ -389,7 +394,7 @@ async function showGallery(mls, opts) {
       await sleep(2600);
       // Parse in Node rather than in the page: it makes the extraction testable
       // against saved report text, which is how the wrong-listing bug surfaced.
-      const raw = await js('document.body.innerText').catch(() => '');
+      const raw = factsOnly ? await js('document.body.innerText').catch(() => '') : await readWholePage();
       meta = core.parseDetail(raw, mls);
       saveReportSample(mls, 'client', raw);
     }
@@ -414,7 +419,9 @@ async function showGallery(mls, opts) {
       // photos the carousel preloads.
       const key = (img.src.match(/Key=(\\d+)/) || [])[1];
       const tid = (img.src.match(/TableID=(\\d+)/) || [])[1] || '9';
-      const n = (document.body.innerText.match(/\\b\\d+\\s*\\/\\s*(\\d+)\\b/) || [])[1];
+      // The carousel counter reads "1 / 29", spaced. Beds/baths ("3/0") and
+      // Age/Yr Blt ("122/1904") are not, so they cannot be taken for the count.
+      const n = (document.body.innerText.match(/\\b1 \\/ (\\d{1,3})\\b/) || [])[1];
       return key ? { key: key, tid: tid, n: n || '60' } : null;
     })()`).catch(() => null);
   } catch (_) {}
@@ -429,7 +436,7 @@ async function showGallery(mls, opts) {
     if (agentSel) {
       await js(`(() => { const s=document.getElementById(${JSON.stringify(agentSel)}); if(!s) return; const o=[...s.options].find(o=>/^\\s*Agent Full\\s*$/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
       await sleep(2600);
-      const rawAgent = await js('document.body.innerText').catch(() => '');
+      const rawAgent = factsOnly ? await js('document.body.innerText').catch(() => '') : await readWholePage();
       saveReportSample(mls, 'agent', rawAgent);
       const agent = core.parseDetail(rawAgent, mls);
       if (!agent.mismatch) {
@@ -481,6 +488,44 @@ async function showGallery(mls, opts) {
     agentPhone: meta.agentPhone || '', agentEmail: meta.agentEmail || '', showing: meta.showing || '',
     disclosures: core.disclosuresLink(meta.disclosuresField, [meta.privateRemarks, meta.remarks].filter(Boolean).join(' \n ')),
     mismatch: !!meta.mismatch, showing: meta.showing || '' };
+}
+
+// Scroll the report top to bottom, a screen at a time, before reading it.
+// Matrix builds some sections as they come into view, and it is how a person
+// reads a listing: all of it, not the first screen. The pause per screen is
+// the "Scroll pause" setting in section 3. Only real content panels are
+// scrolled — the page and at most two tall panels — not every menu.
+async function readWholePage() {
+  const pause = Math.max(150, Number(cfg.scrollPauseMs != null ? cfg.scrollPauseMs : 700));
+  await js(`(async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const panels = [document.scrollingElement || document.documentElement]
+      .concat([...document.querySelectorAll('div, main, section')]
+        .filter(el => el.clientHeight > 250 && el.scrollHeight > el.clientHeight + 80
+          && /(auto|scroll)/.test(getComputedStyle(el).overflowY))
+        .sort((a, b) => b.scrollHeight - a.scrollHeight).slice(0, 2));
+    for (const el of panels) {
+      const step = Math.max(200, Math.round((el === panels[0] ? innerHeight : el.clientHeight) * 0.8));
+      for (let y = 0; y <= el.scrollHeight; y += step) { el.scrollTop = y; await wait(${pause}); }
+      el.scrollTop = el.scrollHeight; await wait(${pause});
+    }
+    for (const el of panels) el.scrollTop = 0;
+    return true;
+  })()`).catch(() => false);
+  return await js('document.body.innerText').catch(() => '');
+}
+
+// Look the kept house up on Redfin, from this computer, so the Lead Board can
+// link straight to its page. A failure only costs the link, never the lead.
+async function redfinUrl(address) {
+  if (!address) return '';
+  try {
+    const u = 'https://www.redfin.com/stingray/do/location-autocomplete?v=2&al=1&location='
+      + encodeURIComponent(address);
+    const r = await net.fetch(u, { headers: { 'Accept': 'application/json, text/plain, */*' } });
+    if (!r.ok) return '';
+    return core.redfinUrlFrom(await r.text(), address);
+  } catch (_) { return ''; }
 }
 
 /** Keep the raw report text for the first few listings of each run, so the
@@ -814,7 +859,13 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         if (control.stopped) break;
         runKpi.reviewed++;
         runKpi['bucket' + q.bucket]++;
-        if (decision === 'keep') { kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good'); }
+        if (decision === 'keep') {
+          // For the Lead Board: the public remarks and the house's own Redfin page.
+          c._remarks = gal.remarks || '';
+          c._redfin = await redfinUrl(c.fullAddr || c.addr);
+          log(c._redfin ? `  Redfin page: ${c._redfin}` : '  no matching Redfin page found', c._redfin ? 'good' : 'info');
+          kept.push(c); runKpi.kept++; log(`  kept ${c.addr}`, 'good');
+        }
         else {
           runKpi.dropped++; runKpi[dropBucket(dropReason)]++;
           log(`  dropped ${c.addr} — ${dropReason || 'no reason given'}`);
@@ -909,14 +960,17 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           } else {
             log(`[${label}] sheet write failed: ${s.error} — kept in the local backup`, 'warn');
           }
-        } else {
-          log(`[${label}] Google Sheet not connected — ${cityWinners.length} lead(s) held in the `
-            + 'local backup. Connect it in section 7 and hit "Send this run\'s leads".', 'warn');
         }
         // Written either way: a failed API call, or a disconnected sheet, must
         // never lose a city that has already been reviewed.
         const d = writeBackup(rows, cityRejects);
         if (!d.ok) log(`[${label}] could not write the local backup: ${d.error}`, 'warn');
+        // The Lead Board's copy of this city, merged into the day's file.
+        if (cityWinners.length) {
+          const b = writeBoardScan(cityWinners);
+          if (b.ok) log(`[${label}] ${cityWinners.length} lead(s) added to today's Lead Board file`, 'good');
+          else log(`[${label}] could not write the Lead Board file: ${b.error}`, 'warn');
+        }
       }
       const cityA = cityLeads.filter(l => l.bucket === 'A').length;
       log(`━━━ ${label} done: ${cityA} A — Work Now · ${cityLeads.length - cityA} B — AI Review · `
@@ -965,6 +1019,16 @@ function finishRun(runKpi, day, started) {
       + `${runKpi.reviewed} reviewed → ${runKpi.bucketA} A — Work Now · ${runKpi.bucketB} B — AI Review · `
       + `${runKpi.bucketC} C — Auto-Pass · sheet: ${runKpi.pushed} new, ${runKpi.pushSkipped} updated.`;
   log(line, 'good');
+  // Hand today's leads to the Lead Board: on the clipboard, ready to paste.
+  const board = boardStatus();
+  if (board.count) {
+    try {
+      clipboard.writeText(fs.readFileSync(board.file, 'utf8'));
+      log(`Today's ${board.count} lead(s) are copied — open the Lead Board, click "Add scan", and paste.`
+        + (board.offers ? ` ${board.offers} have an offer deadline.` : ''), 'good');
+    } catch (e) { log('Could not copy the leads: ' + e.message + ' — use "Copy for the board".', 'warn'); }
+  }
+  send('board', board);
   log('Nothing else is running. Start scan again whenever you want the next pass.', 'good');
   send('done', {
     stopped: control.stopped, summary: line,
@@ -984,6 +1048,67 @@ function closeMlsWindow() {
 ipcMain.on('pause', () => { control.paused = true; log('Paused.', 'warn'); });
 ipcMain.on('resume', () => { control.paused = false; log('Resumed.', 'good'); });
 ipcMain.on('stop', () => { control.stopped = true; control.paused = false; });
+
+// ---------- the Lead Board hand-off ----------
+// One file per day, in Documents/FlipScout, holding every lead the day's runs
+// kept — remarks, offer deadline, listing agent and bucket included. The Lead
+// Board's "Add scan" takes this file (or the same text pasted). An artifact's
+// shared data can only be written from the board page itself, which is why
+// this is a paste and not a push. Field names match the board's scanLead().
+const BOARD_DIR = () => path.join(app.getPath('documents'), 'FlipScout');
+const BOARD_FILE = (d = todayKey()) => path.join(BOARD_DIR(), `FlipScout-scan-${d}.json`);
+
+const boardLead = core.boardLead;
+
+function readBoardScan(d) {
+  try {
+    const j = JSON.parse(fs.readFileSync(BOARD_FILE(d), 'utf8'));
+    if (j && j.kind === 'flipscout-scan' && Array.isArray(j.leads)) return j;
+  } catch (_) {}
+  return null;
+}
+
+function writeBoardScan(leads) {
+  try {
+    const d = todayKey();
+    const prev = readBoardScan(d);
+    const by = {};
+    ((prev && prev.leads) || []).forEach(l => { if (l.mls) by[l.mls] = l; });
+    const before = Object.keys(by).length;
+    (leads || []).map(boardLead).forEach(l => { if (l.mls) by[l.mls] = l; });
+    const out = { kind: 'flipscout-scan', v: 1, app: app.getVersion(), pulled: d,
+      made: new Date().toISOString(), leads: Object.keys(by).map(k => by[k]) };
+    fs.mkdirSync(BOARD_DIR(), { recursive: true });
+    fs.writeFileSync(BOARD_FILE(d), JSON.stringify(out, null, 1));
+    return { ok: true, added: out.leads.length - before, total: out.leads.length };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function boardStatus() {
+  const j = readBoardScan();
+  const leads = (j && j.leads) || [];
+  return { file: BOARD_FILE(), exists: !!j, pulled: todayKey(), count: leads.length,
+    offers: leads.filter(l => l.offerDue).length, made: (j && j.made) || '', url: cfg.boardUrl };
+}
+
+ipcMain.handle('board-status', () => boardStatus());
+ipcMain.handle('board-copy', () => {
+  const b = boardStatus();
+  if (!b.count) return { ok: false, error: 'no leads kept today yet' };
+  clipboard.writeText(fs.readFileSync(b.file, 'utf8'));
+  log(`Copied today's ${b.count} lead(s) — paste them into the Lead Board with "Add scan".`, 'good');
+  return { ok: true, count: b.count };
+});
+ipcMain.handle('board-open', () => {
+  const u = String(cfg.boardUrl || '');
+  if (!/^https:\/\/claude\.ai\//.test(u)) return { ok: false, error: 'the Lead Board link must start with https://claude.ai/' };
+  shell.openExternal(u);
+  return { ok: true };
+});
+ipcMain.on('board-show', () => {
+  const b = boardStatus();
+  try { b.exists ? shell.showItemInFolder(b.file) : shell.openPath(BOARD_DIR()); } catch (_) {}
+});
 
 // ---------- local backup ----------
 // A copy of every reviewed city, written before anything else can fail. It is
@@ -1297,6 +1422,7 @@ function gateFields(c) {
     mlsStatus: g.status || '',
     agentPhone: g.agentPhone || '', agentEmail: g.agentEmail || '', showing: g.showing || '',
     disclosures: g.disclosures || '',
+    remarks: c._remarks || '', redfin: c._redfin || '',
     priceCut: orig > list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
   };
 }

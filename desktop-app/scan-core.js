@@ -789,7 +789,67 @@ function privateRemarks(text) {
   return m ? m[1].replace(/\s+/g, ' ').trim() : '';
 }
 
+/**
+ * The exact Redfin page for an address, out of Redfin's location-autocomplete
+ * answer (the text after its "{}&&" guard). Redfin's page links carry an
+ * internal home id — /CA/San-Francisco/21-College-Ter-94112/home/1234567 — so
+ * they cannot be built from the address; they have to be looked up.
+ *
+ * Only a result whose street number and zip match the address is taken: a
+ * wrong house's page is worse than no link.
+ */
+function redfinUrlFrom(body, address) {
+  const txt = String(body || '');
+  const want = String(address || '');
+  const num = (want.match(/^\s*(\d+[A-Za-z]?)\b/) || [])[1];
+  const zip = (want.match(/\b(9\d{4})\b/) || [])[1];
+  if (!num) return '';
+  const urls = [...txt.matchAll(/"url"\s*:\s*"(\/[A-Z]{2}\/[^"]+?\/home\/\d+)"/g)].map(m => m[1]);
+  for (const u of urls) {
+    const slug = u.split('/')[3] || '';                 // "21-College-Ter-94112"
+    if (!slug.startsWith(num + '-')) continue;
+    if (zip && !slug.endsWith('-' + zip)) continue;
+    return 'https://www.redfin.com' + u;
+  }
+  return '';
+}
+
+/**
+ * One lead as the FlipScout Lead Board stores it (the board's scanLead() reads
+ * exactly these names). Lengths are capped and phone, email, date and Redfin
+ * link are shape-checked, so a pasted file can never put junk on the board.
+ */
+const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+function boardLead(l) {
+  const num = v => (v === '' || v == null || !isFinite(Number(v))) ? null : Number(v);
+  // core.offerDue writes "2026-09-30 (Wed) 12:00 PM" or "TBD".
+  const od = String(l.offerDue || '');
+  const date = (od.match(/^(\d{4}-\d{2}-\d{2})/) || [])[1] || '';
+  const time = (od.match(/(\d{1,2}:\d{2} [AP]M)/) || [])[1] || '';
+  const agent = String(l.listedBy || '');
+  const phone = clip(l.agentPhone, 20);
+  return {
+    mls: clip(l.mls, 20).toUpperCase(),
+    addr: clip(fullAddress(l.address, l.city, l.zip), 160),
+    city: clip(l.city, 60), zip: clip(l.zip, 10),
+    price: num(l.price), ppsf: num(l.ppsf), sqft: num(l.sqft),
+    beds: num(l.beds), baths: num(l.baths), year: num(l.yearBuilt), dom: num(l.dom),
+    remarks: clip(l.remarks, 2000), agentRemarks: clip(l.privateRemarks, 1500), showing: clip(l.showing, 600),
+    offerDue: date, offerTime: time, offerFrom: od ? 'MLS remarks' : '',
+    offerPhrase: od === 'TBD' ? 'Offer date TBD' : clip(od, 60),
+    why: clip([l.bucketLabel, l.oppScore !== '' && l.oppScore != null ? 'score ' + l.oppScore : '', l.why]
+      .filter(Boolean).join(' · '), 240),
+    redfin: /^https:\/\/www\.redfin\.com\/[A-Z]{2}\/[^\s"<>]+\/home\/\d+$/.test(l.redfin || '') ? l.redfin : '',
+    agentName: clip(agent.split(',')[0], 80),
+    agentPhone: /^\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}$/.test(phone) ? phone : '',
+    agentEmail: /^[^\s@<>"']{1,64}@[^\s@<>"']{1,190}\.[A-Za-z]{2,}$/.test(clip(l.agentEmail, 254)) ? clip(l.agentEmail, 254) : '',
+    mlsStatus: clip(l.mlsStatus, 30),
+  };
+}
+
 module.exports = {
+  boardLead,
+  redfinUrlFrom,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
