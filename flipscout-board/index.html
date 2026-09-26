@@ -674,6 +674,12 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .acq-item .ai-l2{font-size:11px}
 .ai-chk{padding-top:7px}
 .acq-lsec > summary, .acq-lsec > .acq-lhead{padding:7px 12px 3px; position:sticky; top:0; z-index:1; background:var(--surface)}
+
+.lp-due-src{display:block; margin-top:3px; font-size:11.5px; color:var(--muted)}
+.lp-edit{margin-left:8px; font:600 11.5px Archivo,sans-serif; color:var(--brand); background:none; border:0; padding:0; cursor:pointer; text-decoration:underline}
+.lp-due-ed{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px}
+.lp-due-ed input{font:13px "IBM Plex Mono",monospace; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--ink)}
+.lp-due-ed .btn{min-height:0; padding:4px 10px; font-size:12px}
 .acq-legend{font-size:12px; color:var(--muted); margin:-4px 0 12px}
 .acq-legend i{display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin:0 4px 0 10px}
 </style>
@@ -1713,7 +1719,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   // gave in a reply. t is a clock time when one is known.
   function acqDueOf(l){
     var d = dueOf(l), x = EMAIL_BY[l.mls], t = "";
-    if (d) t = teamDue(l) ? "" : (l.offerTime || "");
+    if (d) { var te = rec(l.date, l.mls); t = teamDue(l) ? visitTime(te && te.dt) : (l.offerTime || ""); }
     else if (x && /^\d{4}-\d{2}-\d{2}/.test(x.due)) { d = x.due.slice(0, 10); t = (/\d{1,2}:\d{2}\s*[AP]M/i.exec(x.due) || [""])[0]; }
     return {d: d || "", t: t};
   }
@@ -1915,11 +1921,19 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<div class="lp-facts">' + (l.price ? '<span><b>' + fmtMoney(l.price) + '</b></span>' : '') + fact(l.ppsf ? "$" + l.ppsf : "", "/sqft") +
         fact(l.sqft ? fmtNum(l.sqft) : "", "sqft") + fact(l.beds, "beds") + fact(l.year, "built") + fact(l.dom, "DOM") + '</div>' +
       '<div class="lp-grid">' +
-        '<div class="lp-box"><h3>Offer due</h3>' + (o.d
-            ? '<div class="lp-due">' + esc(day(o.d)) + (o.t ? ' · ' + esc(o.t) : '') + '</div>' +
-              (dd !== null ? '<span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' : '') +
-              (!dueOf(l) ? '<span class="em-meta">from the agent\'s reply</span>' : '')
-            : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">No date yet</span>')) +
+        '<div class="lp-box"><h3>Offer due' + (l.date && acqDueEdit !== l.mls ? '<button type="button" class="lp-edit" data-due-edit="' + esc(l.mls) + '">' + (o.d ? '✎ Edit' : '＋ Add') + '</button>' : '') + '</h3>' +
+          (acqDueEdit === l.mls
+            ? '<div class="lp-due-ed"><input type="date" id="acqDueD" value="' + esc(o.d) + '" aria-label="Offer due date">' +
+              '<input type="time" id="acqDueT" value="' + esc(teamDue(l) && e.dt ? e.dt : "") + '" aria-label="Offer due time (optional)">' +
+              '<button type="button" class="btn tiny go" data-due-save="' + esc(l.mls) + '">Save</button>' +
+              (o.d ? '<button type="button" class="btn tiny" data-due-clear="' + esc(l.mls) + '">Clear</button>' : '') +
+              '<button type="button" class="btn tiny" data-due-cancel="1">Cancel</button></div>' +
+              '<span class="lp-due-src">Saved for the whole team; the time is optional.</span>'
+            : (o.d
+              ? '<div class="lp-due">' + esc(day(o.d)) + (o.t ? ' · ' + esc(o.t) : '') + '</div>' +
+                (dd !== null ? '<span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' : '') +
+                '<span class="lp-due-src">' + (!dueOf(l) ? "from the agent's reply" : teamDue(l) ? "typed on the board" + (e.by ? " · last change by " + esc(e.by) : "") : "from the sheet / remarks") + '</span>'
+              : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">' + (teamDue(l) === "-" ? "No deadline (set on the board)" : "No date yet") + '</span>'))) +
           '</div>' +
         '<div class="lp-box"><h3>Team status</h3><select class="st-sel ' + STCLASS[st] + '" data-act="status" aria-label="Status for ' + esc(l.mls) + '"' +
           (l.date ? '' : ' disabled') + '>' + opts + '</select>' +
@@ -1945,6 +1959,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       : '<span class="txt-none">No remarks on this listing yet</span>') + '</div>';
   }
   function acqPick(mls, scroll){
+    if (mls !== acqSel) acqDueEdit = "";
     acqSel = mls;
     [].forEach.call(document.querySelectorAll("#acqSecs .acq-item"), function(b){ b.setAttribute("aria-current", String(b.dataset.pick === mls)); });
     var d = document.querySelector("#acqSecs .acq-detail");
@@ -1954,7 +1969,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       if (scroll && (r.top < 0 || r.top > window.innerHeight - 80)) { try { d.scrollIntoView({block: "start", behavior: "smooth"}); } catch (e) {} }
     }
   }
-  var acqPicked = {};
+  var acqPicked = {}, acqDueEdit = "";
   function acqSelSync(){
     var live = {}; LEADS.forEach(function(l){ if (acqPicked[l.mls] && !removedOf(l)) live[l.mls] = true; });
     acqPicked = live;
@@ -2016,6 +2031,25 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     b = ev.target.closest("[data-acq-f]");
     if (b) { var g = b.dataset.acqF; acqF[g] = acqF[g] === b.dataset.v ? "" : b.dataset.v; renderAcq(); return; }
     if (ev.target.closest("#acqClear, #acqClear2")) { acqClearAll(); return; }
+    b = ev.target.closest("[data-due-edit]");
+    if (b) { acqDueEdit = b.dataset.dueEdit; acqPick(acqDueEdit, false); var di = $("acqDueD"); if (di) di.focus(); return; }
+    if (ev.target.closest("[data-due-cancel]")) { var cm = acqDueEdit; acqDueEdit = ""; acqPick(cm || acqSel, false); return; }
+    b = ev.target.closest("[data-due-save]");
+    if (b) {
+      var dl = BY_MLS[b.dataset.dueSave], dv = $("acqDueD").value, tv = $("acqDueT").value;
+      if (!dv) { toast("Pick a date first — or Clear to remove it"); return; }
+      acqDueEdit = ""; b.blur();
+      if (dl) applyEdit(dl.date, dl.mls, {d: dv, dt: tv || ""});
+      return;
+    }
+    b = ev.target.closest("[data-due-clear]");
+    if (b) {
+      var cl = BY_MLS[b.dataset.dueClear];
+      acqDueEdit = ""; b.blur();
+      // with a date on the sheet, clearing means "no deadline", not "use the sheet's again"
+      if (cl) applyEdit(cl.date, cl.mls, {d: sheetDue(cl) ? "-" : "", dt: ""});
+      return;
+    }
     b = ev.target.closest("[data-acq-restore]");
     if (b) { var rl = BY_MLS[b.dataset.acqRestore]; if (rl) applyEdit(rl.date, rl.mls, {r: false}); return; }
     b = ev.target.closest("[data-pick]");
@@ -2178,12 +2212,14 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       vd: cur.vd || "",
       vs: cur.vs || "",
       vt: cur.vt || "",
+      dt: cur.dt || "",
       by: myName || "Someone",
       at: new Date().toISOString()
     };
     if ("s" in patch) next.s = patch.s;
     if ("r" in patch) next.r = patch.r;
     if ("d" in patch) next.d = patch.d;
+    if ("dt" in patch) next.dt = patch.dt; else if ("d" in patch) next.dt = "";
     if ("pr" in patch) next.pr = patch.pr;
     if ("sp" in patch) next.sp = patch.sp;
     if ("em" in patch) { next.em = patch.em; next.eb = myName || "Someone"; }
@@ -2200,7 +2236,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         ? (next.vd || next.vs ? "Visit " + [next.vd, visitTime(next.vt), next.vs].filter(Boolean).join(" · ") + " — saved for the team" : "Visit cleared")
       : "em" in patch ? "Marked emailed — finish in the new tab" : ("d" in patch
       ? (next.d === "-" ? "Marked no deadline — saved for the team"
-         : next.d ? "Offer due " + next.d + " — saved for the team"
+         : next.d ? "Offer due " + next.d + (next.dt ? " " + visitTime(next.dt) : "") + " — saved for the team"
          : "Deadline cleared")
       : "r" in patch
         ? (next.r ? "Removed — saved for the team" : "Restored — saved for the team")
