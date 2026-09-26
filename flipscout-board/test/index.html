@@ -935,6 +935,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .lk-row .lk-in{flex:1 1 240px; min-width:0; min-height:32px; font-size:13px; padding:5px 9px; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--ink)}
 .lk-row .hint{flex-basis:100%; font-size:11.5px; color:var(--muted)}
 .note-row{flex-wrap:wrap}
+
+.lk-wait{margin-top:6px; padding:8px 10px; border-radius:8px; background:var(--b-offer); color:var(--t-offer); font-size:12.5px; font-weight:600}
 </style>
 
 <header class="top">
@@ -1862,6 +1864,25 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       (dl ? '<a class="btn tiny" href="' + esc(dl) + '" target="_blank" rel="noopener">Download ↗</a>' : '') + '</div>';
   }
   var linkOpen = {}, linkDrafts = {};
+  // Videos uploaded through the Google script (apps-script/flipscout-videos.gs):
+  // the script files them in Drive and logs a row on the sheet's Videos tab; the
+  // board copies those rows into videos/<MLS> so every teammate sees the card.
+  var VIDEO_BRIDGE = "";
+  var VIDEOS = {}, vidWait = {}, vidTimer = null, vidBusy = false;
+  function videoList(mls){
+    var it = VIDEOS[mls] || {};
+    return Object.keys(it).map(function(k){ return it[k]; }).filter(function(v){ return v && LINK_OK.test(v.u || ""); })
+      .sort(function(a, b){ return (a.at || "") < (b.at || "") ? -1 : 1; });
+  }
+  function noteVideoHTML(v){
+    return '<div class="lk-card"><span class="lk-ic" aria-hidden="true">▶</span><span class="lk-t"><b>' + esc(v.n || "Video") + '</b><small>Google Drive' +
+      (v.by ? ' · ' + esc(v.by) : '') + (v.at ? ' · ' + esc(noteDay(v.at)) : '') + (v.sz ? ' · ' + esc(String(v.sz)) + ' MB' : '') + '</small></span>' +
+      '<a class="btn tiny go" href="' + esc(v.u) + '" target="_blank" rel="noopener">Watch ↗</a>' +
+      (LINK_OK.test(v.d || "") ? '<a class="btn tiny" href="' + esc(v.d) + '" target="_blank" rel="noopener">Download ↗</a>' : '') + '</div>';
+  }
+  function videoUrl(l){
+    return VIDEO_BRIDGE + "?mls=" + encodeURIComponent(l.mls) + "&addr=" + encodeURIComponent(l.addr || "") + "&by=" + encodeURIComponent(myName || "");
+  }
   function saveLink(mls){
     var u = (linkDrafts[mls] || "").trim();
     if (!LINK_OK.test(u)) { toast("Paste the whole share link — it starts with https://"); return; }
@@ -1884,6 +1905,66 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   });
   document.addEventListener("input", function(ev){ if (ev.target.classList && ev.target.classList.contains("lk-in")) linkDrafts[ev.target.dataset.mls] = ev.target.value; });
   document.addEventListener("keydown", function(ev){ if (ev.key === "Enter" && ev.target.classList && ev.target.classList.contains("lk-in")) { ev.preventDefault(); saveLink(ev.target.dataset.mls); } });
+  document.addEventListener("click", function(ev){
+    var a = ev.target.closest && ev.target.closest("a[data-vup]"); if (!a) return;
+    vidWait[a.dataset.vup] = Date.now();
+    toast("Upload in the new tab — come back here when it says Uploaded");
+    watchVideos(); draw();
+  });
+  function watchVideos(){
+    if (vidTimer) return;
+    vidTimer = setInterval(function(){
+      var live = Object.keys(vidWait).filter(function(m){ return Date.now() - vidWait[m] < 30 * 60000; });
+      if (!live.length) { clearInterval(vidTimer); vidTimer = null; vidWait = {}; draw(); return; }
+      if (document.visibilityState === "visible") syncVideos(false);
+    }, 45000);
+  }
+  function onBack(){ if (document.visibilityState === "visible" && Object.keys(vidWait).length) syncVideos(false); }
+  document.addEventListener("visibilitychange", onBack);
+  window.addEventListener("focus", onBack);
+  function videosFromWorkbook(X, wb){
+    var ws = wb.Sheets.Videos;
+    if (!ws) return [];
+    var grid = X.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
+    var head = (grid[0] || []).map(function(h){ return String(h).trim(); }), ix = {};
+    head.forEach(function(h, i){ if (h && !(h in ix)) ix[h] = i; });
+    return grid.slice(1).map(function(raw){
+      var g = function(h){ return h in ix ? cellText(X, raw[ix[h]]) : ""; };
+      var id = g("File Id"), when = raw[ix["Added On"]];
+      var at = when instanceof Date ? when.toISOString() : typeof when === "number" ? new Date(Math.round((when - 25569) * 864e5)).toISOString() : g("Added On");
+      return {mls: g("MLS #").toUpperCase(), id: id, n: g("File").slice(0, 150), u: g("Link"), d: g("Download"), by: g("Added By").slice(0, 60),
+              at: String(at).slice(0, 40), sz: parseFloat(g("Size MB")) || 0};
+    }).filter(function(v){ return /^[A-Z0-9]{5,20}$/.test(v.mls) && /^[\w-]{10,}$/.test(v.id) && LINK_OK.test(v.u); });
+  }
+  // copy rows the board does not have yet into videos/<MLS>, one merge per video
+  function saveVideos(rows, quiet){
+    var added = 0;
+    rows.forEach(function(v){
+      if (!db || (VIDEOS[v.mls] && VIDEOS[v.mls][v.id])) return;
+      var item = {u: v.u, d: LINK_OK.test(v.d) ? v.d : "", n: v.n, by: v.by, at: v.at, sz: v.sz};
+      VIDEOS[v.mls] = VIDEOS[v.mls] || {}; VIDEOS[v.mls][v.id] = item;
+      var body = {items: {}}; body.items[v.id] = item;
+      var ref = db.doc("videos/" + v.mls);
+      ref.update(body).catch(function(){ return ref.set(body); }).catch(function(){});
+      if (vidWait[v.mls]) { delete vidWait[v.mls]; if (!quiet) toast("✓ Video added to " + ((BY_MLS[v.mls] || {}).addr || v.mls)); }
+      added++;
+    });
+    if (added) draw();
+    return added;
+  }
+  function syncVideos(quiet){
+    if (!mcp || !db || vidBusy) return;
+    vidBusy = true;
+    Promise.all([loadXlsx(), mcp.callTool("Google Drive", "download_file_content", {fileId: SHEET_ID, exportMimeType: XLSX_TYPE}, {cache: false})]).then(function(got){
+      var X = got[0], p = got[1] && got[1].payload;
+      if (typeof p === "string") { try { p = JSON.parse(p); } catch (e) {} }
+      var b64 = p && typeof p.content === "string" ? p.content : "";
+      if (!b64) return;
+      var bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      saveVideos(videosFromWorkbook(X, X.read(bytes, {type: "array"})), quiet);
+    }).catch(function(){}).then(function(){ vidBusy = false; });
+  }
   function noteDay(at){
     var d = new Date(at);
     return isNaN(d) ? "" : d.toLocaleDateString("en-US", {month: "short", day: "numeric"});
@@ -1933,6 +2014,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var m = esc(l.mls);
     return (last ? '<span class="team-note"><b>' + esc(last.by) + '</b> <span class="when">' + esc(noteWhen(last.at)) +
         '</span><br>' + esc(last.t.length > 160 ? last.t.slice(0, 160) + "…" : last.t || ("📎 " + (last.f ? last.f.n : ""))) + '</span>' : '') +
+      (withFiles ? videoList(l.mls).map(noteVideoHTML).join("") +
+        (vidWait[l.mls] ? '<div class="lk-wait">Waiting for the upload to finish in the other tab — the video appears here by itself.</div>' : '') : '') +
       '<details class="notes" data-notes="' + m + '"' + (openNotes[l.mls] || withFiles ? ' open' : '') + '>' +
       '<summary>' + (list.length ? 'Notes · ' + list.length : '＋ Add a note') + '</summary>' +
       (list.length ? '<ol>' + list.map(function(n){
@@ -1944,7 +2027,10 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<div class="note-row"><span class="hint">Saved with your name for the whole team</span>' +
       (withFiles && ASSETS ? '<label class="btn tiny note-attach" title="Photos, short videos (MP4, MOV, WebM), PDFs or text files, up to 20 MB each — longer videos: 🎬 Video link">📎 Attach file' +
         '<input type="file" data-attach="' + m + '" accept="image/*,video/mp4,video/webm,video/quicktime,.mp4,.m4v,.mov,.webm,application/pdf,.pdf,.txt,.csv,.md,.json,.svg"></label>' : '') +
-      (withFiles ? '<button type="button" class="btn tiny" data-link-open="' + m + '" title="For long videos: paste a Google Drive share link">🎬 Video link</button>' : '') +
+      (withFiles ? (VIDEO_BRIDGE
+          ? '<a class="btn tiny go" data-vup="' + m + '" href="' + esc(videoUrl(l)) + '" target="_blank" rel="noopener" title="Any length — it goes to this property\'s folder in Google Drive">🎬 Upload video</a>'
+          : '<button type="button" class="btn tiny" disabled title="The upload script is not connected yet">🎬 Upload video</button>') +
+        '<button type="button" class="btn tiny" data-link-open="' + m + '" title="Already in Drive, Photos or YouTube? Paste its share link">🔗 Paste link</button>' : '') +
       '<button type="button" class="btn tiny" data-note-save="' + m + '">Save note</button></div>' +
       (withFiles && linkOpen[l.mls] ? '<div class="lk-row"><input type="url" class="lk-in" data-mls="' + m + '" value="' + esc(linkDrafts[l.mls] || "") + '"' +
         ' placeholder="Paste the Google Drive share link" aria-label="Video share link">' +
@@ -3335,6 +3421,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       var wbk = X.read(bytes, {type: "array"});
       var rows = rowsFromWorkbook(X, wbk), erows = emailsFromWorkbook(X, wbk);
+      saveVideos(videosFromWorkbook(X, wbk), true);
       if (!rows.length) throw {code: "sheet", message: "The Leads tab came back empty, so nothing was refreshed."};
       // the same safety stop as the daily refresh
       var have = {}; rows.forEach(function(r){ have[r[0]] = true; });
@@ -3556,6 +3643,12 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       }, function(){
         note("Lost the connection to the shared board — notes from others may not show. Reload the page.", true);
       });
+      db.collection("videos").onSnapshot(function(snap){
+        var next = {};
+        snap.docs.forEach(function(d){ var b = d.data() || {}; next[d.id] = b.items && typeof b.items === "object" ? b.items : {}; });
+        VIDEOS = next;
+        draw();
+      }, function(){});
       db.collection("sheet").onSnapshot(function(snap){
         var next = {};
         snap.docs.forEach(function(d){ next[d.id] = d.data() || {}; });
