@@ -940,10 +940,6 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
 .lk-hint{margin-top:6px; font-size:11.5px; color:var(--muted)}
 
-#vpDlg{border:1px solid var(--line); border-radius:14px; padding:0; width:min(960px, calc(100% - 32px)); background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55)}
-#vpDlg::backdrop{background:rgba(14,32,46,.6)}
-.vp-box{position:relative; width:100%; aspect-ratio:16/9; margin-top:12px; background:#000; border-radius:10px; overflow:hidden}
-.vp-box iframe{position:absolute; inset:0; width:100%; height:100%; border:0}
 </style>
 
 <header class="top">
@@ -1128,18 +1124,6 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         <button type="button" class="btn" id="visitClear" title="Remove the date, time and status">Clear</button>
         <button type="button" class="btn" id="visitCancel">Cancel</button>
         <button type="button" class="btn go" id="visitSave">Save</button>
-      </div>
-    </div>
-  </dialog>
-  <dialog id="vpDlg" aria-labelledby="vpTitle">
-    <div class="dlg">
-      <h2 id="vpTitle">Video</h2>
-      <div class="vp-box"><iframe id="vpFrame" title="Video player" src="about:blank" allow="autoplay; fullscreen" allowfullscreen referrerpolicy="no-referrer"></iframe></div>
-      <p class="dlg-hint">Blank or an error above? A new video can take a few minutes before Drive plays it — or open it in Drive.</p>
-      <div class="dlg-actions">
-        <a class="btn" id="vpDl" href="#" target="_blank" rel="noopener">Download ↗</a>
-        <a class="btn" id="vpOpen" href="#" target="_blank" rel="noopener">Open in Drive ↗</a>
-        <button type="button" class="btn go" id="vpClose">Close</button>
       </div>
     </div>
   </dialog>
@@ -1899,26 +1883,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   function noteVideoHTML(v){
     return '<div class="lk-card"><span class="lk-ic" aria-hidden="true">▶</span><span class="lk-t"><b>' + esc(v.n || "Video") + '</b><small>Google Drive' +
       (v.by ? ' · ' + esc(v.by) : '') + (v.at ? ' · ' + esc(noteDay(v.at)) : '') + (v.sz ? ' · ' + esc(String(v.sz)) + ' MB' : '') + '</small></span>' +
-      (driveId(v.u) ? '<button type="button" class="btn tiny go" data-vplay="' + esc(v.id || "") + '" data-vmls="' + esc(v.mls || "") + '">▶ Watch</button>'
-                    : '<a class="btn tiny go" href="' + esc(v.u) + '" target="_blank" rel="noopener">Watch ↗</a>') +
+      '<a class="btn tiny go" href="' + esc(v.u) + '" target="_blank" rel="noopener" title="Plays in Google Drive, in a new tab">▶ Watch ↗</a>' +
       (LINK_OK.test(v.d || "") ? '<a class="btn tiny" href="' + esc(v.d) + '" target="_blank" rel="noopener">Download ↗</a>' : '') + '</div>';
   }
-  // Drive's own player in a window on the board. If the viewer's browser or the
-  // page's rules keep it out, the two buttons under it still work.
-  function playVideo(v){
-    var id = driveId(v.u); if (!id) return;
-    $("vpTitle").textContent = v.n || "Video";
-    $("vpFrame").src = "https://drive.google.com/file/d/" + id + "/preview";
-    $("vpOpen").href = v.u;
-    $("vpDl").href = LINK_OK.test(v.d || "") ? v.d : "https://drive.google.com/uc?export=download&id=" + id;
-    var d = $("vpDlg"); if (d.showModal) d.showModal(); else d.setAttribute("open", "");
-  }
-  function closePlayer(){ var d = $("vpDlg"); $("vpFrame").src = "about:blank"; if (d.open) d.close(); }
-  document.addEventListener("click", function(ev){
-    var b = ev.target.closest && ev.target.closest("button[data-vplay]"); if (!b) return;
-    var v = ((VIDEOS[b.dataset.vmls] || {})[b.dataset.vplay]) || null;
-    if (v) playVideo(Object.assign({id: b.dataset.vplay}, v));
-  });
   function videoUrl(l){
     return VIDEO_BRIDGE + "?mls=" + encodeURIComponent(l.mls) + "&addr=" + encodeURIComponent(l.addr || "") + "&by=" + encodeURIComponent(myName || "");
   }
@@ -2808,8 +2775,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   $("unpassNo").addEventListener("click", function(){ $("unpassDlg").close(); });
   $("unpassGo").addEventListener("click", function(){ $("unpassDlg").close(); toast("Taking the pass off the sheet — close that tab when it says done"); });
   $("passDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closePass(false); });
-  $("vpClose").addEventListener("click", closePlayer);
-  $("vpDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closePlayer(); });
+
 
   /* ---------- persistence ---------- */
   function applyEdit(date, mls, patch){
