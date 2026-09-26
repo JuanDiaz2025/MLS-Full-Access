@@ -824,6 +824,49 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .wk-sheetnote{margin:0 0 8px; font-size:12.5px; color:var(--muted)}
 @media (max-width:1280px){ .wk-next{grid-template-columns:1fr 1fr} .wk-cols{grid-template-columns:1fr} }
 @media (max-width:900px){ .wk-next{grid-template-columns:1fr} .wk-tab-end{margin-left:0} .wk-lbl{width:100%} }
+
+/* v4: one header row, a quiet panel — no boxes inside the box */
+.wk-head{display:flex; align-items:flex-end; gap:12px; border-bottom:1px solid var(--line); margin:4px 0 14px}
+.wk-head .wk-tabs{flex:1; min-width:0; border-bottom:0; margin:0; overflow:visible; flex-wrap:wrap}
+.wk-head .wk-bar{margin:0 0 6px; flex:none}
+.wk-head .wk-bar select{min-height:32px; font-size:12.5px; padding:5px 24px 5px 9px}
+.wk-tab-end{margin-left:0}
+.acq-detail{padding:22px 26px 18px}
+.dx h2{font:600 21px Archivo,sans-serif; margin:0; line-height:1.25}
+.dx-facts{display:flex; flex-wrap:wrap; gap:4px 14px; margin:6px 0 4px; font-size:13.5px; color:var(--muted)}
+.dx-facts b{font-family:"IBM Plex Mono",monospace; font-weight:600; color:var(--ink)}
+.dx-tags{display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px; color:var(--muted)}
+.dx-tags .mlslink, .dx-tags .mst{margin-left:0}
+.dx-tags .bk{margin-top:0}
+.dx-bar{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:16px 0 0; padding:12px 0; border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft)}
+.dx-sel{display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:0 4px 0 12px; min-height:36px; border:1px solid var(--line); background:var(--surface)}
+.dx-sel > span:first-child:not(.wk-av){font:600 10.5px Archivo,sans-serif; letter-spacing:.07em; text-transform:uppercase; opacity:.75}
+.dx-sel select{border:0; background:transparent; font:600 13px Archivo,sans-serif; color:inherit; padding:6px 22px 6px 2px; min-height:0; cursor:pointer}
+.dx-sel select:focus{outline:none}
+.dx-sel:focus-within{box-shadow:0 0 0 2px var(--brand-2)}
+.dx-sel[class*="wk-st-"]{border-color:transparent}
+.dx-own{padding-left:6px}
+.dx-gap{flex:1}
+.dx-pass{color:var(--t-pass)}
+.dx-next{min-height:36px; padding:7px 16px; font:600 13px Archivo,sans-serif; border-radius:999px}
+.dx-info{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; padding:14px 0; border-bottom:1px solid var(--line-soft)}
+.dx-cell{min-width:0; font-size:13px}
+.dx h3{display:flex; align-items:center; gap:8px; margin:0 0 5px; font:600 10.5px Archivo,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--muted)}
+.dx h3 .lp-edit{margin-left:0; text-transform:none; letter-spacing:0}
+.dx-meta{display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin-top:3px; font-size:12px; color:var(--muted)}
+.dx-meta .due-chip{margin:0}
+.dx .contact{margin-top:0}
+.dx-cols{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.1fr); gap:28px; padding-top:14px}
+.dx-cols.one{grid-template-columns:1fr}
+.dx-cols section{min-width:0}
+.dx .notes, .dx .notes ol, .dx textarea.note-in{max-width:none; width:100%}
+.dx .team-note{display:none}
+.dx .notes > summary{display:none}
+.dx .lp-rem p{font-size:13px}
+.dx-foot{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:16px; padding-top:10px; border-top:1px solid var(--line-soft); font-size:11.5px; color:var(--muted)}
+.dx-foot .wk-rm{font-size:11.5px; font-weight:500}
+@media (max-width:1180px){ .dx-info{grid-template-columns:1fr 1fr} .dx-cols{grid-template-columns:1fr} }
+@media (max-width:900px){ .wk-head{flex-direction:column; align-items:stretch} .dx-info{grid-template-columns:1fr} }
 </style>
 
 <header class="top">
@@ -900,10 +943,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   </div><!-- /viewLeads -->
 
   <div id="viewAcq" hidden>
-    <p class="acq-sub">Every lead the team is working, by stage. Search finds any lead on the board — give it a stage to start working it.
-      <a href="#" class="acq-back" id="acqBack">Open the full Lead Board →</a></p>
-    <div class="wk-tabs" id="acqTabs" role="tablist" aria-label="Stage"></div>
-    <div class="wk-bar" id="acqBar"></div>
+    <div class="wk-head"><div class="wk-tabs" id="acqTabs" role="tablist" aria-label="Stage"></div>
+      <div class="wk-bar" id="acqBar"></div></div>
     <p class="acq-note" id="acqNote"></p>
     <div id="acqSecs"><div class="acq-split">
       <nav class="acq-list" aria-label="Leads being worked">
@@ -1980,14 +2021,13 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       var areas = {}; open.forEach(function(l){ var c = countyOf(l); areas[c] = (areas[c] || 0) + 1; });
       var anyF = !!(acqF.who || acqF.area || acqF.bk);
       $("acqBar").innerHTML =
-        '<span class="wk-bar-gap"></span>' +
         '<select data-acq-fsel="area" class="' + (acqF.area ? 'on' : '') + '" aria-label="Filter by area"><option value="">All areas</option>' +
           COUNTIES.map(function(c){ return c[0]; }).concat(["Other"]).filter(function(k){ return areas[k] || acqF.area === k; }).map(function(k){
             return '<option value="' + esc(k) + '"' + (acqF.area === k ? ' selected' : '') + '>' + esc(k) + ' (' + (areas[k] || 0) + ')</option>';
           }).join("") + '</select>' +
         '<select data-acq-fsel="bk" class="' + (acqF.bk ? 'on' : '') + '" aria-label="Filter by bucket"><option value="">All buckets</option>' +
           ["A", "B"].map(function(k){ return '<option value="' + k + '"' + (acqF.bk === k ? ' selected' : '') + '>' + k + ' · ' + BK_NAME[k] + '</option>'; }).join("") + '</select>' +
-        '<button type="button" class="wk-link" id="acqClear"' + (anyF || q ? '' : ' disabled') + '>Clear</button>';
+        (anyF || q ? '<button type="button" class="wk-link" id="acqClear">Clear</button>' : '');
     }
 
     // what the list shows
@@ -2036,7 +2076,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     }
     if (!flat.some(function(l){ return l.mls === acqSel; })) acqSel = flat[0].mls;
     // a teammate's change must not wipe a note being typed in the panel
-    var act = document.activeElement, typing = act && act.closest && act.closest(".acq-detail") && /^(TEXTAREA|INPUT|SELECT)$/.test(act.tagName);
+    var act = document.activeElement, typing = act && act.closest && act.closest(".acq-detail") && (/^(TEXTAREA|INPUT)$/.test(act.tagName) || (act.tagName === "SELECT" && /^acqVis/.test(act.id)));
     $("acqListBody").innerHTML = groups.map(function(g){
       return '<div class="wk-grp' + (g.hot ? ' hot' : '') + '">' + (g.t ? '<div class="wk-gh"><span>' + esc(g.t) + '</span><b>' + g.rows.length + '</b>' +
         (g.sub ? '<small>' + esc(g.sub) + '</small>' : '') + '</div>' : '') +
@@ -2065,70 +2105,77 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '</button></div>';
   }
 
+  // The one thing to do next for a lead at each stage: [label, what it does].
+  var NEXT = {
+    "new":      ["Juan’s interested", "interest"],
+    "interest": ["Book a visit", "book"],
+    "visit":    ["Mark visit done", "visited"],
+    "visited":  ["Offer sent", "offer"],
+    "offer":    ["Mark won", "won"]
+  };
   function acqDetailHTML(l){
     if (!l) return '<div class="lp-empty">Pick a lead on the left.</div>';
     var e = rec(l.date, l.mls) || {}, st = acqStage(l), ow = acqOwner(l), u = redfinOf(l), urg = acqUrgent(l);
-    var canSave = !!l.date, dis = canSave ? '' : ' disabled';
+    var canSave = !!l.date, dis = canSave ? '' : ' disabled', nx = NEXT[st];
     var fact = function(v, k){ return v || v === 0 ? '<span><b>' + v + '</b> ' + k + '</span>' : ''; };
-    return '<div class="acq-detail-in" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
+    var open = OPEN_STAGES.indexOf(st) !== -1;
+    return '<div class="acq-detail-in dx" data-mls="' + esc(l.mls) + '" data-date="' + esc(l.date) + '">' +
       (e.r ? '<div class="lp-gone">Removed by <b>' + esc(e.by || "Someone") + '</b>' + (e.at ? ' · ' + esc(noteWhen(e.at)) : '') +
         '<button type="button" class="btn tiny" data-acq-restore="' + esc(l.mls) + '">Restore</button></div>' : '') +
       (canSave ? '' : '<div class="lp-gone">This lead has no First Added date on the sheet, so changes to it can’t be saved.</div>') +
-      '<div class="wk-dh"><div class="wk-dh-t">' +
-        '<h2>' + (u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener" title="Open on Redfin">' + esc(l.addr) + ' ↗</a>' : esc(l.addr)) + '</h2>' +
-        '<div class="lp-sub"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
-          mlsStatusHTML(l.mlsStatus) + occCutHTML(l) + bucketHTML(l).replace(/^<br>/, "") + '</div>' +
-        '<div class="lp-facts">' + (l.price ? '<span><b>' + fmtMoney(l.price) + '</b></span>' : '') + fact(l.ppsf ? "$" + l.ppsf : "", "/sqft") +
-          fact(l.sqft ? fmtNum(l.sqft) : "", "sqft") + fact(l.beds, "beds") + fact(l.year, "built") + fact(l.dom, "DOM") + '</div>' +
-      '</div>' + (e.r || !canSave ? '' : '<button type="button" class="wk-link wk-rm" data-acq-rm="' + esc(l.mls) + '">Remove</button>') + '</div>' +
       (urg ? '<div class="wk-alert">' + esc(urg) + '</div>' : '') +
 
-      // 1. where it is, and who has it
-      '<div class="wk-act">' +
-        '<div class="wk-act-row"><span class="wk-lbl">Stage</span><div class="wk-stages" role="group" aria-label="Stage">' +
-          STAGES.map(function(s){
-            return '<button type="button" class="wk-st-' + s.k + '" data-acq-stage="' + s.k + '" aria-pressed="' + (st === s.k) + '"' + dis +
-              (s.sub ? ' title="' + esc(s.sub) + '"' : '') + '>' + esc(s.t) + '</button>';
-          }).join("") + '</div></div>' +
-        '<div class="wk-act-row"><span class="wk-lbl">Who’s on it</span><div class="wk-people" role="group" aria-label="Who is on it">' +
-          PEOPLE.map(function(p){
-            return '<button type="button" data-acq-own="' + p + '" aria-pressed="' + (ow === p) + '"' + dis + '>' + ownerBadge(p, true) + p + '</button>';
-          }).join("") +
-          (ow ? '<button type="button" class="wk-link" data-acq-own=""' + dis + '>Nobody</button>' : '') + '</div>' +
-          (e.by ? '<span class="wk-last">last change: ' + esc(e.by) + ' · ' + esc(noteWhen(e.at)) + '</span>' : '') + '</div>' +
+      // who and what: the house, then its numbers on one quiet line
+      '<h2>' + (u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener" title="Open on Redfin">' + esc(l.addr) + ' ↗</a>' : esc(l.addr)) + '</h2>' +
+      '<div class="dx-facts">' + (l.price ? '<span><b>' + fmtMoney(l.price) + '</b></span>' : '') + fact(l.ppsf ? "$" + l.ppsf : "", "/sqft") +
+        fact(l.sqft ? fmtNum(l.sqft) : "", "sqft") + fact(l.beds, "bd") + fact(l.year, "built") + fact(l.dom, "DOM") + '</div>' +
+      '<div class="dx-tags"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
+        mlsStatusHTML(l.mlsStatus) + occCutHTML(l) + bucketHTML(l).replace(/^<br>/, "") + '</div>' +
+
+      // one bar: where it is, who has it, and the single next step
+      '<div class="dx-bar">' +
+        '<label class="dx-sel wk-st-' + st + '"><span>Stage</span><select data-acq-stagesel aria-label="Stage"' + dis + '>' +
+          STAGES.map(function(s){ return '<option value="' + s.k + '"' + (s.k === st ? ' selected' : '') + '>' + esc(s.t) + '</option>'; }).join("") + '</select></label>' +
+        '<label class="dx-sel dx-own">' + (ow ? ownerBadge(ow, true) : '<span>Owner</span>') + '<select data-acq-ownsel aria-label="Who is on it"' + dis + '>' +
+          '<option value="">' + (ow ? 'Nobody' : 'Nobody yet') + '</option>' +
+          PEOPLE.map(function(p){ return '<option' + (p === ow ? ' selected' : '') + '>' + p + '</option>'; }).join("") + '</select></label>' +
+        '<span class="dx-gap"></span>' +
+        (open && canSave ? '<button type="button" class="wk-link dx-pass" data-acq-stage="passed">Pass</button>' : '') +
+        (nx && canSave && !e.r ? '<button type="button" class="btn go dx-next" data-acq-next="' + nx[1] + '">' + esc(nx[0]) + ' →</button>' : '') +
       '</div>' +
 
-      // 2. what's next: deadline, visit, agent
-      '<div class="wk-next">' + acqDueCard(l, e) + acqVisitCard(l, e) +
-        '<div class="wk-card"><h3>Agent</h3>' + contactHTML(l) + acqEmailLine(l, e) + '</div>' +
+      // the three facts that drive the day, no boxes
+      '<div class="dx-info">' + acqDueCard(l, e) + acqVisitCard(l, e) +
+        '<div class="dx-cell"><h3>Agent</h3>' + contactHTML(l) + acqEmailLine(l, e) + '</div>' +
       '</div>' +
 
-      // 3. the record: notes on the left, the listing's own words on the right
-      '<div class="wk-cols' + (acqHasRemarks(l) ? '' : ' one') + '">' +
-        '<div class="wk-card"><h3>Notes &amp; files</h3>' + (l.note ? '<p class="wk-sheetnote"><b>On the sheet:</b> ' + esc(l.note) + '</p>' : '') + notesHTML(l, true) + '</div>' +
+      '<div class="dx-cols' + (acqHasRemarks(l) ? '' : ' one') + '">' +
+        '<section><h3>Notes &amp; files</h3>' + (l.note ? '<p class="wk-sheetnote"><b>On the sheet:</b> ' + esc(l.note) + '</p>' : '') + notesHTML(l, true) + '</section>' +
         (acqHasRemarks(l) ? acqRemarksHTML(l) : '') +
       '</div>' +
+      '<div class="dx-foot">' + (e.by ? '<span>Last change: ' + esc(e.by) + ' · ' + esc(noteWhen(e.at)) + '</span>' : '<span></span>') +
+        (e.r || !canSave ? '' : '<button type="button" class="wk-link wk-rm" data-acq-rm="' + esc(l.mls) + '">Remove from the dashboard</button>') + '</div>' +
     '</div>';
   }
   function acqDueCard(l, e){
     var o = acqDueOf(l), dd = daysUntil(o.d);
     var head = '<h3>Offer due' + (l.date && acqDueEdit !== l.mls ? '<button type="button" class="lp-edit" data-due-edit="' + esc(l.mls) + '">' + (o.d ? 'Edit' : '＋ Add') + '</button>' : '') + '</h3>';
-    if (acqDueEdit === l.mls) return '<div class="wk-card">' + head +
+    if (acqDueEdit === l.mls) return '<div class="dx-cell">' + head +
       '<div class="lp-due-ed"><input type="date" id="acqDueD" value="' + esc(o.d) + '" aria-label="Offer due date">' +
       '<input type="time" id="acqDueT" value="' + esc(teamDue(l) && e.dt ? e.dt : "") + '" aria-label="Offer due time (optional)"></div>' +
       '<div class="lp-due-ed"><button type="button" class="btn tiny go" data-due-save="' + esc(l.mls) + '">Save</button>' +
       (o.d ? '<button type="button" class="btn tiny" data-due-clear="' + esc(l.mls) + '">Clear</button>' : '') +
       '<button type="button" class="btn tiny" data-due-cancel="1">Cancel</button></div></div>';
-    return '<div class="wk-card">' + head + (o.d
+    return '<div class="dx-cell">' + head + (o.d
       ? '<div class="lp-due">' + esc(acqDay(o.d)) + (o.t ? ' · ' + esc(o.t) : '') + '</div>' +
-        (dd !== null ? '<span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span>' : '') +
-        '<span class="lp-due-src">' + (!dueOf(l) ? "from the agent's reply" : teamDue(l) ? "typed on the board" : "from the sheet / remarks") + '</span>'
-      : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">' + (teamDue(l) === "-" ? "No deadline" : "No date yet") + '</span>')) + '</div>';
+        '<span class="dx-meta">' + (dd !== null ? '<span class="due-chip ' + dueClass(dd) + '">' + dueLabel(dd) + '</span> ' : '') +
+        (!dueOf(l) ? "from the agent's reply" : teamDue(l) ? "typed on the board" : "from the remarks") + '</span>'
+      : (l.offerPhrase && /\bT\.?B\.?D\b/i.test(l.offerPhrase) ? '<span class="due-chip due-later">TBD</span>' : '<span class="txt-none">' + (teamDue(l) === "-" ? "No deadline" : "None yet") + '</span>')) + '</div>';
   }
   function acqVisitCard(l, e){
     var v = visitOf(l), vw = acqVisitWho(l);
     var head = '<h3>Visit' + (l.date && acqVisEdit !== l.mls ? '<button type="button" class="lp-edit" data-vis-edit="' + esc(l.mls) + '">' + (v.d || v.s ? 'Edit' : '＋ Book') + '</button>' : '') + '</h3>';
-    if (acqVisEdit === l.mls) return '<div class="wk-card">' + head +
+    if (acqVisEdit === l.mls) return '<div class="dx-cell">' + head +
       '<div class="lp-due-ed"><input type="date" id="acqVisD" value="' + esc(v.d) + '" aria-label="Visit date">' +
       '<input type="time" id="acqVisT" value="' + esc(v.t) + '" aria-label="Visit time (optional)"></div>' +
       '<div class="lp-due-ed"><select id="acqVisW" aria-label="Who is going"><option value="">Who’s going?</option>' +
@@ -2138,9 +2185,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       (v.d || v.s ? '<button type="button" class="btn tiny" data-vis-clear="' + esc(l.mls) + '">Clear</button>' : '') +
       '<button type="button" class="btn tiny" data-vis-cancel="1">Cancel</button></div></div>';
     var n = v.d ? daysUntil(v.d) : null;
-    return '<div class="wk-card">' + head + (v.d || v.s
+    return '<div class="dx-cell">' + head + (v.d || v.s
       ? (v.d ? '<div class="lp-due">' + esc(acqDay(v.d)) + (v.t ? ' · ' + esc(visitTime(v.t)) : '') + '</div>' : '<div class="txt-none">No date yet</div>') +
-        '<span class="wk-vis">' + (vw ? ownerBadge(vw, true) + esc(vw) + ' · ' : '') + '<span class="vb-st ' + (VISIT_CLASS[v.s] || '') + '">' + esc(v.s || "No status") + '</span>' +
+        '<span class="dx-meta">' + (vw ? ownerBadge(vw, true) + ' ' + esc(vw) + ' · ' : '') + esc(v.s || "No status") +
         (n !== null && n >= 0 && v.s === "Scheduled" ? ' · ' + esc(dueLabel(n).replace(/^due /, "")) : '') + '</span>'
       : '<span class="txt-none">Not booked</span>') + '</div>';
   }
@@ -2157,13 +2204,15 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   function acqHasRemarks(l){ return !!(l.agentRemarks || l.remarks || l.showing || l.why); }
   function acqRemarksHTML(l){
+    // the MLS leaves zero-width spaces in, sometimes as the literal text "&#8203;"
+    var clean = function(t){ return String(t || "").replace(/&#8203;|&ZeroWidthSpace;|[\u200B\uFEFF]/g, ""); };
     var secs = [];
-    if (l.agentRemarks) secs.push(["Agent-only remarks", marked(l.agentRemarks, l.offerPhrase)]);
-    if (l.remarks) secs.push(["Public remarks", marked(l.remarks, l.offerPhrase)]);
-    if (l.showing) secs.push(["Showing", esc(l.showing)]);
+    if (l.agentRemarks) secs.push(["Agent-only remarks", marked(clean(l.agentRemarks), l.offerPhrase)]);
+    if (l.remarks) secs.push(["Public remarks", marked(clean(l.remarks), l.offerPhrase)]);
+    if (l.showing) secs.push(["Showing", esc(clean(l.showing))]);
     if (l.why) secs.push(["Why this bucket", esc(l.why)]);
-    return '<div class="wk-card lp-rem"><h3>Remarks</h3>' +
-      secs.map(function(x){ return '<div class="rm-sec"><h4>' + x[0] + '</h4><p>' + x[1] + '</p></div>'; }).join("") + '</div>';
+    return '<section class="lp-rem"><h3>Remarks</h3>' +
+      secs.map(function(x){ return '<div class="rm-sec"><h4>' + x[0] + '</h4><p>' + x[1] + '</p></div>'; }).join("") + '</section>';
   }
   function acqPick(mls, scroll){
     if (mls !== acqSel) { acqDueEdit = ""; acqVisEdit = ""; }
@@ -2214,6 +2263,12 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   $("acqSelToggle").addEventListener("click", function(){ acqSelecting = !acqSelecting; if (!acqSelecting) acqPicked = {}; renderAcq(); });
   function acqClearAll(){ acqF.who = ""; acqF.area = ""; acqF.bk = ""; $("acqQ").value = ""; acqKeep(); renderAcq(); }
   $("acqQ").addEventListener("input", function(){ renderAcq(); });
+  $("viewAcq").addEventListener("change", function(ev){
+    var cur = BY_MLS[acqSel], sl = ev.target;
+    if (!cur || !sl.matches) return;
+    if (sl.matches("select[data-acq-stagesel]")) { sl.blur(); applyEdit(cur.date, cur.mls, stagePatch(cur, sl.value)); }
+    else if (sl.matches("select[data-acq-ownsel]")) { sl.blur(); applyEdit(cur.date, cur.mls, {ow: sl.value}); }
+  });
   $("acqBar").addEventListener("change", function(ev){
     var sl = ev.target.closest("select[data-acq-fsel]"); if (!sl) return;
     acqF[sl.dataset.acqFsel] = sl.value;
@@ -2246,6 +2301,14 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var cur = BY_MLS[acqSel];
     b = ev.target.closest("[data-acq-stage]");
     if (b && cur) { b.blur(); applyEdit(cur.date, cur.mls, stagePatch(cur, b.dataset.acqStage)); return; }
+    b = ev.target.closest("[data-acq-next]");
+    if (b && cur) {
+      var nk = b.dataset.acqNext; b.blur();
+      if (nk === "book") { acqVisEdit = cur.mls; acqPick(cur.mls, false); var vd0 = $("acqVisD"); if (vd0) vd0.focus(); return; }
+      var np = stagePatch(cur, nk);
+      if (nk === "visited") np.vs = "Visited";                 // the visit itself is done too
+      applyEdit(cur.date, cur.mls, np); return;
+    }
     b = ev.target.closest("[data-acq-own]");
     if (b && cur) { b.blur(); applyEdit(cur.date, cur.mls, {ow: b.dataset.acqOwn}); return; }
     b = ev.target.closest("[data-acq-rm]");
@@ -2934,11 +2997,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
     setAcq(false);
   });
-  $("acqBack").addEventListener("click", function(ev){
-    ev.preventDefault();
-    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
-    setAcq(false);
-  });
+
   syncStep();
 
   /* ---------- refresh from the sheet ---------- */
