@@ -947,9 +947,6 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .lk-row1{display:flex; align-items:center; gap:10px}
 .lk-here .note-video{max-width:none; max-height:360px; margin-top:8px}
 
-#vpDlg{border:1px solid var(--line); border-radius:14px; padding:0; width:min(980px, calc(100% - 32px)); background:var(--surface); color:var(--ink); box-shadow:0 24px 60px -20px rgba(10,30,50,.55)}
-#vpDlg::backdrop{background:rgba(14,32,46,.7)}
-.vp-video{display:block; width:100%; max-height:70vh; margin-top:12px; background:#000; border-radius:10px}
 </style>
 
 <header class="top">
@@ -1135,13 +1132,6 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         <button type="button" class="btn" id="visitCancel">Cancel</button>
         <button type="button" class="btn go" id="visitSave">Save</button>
       </div>
-    </div>
-  </dialog>
-  <dialog id="vpDlg" aria-labelledby="vpTitle">
-    <div class="dlg">
-      <h2 id="vpTitle">Video</h2>
-      <video id="vpVideo" class="vp-video" controls playsinline preload="metadata"></video>
-      <div class="dlg-actions"><button type="button" class="btn go" id="vpClose">Close</button></div>
     </div>
   </dialog>
   <dialog id="passDlg" aria-labelledby="passTitle">
@@ -1988,16 +1978,6 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       writeNote(mls, noteId, next, "Saved on the board — couldn't copy it to Drive (" + ((e && e.code) || "error") + ")");
     }).then(function(){ delete copying[entry.f.id]; draw(); });
   }
-  function openPlayer(id, name){
-    $("vpTitle").textContent = name || "Video";
-    var v = $("vpVideo"); v.src = "/_blob/" + id;
-    var d = $("vpDlg"); if (d.showModal) d.showModal(); else d.setAttribute("open", "");
-    try { v.play().catch(function(){}); } catch (e) {}
-  }
-  function closePlayer(){ var v = $("vpVideo"); try { v.pause(); } catch (e) {} v.removeAttribute("src"); v.load(); var d = $("vpDlg"); if (d.open) d.close(); }
-  document.addEventListener("click", function(ev){
-    var b = ev.target.closest && ev.target.closest("button[data-vpop]"); if (b) openPlayer(b.dataset.vpop, b.dataset.vpopN);
-  });
   function videoUrl(l){
     return VIDEO_BRIDGE + "?mls=" + encodeURIComponent(l.mls) + "&addr=" + encodeURIComponent(l.addr || "") + "&by=" + encodeURIComponent(myName || "");
   }
@@ -2168,10 +2148,11 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       n = n || {};
       var where = n.dr ? "on the board · copy in Google Drive" : copying[f.id] ? "on the board · copying to Drive…" :
                   f.sz > DRIVE_COPY_MAX ? "on the board only — over 16 MB, too big to copy to Drive from here" : n.dx ? "on the board only — the Drive copy failed" : "on the board";
-      return '<div class="lk-card"><span class="lk-ic" aria-hidden="true">▶</span><span class="lk-t"><b>' + esc(f.n) + '</b><small>' + esc(where) + (f.sz ? ' · ' + fileSize(f.sz) : '') + '</small></span>' +
-        '<button type="button" class="btn tiny go" data-vpop="' + esc(f.id) + '" data-vpop-n="' + esc(f.n) + '">▶ Play</button>' +
+      // plays right in the note; the player has its own full-screen button
+      return '<div class="lk-card lk-here"><div class="lk-row1"><span class="lk-t"><b>' + esc(f.n) + '</b><small>' + esc(where) + (f.sz ? ' · ' + fileSize(f.sz) : '') + '</small></span>' +
         (n.dr ? '<a class="btn tiny" href="' + esc(n.dr) + '" target="_blank" rel="noopener">Drive ↗</a>' : '') +
-        (DOWNLOADS ? '<button type="button" class="btn tiny" data-dl="' + esc(f.id) + '" data-dl-n="' + esc(f.n) + '">Download</button>' : '') + '</div>';
+        (DOWNLOADS ? '<button type="button" class="btn tiny" data-dl="' + esc(f.id) + '" data-dl-n="' + esc(f.n) + '">Download</button>' : '') + '</div>' +
+        '<video class="note-video" src="' + url + '" controls preload="metadata" playsinline></video></div>';
     }
     return '<a class="note-file" href="' + url + '" target="_blank" rel="noopener">' + (img ? '🖼' : vid ? '🎬' : /pdf/.test(f.ty) ? '📄' : '📎') +
       ' <span>' + esc(f.n) + '</span>' + (f.sz ? '<small>' + fileSize(f.sz) + '</small>' : '') + '</a>' +
@@ -2929,9 +2910,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   $("unpassNo").addEventListener("click", function(){ $("unpassDlg").close(); });
   $("unpassGo").addEventListener("click", function(){ $("unpassDlg").close(); toast("Taking the pass off the sheet — close that tab when it says done"); });
   $("passDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closePass(false); });
-  $("vpClose").addEventListener("click", closePlayer);
-  $("vpDlg").addEventListener("cancel", function(ev){ ev.preventDefault(); closePlayer(); });
-  $("vpDlg").addEventListener("click", function(ev){ if (ev.target === $("vpDlg")) closePlayer(); });
+
 
 
   /* ---------- persistence ---------- */
