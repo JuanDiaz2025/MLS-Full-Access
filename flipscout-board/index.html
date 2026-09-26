@@ -995,10 +995,10 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 </header>
 
 <div class="wrap">
+  <div id="toast" role="status" aria-live="polite" hidden></div>
   <div id="viewLeads">
   <dl class="stats" id="stats"></dl>
   <div class="banner" id="syncNote">Connecting to the shared board…</div>
-  <div id="toast" role="status" aria-live="polite" hidden></div>
 
   <div class="sechead"><span id="activeLabel">Active</span><span class="cnt" id="activeCount"></span><span class="rule"></span></div>
   <div class="tablecard"><table id="tblActive"></table></div>
@@ -1972,19 +1972,28 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   function syncVideos(quiet, loud){
     if (!mcp || !db) { if (loud) toast("Google Drive isn't connected on this view — try ↻ Refresh from sheet"); return; }
-    if (vidBusy) return;
+    if (vidBusy && Date.now() - vidLast < 50000) { if (loud) toast("Still checking — one moment…"); return; }
     vidBusy = true; vidLast = Date.now();
     if (loud) toast("Looking for new videos…");
-    Promise.all([loadXlsx(), mcp.callTool("Google Drive", "download_file_content", {fileId: SHEET_ID, exportMimeType: XLSX_TYPE}, {cache: false})]).then(function(got){
+    var ac = typeof AbortController === "function" ? new AbortController() : null, kill = ac ? setTimeout(function(){ ac.abort(); }, 45000) : null;
+    Promise.all([loadXlsx(), mcp.callTool("Google Drive", "download_file_content", {fileId: SHEET_ID, exportMimeType: XLSX_TYPE}, ac ? {cache: false, signal: ac.signal} : {cache: false})]).then(function(got){
       var X = got[0], p = got[1] && got[1].payload;
       if (typeof p === "string") { try { p = JSON.parse(p); } catch (e) {} }
       var b64 = p && typeof p.content === "string" ? p.content : "";
       if (!b64) return;
       var bin = atob(b64), bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      var n = saveVideos(videosFromWorkbook(X, X.read(bytes, {type: "array"})), quiet);
-      if (loud && !n) toast("No new videos yet — a big one can take a minute after it says Uploaded");
-    }).catch(function(e){ if (loud) toast("Couldn't check for videos — " + ((e && e.code) || "try again")); }).then(function(){ vidBusy = false; });
+      var rows = videosFromWorkbook(X, X.read(bytes, {type: "array"}));
+      var n = saveVideos(rows, quiet), here = rows.filter(function(v){ return v.mls === acqSel; }).length;
+      // say what the sheet holds, so a missing video can be traced to the sheet or the board
+      if (loud) toast(n ? "✓ " + n + " new video" + (n === 1 ? "" : "s") + " added"
+        : "No new videos — the sheet's Videos tab has " + rows.length + " row" + (rows.length === 1 ? "" : "s") + ", " + here + " for this lead");
+    }).catch(function(e){
+      var c = e && e.code;
+      if (loud) toast(c === "cancelled" ? "Google Drive didn't answer in time — try again" :
+        c === "not_in_manifest" || c === "server_not_connected" || c === "needs_reauth" ? "Allow Google Drive for this board, then try again (" + c + ")" :
+        "Couldn't check for videos — " + (c || "try again"));
+    }).then(function(){ vidBusy = false; if (kill) clearTimeout(kill); });
   }
   function noteDay(at){
     var d = new Date(at);
