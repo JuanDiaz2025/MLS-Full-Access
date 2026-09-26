@@ -671,6 +671,17 @@ that line's Lead Board hand-off, Redfin links and report scrolling.
 - An empty or unreadable AI reply is treated like a failed call, not a DROP;
   OpenAI gets 4000 completion tokens so "thinking" models can answer.
 
+**v1.44.0 — San Francisco still read 0 rows after the 25 s wait** (Seth, 26 Sep,
+12:02 PM: "280 matches → scraped 0 rows"; San Mateo and Santa Clara read fine in
+the same session). So it is not timing: SF's results page does not match the
+`tr.DisplayRegRow / tr.DisplayAltRow` grid the reader expects. `JS_SCRAPE_GRID`
+now falls back to finding the header row by its cells (`MLS #` + `Price`) and
+reading every later row of that table with an MLS-shaped id. If that also finds
+nothing, `scanArea` saves `JS_GRID_DEBUG` (URL, title, frame count, row class
+counts, where "MLS #" appears, page text) plus a screenshot to
+`<userData>/grid-debug/` and logs the path — **ask for those two files before
+guessing at SF's grid again.**
+
 **A failed AI call is not a verdict.** It used to return DROP, so one typo in
 the model name auto-passed every listing in a run. Now the text rules' verdict
 stands, the log says `AI call failed: <provider message>`, and after 3

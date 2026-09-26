@@ -383,7 +383,20 @@ async function scanArea(area) {
   }
   log(`  scraped ${all.length} rows`);
   if (!all.length && count !== '0' && count !== '?') {
-    log(`  ⚠ ${label}: the MLS showed ${count} matches but no rows could be read — the results grid did not load. Scan this area again.`, 'error');
+    log(`  ⚠ ${label}: the MLS showed ${count} matches but no rows could be read — the results page is not the grid the app knows.`, 'error');
+    // Keep the evidence: what the page was, and a picture of it.
+    try {
+      const dir = path.join(app.getPath('userData'), 'grid-debug');
+      fs.mkdirSync(dir, { recursive: true });
+      const base = path.join(dir, label.replace(/[^a-z0-9]+/gi, '-') + '-' + Date.now());
+      const dbg = await js(core.JS_GRID_DEBUG).catch(e => ({ error: String(e) }));
+      fs.writeFileSync(base + '.json', JSON.stringify(dbg, null, 2));
+      if (mlsWin && !mlsWin.isDestroyed()) {
+        const img = await mlsWin.webContents.capturePage();
+        fs.writeFileSync(base + '.png', img.toPNG());
+      }
+      log(`  Saved what the page showed to ${base}.json and .png — send both to Claude.`, 'warn');
+    } catch (e) { log('  (could not save the page: ' + e.message + ')', 'warn'); }
   }
   return { city: label, county: area.county, count, rows: all };
 }

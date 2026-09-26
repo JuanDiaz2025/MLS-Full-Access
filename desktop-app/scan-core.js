@@ -65,7 +65,42 @@ const JS_SCRAPE_GRID = `(() => {
       sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'),
       zip: (zipCell.match(/9[0-5]\\d{3}/)||[''])[0] || inAddr });
   });
+  // Fallback for a grid whose rows carry other class names (San Francisco read
+  // "280 matches -> 0 rows" even after waiting): find the header row by its
+  // cells, then read every later row of the same table that holds an MLS #.
+  if (!out.length) {
+    const trs = Array.from(document.querySelectorAll('tr'));
+    const cellsOf = r => Array.from(r.children).map(c => clean(c.innerText));
+    const hi = trs.findIndex(r => { const t = cellsOf(r); return t.includes('MLS #') && t.some(x => /^(List )?Price$/i.test(x)); });
+    if (hi >= 0) {
+      const ix = {}; cellsOf(trs[hi]).forEach((c,i)=>{ if(c && ix[c]==null) ix[c]=i; });
+      const tbl = trs[hi].closest('table');
+      trs.slice(hi + 1).forEach(tr => {
+        if (tbl && tr.closest('table') !== tbl) return;
+        const cells = cellsOf(tr);
+        const p = k => ix[k]!=null ? (cells[ix[k]]||'') : '';
+        const mls = p('MLS #');
+        if (!/^[A-Z]{2,6}\\d{5,}$/.test(mls)) return;
+        const street = p('Street Address') || p('Address');
+        out.push({ mls, addr: street, price: p('Price') || p('List Price'), sqft: p('SqFt'),
+          bds: p('Bds') || p('Beds'), city: p('Postal City') || p('City'), age: p('Age'), dom: p('DOM'),
+          zip: (street.match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '' });
+      });
+    }
+  }
   return out;
+})()`;
+
+// What the results page looked like when no rows could be read — saved so a
+// "matches but 0 rows" area can be diagnosed from the user's machine.
+const JS_GRID_DEBUG = `(() => {
+  const clean = t => (t||'').replace(/\\s+/g,' ').trim();
+  const trs = Array.from(document.querySelectorAll('tr'));
+  const cls = {}; trs.forEach(t => { const c = t.className || '(none)'; cls[c] = (cls[c]||0) + 1; });
+  const withMls = Array.from(document.querySelectorAll('*')).filter(e => e.children.length < 3 && /^MLS ?#$/.test(clean(e.textContent))).slice(0, 5)
+    .map(e => ({ tag: e.tagName, cls: e.className, parent: e.parentElement && e.parentElement.tagName + '.' + e.parentElement.className }));
+  return { url: location.href, title: document.title, frames: window.frames.length, rowClasses: cls, mlsHeaders: withMls,
+    text: clean(document.body.innerText).slice(0, 2500) };
 })()`;
 
 // Pull every photo URL (Size=2) for the single listing shown in the results grid.
@@ -871,7 +906,7 @@ module.exports = {
   redfinUrlFrom,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
-  JS_SCRAPE_GRID, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
+  JS_SCRAPE_GRID, JS_GRID_DEBUG, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
   qualify, privateRemarks, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
   mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS, disclosuresLink,
