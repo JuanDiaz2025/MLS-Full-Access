@@ -28,7 +28,7 @@
 
 var SHEET_ID = '1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ';
 var ROOT_NAME = 'FlipScout property videos';
-var ROOT_ID = '';                         // optional: a folder id (e.g. in a Shared drive)
+var ROOT_ID = '1RCHgifHH80Fzi9nwtl3cXeA31K2yKWmr';                         // optional: a folder id (e.g. in a Shared drive)
 var TAB = 'Videos';
 var HEAD = ['Added On', 'MLS #', 'Address', 'File', 'Link', 'Download', 'Added By', 'Size MB', 'File Id'];
 var CHUNK = 4 * 1024 * 1024;              // a multiple of 256 KB, as Drive requires
