@@ -607,16 +607,20 @@ and the state of the finishes. Pay closest attention to the KITCHEN and BATHROOM
 that is where renovation shows first, and a listing is often photographed to hide it.
 Do not answer from the exterior shots alone.
 
-KEEP GENUINE value-add fixers: dated/original/worn/distressed interiors, vacant-original, estate/probate look, old kitchens/baths (formica, tile counters, old cabinets), worn or original flooring, needs cosmetic-to-heavy work.
+KEEP GENUINE value-add fixers that LOOK LIKE THEY NEED WORK: worn/distressed/neglected interiors, estate/probate look, old kitchens/baths in poor shape, worn or damaged flooring, needs cosmetic-to-heavy work.
 
 ONE UPDATED SURFACE IS NOT A FLIP. An older house where ONE thing was redone (granite on old cabinets, one remodeled bathroom, a new water heater) while the rest is original — dated kitchen, other baths original, old carpet or flooring — is a KEEP: a flipper still has a full job there. DROP for renovation only when the house as a whole has been flipped: the kitchen is new end to end (cabinets AND counters AND appliances) and the bathrooms are redone, or new finishes run throughout.
 
 Occupants, furniture and belongings are not finishes: judge the house, not who lives in it (occupancy is handled by other rules).
 
-The ONLY question that matters is: HAS WORK BEEN DONE TO THIS HOUSE? Judge the FINISHES, not the housekeeping or the staging. A house that is tidy, empty, swept, or professionally staged but still has ORIGINAL DATED FINISHES is a KEEP — "clean" is not "renovated". When torn between "clean but dated" and "lightly updated", choose KEEP.
+TWO questions decide it:
+1. HAS WORK BEEN DONE TO THIS HOUSE? Judge the FINISHES, not the staging — furniture and a fresh stage do not make a house renovated.
+2. DOES IT LOOK LIKE IT NEEDS WORK NOW? The buyer takes AS-IS houses that visibly need renovation. KEEP only when the photos show wear, neglect or damage: missing or broken cabinet doors, chipped or damaged counters, patched, stained or scuffed walls, torn, worn or stained flooring, grimy or cracked tile, tired original bathrooms, a house left dirty or in disrepair. Remarks saying as-is, deferred maintenance, needs TLC/work also count.
+A house that is DATED BUT IN GOOD REPAIR — old oak or painted cabinets and tile counters, but tidy, intact and livable as it stands — is a DROP, reason "dated but in good condition". Dated is not enough; it has to look like it needs work. When torn between "worn" and "dated but fine", choose KEEP and say so in the reason.
 
 DROP if ANY of:
-- Renovated / remodeled / updated / refreshed / turnkey: new or refaced cabinets, quartz/granite counters, new stainless appliances, redone bathrooms (new tile/vanity/fixtures), new flooring throughout, recessed lighting, modern tile backsplash, luxury vinyl plank, fresh designer finishes. Actual work done = DROP. Merely clean or staged = KEEP.
+- Renovated / remodeled / updated / refreshed / turnkey: new or refaced cabinets, quartz/granite counters, new stainless appliances, redone bathrooms (new tile/vanity/fixtures), new flooring throughout, recessed lighting, modern tile backsplash, luxury vinyl plank, fresh designer finishes. Actual work done = DROP.
+- Dated but in good repair (see question 2): original finishes that are tidy, intact and livable as-is = DROP.
 - Multi-unit: 2+ full kitchens, a separate in-law/second unit with its own kitchen, duplex/triplex, or a detached rear dwelling that's a living unit.
 - Fire damage / charring.
 - Newer build that looks modern.

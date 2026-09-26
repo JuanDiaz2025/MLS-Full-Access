@@ -53,6 +53,28 @@ So: judge the *finishes*, not the housekeeping or the staging. When photos are
 genuinely ambiguous between "clean but dated" and "lightly updated," keep it and
 note the uncertainty on the lead rather than dropping it.
 
+### ⚠️ UPDATE 26 Sep (Seth) — dated is NOT enough; it must LOOK like it needs work
+
+This overrides the "merely clean → KEEP" bullet above for **photo review**. Juan
+buys **as-is houses that visibly need renovation**. A house that is dated but in
+good repair — old oak or painted cabinets, tile counters, tidy and livable as it
+stands — is a **DROP** ("dated but in good condition").
+
+- **KEEP (Seth confirmed):** 31 Laurel Ln, Richmond (CC41149486) — cabinet doors
+  missing, stripped and patched walls, torn flooring · 3223 San Jose Ave, Daly
+  City (CC41149536) — doors missing, broken counter edge, patched wall, 1950s
+  yellow-tile bath · 359 Aspenridge, Milpitas (BE41149496) — empty, scuffed walls,
+  worn tile counters, tired original bath.
+- **DROP (Seth: "looking good", Juan won't buy):** 305 Virginia Ave SF, 3564 Smith
+  St Union City, 2271 46th Ave SF, 2027 21st Ave SF — all original finishes, all
+  tidy and intact.
+
+Enforced in the AI vision prompt (`rulesPrompt` in `main.js`, "question 2").
+Still true: staging and furniture are not finishes, one updated surface is not
+a flip, and when torn between "worn" and "dated but fine" the AI keeps it and
+says so. The text rules cannot see wear, so without an AI key these still reach
+the sheet for the reviewer to prune.
+
 ### ⚠️ "Renovation" cuts BOTH ways — the word alone means nothing
 
 **Never drop on `/renovat/`.** The same root describes the deal we want and the
