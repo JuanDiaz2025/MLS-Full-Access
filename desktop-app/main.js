@@ -595,7 +595,9 @@ async function compFor(mls, zip, sqft) {
 
 // ---------- AI auto-verify (Claude vision applies the buy-box rules) ----------
 function rulesPrompt(c, photoCount, gal) {
-  const remarks = ((gal && gal.remarks) || '').slice(0, 700);
+  // Private remarks too: the needs-work words on Seth's 28 Sep approvals
+  // ("Fixer", "Great bones--cosmetic remodel", "sold as-is") were agent-only.
+  const remarks = [gal && gal.remarks, gal && gal.privateRemarks].filter(Boolean).join(' / ').slice(0, 1200);
   return `You are screening a real-estate listing for a house-FLIPPING buy box.
 
 Listing: ${c.addr}, ${c._cityKey} — ${c._sqft} sqft, $${c._price.toLocaleString()}.
@@ -633,6 +635,8 @@ reason "no kitchen/bath photos".
 Respond with ONLY a JSON object, no other text:
 {"kitchen":"<what the kitchen photos show, or 'none seen'>",
  "bathroom":"<what the bathroom photos show, or 'none seen'>",
+ "wear":"heavy"|"some"|"none" — wear, neglect or damage you actually SAW (missing/broken doors, chipped counters, stained/torn floors, patched or scuffed walls, grime, cracked tile). Old-fashioned is NOT wear: tidy oak cabinets, tile counters or a 1970s bath in good repair = "none",
+ "damage":"<the specific wear/damage items you saw, or 'none'>",
  "quickFlip":"<cosmetic | structural — and why, in a few words. 'structural' means foundation, framing, settlement, roof or water damage ONLY; renovated finishes are never 'structural'>",
  "decision":"KEEP"|"DROP",
  "reason":"<8-15 words citing the specific finishes you saw>"}`;
@@ -708,12 +712,16 @@ async function autoDecide(c) {
     if (!/\{[\s\S]*"decision"[\s\S]*\}/.test(text || '')) return { error: true, reason: 'AI gave no usable answer' + (text ? ': "' + String(text).trim().slice(0, 80) + '"' : ' (empty reply)') };
     let o = {}; const m = text.match(/\{[\s\S]*\}/);
     try { o = JSON.parse(m ? m[0] : text); } catch (_) {}
-    const decision = /^keep$/i.test(String(o.decision || '').trim()) ? 'keep' : 'drop';
+    // The model's KEEP is not taken on trust: with no wear seen and no
+    // needs-work wording in the remarks, it is "dated but in good condition".
+    const av = core.aiVerdict(o, [gal.remarks, gal.privateRemarks].filter(Boolean).join(' '));
+    const decision = av.decision;
     // Surface what it actually saw, so a wrong call is diagnosable from the log
     // instead of being a bare verdict.
-    const seen = [o.kitchen && ('kitchen: ' + o.kitchen), o.bathroom && ('bath: ' + o.bathroom),
+    const seen = [o.wear && ('wear: ' + o.wear + (o.damage && !/^none/i.test(o.damage) ? ' (' + o.damage + ')' : '')),
+      o.kitchen && ('kitchen: ' + o.kitchen), o.bathroom && ('bath: ' + o.bathroom),
       o.quickFlip && ('rehab: ' + o.quickFlip)].filter(Boolean).join(' | ');
-    const reason = [(o.reason || text || '').trim(), seen].filter(Boolean).join(' — ');
+    const reason = [av.why, (o.reason || text || '').trim(), seen].filter(Boolean).join(' — ');
     return { decision, reason: reason.slice(0, 300), photos: photos.length };
   } catch (e) { return { error: true, reason: 'AI call failed: ' + e.message }; }
 }

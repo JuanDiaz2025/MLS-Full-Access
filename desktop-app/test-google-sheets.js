@@ -457,6 +457,30 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     eq(info.tabs, ['Leads'], 'two "quota exceeded" answers in a row are retried, then it works');
   }
 
+  // 17. Seth's manual check, 28 Sep (Alameda, 36 leads): A needs needs-work wording,
+  //     and the AI's KEEP needs wear it actually saw.
+  {
+    const core = require('./scan-core');
+    const cheap = { photos: 20, photosReliable: true, occupiedBy: 'Vacant', yearBuilt: 1956, dom: 23,
+      price: 779000, origPrice: 799000, ppsfRatio: 0.6 };
+    eq(core.qualify({ ...cheap, privateRemarks: 'Probate with independent administration. Pre-emptive offers welcome.' }).bucket, 'B',
+      'cheap + vacant + probate but no needs-work wording is held at B (6138 Oakdale)');
+    eq(core.qualify({ ...cheap, privateRemarks: 'Great bones--cosmetic remodel. Lockbox at front door.' }).bucket, 'A',
+      '"great bones — cosmetic remodel" counts as needs work (1363 Bates)');
+    eq(/distressed sale/.test(core.qualify({ privateRemarks: 'Bids at www.xome.com/auctions. 5% buyer\'s premium.' }).why), true,
+      'a Xome auction is a distressed sale (6225 Tevis)');
+    eq(/distressed sale/.test(core.qualify({ privateRemarks: 'Submit offers at homepath.fanniemae.com.' }).why), true,
+      'a Fannie Mae HomePath sale is a distressed sale (1027 76th)');
+    eq(/newer build/.test(core.qualify({ privateRemarks: 'Nice home.', yearBuilt: 1991 }).why), true, 'a 1991 build scores down');
+    eq(core.aiVerdict({ decision: 'KEEP', wear: 'none' }, 'Open house Sat 2-4.').decision, 'drop',
+      'AI KEEP with no wear seen = dated but in good condition');
+    eq(core.aiVerdict({ decision: 'KEEP', wear: 'none' }, 'Sold as-is, needs work.').decision, 'keep',
+      'unless the remarks say it needs work');
+    eq(core.aiVerdict({ decision: 'KEEP', wear: 'some' }, '').decision, 'keep', 'AI KEEP with wear seen stays');
+    eq(core.aiVerdict({ decision: 'KEEP' }, '').decision, 'keep', 'an older answer without the wear field is taken as given');
+    eq(core.aiVerdict({ decision: 'DROP', wear: 'heavy' }, 'fixer').decision, 'drop', 'an AI DROP is still a drop');
+  }
+
   // 16. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');

@@ -446,6 +446,25 @@ const VACANT_KW = /\bvacant\b|delivered vacant|no one living/i;
 const HOARD_KW = /(hoarder|clutter(?:ed)?|needs (?:a )?(?:good )?clean[- ]?out|full of (?:contents|belongings)|sold with contents)/i;
 const MOTIVATED_KW = /(cash only|cash offers?|investor special|investors? welcome|bring (?:all )?offers|motivated seller|priced to sell|quick close|no repairs will be made|seller will not make any repairs)/i;
 const STAGED_KW = /(professionally staged|virtually staged|staged to perfection|beautifully staged)/i;
+// Seth's manual check of an Alameda run (28 Sep, 36 leads): every lead he
+// approved had the remarks SAY it needs work or is a distressed sale; not one of
+// the 20 he called "looks good / refurbished" did. What was missed:
+// "Great bones--cosmetic remodel" (1363 Bates), a Xome auction (6225 Tevis) and
+// a Fannie Mae HomePath sale (1027 76th). "not a cosmetic remodel" is a hard
+// drop in SLOW_KW long before this is read.
+const COSMETIC_KW = /((?:great|good|solid) bones|cosmetic (?:remodel|refresh|update|work|fixer|rehab)|(?:a lot|lots|tons|full) of potential)/i;
+const DISTRESSED_SALE_KW = /(auction|xome|homepath|fannie mae|freddie mac|bank[- ]owned|\breo\b|hud home|foreclos)/i;
+// Same check: no approved lead was built after 1974, and nine of the rejected
+// and "double check" ones were (1978-1999). A newer house has had less time to
+// wear out — scored down, never dropped.
+const NEWER_BUILD = 1975;
+
+/** Do the remarks say this house needs work (or is a distressed sale)?
+ *  Nothing reaches A without it — see the 28 Sep calibration above. */
+function saysNeedsWork(t) {
+  t = String(t || '');
+  return NEEDS_WORK_KW.test(t) || FIXER_KW.test(t) || COSMETIC_KW.test(t) || DISTRESSED_SALE_KW.test(t);
+}
 
 /**
  * Score one listing. `m` carries what the report and the grid gave us:
@@ -471,7 +490,11 @@ function qualify(m) {
   // Opportunity signals.
   if (NEEDS_WORK_KW.test(t)) add(20, `needs work — "${hit(NEEDS_WORK_KW)}"`);
   else if (FIXER_KW.test(t)) add(20, `fixer / as-is — "${hit(FIXER_KW)}"`);
-  if (DISTRESS_KW.test(t)) add(10, `probate / trust / estate — "${hit(DISTRESS_KW)}"`);
+  else if (COSMETIC_KW.test(t)) add(20, `needs cosmetic work — "${hit(COSMETIC_KW)}"`);
+  if (DISTRESSED_SALE_KW.test(t)) add(10, `distressed sale — "${hit(DISTRESSED_SALE_KW)}"`);
+  // Probate / trust on its own was 3 of Seth's 20 "looks good" (6138 Oakdale,
+  // 513 Carobe, 7160 Thorndale): an estate sale is often a well-kept house.
+  if (DISTRESS_KW.test(t)) add(5, `probate / trust / estate — "${hit(DISTRESS_KW)}"`);
   if (ORIGINAL_KW.test(t)) add(10, `original / long-held — "${hit(ORIGINAL_KW)}"`);
   // The MLS's own "Occupied By" field beats a word in the remarks.
   const occ = String(m.occupiedBy || '');
@@ -493,6 +516,7 @@ function qualify(m) {
 
   const yb = Number(m.yearBuilt) || 0;
   if (yb >= 1850 && yb <= 1960) add(5, `built ${yb}`);
+  else if (yb >= NEWER_BUILD) add(-5, `newer build (${yb})`);
   const dom = Number(m.dom) || 0;
   if (dom >= 21) add(5, `${dom} days on market`);
 
@@ -515,12 +539,42 @@ function qualify(m) {
   }
 
   let bucket = score >= BUCKET_A ? 'A' : score >= BUCKET_B ? 'B' : 'C';
+  // A = "Work Now", and on the 28 Sep check an A without needs-work wording was
+  // never a buy (6138 Oakdale, 2825 Hillcrest). Price, $/sqft and vacancy say
+  // it is cheap, not that it needs work: those wait in B for the photos.
+  const needsWork = saysNeedsWork(t);
+  if (bucket === 'A' && !needsWork) {
+    bucket = 'B';
+    score = Math.min(score, BUCKET_A - 1);
+    signals.push({ pts: 0, what: 'remarks never say it needs work — held at B for the photos' });
+  }
   // Remarks silent on condition and the reviewer asked for unsure = drop.
   if (r.decision === 'manual' && m.whenUnsure === 'drop' && bucket === 'B' && !top.length) bucket = 'C';
-  const note = signals.filter(x => x.pts === 0 && /tenant now/.test(x.what)).map(x => x.what);
+  const note = signals.filter(x => x.pts === 0 && /tenant now|held at B/.test(x.what)).map(x => x.what);
   const why = [...top, ...neg, ...note].join(' + ') || r.reason;
   return { bucket, label: BUCKET_LABEL[bucket], score, decision: bucket === 'C' ? 'drop' : 'keep',
-    hard: false, why, signals };
+    hard: false, why, signals, needsWork };
+}
+
+/**
+ * Turn the vision model's JSON into a verdict.
+ *
+ * The model is not trusted to apply "dated but in good repair = DROP" itself:
+ * on Seth's 28 Sep check it said KEEP on all 36 leads, while writing "dated
+ * but intact", "clean but old style", "in good condition" about 20 houses he
+ * rejected. So it now reports the WEAR it saw ("heavy" | "some" | "none") and
+ * the code decides: a KEEP with no wear is a drop — unless the remarks say the
+ * house needs work, which the photos may simply not show.
+ */
+function aiVerdict(o, remarksText) {
+  o = o || {};
+  const keep = /^keep$/i.test(String(o.decision || '').trim());
+  const wear = String(o.wear || '').trim().toLowerCase();
+  if (!keep) return { decision: 'drop', why: '' };
+  if (/^none\b/.test(wear) && !saysNeedsWork(remarksText)) {
+    return { decision: 'drop', why: 'dated but in good condition — no wear or damage in the photos' };
+  }
+  return { decision: 'keep', why: /^none\b/.test(wear) ? 'photos show no wear, kept because the remarks say it needs work' : '' };
 }
 
 /**
@@ -902,6 +956,7 @@ function boardLead(l) {
 }
 
 module.exports = {
+  saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   boardLead,
   redfinUrlFrom,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,

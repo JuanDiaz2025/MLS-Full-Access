@@ -75,6 +75,27 @@ a flip, and when torn between "worn" and "dated but fine" the AI keeps it and
 says so. The text rules cannot see wear, so without an AI key these still reach
 the sheet for the reviewer to prune.
 
+### ⚠️ UPDATE 28 Sep (Seth's manual check of an Alameda run, 36 leads)
+
+5 approved · 11 "double check" · 20 "looks good / refurbished". The patterns:
+
+- **Every approval had the remarks say it needs work or is a distressed sale**
+  (as-is, fixer, "bring your", "great bones--cosmetic remodel", Xome auction);
+  **none of the 20 rejects did.** $/sqft, vacancy, price cuts and age did not
+  separate them (2244 E 20th was 43% of the median and "refurbished").
+  → `qualify()` now **holds A at B** without needs-work wording, and reads
+  `COSMETIC_KW` (great bones, cosmetic remodel, lots of potential) and
+  `DISTRESSED_SALE_KW` (auction, Xome, HomePath/Fannie Mae, REO, bank-owned).
+- **Probate / trust alone is not a fixer** (3 rejects): +5, was +10.
+- **No approval was built after 1974**; nine rejects/checks were 1978–1999 → −5.
+- **The AI said KEEP on all 36** while writing "dated but intact", "clean",
+  "in good condition" about the rejects. It now returns `wear: heavy|some|none`
+  and `core.aiVerdict()` decides: KEEP with `none` = DROP "dated but in good
+  condition", unless the remarks say it needs work. The prompt now gets the
+  private remarks too (where most of the needs-work words were).
+- Replay of the 36 (v1.45.0): A = all 5 approvals + 1 check; 19 of 20 rejects
+  drop. The photo step was estimated from the AI's recorded descriptions.
+
 ### ⚠️ "Renovation" cuts BOTH ways — the word alone means nothing
 
 **Never drop on `/renovat/`.** The same root describes the deal we want and the
