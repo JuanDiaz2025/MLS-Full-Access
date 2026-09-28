@@ -93,6 +93,20 @@ the sheet for the reviewer to prune.
   and `core.aiVerdict()` decides: KEEP with `none` = DROP "dated but in good
   condition", unless the remarks say it needs work. The prompt now gets the
   private remarks too (where most of the needs-work words were).
+- **Photos of all 16 non-rejects, pulled from the public mlslistings.com pages
+  (28 Sep): "old style" ≠ original.** Every approval has **1950s–80s original
+  finishes, worn or dirty** — stained wall-to-wall or shag carpet, sheet
+  linoleum, wood panelling, dark 60s–70s cabinets, textured ceilings, drapes —
+  or a stripped/damaged interior (6225 Tevis). The AI kept the "double checks"
+  because a **1995–2015 refresh looks dated today**: cherry/maple + granite +
+  stainless + laminate/engineered floors (1629 68th, 37735 Blacow, 2825
+  Hillcrest, 9024 Olive, 1027 76th); **9014 A St is a full recent flip** (LVP,
+  white shaker, new tile) the AI called "dated, patched walls". The prompt now
+  asks for `era: original | prior-update | new`; `aiVerdict()` drops
+  prior-update / new unless wear is heavy, and a bare boilerplate "as-is" no
+  longer overrules photos showing no wear. Public photo URLs: MLSL
+  `media.mlslmedia.com/property/MLSL/<n>/…`, Bay East/CCAR
+  `zimg.paragon.ice.com/…/<n>/…`, SFAR/MetroList `…/listingpics/bigphoto/…`.
 - Replay of the 36 (v1.45.0): A = all 5 approvals + 1 check; 19 of 20 rejects
   drop. The photo step was estimated from the AI's recorded descriptions.
 

@@ -618,6 +618,11 @@ Occupants, furniture and belongings are not finishes: judge the house, not who l
 TWO questions decide it:
 1. HAS WORK BEEN DONE TO THIS HOUSE? Judge the FINISHES, not the staging — furniture and a fresh stage do not make a house renovated.
 2. DOES IT LOOK LIKE IT NEEDS WORK NOW? The buyer takes AS-IS houses that visibly need renovation. KEEP only when the photos show wear, neglect or damage: missing or broken cabinet doors, chipped or damaged counters, patched, stained or scuffed walls, torn, worn or stained flooring, grimy or cracked tile, tired original bathrooms, a house left dirty or in disrepair. Remarks saying as-is, deferred maintenance, needs TLC/work also count.
+OLD STYLE IS NOT THE SAME AS ORIGINAL. Judge the ERA of the finishes, not whether they look fashionable today.
+- ORIGINAL (what the buyer wants): finishes from the 1950s-1980s — wall-to-wall or shag carpet, sheet vinyl / linoleum floors, wood-panelled walls, dark 1960s-70s wood or painted cabinets with laminate or tile counters, popcorn/textured ceilings, pink/yellow/green tile baths, heavy drapes.
+- A PRIOR UPDATE (work already done — the buyer does NOT want it, even though it looks dated now): a 1995-2015 refresh — cherry, maple or light-oak cabinets WITH granite or solid-surface counters, stainless appliances, laminate / engineered / "Brazilian cherry" / LVP floors, glossy large tile, recessed lights, white shaker cabinets. A 2005 cherry-and-granite kitchen is "old style", but someone already renovated it: that is a DROP, reason "prior update (2000s finishes)".
+Seth's check (28 Sep): every house he approved had ORIGINAL 1950s-80s finishes worn or dirty (stained carpet, shag, linoleum, panelling) or a stripped/damaged interior; the ones he rejected had cherry/maple + granite + stainless + laminate that the reviewer had called "dated".
+
 A house that is DATED BUT IN GOOD REPAIR — old oak or painted cabinets and tile counters, but tidy, intact and livable as it stands — is a DROP, reason "dated but in good condition". Dated is not enough; it has to look like it needs work. When torn between "worn" and "dated but fine", choose KEEP and say so in the reason.
 
 DROP if ANY of:
@@ -635,6 +640,7 @@ reason "no kitchen/bath photos".
 Respond with ONLY a JSON object, no other text:
 {"kitchen":"<what the kitchen photos show, or 'none seen'>",
  "bathroom":"<what the bathroom photos show, or 'none seen'>",
+ "era":"original"|"prior-update"|"new" — the era of the kitchen and bath finishes (original = 1950s-80s; prior-update = a 1995-2015 refresh such as granite + stainless + laminate; new = a recent flip),
  "wear":"heavy"|"some"|"none" — wear, neglect or damage you actually SAW (missing/broken doors, chipped counters, stained/torn floors, patched or scuffed walls, grime, cracked tile). Old-fashioned is NOT wear: tidy oak cabinets, tile counters or a 1970s bath in good repair = "none",
  "damage":"<the specific wear/damage items you saw, or 'none'>",
  "quickFlip":"<cosmetic | structural — and why, in a few words. 'structural' means foundation, framing, settlement, roof or water damage ONLY; renovated finishes are never 'structural'>",

@@ -479,6 +479,13 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     eq(core.aiVerdict({ decision: 'KEEP', wear: 'some' }, '').decision, 'keep', 'AI KEEP with wear seen stays');
     eq(core.aiVerdict({ decision: 'KEEP' }, '').decision, 'keep', 'an older answer without the wear field is taken as given');
     eq(core.aiVerdict({ decision: 'DROP', wear: 'heavy' }, 'fixer').decision, 'drop', 'an AI DROP is still a drop');
+    eq(core.aiVerdict({ decision: 'KEEP', era: 'prior-update', wear: 'some' }, 'Sold as-is.').decision, 'drop',
+      'a 2000s cherry/granite update is a drop, even on an as-is sale (1629 68th)');
+    eq(core.aiVerdict({ decision: 'KEEP', era: 'prior-update', wear: 'heavy' }, '').decision, 'keep',
+      'unless the photos show heavy wear');
+    eq(core.aiVerdict({ decision: 'KEEP', era: 'original', wear: 'some' }, '').decision, 'keep', 'original 1950s-80s finishes with wear stay (4361 Margery)');
+    eq(core.aiVerdict({ decision: 'KEEP', era: 'original', wear: 'none' }, 'AS IS SALE condition.').decision, 'drop',
+      'boilerplate "as is" does not overrule photos that show no wear');
   }
 
   // 16. The composed sheet value, end to end.

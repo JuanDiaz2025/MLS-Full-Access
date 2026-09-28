@@ -571,7 +571,14 @@ function aiVerdict(o, remarksText) {
   const keep = /^keep$/i.test(String(o.decision || '').trim());
   const wear = String(o.wear || '').trim().toLowerCase();
   if (!keep) return { decision: 'drop', why: '' };
-  if (/^none\b/.test(wear) && !saysNeedsWork(remarksText)) {
+  // "Old style" is not original. A 2000s cherry/granite/stainless kitchen reads
+  // as "dated" and was KEPT on 1629 68th, 9014 A St, 37735 Blacow, 9024 Olive,
+  // 2825 Hillcrest — each a house someone had already updated (28 Sep photos).
+  const era = String(o.era || '').trim().toLowerCase();
+  if (/^(prior|new)/.test(era) && !/^(heavy)/.test(wear)) {
+    return { decision: 'drop', why: era.startsWith('new') ? 'recently renovated finishes' : 'prior update (1995-2015 finishes) — work already done' };
+  }
+  if (/^none\b/.test(wear) && !saysNeedsWork(String(remarksText || '').replace(/\bas[- ]is\b/gi, ''))) {
     return { decision: 'drop', why: 'dated but in good condition — no wear or damage in the photos' };
   }
   return { decision: 'keep', why: /^none\b/.test(wear) ? 'photos show no wear, kept because the remarks say it needs work' : '' };
