@@ -947,6 +947,48 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .lk-row1{display:flex; align-items:center; gap:10px}
 .lk-here .note-video{max-width:none; max-height:360px; margin-top:8px}
 
+
+/* ---------- night mode: only when someone turns it on (never the OS default) ---------- */
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --ground:#0E1620; --surface:#16212D; --surface-2:#1C2937;
+  --ink:#E4EAF1; --muted:#9DADBE; --line:#2E3E50; --line-soft:#223142;
+  --brand:#2A7DB5; --brand-2:#1FA3A3; --accent:#5AA9E6; --accent-soft:#16324A;
+  --t-none:#B8C4D2; --b-none:#2A3645;  --t-review:#8FC6F3; --b-review:#17324B;
+  --t-offer:#F2C46B; --b-offer:#3A2C10; --t-won:#80DAB1;  --b-won:#133A2B;
+  --t-pass:#F4A3B6;  --b-pass:#3E1A24;  --t-removed:#B8C4D2; --b-removed:#2A3645;
+  --teal-ink:#6FD3D3; --teal-bg:#123838;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+}
+:root[data-theme="dark"] #viewAcq{
+  --st-new-b:#2A3645;   --st-new-t:#C4CEDA;
+  --st-int-b:#2E2347;   --st-int-t:#C9B2F2;
+  --st-visit-b:#123838; --st-visit-t:#77D6D6;
+  --st-offer-b:#3A2C10; --st-offer-t:#F2C46B;
+  --st-won-b:#133A2B;   --st-won-t:#80DAB1;
+  --st-pass-b:#3E1A24;  --st-pass-t:#F4A3B6;
+}
+:root[data-theme="dark"] header.top{background:linear-gradient(100deg,#0A3350 0%,#0B4459 52%,#0B5454 100%)}
+:root[data-theme="dark"] #dateSel, :root[data-theme="dark"] #q, :root[data-theme="dark"] #statusFilter{background:var(--surface); color:var(--ink); border-color:var(--line)}
+:root[data-theme="dark"] header.top .btn{background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.25); color:#E4EAF1}
+:root[data-theme="dark"] header.top .btn:hover{background:rgba(255,255,255,.2); color:#FFFFFF}
+:root[data-theme="dark"] .presets button[aria-pressed="true"], :root[data-theme="dark"] .viewnav button[aria-current="true"]{background:#E4EAF1; color:#0E1620}
+:root[data-theme="dark"] .wk-st-new, :root[data-theme="dark"] .wk-gh-new{background:#2A3645; color:#C4CEDA}
+:root[data-theme="dark"] .wk-st-visited, :root[data-theme="dark"] .wk-gh-visited{background:#1E3317; color:#A9D98E; border-left-color:#7DBA5E}
+:root[data-theme="dark"] .wk-gh{background:#1C2937; color:#B8C4D2}
+:root[data-theme="dark"] .wk-gh-hot, :root[data-theme="dark"] .wk-grp.hot .wk-gh, :root[data-theme="dark"] .wk-alert{background:#3E1A1A; color:#F7B0A8}
+:root[data-theme="dark"] .wk-gh-others, :root[data-theme="dark"] .wk-gh-gone{background:#1C2937; color:#9DADBE}
+:root[data-theme="dark"] .wk-gh b{background:rgba(255,255,255,.12)}
+:root[data-theme="dark"] .wk-urg{color:#F7B0A8}
+:root[data-theme="dark"] .wk-grp.hot .wk-gh{color:#F7B0A8}
+:root[data-theme="dark"] .lp-rem h4{color:var(--accent)}
+:root[data-theme="dark"] a{color:var(--accent)}
+:root[data-theme="dark"] .btn.go, :root[data-theme="dark"] .wk-seg button[aria-pressed="true"]{color:#FFFFFF}
+:root[data-theme="dark"] .acq-selbar .btn.rm{background:#E4EAF1}
+:root[data-theme="dark"] .lk-ic{background:var(--brand)}
+:root[data-theme="dark"] tbody tr:hover td{background:#1A2A3A}
+:root[data-theme="dark"] .note-video, :root[data-theme="dark"] .note-thumb{border-color:var(--line)}
+#themeBtn{min-height:0; padding:5px 12px; font-size:12.5px}
 </style>
 
 <header class="top">
@@ -962,6 +1004,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       </div>
       <button type="button" class="btn" id="addScan">＋ Add scan</button>
       <button type="button" class="btn" id="sheetRefresh" hidden title="Read the latest leads from the prod Google Sheet, for the whole team">↻ Refresh from sheet</button>
+      <button type="button" class="btn" id="themeBtn" aria-pressed="false" title="Switch between day and night colours — only for you, on this device">🌙 Night</button>
       <div class="presence"><span id="peerList"></span><input type="text" id="nameIn" placeholder="Your name" aria-label="Your name on this board"></div>
     </div>
 
@@ -1183,6 +1226,20 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 <script>
 (function(){
   "use strict";
+  // Night mode is opt-in: the OS setting is ignored, day is the default.
+  var THEME = "light";
+  try { THEME = localStorage.getItem("fs_theme") === "dark" ? "dark" : "light"; } catch (e) {}
+  function applyTheme(){
+    document.documentElement.setAttribute("data-theme", THEME);
+    var b = document.getElementById("themeBtn");
+    if (b) { b.textContent = THEME === "dark" ? "☀ Day" : "🌙 Night"; b.setAttribute("aria-pressed", String(THEME === "dark")); }
+  }
+  applyTheme();
+  document.getElementById("themeBtn").addEventListener("click", function(){
+    THEME = THEME === "dark" ? "light" : "dark";
+    try { localStorage.setItem("fs_theme", THEME); } catch (e) {}
+    applyTheme();
+  });
   var D = window.__MLS__ || {dates:[],rows:[],pulled:""};
   var COLS = ["mls","addr","price","ppsf","sqft","beds","year","dom","note","date","sdue",
               "agentPhone","agentEmail","agentName","mlsStatus","offerTime","offerFrom","offerPhrase",
