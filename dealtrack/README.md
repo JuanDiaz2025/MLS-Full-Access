@@ -27,6 +27,8 @@ Every page has date presets (including the Bateman period, Jun 5 – Jul 23, 202
 
 4. Open http://localhost:3000.
 
+**Windows:** double-click `start.bat`. The first time, it creates `.env.local` and opens it in Notepad so you can paste in the keys. Run it again after saving, and it installs everything and opens the dashboard.
+
 ## Settings
 
 All settings are environment variables. On your computer they go in `.env.local`, which git ignores. When the app is online, add them in the hosting provider's settings (on Vercel: Project → Settings → Environment Variables). Never put the values in the code.
