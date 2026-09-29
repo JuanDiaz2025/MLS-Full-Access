@@ -1699,7 +1699,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         (st === "Pass" && e && e.pr ? '<span class="pass-why">“' + esc(e.pr) + '”</span>' : '') + bucketHTML(l) + '</td>' +
       '<td data-l="Property" class="wide">' + addrHTML(l) +
         '<span class="mls">' + esc(l.mls) + '</span>' +
-        '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' +
+        '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' + reiLinkHTML(l) +
         mlsStatusHTML(l.mlsStatus) + reiHTML(l) + occCutHTML(l) +
         contactHTML(l) +
         (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + '</td>' +
@@ -1843,6 +1843,11 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
           : /passing|lost|dead|sold|top dollar/i.test(x.s) ? "rei-dead" : "rei-open";
     var tip = "REI Blackbook — " + x.n + " (matched by " + x.how + ")" + (x.t.length ? "\nTags: " + x.t.join(", ") : "") + (x.last ? "\nLast activity " + x.last : "");
     return '<a class="rei ' + c + '" href="https://my.reiblackbook.com/contacts/' + esc(x.id) + '" target="_blank" rel="noopener" title="' + esc(tip) + '">REI: ' + esc(x.s) + '</a>';
+  }
+  // The lead's REI Blackbook contact, next to the MLS link.
+  function reiLinkHTML(l){
+    var x = REI[l.mls]; if (!x) return "";
+    return '<a class="mlslink" href="https://my.reiblackbook.com/contacts/' + esc(x.id) + '" target="_blank" rel="noopener" title="Open ' + esc(x.n) + ' in REI Blackbook">REI ↗</a>';
   }
   function mlsStatusHTML(st){
     if (!st) return "";
@@ -2678,7 +2683,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<h2>' + (u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener" title="Open on Redfin">' + esc(l.addr) + ' ↗</a>' : esc(l.addr)) + '</h2>' +
       '<div class="dx-facts">' + (l.price ? '<span><b>' + fmtMoney(l.price) + '</b></span>' : '') + fact(l.ppsf ? "$" + l.ppsf : "", "/sqft") +
         fact(l.sqft ? fmtNum(l.sqft) : "", "sqft") + fact(l.beds, "bd") + fact(l.year, "built") + fact(l.dom, "DOM") + '</div>' +
-      '<div class="dx-tags"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
+      '<div class="dx-tags"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' + reiLinkHTML(l) +
         mlsStatusHTML(l.mlsStatus) + reiHTML(l) + occCutHTML(l) + bucketHTML(l).replace(/^<br>/, "") + '</div>' +
 
       // one bar: where it is, who has it, and the single next step
@@ -3226,7 +3231,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       [esc(l.agentName), esc(l.agentPhone), esc(l.agentEmail)].filter(Boolean).join('<br>') + (l.agentEmail ? '<br>' + mailHTML(l) : '')]);
     $("sideTitle").textContent = l.addr;
     $("sideBody").innerHTML = '<span class="mls">' + esc(l.mls) + '</span>' + mlsStatusHTML(l.mlsStatus) +
-      '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
+      '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' + reiLinkHTML(l) +
       secs.map(function(x){ return '<div class="sec"><h3>' + x[0] + '</h3><p>' + x[1] + '</p></div>'; }).join("");
     sideFrom = from || null;
     $("side").hidden = false;
