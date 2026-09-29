@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import { formatConversions, formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
 import { DataTable, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
 import { parseRange } from "@/lib/date-range"
-import { getLandingPages, type LandingPageRow } from "@/lib/google-ads/reports"
+import { emptyMetrics, getAdDestinations, getLandingPages, type AdDestination, type LandingPageRow } from "@/lib/google-ads/reports"
 import { load, type Loaded } from "@/lib/load"
 import { checkPage, getPageSpeed, type PageCheck, type PageSpeed } from "@/lib/pagespeed"
 import { getPageStats } from "@/lib/posthog"
@@ -15,6 +15,7 @@ const AUDITED = 8
 const OTHERS_SHOWN = 25
 
 type Audited = LandingPageRow & {
+  live: boolean // an enabled ad in an enabled campaign points here right now
   check: PageCheck
   speed: Loaded<PageSpeed>
   visits?: { sessions: number; conversions: number }
@@ -49,6 +50,7 @@ export default async function LandingPagesPage({
 }) {
   const range = parseRange(await searchParams)
   const result = await load(() => getLandingPages(range))
+  const destinations = await load(() => getAdDestinations())
   // Visitor numbers are a bonus: the audit still works without PostHog.
   const stats = await load(() => getPageStats(range))
 
@@ -56,7 +58,7 @@ export default async function LandingPagesPage({
     <>
       <PageHeader
         title="Landing pages"
-        description={`Where ads sent people and how those pages hold up on a phone. The ${AUDITED} pages with the most spend get a PageSpeed Insights test (mobile) and a check for the basics: a short form, tap-to-call, and reviews.`}
+        description={`Where your ads send people and how those pages hold up on a phone. Pages your running ads point to right now come first, then the pages that got the most ad spend in this period. Up to ${AUDITED} get a PageSpeed Insights test (mobile) and a check for the basics: a short form, tap-to-call, and reviews.`}
         range={range}
       />
       {!result.ok ? (
@@ -66,21 +68,47 @@ export default async function LandingPagesPage({
           {!stats.ok && (
             <p className="text-xs text-muted-foreground">
               Visitor numbers from PostHog aren&apos;t available right now
-              {stats.kind === "missing" ? ` (add ${stats.keys.join(", ")})` : `: ${stats.message}`}.
+              {stats.kind === "missing" ? ` (add ${stats.keys.join(", ")})` : `: ${stats.message.replace(/\.$/, "")}`}.
             </p>
           )}
-          <Body pages={result.data} stats={stats.ok ? stats.data : undefined} />
+          <Body
+            pages={result.data}
+            live={destinations.ok ? destinations.data.filter((d) => d.campaigns.some((c) => c.status === "ENABLED")) : []}
+            stats={stats.ok ? stats.data : undefined}
+          />
         </>
       )}
     </>
   )
 }
 
-async function Body({ pages, stats }: { pages: LandingPageRow[]; stats?: Map<string, { sessions: number; conversions: number }> }) {
-  if (!pages.length) return <p className="rounded-2xl border bg-card p-5 text-sm">No ad clicks in this date range.</p>
+async function Body({
+  pages,
+  live,
+  stats,
+}: {
+  pages: LandingPageRow[]
+  live: AdDestination[]
+  stats?: Map<string, { sessions: number; conversions: number }>
+}) {
+  if (!pages.length && !live.length) {
+    return <p className="rounded-2xl border bg-card p-5 text-sm">No running ads and no ad clicks in this date range.</p>
+  }
+  const liveUrls = new Set(live.map((d) => d.url))
+  const spent = new Map(pages.map((p) => [p.url, p]))
+  // Running ads first (with this period's results, if any), then the most-spent other pages.
+  const toAudit: (LandingPageRow & { live: boolean })[] = [
+    ...live.map((d) => ({
+      url: d.url,
+      campaigns: d.campaigns.filter((c) => c.status === "ENABLED").map((c) => c.name),
+      metrics: spent.get(d.url)?.metrics ?? emptyMetrics(),
+      live: true,
+    })),
+    ...pages.filter((p) => !liveUrls.has(p.url)).map((p) => ({ ...p, live: false })),
+  ].slice(0, AUDITED)
 
   const audited: Audited[] = await Promise.all(
-    pages.slice(0, AUDITED).map(async (p) => {
+    toAudit.map(async (p) => {
       const check = await checkPage(p.url)
       const speed: Loaded<PageSpeed> =
         check.resolves && check.status !== null && check.status < 400
@@ -94,7 +122,10 @@ async function Body({ pages, stats }: { pages: LandingPageRow[]; stats?: Map<str
   return (
     <>
       {speedProblem && !speedProblem.ok && <ReportProblem problem={speedProblem} />}
-      <Section title="Most-spent landing pages" description="Speed is Google's mobile Lighthouse score (0–100; 90+ is good). Visits and submits come from PostHog.">
+      <Section
+        title="Landing pages to check"
+        description={`${live.length ? `${live.length} ${live.length === 1 ? "page is" : "pages are"} behind ads running now (marked), then the most-spent pages in this period.` : "No campaign is running right now, so these are the most-spent pages in this period."} Speed is Google's mobile Lighthouse score (0–100; 90+ is good). Visits and submits come from PostHog.`}
+      >
         <DataTable<Audited>
           rows={audited}
           rowKey={(a) => a.url}
@@ -103,9 +134,17 @@ async function Body({ pages, stats }: { pages: LandingPageRow[]; stats?: Map<str
               key: "url",
               label: "Page",
               render: (a) => (
-                <a href={a.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-                  {path(a.url)}
-                </a>
+                <span className="flex flex-col gap-0.5">
+                  <a href={a.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+                    {path(a.url)}
+                  </a>
+                  {a.live && (
+                    <span className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                      <Pill tone="green">Ads running</Pill>
+                      {a.campaigns.join(", ")}
+                    </span>
+                  )}
+                </span>
               ),
             },
             { key: "cost", label: "Spend", align: "right", render: (a) => formatUsd(a.metrics.cost) },
@@ -164,13 +203,13 @@ async function Body({ pages, stats }: { pages: LandingPageRow[]; stats?: Map<str
         )}
       </Section>
 
-      {pages.length > AUDITED && (
+      {pages.filter((p) => !audited.some((a) => a.url === p.url)).length > 0 && (
         <Section
           title="Other landing pages"
-          description={`Not speed-tested. ${pages.length - AUDITED > OTHERS_SHOWN ? `The next ${OTHERS_SHOWN} of ${pages.length - AUDITED} by spend. ` : ""}Broken pages behind any ad show up on the Alerts page.`}
+          description={`Not speed-tested. The next ${OTHERS_SHOWN} by spend at most. Broken pages behind any ad show up on the Alerts page.`}
         >
           <DataTable<LandingPageRow>
-            rows={pages.slice(AUDITED, AUDITED + OTHERS_SHOWN)}
+            rows={pages.filter((p) => !audited.some((a) => a.url === p.url)).slice(0, OTHERS_SHOWN)}
             rowKey={(p) => p.url}
             columns={[
               { key: "url", label: "Page", render: (p) => <span className="font-medium">{path(p.url)}</span> },

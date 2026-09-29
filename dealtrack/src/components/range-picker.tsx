@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 
 import { presets, type DateRange } from "@/lib/date-range"
 import { cn } from "@/lib/utils"
@@ -9,6 +9,13 @@ import { cn } from "@/lib/utils"
 // Preset ranges as links, plus a custom from/to form. The page reads the range from the URL.
 export default function RangePicker({ range }: { range: DateRange }) {
   const pathname = usePathname()
+  // Other filters on the page (campaign status, traffic, months) survive a date change.
+  const kept = [...useSearchParams().entries()].filter(([k]) => !["range", "from", "to"].includes(k))
+  const withKept = (query: string) => {
+    const params = new URLSearchParams(query)
+    for (const [k, v] of kept) params.set(k, v)
+    return `${pathname}?${params}`
+  }
 
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -16,7 +23,7 @@ export default function RangePicker({ range }: { range: DateRange }) {
         {presets.map((p) => (
           <Link
             key={p.id}
-            href={`${pathname}?range=${p.id}`}
+            href={withKept(`range=${p.id}`)}
             aria-current={range.preset === p.id ? "true" : undefined}
             className={cn(
               "rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground",
@@ -48,6 +55,9 @@ export default function RangePicker({ range }: { range: DateRange }) {
           defaultValue={range.to}
           className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
         />
+        {kept.map(([k, v]) => (
+          <input key={k} type="hidden" name={k} value={v} />
+        ))}
         <button type="submit" className="h-8 rounded-lg border px-3 font-medium hover:bg-muted">
           Apply
         </button>

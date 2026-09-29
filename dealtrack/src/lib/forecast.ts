@@ -239,8 +239,9 @@ export type AdsModel = {
   costPerLead: number
 }
 
-export function fitAds(monthly: AdsMonth[]): AdsModel | null {
-  const rows = monthly.filter((r) => r.month >= FIT_START && r.cost >= MIN_MONTHLY_SPEND && r.leads > 0)
+// `from`/`to` (YYYY-MM, inclusive) pick the months the model learns from.
+export function fitAds(monthly: AdsMonth[], from = FIT_START, to = "9999-12"): AdsModel | null {
+  const rows = monthly.filter((r) => r.month >= from && r.month <= to && r.cost >= MIN_MONTHLY_SPEND && r.leads > 0)
   if (rows.length < 4) return null
   return {
     leads: fitLogLog(rows.map((r) => [r.cost, r.leads]), 1),

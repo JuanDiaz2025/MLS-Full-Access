@@ -16,7 +16,7 @@ import {
   type Scenario,
 } from "@/lib/forecast"
 import type { Deal, Lead } from "@/lib/leads"
-import { getMonthlyAds } from "@/lib/google-ads/reports"
+import { getAllCampaigns, getMonthlyAds, type CampaignListRow } from "@/lib/google-ads/reports"
 import { load, type Loaded } from "@/lib/load"
 import { getLeadData } from "@/lib/sheets"
 
@@ -24,6 +24,43 @@ export const metadata: Metadata = { title: "Forecast · DealTrack" }
 
 const BUDGETS = [5_000, 10_000, 15_000, 20_000, 30_000, 45_000]
 const MONTH_CHOICES = [3, 6, 12]
+const DAYS_PER_MONTH = 30.4
+
+// Which months the forecast learns from. Months are YYYY-MM, inclusive.
+const LEARN = [
+  { id: "2025", label: "Since Jan 2025" },
+  { id: "2024", label: "Since Jan 2024" },
+  { id: "12m", label: "Last 12 months" },
+  { id: "6m", label: "Last 6 months" },
+  { id: "2026", label: "2026 only" },
+  { id: "custom", label: "Custom" },
+] as const
+type LearnId = (typeof LEARN)[number]["id"]
+
+const addMonths = (ym: string, n: number) => {
+  const d = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1 + n, 1))
+  return d.toISOString().slice(0, 7)
+}
+const YM = /^\d{4}-\d{2}$/
+
+function learnWindow(id: LearnId, from?: string, to?: string) {
+  // The current month is still running, so it isn't a full month of results.
+  const last = addMonths(today().slice(0, 7), -1)
+  switch (id) {
+    case "2024":
+      return { from: "2024-01", to: last }
+    case "12m":
+      return { from: addMonths(last, -11), to: last }
+    case "6m":
+      return { from: addMonths(last, -5), to: last }
+    case "2026":
+      return { from: "2026-01", to: last }
+    case "custom":
+      return from && YM.test(from) && to && YM.test(to) ? (from <= to ? { from, to } : { from: to, to: from }) : { from: FIT_START, to: last }
+    default:
+      return { from: FIT_START, to: last }
+  }
+}
 
 type Params = Record<string, string | string[] | undefined>
 type Sheet = { leads: Lead[]; deals: Deal[] }
@@ -35,9 +72,16 @@ const range = ([lo, mid, hi]: [number, number, number], f: (n: number) => string
 export default async function ForecastPage({ searchParams }: { searchParams: Promise<Params> }) {
   const params = await searchParams
   const months = MONTH_CHOICES.includes(Number(first(params.months))) ? Number(first(params.months)) : 3
+  const learnId = (LEARN.find((l) => l.id === first(params.learn))?.id ?? "2025") as LearnId
+  const learn = learnWindow(learnId, first(params.from), first(params.to))
+  const campaignId = first(params.campaign)?.replace(/\D/g, "") || undefined
 
   // Google Ads alone drives the forecast; the lead sheet adds deals and profit when it's connected.
-  const [ads, sheet] = await Promise.all([load(() => getMonthlyAds("2023-01-01", today())), load(() => getLeadData())])
+  const [ads, sheet, campaigns] = await Promise.all([
+    load(() => getMonthlyAds("2023-01-01", today(), campaignId)),
+    load(() => getLeadData()),
+    load(() => getAllCampaigns({ from: "2023-01-01", to: today(), label: "All time" })),
+  ])
 
   return (
     <>
@@ -45,21 +89,62 @@ export default async function ForecastPage({ searchParams }: { searchParams: Pro
         title="Forecast"
         description="What a monthly Google Ads budget is likely to bring in, with honest ranges. Leads come from the account's own history; deals and profit are added from the PPC LEAD sheet when it's connected. Costs are Google Ads spend only."
       />
-      {!ads.ok ? <ReportProblem problem={ads} /> : <Body ads={ads.data} sheet={sheet} months={months} />}
+      {!ads.ok ? (
+        <ReportProblem problem={ads} />
+      ) : (
+        <Body
+          ads={ads.data}
+          sheet={sheet}
+          months={months}
+          learnId={learnId}
+          learn={learn}
+          campaigns={campaigns.ok ? campaigns.data : []}
+          campaignId={campaignId}
+        />
+      )}
     </>
   )
 }
 
-function Body({ ads, sheet, months }: { ads: AdsMonth[]; sheet: Loaded<Sheet>; months: number }) {
-  const model = fitAds(ads)
+function Body({
+  ads,
+  sheet,
+  months,
+  learnId,
+  learn,
+  campaigns,
+  campaignId,
+}: {
+  ads: AdsMonth[]
+  sheet: Loaded<Sheet>
+  months: number
+  learnId: LearnId
+  learn: { from: string; to: string }
+  campaigns: CampaignListRow[]
+  campaignId?: string
+}) {
+  const selected = campaigns.find((c) => c.id === campaignId)
+  const enabled = campaigns.filter((c) => c.status === "ENABLED" && (!campaignId || c.id === campaignId))
+  const currentDaily = enabled.reduce((s, c) => s + (c.dailyBudget ?? 0), 0)
+  const currentMonthly = Math.round(currentDaily * DAYS_PER_MONTH)
+  const controls = (
+    <Controls months={months} learnId={learnId} learn={learn} campaigns={campaigns} campaignId={campaignId} />
+  )
+  const model = fitAds(ads, learn.from, learn.to)
   if (!model) {
     return (
-      <p className="rounded-2xl border bg-card p-5 text-sm">
-        Not enough history to forecast yet: it needs at least 4 months since {FIT_START} with $1,000+ spend and leads.
-      </p>
+      <>
+        <Section title="Forecast settings" actions={controls}>
+          <p className="text-sm">
+            Not enough history to forecast{selected ? ` ${selected.name}` : ""} from {monthLabel(learn.from)} to {monthLabel(learn.to)}: it
+            needs at least 4 months with $1,000+ spend and leads. Pick a longer period or all campaigns.
+          </p>
+        </Section>
+      </>
     )
   }
-  const scenarios = simulateAds(model, BUDGETS, { months })
+  const budgets = currentMonthly > 0 && !BUDGETS.includes(currentMonthly) ? [...BUDGETS, currentMonthly].sort((a, b) => a - b) : BUDGETS
+  const scenarios = simulateAds(model, budgets, { months })
   const tenPercent = 1.1 ** model.leads.elasticity - 1
   const spend = new Map(ads.map((m) => [m.month, m.cost]))
   const deals = sheet.ok ? buildMonthly(spend, sheet.data.leads, sheet.data.deals) : null
@@ -70,7 +155,14 @@ function Body({ ads, sheet, months }: { ads: AdsMonth[]; sheet: Loaded<Sheet>; m
     <>
       <KpiGrid
         items={[
-          { label: "Cost per lead", value: formatUsd(model.costPerLead), note: `Google Ads, since ${FIT_START.slice(0, 4)}` },
+          { label: "Cost per lead", value: formatUsd(model.costPerLead), note: `${monthLabel(learn.from)} – ${monthLabel(learn.to)}` },
+          {
+            label: "Running now",
+            value: enabled.length ? `${formatUsd(currentDaily)}/day` : "Nothing",
+            note: enabled.length
+              ? `${enabled.length} enabled ${enabled.length === 1 ? "campaign" : "campaigns"}, about ${formatUsd(currentMonthly)}/month`
+              : "No enabled campaigns",
+          },
           {
             label: "+10% budget",
             value: `+${formatPercent(tenPercent, 0)} leads`,
@@ -79,22 +171,32 @@ function Body({ ads, sheet, months }: { ads: AdsMonth[]; sheet: Loaded<Sheet>; m
           {
             label: "How well spend explains leads",
             value: formatPercent(Math.max(0, model.leads.r2), 0),
-            note: `${model.months} months of history`,
+            note: `${model.months} months used`,
             tone: model.leads.r2 < 0.4 ? "bad" : "default",
           },
         ]}
       />
 
       <Section
-        title={`Next ${months} months by monthly budget`}
+        title={`Next ${months} months by monthly budget${selected ? `: ${selected.name}` : ""}`}
         description={`From Google Ads alone. Each row is ${formatNumber(5000)} simulated ${months}-month periods; the middle result is shown with the range that covers 8 in 10 outcomes. Leads are Google's lead conversions (forms and calls); page views and other soft actions don't count. More budget is assumed to bring leads at the same cost or worse, never cheaper.`}
-        actions={<MonthsForm months={months} />}
+        actions={controls}
       >
         <DataTable<AdsScenario>
           rows={scenarios}
           rowKey={(s) => String(s.budget)}
+          rowClassName={(s) => (s.budget === currentMonthly ? "bg-primary/5" : undefined)}
           columns={[
-            { key: "budget", label: "Budget / month", render: (s) => <span className="font-medium">{formatUsd(s.budget)}</span> },
+            {
+              key: "budget",
+              label: "Budget / month",
+              render: (s) => (
+                <span className="flex flex-col">
+                  <span className="font-medium">{formatUsd(s.budget)}</span>
+                  {s.budget === currentMonthly && <span className="text-xs text-primary">Your current budget</span>}
+                </span>
+              ),
+            },
             { key: "daily", label: "Per day", align: "right", render: (s) => formatUsd(s.budget / 30.4) },
             { key: "cost", label: `Ad spend (${months} mo)`, align: "right", render: (s) => formatUsd(s.totalCost) },
             { key: "leads", label: "Leads", align: "right", render: (s) => range(s.leads, formatNumber) },
@@ -110,7 +212,16 @@ function Body({ ads, sheet, months }: { ads: AdsMonth[]; sheet: Loaded<Sheet>; m
         )}
       </Section>
 
-      <DealsSection sheet={sheet} spend={spend} months={months} />
+      {campaignId ? (
+        <Section title="Deals and profit">
+          <p className="text-sm text-muted-foreground">
+            The PPC LEAD sheet doesn&apos;t record which campaign each lead came from, so deals are forecast for all campaigns
+            together. Choose &ldquo;All campaigns&rdquo; to see them.
+          </p>
+        </Section>
+      ) : (
+        <DealsSection sheet={sheet} spend={spend} months={months} />
+      )}
 
       <Section
         title="Month by month"
@@ -160,12 +271,59 @@ function Body({ ads, sheet, months }: { ads: AdsMonth[]; sheet: Loaded<Sheet>; m
   )
 }
 
-function MonthsForm({ months }: { months: number }) {
+function Controls({
+  months,
+  learnId,
+  learn,
+  campaigns,
+  campaignId,
+}: {
+  months: number
+  learnId: LearnId
+  learn: { from: string; to: string }
+  campaigns: CampaignListRow[]
+  campaignId?: string
+}) {
+  // Enabled campaigns first, then everything else that ever spent.
+  const options = campaigns
+    .filter((c) => c.status === "ENABLED" || c.metrics.cost > 0)
+    .sort((a, b) => Number(b.status === "ENABLED") - Number(a.status === "ENABLED") || b.metrics.cost - a.metrics.cost)
+  const field = "h-8 rounded-md border bg-background px-2"
   return (
     <form className="flex flex-wrap items-end gap-2 text-sm" method="get">
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">Months</span>
-        <select name="months" defaultValue={months} className="h-8 rounded-md border bg-background px-2">
+        <span className="text-xs text-muted-foreground">Campaign</span>
+        <select name="campaign" defaultValue={campaignId ?? ""} className={`${field} max-w-56`}>
+          <option value="">All campaigns</option>
+          {options.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.status === "ENABLED" ? "● " : ""}
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">Learn from</span>
+        <select name="learn" defaultValue={learnId} className={field}>
+          {LEARN.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">From (custom)</span>
+        <input type="month" name="from" defaultValue={learn.from} className={field} />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">To (custom)</span>
+        <input type="month" name="to" defaultValue={learn.to} className={field} />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">Months ahead</span>
+        <select name="months" defaultValue={months} className={field}>
           {MONTH_CHOICES.map((m) => (
             <option key={m} value={m}>
               {m}

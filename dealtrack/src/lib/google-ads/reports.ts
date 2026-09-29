@@ -458,14 +458,15 @@ export function isLeadConversion(name: string, category: string) {
 
 // ---- Monthly spend, clicks, and leads (forecast without the lead sheet) --------------------
 
-export async function getMonthlyAds(from: string, to: string) {
+// The whole account, or one campaign when `campaignId` is given.
+export async function getMonthlyAds(from: string, to: string, campaignId?: string) {
+  const id = campaignId?.replace(/\D/g, "")
+  const source = id ? "campaign" : "customer"
+  const where = `segments.date BETWEEN '${from}' AND '${to}'${id ? ` AND campaign.id = ${id}` : ""}`
   const [totals, byAction, actions] = await Promise.all([
-    gaql<{ segments: { month: string }; metrics?: MetricsRow }>(
-      `SELECT segments.month, ${METRICS} FROM customer WHERE segments.date BETWEEN '${from}' AND '${to}'`,
-    ),
+    gaql<{ segments: { month: string }; metrics?: MetricsRow }>(`SELECT segments.month, ${METRICS} FROM ${source} WHERE ${where}`),
     gaql<{ segments: { month: string; conversionActionName?: string }; metrics?: { conversions?: Num } }>(
-      `SELECT segments.month, segments.conversion_action_name, metrics.conversions FROM customer
-       WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+      `SELECT segments.month, segments.conversion_action_name, metrics.conversions FROM ${source} WHERE ${where}`,
     ),
     gaql<{ conversionAction: { name?: string; category?: string } }>("SELECT conversion_action.name, conversion_action.category FROM conversion_action"),
   ])
@@ -488,4 +489,51 @@ export async function getMonthlyAds(from: string, to: string) {
     if (isLeadConversion(name, category.get(name) ?? "")) row(a.segments.month).leads += num(a.metrics?.conversions)
   }
   return [...months.values()].sort((a, b) => a.month.localeCompare(b.month))
+}
+
+// ---- Every campaign (Campaigns page) --------------------------------------------------------
+
+export type CampaignListRow = CampaignRow & { dailyBudget: number | null }
+
+// Every campaign in the account, running or not, with this period's results (zero when it
+// didn't run). Google leaves campaigns with no activity out of metric queries, so the list and
+// the numbers come from two queries.
+export async function getAllCampaigns(range: DateRange): Promise<CampaignListRow[]> {
+  const [list, stats] = await Promise.all([
+    gaql<{
+      campaign: { id?: Num; name?: string; status?: string; advertisingChannelType?: string; biddingStrategyType?: string }
+      campaignBudget?: { amountMicros?: Num }
+    }>(
+      `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
+         campaign.bidding_strategy_type, campaign_budget.amount_micros
+       FROM campaign`,
+    ),
+    gaql<{ campaign: { id?: Num }; metrics?: MetricsRow }>(`SELECT campaign.id, ${METRICS} FROM campaign WHERE ${during(range)}`),
+  ])
+  const byId = new Map<string, Metrics>()
+  for (const s of stats) {
+    const id = String(s.campaign.id ?? "")
+    byId.set(id, add(byId.get(id) ?? emptyMetrics(), toMetrics(s.metrics)))
+  }
+  return list
+    .map((r) => {
+      const id = String(r.campaign.id ?? "")
+      const budget = r.campaignBudget?.amountMicros
+      return {
+        id,
+        name: r.campaign.name ?? "(no name)",
+        status: r.campaign.status ?? "UNKNOWN",
+        channel: r.campaign.advertisingChannelType ?? "",
+        bidding: r.campaign.biddingStrategyType ?? "",
+        dailyBudget: budget === undefined ? null : num(budget) / 1_000_000,
+        metrics: byId.get(id) ?? emptyMetrics(),
+      }
+    })
+    .sort((a, b) => b.metrics.cost - a.metrics.cost || a.name.localeCompare(b.name))
+}
+
+// Campaign ID -> name, for matching website visits (gad_campaignid in the landing URL) to campaigns.
+export async function getCampaignNames(): Promise<Map<string, string>> {
+  const rows = await gaql<{ campaign: { id?: Num; name?: string } }>("SELECT campaign.id, campaign.name FROM campaign")
+  return new Map(rows.map((r) => [String(r.campaign.id ?? ""), r.campaign.name ?? "(no name)"]))
 }

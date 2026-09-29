@@ -5,15 +5,15 @@ Google Ads results for Twin Home Buyer, built from the AdPilot hackathon app.
 It reports on one Google Ads account and shows:
 
 - **Overview:** spend, clicks, conversions, cost per conversion, daily trends, and what needs attention.
-- **Campaigns:** every campaign that ran in the period, including paused and removed ones.
+- **Campaigns:** every campaign in the account, running or not, with its daily budget and results for the period. Filter by status like Google Ads: All but removed, Enabled, Paused, Removed, All.
 - **Search terms:** what people typed, which terms spent money without converting, and suggested negative keywords you can copy into Google Ads.
 - **Keywords:** each keyword marked "Stop or fix" (spent $100+ without converting) or "Scale" (converting cheaper than average).
 - **Locations:** spend by city, with anything outside the nine Bay Area counties flagged.
 - **Day & hour:** a heat map of spend and conversions by weekday and hour.
 - **Conversions:** what Google counts as a conversion, with a warning if a primary conversion isn't really a lead.
-- **Landing pages:** where ads sent people. The 8 pages with the most spend get a mobile PageSpeed test and a check for a short form, tap-to-call, and reviews, next to their spend, conversions, and PostHog submit rate.
-- **Behavior:** from PostHog: submit rate by traffic source, device, landing page, day, and hour; how people who submit behave (pages, time to submit, rage clicks). The team and the staging site are left out.
-- **Forecast:** Google Ads leads and cost per lead to expect at $5k–$45k a month over 3, 6, or 12 months, from the account's own history (lead forms and calls only). With the PPC LEAD sheet connected it also forecasts deals, net revenue, ad spend per deal, and the chance of zero deals. Costs are ad spend only.
+- **Landing pages:** where your ads send people. Pages behind ads that are running right now come first (marked "Ads running"), then the most-spent pages in the period. Up to 8 get a mobile PageSpeed test and a check for a short form, tap-to-call, and reviews, next to their spend, conversions, and PostHog submit rate.
+- **Behavior:** Google Ads visitors by default (switch to all visits): each recent visit with its campaign, keyword, pages visited, time on site, device, city, whether they submitted the form, and a link to watch the PostHog replay; plus submit rates by campaign, keyword, landing page, device, day, and hour. The team and the staging site are left out.
+- **Forecast:** Google Ads leads and cost per lead to expect by monthly budget over 3, 6, or 12 months, including your current budget (the daily budgets of enabled campaigns). Choose the months it learns from (since 2025, last 12 or 6 months, 2026, or custom) and one campaign or all. With the PPC LEAD sheet connected it also forecasts deals, net revenue, ad spend per deal, and the chance of zero deals. Costs are ad spend only.
 - **Alerts:** health checks (ads pointing at broken or deleted pages, primary conversions that aren't leads, JavaScript errors, bot and team traffic) and weeks where spend, clicks, cost per click, conversions, or site traffic jumped far outside normal.
 - **Changes:** Google's own change history for the last 30 days: who changed what, and from where (DealTrack, the Google Ads website, Editor, scripts).
 
