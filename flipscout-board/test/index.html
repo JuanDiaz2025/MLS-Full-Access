@@ -549,6 +549,14 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .acq-chip[aria-pressed="true"]{background:var(--brand); border-color:var(--brand); color:#FFFFFF}
 .acq-chip[aria-pressed="true"] .n{color:#FFFFFF; opacity:.85}
 .acq-clear{font:600 12.5px Archivo,sans-serif; color:var(--brand); background:none; border:0; cursor:pointer; text-decoration:underline; padding:4px}
+/* the four cards are Juan's: what needs him and when */
+#viewAcq .acq-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:700px){ #viewAcq .acq-tiles{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.acq-tile .sub.warn{color:var(--t-pass); font-weight:600}
+.acq-tile.hot{border-color:var(--t-pass); box-shadow:inset 3px 0 0 var(--t-pass)}
+.acq-tile.amber{box-shadow:inset 3px 0 0 var(--t-offer)}
+.acq-meta{margin-left:auto; align-self:center; font-size:12px; color:var(--muted); white-space:nowrap; padding-left:12px}
+@media (max-width:700px){ .acq-meta{display:none} }
 .acq-note{font-size:12.5px; color:var(--muted); margin:0 0 12px; min-height:1em}
 .acq-sec{margin:0 0 6px}
 .acq-sec > summary{list-style:none; cursor:pointer}
@@ -1067,7 +1075,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
   <div id="viewAcq" hidden>
     <div class="acq-tiles" id="acqTiles"></div>
-    <div class="wk-head"><div class="wk-tabs" id="acqTabs" role="tablist" aria-label="Stage"></div></div>
+    <div class="wk-head"><div class="wk-tabs" id="acqTabs" role="tablist" aria-label="Stage"></div><span class="acq-meta" id="acqMeta"></span></div>
     <p class="acq-note" id="acqNote"></p>
     <div id="acqSecs"><div class="acq-split">
       <nav class="acq-list" aria-label="Leads being worked">
@@ -2420,13 +2428,43 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 
   var acqF = {tab: "active", who: "", area: "", bk: "", sort: "due", tile: ""};
   function acqVisitSoon(l){ var v = visitOf(l), n = v.d ? daysUntil(v.d) : null; return v.s === "Scheduled" && n !== null && n >= 0; }
+  // Juan's four cards (Seth, 29 Sep): what needs him and when. The team's
+  // outreach numbers moved to the grey line beside the tabs.
+  function acqVisitPast(l){ var v = visitOf(l), n = v.d ? daysUntil(v.d) : null; return v.s === "Scheduled" && n !== null && n < 0; }
+  function acqLeftLabel(l){
+    var h = acqHoursLeft(l);
+    if (h !== null && h >= 0 && h < 24) return h < 1 ? "under 1h left" : Math.round(h) + "h left";
+    var n = acqDueDays(l); return n === 0 ? "today" : n === 1 ? "tomorrow" : "in " + n + " days";
+  }
+  function acqSoonest(ls, key){ return ls.slice().sort(function(a, b){ return key(a) - key(b); })[0]; }
   var ACQ_TILES = [
-    {k: "",        t: "Working",    sub: "being worked"},
-    {k: "emailed", t: "Emailed",    c: "--t-review", sub: "agents contacted", f: acqEmailed},
-    {k: "replied", t: "Replied",    c: "--t-won",    sub: "agents answered",  f: acqReplied},
-    {k: "juan",    t: "Needs Juan", c: "--t-pass",   sub: "reply wants a call or talks price", f: function(l){ var x = EMAIL_BY[l.mls]; return !!(x && x.juan); }},
-    {k: "due",     t: "Offers due", c: "--t-offer",  sub: "today to 3 days", f: function(l){ var n = acqDueDays(l); return n !== null && n >= 0 && n <= 3; }},
-    {k: "visits",  t: "Visits",     c: "--st-visit-t", sub: "booked, upcoming", f: acqVisitSoon}
+    {k: "due", t: "Offers due", c: "--t-offer",
+     f: function(l){ var n = acqDueDays(l); return n !== null && n >= 0 && n <= 3; },
+     sub: function(ls){
+       if (!ls.length) return {s: "nothing in the next 3 days"};
+       var x = acqSoonest(ls, function(l){ var h = acqHoursLeft(l); return h === null ? 1e9 : h; }), h = acqHoursLeft(x);
+       return {s: acqStreet(x).s + " — " + acqLeftLabel(x), hot: h !== null && h >= 0 && h < 24};
+     }},
+    {k: "review", t: "To review", c: "--t-review",
+     f: function(l){ return acqStage(l) === "new"; },
+     sub: function(ls){ var n = ls.filter(acqIsNew).length; return {s: n ? n + " new since yesterday" : "waiting on Juan’s yes or no", amber: n > 0}; }},
+    {k: "visits", t: "Visits", c: "--st-visit-t", n: function(ls){ return ls.filter(acqVisitSoon).length; },
+     f: function(l){ return acqVisitSoon(l) || acqVisitPast(l); },
+     sub: function(ls){
+       var past = ls.filter(acqVisitPast).length, up = ls.filter(acqVisitSoon);
+       if (past) return {s: past + " to mark done", hot: true};
+       if (!up.length) return {s: "none booked"};
+       var x = acqSoonest(up, function(l){ return daysUntil(visitOf(l).d); });
+       return {s: "next: " + acqStreet(x).s + " · " + acqDay(visitOf(x).d)};
+     }},
+    {k: "offer", t: "Offers out", c: "--st-offer-t",
+     f: function(l){ return acqStage(l) === "offer"; },
+     sub: function(ls){
+       if (!ls.length) return {s: "none waiting on a seller"};
+       var old = acqSoonest(ls, function(l){ var e = rec(l.date, l.mls) || {}; return new Date(e.at || 0).getTime(); }), e = rec(old.date, old.mls) || {};
+       var d = e.at ? Math.floor((Date.now() - new Date(e.at)) / 864e5) : null;
+       return {s: d === null ? "waiting on the seller" : "oldest: " + acqStreet(old).s + " · " + (d <= 0 ? "sent today" : d + (d === 1 ? " day" : " days"))};
+     }}
   ];
   var acqSel = "", acqFlat = [], acqPicked = {}, acqDueEdit = "", acqVisEdit = "", acqSelecting = false;
   try { var tv = localStorage.getItem("fs_acq_tab"); if (tv) acqF.tab = tv; var sv = localStorage.getItem("fs_acq_sort"); if (/^(due|new|price)$/.test(sv || "")) acqF.sort = sv; localStorage.removeItem("fs_acq_who"); } catch (e) {}
@@ -2476,11 +2514,15 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     // the cards: counts over everything being worked (filters aside); one picked narrows the list
     var tileF = acqF.tile && ACQ_TILES.filter(function(t){ return t.k === acqF.tile; })[0];
     $("acqTiles").innerHTML = ACQ_TILES.map(function(t){
-      var n = t.f ? open.filter(t.f).length : open.length, on = t.k ? acqF.tile === t.k : !acqF.tile;
-      return '<button type="button" class="kpi acq-tile" data-acq-tile="' + t.k + '" aria-pressed="' + on + '">' +
-        '<span class="t">' + t.t + '</span><span class="v"' + (t.c ? ' style="color:var(' + t.c + ')"' : '') + '>' + n + '</span>' +
-        '<span class="sub">' + (t.k ? t.sub : closed.filter(function(l){ return acqStage(l) === "won"; }).length + ' won · show everything') + '</span></button>';
+      var ls = open.filter(t.f), n = t.n ? t.n(ls) : ls.length, on = acqF.tile === t.k, sb = t.sub(ls);
+      return '<button type="button" class="kpi acq-tile' + (sb.hot ? ' hot' : sb.amber ? ' amber' : '') + '" data-acq-tile="' + t.k + '" aria-pressed="' + on + '"' +
+        ' title="' + (on ? 'Showing only these — click again to show everything' : 'Show only these in the list') + '">' +
+        '<span class="t">' + t.t + '</span><span class="v" style="color:var(' + t.c + ')">' + n + '</span>' +
+        '<span class="sub' + (sb.hot ? ' warn' : '') + '">' + esc(sb.s) + '</span></button>';
     }).join("");
+    var won = closed.filter(function(l){ return acqStage(l) === "won"; }).length;
+    $("acqMeta").textContent = open.length + " working · " + open.filter(acqEmailed).length + " emailed · " +
+      open.filter(acqReplied).length + " replied" + (won ? " · " + won + " won" : "");
     // the stage tabs: counts follow the card and the area filters, not the tab
     var base = open.filter(function(l){ return who(l) && extra(l) && (!tileF || tileF.f(l)); });
     var cnt = {active: base.length, closed: closed.filter(function(l){ return who(l) && extra(l); }).length};
