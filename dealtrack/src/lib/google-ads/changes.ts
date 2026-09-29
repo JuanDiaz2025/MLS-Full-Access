@@ -29,6 +29,8 @@ export type ChangeSummary = {
   applied: number
   skipped: number // already in place
   failures: string[]
+  // What Google saved, read back after a real change (negative keywords only).
+  saved?: string[]
 }
 
 // Campaigns that can take negative keywords and exclusions: not removed, and not Local Services
@@ -259,8 +261,18 @@ export async function addNegativeKeywords(
     })),
     { validateOnly },
   )
-  return summarize(planned.length, skipped, result.failures, (i) => `"${planned[i]?.text}" in ${campaigns.get(planned[i]?.campaignId)}`)
+  const summary = summarize(planned.length, skipped, result.failures, (i) => `"${planned[i]?.text}" in ${campaigns.get(planned[i]?.campaignId)}`)
+  // Read back what Google stored, so the message shows the saved text rather than what was sent.
+  const created = result.resourceNames.filter(Boolean).slice(0, 200)
+  if (!validateOnly && created.length) {
+    const saved = await getCampaignNegatives({ resourceNames: created })
+    summary.saved = [...new Set(saved.map((n) => notation(n.text ?? "", n.matchType ?? "")))]
+  }
+  return summary
 }
+
+const notation = (text: string, matchType: string) =>
+  matchType === "PHRASE" ? `"${text}"` : matchType === "EXACT" ? `[${text}]` : text
 
 export async function excludeLocations(
   input: { campaignIds: string[]; geoIds: string[] },

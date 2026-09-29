@@ -23,7 +23,10 @@ const CRITERION = /^customers\/\d+\/campaignCriteria\/\d+~\d+$/
 
 function report(summary: ChangeSummary, noun: string, verb: string): ActionResult {
   const parts: string[] = []
-  if (summary.applied) parts.push(`${verb} ${summary.applied} ${noun}${summary.applied === 1 ? "" : "s"} in Google Ads.`)
+  if (summary.applied) {
+    const saved = summary.saved?.length ? `: ${summary.saved.join(", ")}` : ""
+    parts.push(`${verb} ${summary.applied} ${noun}${summary.applied === 1 ? "" : "s"} in Google Ads${saved}.`)
+  }
   if (summary.skipped) parts.push(`${summary.skipped} ${summary.skipped === 1 ? "was" : "were"} already there.`)
   if (summary.failures.length) parts.push(`${summary.failures.length} failed.`)
   if (!parts.length) parts.push("Nothing to change.")
