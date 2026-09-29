@@ -132,13 +132,22 @@ function explain(status: number, body: ApiErrorBody | undefined): GoogleAdsError
 
 const cache = new Map<string, { at: number; rows: unknown[] }>()
 
+// When the data on screen was fetched from Google (a cached result keeps its original time).
+let lastDataAt: number | null = null
+export function lastFetchedAt() {
+  return lastDataAt
+}
+
 // Runs one GAQL query against the configured account and returns every row.
 // Field names come back in camelCase, e.g. metrics.costMicros.
 export async function gaql<Row>(query: string): Promise<Row[]> {
   const cfg = config()
   const key = `${cfg.customerId}\n${query}`
   const hit = cache.get(key)
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.rows as Row[]
+  if (hit && Date.now() - hit.at < CACHE_MS) {
+    lastDataAt = hit.at
+    return hit.rows as Row[]
+  }
 
   const send = async () => {
     const headers: Record<string, string> = {
@@ -177,6 +186,8 @@ export async function gaql<Row>(query: string): Promise<Row[]> {
 
   const batches = (Array.isArray(body) ? body : []) as { results?: Row[] }[]
   const rows = batches.flatMap((batch) => batch.results ?? [])
-  cache.set(key, { at: Date.now(), rows })
+  const at = Date.now()
+  cache.set(key, { at, rows })
+  lastDataAt = at
   return rows
 }

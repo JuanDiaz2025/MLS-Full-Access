@@ -46,11 +46,25 @@ const cityToCounty = new Map<string, string>(
 
 export type AreaStatus = "inside" | "outside" | "unknown"
 
-// Google's canonical names look like "San Jose,California,United States".
+const bayAreaCounties = new Set(Object.keys(BAY_AREA_CITIES).map((c) => c.toLowerCase()))
+
+// Google's canonical names look like "San Jose,California,United States", and sometimes include
+// the county: "San Carlos,San Mateo County,California,United States".
 export function serviceAreaStatus(canonicalName: string | undefined): { status: AreaStatus; county?: string } {
   if (!canonicalName) return { status: "unknown" }
-  const [city, state] = canonicalName.split(",").map((part) => part.trim())
-  if (state !== "California") return { status: "outside" }
+  const parts = canonicalName.split(",").map((part) => part.trim())
+  const [city] = parts
+  const state = parts.at(-2)
+  if (parts.at(-1) !== "United States" || state !== "California") return { status: "outside" }
+
+  // A place inside a Bay Area county counts even if it isn't on the city list (e.g. Emerald Hills).
+  const countyPart = parts.slice(1, -2).find((p) => p.endsWith(" County"))
+  const countyName = countyPart?.replace(/ County$/, "")
+  if (countyName && bayAreaCounties.has(countyName.toLowerCase())) {
+    const county = Object.keys(BAY_AREA_CITIES).find((c) => c.toLowerCase() === countyName.toLowerCase())
+    return { status: "inside", county }
+  }
+
   const county = cityToCounty.get(city.toLowerCase())
   return county ? { status: "inside", county } : { status: "outside" }
 }

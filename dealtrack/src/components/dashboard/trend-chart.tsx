@@ -11,7 +11,8 @@ const H = 160
 
 // Round the axis max up to a clean number (e.g. 237 -> 250).
 function niceMax(n: number) {
-  if (n <= 1) return 1
+  // Small counts get a 0–2 axis so the middle tick is a whole number.
+  if (n <= 2) return 2
   const step = 10 ** Math.floor(Math.log10(n)) / 2
   return Math.ceil(n / step) * step
 }

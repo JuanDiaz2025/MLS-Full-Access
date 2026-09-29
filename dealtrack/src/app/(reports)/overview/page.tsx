@@ -17,6 +17,7 @@ import {
   sumMetrics,
   type CampaignRow,
 } from "@/lib/google-ads/reports"
+import { lastFetchedAt } from "@/lib/google-ads/client"
 import { load } from "@/lib/load"
 
 export const metadata: Metadata = { title: "Overview · DealTrack" }
@@ -49,6 +50,7 @@ export default async function OverviewPage({
   }
 
   const { account, daily, campaigns, terms, locations } = result.data
+  const fetchedAt = lastFetchedAt()
   const totals = sumMetrics(daily)
   const r = rates(totals)
 
@@ -91,6 +93,16 @@ export default async function OverviewPage({
         description={`Google Ads account ${account.id.replace(/(\d{3})(\d{3})(\d{4})/, "$1-$2-$3")}. Read-only: nothing here changes your ads.`}
         range={range}
       />
+
+      <p className="-mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="size-2 rounded-full bg-emerald-500" aria-hidden />
+        <span>
+          <span className="font-medium text-emerald-700">Connected to Google Ads.</span>{" "}
+          {fetchedAt
+            ? `Data fetched at ${new Date(fetchedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" })} Pacific. It refreshes every 10 minutes.`
+            : "Live data."}
+        </span>
+      </p>
 
       <KpiGrid
         items={[
