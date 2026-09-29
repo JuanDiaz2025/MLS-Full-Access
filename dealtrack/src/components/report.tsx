@@ -16,10 +16,12 @@ export function PageHeader({
   title,
   description,
   range,
+  keep,
 }: {
   title: string
   description: string
   range: DateRange
+  keep?: Record<string, string>
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -32,7 +34,7 @@ export function PageHeader({
           Date range: <span className="font-medium text-foreground">{range.label}</span>
         </p>
       </div>
-      <RangePicker range={range} />
+      <RangePicker range={range} keep={keep} />
     </div>
   )
 }

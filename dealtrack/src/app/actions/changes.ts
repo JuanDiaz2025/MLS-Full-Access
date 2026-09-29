@@ -1,9 +1,10 @@
 "use server"
 
-// The only entry points that change Google Ads. Each one checks that the person is signed in as
-// an admin, validates the input, and reports back what Google did.
+// Entry points for negative keywords and location exclusions (campaign controls are in
+// controls.ts). Each one checks that the person is signed in as an admin, validates the input,
+// and reports back what Google did.
 
-import { isAdmin } from "@/lib/auth"
+import { guarded, type ActionResult } from "@/app/actions/guard"
 import {
   MATCH_TYPES,
   addNegativeKeywords,
@@ -12,9 +13,8 @@ import {
   type ChangeSummary,
   type MatchType,
 } from "@/lib/google-ads/changes"
-import { GoogleAdsError, MissingKeysError } from "@/lib/google-ads/client"
 
-export type ActionResult = { ok: boolean; message: string; failures?: string[] }
+export type { ActionResult }
 
 const MAX_ITEMS = 100
 const MAX_CAMPAIGNS = 25
@@ -31,21 +31,6 @@ function report(summary: ChangeSummary, noun: string, verb: string): ActionResul
   if (summary.failures.length) parts.push(`${summary.failures.length} failed.`)
   if (!parts.length) parts.push("Nothing to change.")
   return { ok: summary.failures.length === 0, message: parts.join(" "), failures: summary.failures }
-}
-
-async function guarded(run: () => Promise<ActionResult>): Promise<ActionResult> {
-  if (!(await isAdmin())) {
-    return { ok: false, message: "Only admins can change Google Ads. Sign in with the admin password first." }
-  }
-  try {
-    return await run()
-  } catch (err) {
-    if (err instanceof MissingKeysError) return { ok: false, message: "Google Ads isn't connected, so nothing was changed." }
-    if (err instanceof GoogleAdsError) {
-      return { ok: false, message: `Nothing was changed. ${err.message}${err.detail ? ` Google said: ${err.detail}` : ""}` }
-    }
-    return { ok: false, message: err instanceof Error ? err.message : "Something went wrong, so nothing was changed." }
-  }
 }
 
 function campaignIdsFrom(value: unknown): string[] | null {

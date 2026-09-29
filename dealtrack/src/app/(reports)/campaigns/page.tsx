@@ -1,8 +1,11 @@
 import type { Metadata } from "next"
 
+import CampaignControls from "@/components/changes/campaign-controls"
 import { formatConversions, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
-import { DataTable, PageHeader, ReportProblem, Section, StatusPill, enumLabel } from "@/components/report"
+import { AdminLink, DataTable, PageHeader, ReportProblem, Section, StatusPill, enumLabel } from "@/components/report"
+import { isAdmin } from "@/lib/auth"
 import { parseRange } from "@/lib/date-range"
+import { getCampaignControls, maxDailyBudget } from "@/lib/google-ads/controls"
 import { getCampaigns, rates, sumMetrics, type CampaignRow } from "@/lib/google-ads/reports"
 import { load } from "@/lib/load"
 
@@ -14,7 +17,11 @@ export default async function CampaignsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const range = parseRange(await searchParams)
-  const result = await load(() => getCampaigns(range))
+  const admin = await isAdmin()
+  const [result, controls] = await Promise.all([
+    load(() => getCampaigns(range)),
+    admin ? load(getCampaignControls) : null,
+  ])
 
   return (
     <>
@@ -23,6 +30,19 @@ export default async function CampaignsPage({
         description="Every campaign that showed ads in this period, including paused and removed ones."
         range={range}
       />
+      <Section
+        title="Pause, turn on, and budgets"
+        description="Running campaigns are listed. Find a paused one to turn it back on. Every change asks first and can be undone."
+        actions={!admin && <AdminLink />}
+      >
+        {!controls ? (
+          <p className="text-sm text-muted-foreground">Admins can pause campaigns, turn them on, and change daily budgets here.</p>
+        ) : !controls.ok ? (
+          <ReportProblem problem={controls} />
+        ) : (
+          <CampaignControls campaigns={controls.data} maxBudget={maxDailyBudget()} />
+        )}
+      </Section>
       {!result.ok ? (
         <ReportProblem problem={result} />
       ) : (

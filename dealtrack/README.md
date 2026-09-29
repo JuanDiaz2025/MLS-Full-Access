@@ -7,6 +7,7 @@ It reports on one Google Ads account and shows:
 - **Overview:** spend, clicks, conversions, cost per conversion, daily trends, and what needs attention.
 - **Campaigns:** every campaign that ran in the period, including paused and removed ones.
 - **Search terms:** what people typed, which terms spent money without converting, and suggested negative keywords you can copy into Google Ads.
+- **Ads:** each responsive search ad's headlines and descriptions, approval status, and results.
 - **Keywords:** each keyword marked "Stop or fix" (spent $100+ without converting) or "Scale" (converting cheaper than average).
 - **Locations:** spend by city, with anything outside the nine Bay Area counties flagged.
 - **Day & hour:** a heat map of spend and conversions by weekday and hour.
@@ -22,6 +23,11 @@ Reports are read-only for everyone. People who sign in with `ADMIN_PASSWORD` can
 - **Add negative keywords** from the Search terms page: tick suggested ones or type your own, choose phrase, exact, or broad match, and choose campaigns.
 - **Exclude cities** outside the Bay Area from the Locations page.
 - **Undo** either one with Remove, in the lists below each panel.
+- **Pause or turn on campaigns, and change daily budgets** on the Campaigns page. Running campaigns are listed; find a paused one by name.
+- **Set an ad schedule** (days and hours a campaign shows ads) on the Day & hour page, under the heat map.
+- **Edit ad headlines and descriptions** on the Ads page, including pins. Character counts follow Google's rules, so `{LOCATION(City):Local}` counts as "Local". Google reviews an edited ad again, usually within a day.
+
+After a pause, budget, schedule, or ad change, the message that follows has an **Undo** button that puts back what was there before.
 
 Safeguards:
 
@@ -29,6 +35,9 @@ Safeguards:
 - Only running campaigns are chosen by default. Paused ones can be added from a search box.
 - Terms and cities that brought conversions are left unchecked.
 - Bay Area cities can't be excluded, whatever is sent to the server.
+- Daily budgets are limited to $1–$1,000 (`MAX_DAILY_BUDGET` changes the limit). The confirm step warns when a budget is shared with other campaigns or more than doubles.
+- A schedule is saved all at once or not at all, so a campaign never ends up with half a schedule. Unchanged time ranges keep their bid adjustments.
+- Every change reads the current value fresh from Google first, so undo restores what was really there.
 - Remove only works on negative keywords and location exclusions, so it can't delete keywords, ads, or campaigns.
 - Changes appear in Google Ads' change history (and on the Changes page) as made through the API.
 
@@ -63,6 +72,7 @@ All settings are environment variables. On your computer they go in `.env.local`
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | Optional. The manager account's ID, only if access goes through it |
 | `APP_PASSWORD` | A team password you choose, for viewing. Required online; optional on your computer |
 | `ADMIN_PASSWORD` | Optional. A separate password that allows changes in Google Ads |
+| `MAX_DAILY_BUDGET` | Optional. The highest daily budget, in dollars, admins can set (default 1000) |
 | `SESSION_SECRET` | Any long random string |
 
 If a Google Ads value is missing, the pages say which one.
@@ -73,7 +83,7 @@ If a Google Ads value is missing, the pages say which one.
 - `src/lib/google-ads/reports.ts` holds the report queries and turns Google's micros and strings into dollars and numbers.
 - `src/lib/service-area.ts` lists the Bay Area cities used to flag out-of-area spend. Edit it to change the buy box.
 - `src/lib/negatives.ts` holds the rules behind suggested negative keywords. Edit them as the team learns from lead outcomes.
-- `src/lib/google-ads/changes.ts` makes the changes (campaign negative keywords and location exclusions) and re-checks every input against the live account first. `src/app/actions/changes.ts` is the only way the pages reach it, and it checks for an admin session.
+- `src/lib/google-ads/changes.ts` makes the changes (campaign negative keywords and location exclusions) and re-checks every input against the live account first. `src/lib/google-ads/controls.ts` does the same for campaign status, budgets, ad schedules, and ad text. The pages reach them only through the server actions in `src/app/actions/`, which check for an admin session.
 
 ## Next steps
 

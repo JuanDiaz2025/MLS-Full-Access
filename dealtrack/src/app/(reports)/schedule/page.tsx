@@ -1,9 +1,12 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 
+import ScheduleEditor, { type EditorSlot } from "@/components/changes/schedule-editor"
 import { formatConversions, formatUsd } from "@/components/dashboard/format"
-import { PageHeader, ReportProblem, Section } from "@/components/report"
+import { AdminLink, PageHeader, ReportProblem, Section } from "@/components/report"
+import { isAdmin } from "@/lib/auth"
 import { parseRange, rangeQuery, type DateRange } from "@/lib/date-range"
+import { getAdSchedules, getCampaignControls } from "@/lib/google-ads/controls"
 import { getSchedule, rates, sumMetrics, weekdays, type Metrics, type ScheduleGrid } from "@/lib/google-ads/reports"
 import { load } from "@/lib/load"
 import { cn } from "@/lib/utils"
@@ -27,7 +30,24 @@ export default async function SchedulePage({
   const params = await searchParams
   const range = parseRange(params)
   const metric: MetricId = params.metric === "conversions" ? "conversions" : "cost"
-  const result = await load(() => getSchedule(range))
+  const admin = await isAdmin()
+  const [result, editor] = await Promise.all([
+    load(() => getSchedule(range)),
+    admin
+      ? load(async () => {
+          const [campaigns, schedules] = await Promise.all([getCampaignControls(), getAdSchedules()])
+          return {
+            campaigns: campaigns.map(({ id, name, status }) => ({ id, name, status })),
+            schedules: Object.fromEntries(
+              campaigns.map((c) => [
+                c.id,
+                (schedules.get(c.id) ?? []).map(({ day, from, to, bidModifier }): EditorSlot => ({ day, from, to, bidModifier })),
+              ]),
+            ),
+          }
+        })
+      : null,
+  ])
 
   return (
     <>
@@ -37,6 +57,19 @@ export default async function SchedulePage({
         range={range}
       />
       {!result.ok ? <ReportProblem problem={result} /> : <Body grid={result.data} metric={metric} range={range} />}
+      <Section
+        title="Ad schedule"
+        description="Choose the days and hours a campaign can show ads. Use the heat map above to find hours that spend without bringing leads."
+        actions={!admin && <AdminLink />}
+      >
+        {!editor ? (
+          <p className="text-sm text-muted-foreground">Admins can set when each campaign shows ads here.</p>
+        ) : !editor.ok ? (
+          <ReportProblem problem={editor} />
+        ) : (
+          <ScheduleEditor {...editor.data} />
+        )}
+      </Section>
     </>
   )
 }

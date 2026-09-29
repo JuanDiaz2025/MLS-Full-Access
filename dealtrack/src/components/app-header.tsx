@@ -12,6 +12,7 @@ export const navLinks = [
   { href: "/campaigns", label: "Campaigns" },
   { href: "/search-terms", label: "Search terms" },
   { href: "/keywords", label: "Keywords" },
+  { href: "/ads", label: "Ads" },
   { href: "/locations", label: "Locations" },
   { href: "/schedule", label: "Day & hour" },
   { href: "/conversions", label: "Conversions" },

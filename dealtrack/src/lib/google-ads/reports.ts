@@ -16,7 +16,7 @@ const num = (v: Num) => Number(v ?? 0) || 0
 
 export const emptyMetrics = (): Metrics => ({ cost: 0, clicks: 0, impressions: 0, conversions: 0 })
 
-function toMetrics(m: MetricsRow | undefined): Metrics {
+export function toMetrics(m: MetricsRow | undefined): Metrics {
   return {
     cost: num(m?.costMicros) / 1_000_000,
     clicks: num(m?.clicks),
@@ -50,8 +50,8 @@ export function rates(m: Metrics) {
 // A term or city that cost money and brought no conversions.
 export const isWaste = (m: Metrics) => m.cost > 0 && m.conversions === 0
 
-const METRICS = "metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions"
-const during = (r: DateRange) => `segments.date BETWEEN '${r.from}' AND '${r.to}'`
+export const METRICS = "metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions"
+export const during = (r: DateRange) => `segments.date BETWEEN '${r.from}' AND '${r.to}'`
 
 // ---- Account --------------------------------------------------------------------------------
 

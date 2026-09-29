@@ -3,11 +3,12 @@
 // Pieces shared by the panels that change Google Ads: a campaign picker, a confirm step, and the
 // result message. Every change goes through useChange, which shows a confirmation first.
 
-import { useState, useTransition, type ReactNode } from "react"
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, CheckCircle2 } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Undo2 } from "lucide-react"
 
 import type { ActionResult } from "@/app/actions/changes"
+import { undoAction } from "@/app/actions/controls"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -106,7 +107,14 @@ export function CampaignPicker({
   )
 }
 
-type Pending = { title: string; details: ReactNode; confirmLabel: string; run: () => Promise<ActionResult> }
+type Pending = {
+  title: string
+  details: ReactNode
+  confirmLabel: string
+  run: () => Promise<ActionResult>
+  // Shown under the details. Defaults to pointing at the list of what's in place.
+  note?: string
+}
 
 // Asks before running a change, then shows what Google did and refreshes the page's data.
 export function useChange() {
@@ -114,6 +122,13 @@ export function useChange() {
   const [pending, setPending] = useState<Pending | null>(null)
   const [result, setResult] = useState<ActionResult | null>(null)
   const [running, startTransition] = useTransition()
+  const [undoing, startUndo] = useTransition()
+  const box = useRef<HTMLDivElement>(null)
+
+  // Bring the confirmation (or the result) into view; the button may be far up a long list.
+  useEffect(() => {
+    box.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [pending, result])
 
   function ask(p: Pending) {
     setResult(null)
@@ -131,8 +146,17 @@ export function useChange() {
     })
   }
 
+  function undo() {
+    const u = result?.undo
+    if (!u) return
+    startUndo(async () => {
+      setResult(await undoAction(u))
+      router.refresh()
+    })
+  }
+
   const ui = (
-    <>
+    <div ref={box} className="flex flex-col gap-3 empty:hidden">
       {pending && (
         <div
           role="alertdialog"
@@ -144,7 +168,7 @@ export function useChange() {
           </p>
           <div className="text-muted-foreground">{pending.details}</div>
           <p className="text-xs text-muted-foreground">
-            This changes your live Google Ads account. You can undo it from the list below.
+            This changes your live Google Ads account. {pending.note ?? "You can undo it from the list below."}
           </p>
           <div className="flex gap-2">
             <Button type="button" onClick={confirm} disabled={running}>
@@ -156,14 +180,26 @@ export function useChange() {
           </div>
         </div>
       )}
-      {result && <ResultMessage result={result} onDismiss={() => setResult(null)} />}
-    </>
+      {result && <ResultMessage result={result} onDismiss={() => setResult(null)} onUndo={undo} undoing={undoing} disabled={running} />}
+    </div>
   )
 
-  return { ask, ui, busy: running || !!pending }
+  return { ask, ui, busy: running || undoing || !!pending }
 }
 
-function ResultMessage({ result, onDismiss }: { result: ActionResult; onDismiss: () => void }) {
+function ResultMessage({
+  result,
+  onDismiss,
+  onUndo,
+  undoing,
+  disabled,
+}: {
+  result: ActionResult
+  onDismiss: () => void
+  onUndo: () => void
+  undoing: boolean
+  disabled: boolean
+}) {
   const Icon = result.ok ? CheckCircle2 : AlertTriangle
   return (
     <div
@@ -182,6 +218,12 @@ function ResultMessage({ result, onDismiss }: { result: ActionResult; onDismiss:
               <li key={f}>{f}</li>
             ))}
           </ul>
+        )}
+        {result.ok && result.undo && (
+          <Button type="button" variant="outline" size="sm" className="mt-1 self-start" onClick={onUndo} disabled={undoing || disabled}>
+            <Undo2 aria-hidden />
+            {undoing ? "Undoing…" : "Undo"}
+          </Button>
         )}
       </div>
       <button type="button" onClick={onDismiss} className="self-start text-xs text-muted-foreground hover:text-foreground">

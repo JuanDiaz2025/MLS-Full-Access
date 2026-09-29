@@ -180,11 +180,12 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
 
 // Runs one GAQL query against the configured account and returns every row.
 // Field names come back in camelCase, e.g. metrics.costMicros.
-export async function gaql<Row>(query: string): Promise<Row[]> {
+// fresh: skip the cache, for reads that a change is about to be based on.
+export async function gaql<Row>(query: string, { fresh = false }: { fresh?: boolean } = {}): Promise<Row[]> {
   const cfg = config()
   const key = `${cfg.customerId}\n${query}`
   const hit = cache.get(key)
-  if (hit && Date.now() - hit.at < CACHE_MS) {
+  if (!fresh && hit && Date.now() - hit.at < CACHE_MS) {
     lastDataAt = hit.at
     return hit.rows as Row[]
   }
@@ -227,12 +228,13 @@ type PartialFailureDetail = {
 export async function mutate(
   service: string,
   operations: unknown[],
-  { validateOnly = false }: { validateOnly?: boolean } = {},
+  // atomic: all operations succeed or none do (Google returns an error instead of partial results).
+  { validateOnly = false, atomic = false }: { validateOnly?: boolean; atomic?: boolean } = {},
 ): Promise<MutateResult> {
   const cfg = config()
   const body = (await call(cfg, `${service}:mutate`, {
     operations,
-    partialFailure: true,
+    partialFailure: !atomic,
     validateOnly,
   })) as {
     results?: { resourceName?: string }[]
