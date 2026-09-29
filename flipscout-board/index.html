@@ -736,6 +736,8 @@ button.lnk-edit{background:none; border:0; padding:0; cursor:pointer; font:inher
 .wk-tab-visit[aria-selected="true"]{border-bottom-color:var(--st-visit-t)}
 .wk-tab-offer[aria-selected="true"]{border-bottom-color:var(--st-offer-t)}
 .wk-tab-visited[aria-selected="true"]{border-bottom-color:#35591C}
+.wk-tab-won[aria-selected="true"]{border-bottom-color:var(--st-won-t)}
+.wk-tab-passed[aria-selected="true"]{border-bottom-color:var(--st-pass-t)}
 .note-video{display:block; margin-top:6px; width:100%; max-width:480px; max-height:320px; border-radius:6px; border:1px solid var(--line); background:#000}
 .note-dl{margin-left:6px; font-size:11.5px; padding:2px 4px}
 
@@ -2612,12 +2614,17 @@ button.lnk-edit{background:none; border:0; padding:0; cursor:pointer; font:inher
       open.filter(acqReplied).length + " replied" + (won ? " · " + won + " won" : "");
     // the stage tabs: counts follow the card and the area filters, not the tab
     var base = open.filter(function(l){ return who(l) && extra(l) && (!tileF || tileF.f(l)); });
-    var cnt = {active: base.length, closed: closed.filter(function(l){ return who(l) && extra(l); }).length};
+    // Won, Passed and Removed are separate tabs (Seth, 29 Sep). A won or passed
+    // lead stays under its own tab even after the MLS marks it sold.
+    var endOf = function(l){ var s = acqStage(l); return s === "won" || s === "passed" ? s : "gone"; };
+    var clF = closed.filter(function(l){ return who(l) && extra(l); });
+    var cnt = {active: base.length};
+    ["won", "passed", "gone"].forEach(function(k){ cnt[k] = clF.filter(function(l){ return endOf(l) === k; }).length; });
     OPEN_STAGES.forEach(function(k){ cnt[k] = base.filter(function(l){ return acqStage(l) === k; }).length; });
-    var tabs = [["active", "All active"]].concat(OPEN_STAGES.map(function(k){ return [k, STAGE_BY[k].t]; })).concat([["closed", "Won · Passed · Removed"]]);
+    var tabs = [["active", "All active"]].concat(OPEN_STAGES.map(function(k){ return [k, STAGE_BY[k].t]; })).concat([["won", "Won"], ["passed", "Passed"], ["gone", "Removed · off market"]]);
     if (!tabs.some(function(t){ return t[0] === acqF.tab; })) acqF.tab = "active";
     $("acqTabs").innerHTML = tabs.map(function(t){
-      return '<button type="button" role="tab" class="wk-tab' + (t[0] === "closed" ? ' wk-tab-end' : '') + (OPEN_STAGES.indexOf(t[0]) !== -1 ? ' wk-tab-' + t[0] : '') +
+      return '<button type="button" role="tab" class="wk-tab' + (t[0] === "won" ? ' wk-tab-end' : '') + (t[0] === "won" || t[0] === "passed" ? ' wk-tab-' + t[0] : '') + (OPEN_STAGES.indexOf(t[0]) !== -1 ? ' wk-tab-' + t[0] : '') +
         '" data-acq-tab="' + t[0] + '" aria-selected="' + (acqF.tab === t[0]) + '"><span>' + esc(t[1]) + '</span><b>' + cnt[t[0]] + '</b></button>';
     }).join("");
 
@@ -2649,16 +2656,10 @@ button.lnk-edit{background:none; border:0; padding:0; cursor:pointer; font:inher
       if (hits.length) groups.push({k: "hits", t: "Being worked", rows: hits});
       if (others.length) groups.push({k: "others", t: "Not worked yet", sub: "open one and pick a stage to start" + (sold ? " · " + sold + " sold / off market left out" : ""), rows: others});
       $("acqNote").textContent = (hits.length + others.length) + " match" + (hits.length + others.length === 1 ? "" : "es") + " for “" + $("acqQ").value.trim() + "” — searching every lead";
-    } else if (acqF.tab === "closed") {
-      var cl = closed.filter(function(l){ return who(l) && extra(l); });
-      [["won", "Won"], ["passed", "Passed"], ["gone", "Removed or off the market"]].forEach(function(g){
-        var rows = cl.filter(function(l){
-          var gone = removedOf(l) || CLOSED.test(l.mlsStatus || "");
-          return g[0] === "gone" ? gone : !gone && acqStage(l) === g[0];
-        });
-        if (rows.length) groups.push({k: g[0], t: g[1], rows: rows});
-      });
-      $("acqNote").textContent = "";
+    } else if (acqF.tab === "won" || acqF.tab === "passed" || acqF.tab === "gone") {
+      var cl = clF.filter(function(l){ return endOf(l) === acqF.tab; }).sort(acqNewer);
+      if (cl.length) groups.push({k: acqF.tab, t: "", rows: cl});
+      $("acqNote").textContent = cl.length ? "" : (acqF.tab === "won" ? "No won deals yet." : acqF.tab === "passed" ? "Nothing passed yet." : "Nothing removed or off the market.");
     } else {
       var rows = base.filter(function(l){ return acqF.tab === "active" || acqStage(l) === acqF.tab; }).sort(acqSort);
       var hot = rows.filter(function(l){ return acqUrgent(l); });
