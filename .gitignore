@@ -220,3 +220,6 @@ __marimo__/
 # lead exports contain contact details
 data/
 *.xlsx
+
+# The Python template above ignores every lib/ folder; DealTrack's source lives in one.
+!dealtrack/src/lib/
