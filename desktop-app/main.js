@@ -222,6 +222,20 @@ function ledgerRecordMany(items) {
   saveLedger(e);
 }
 
+// ---------- re-review a past scan (v1.46) ----------
+// The MLS #s a "Re-review a past scan" freed up: the next scan re-judges them,
+// including the ones already on the Leads tab (re-scored in place, never
+// re-added). Cleared one by one as the sheet takes each new verdict.
+const REREVIEW_FILE = () => path.join(app.getPath('userData'), 'rereview.json');
+function loadRereview() {
+  try { const j = JSON.parse(fs.readFileSync(REREVIEW_FILE(), 'utf8')); return { date: j.date || '', mls: j.mls || {} }; }
+  catch (_) { return { date: '', mls: {} }; }
+}
+function saveRereview(r) {
+  try { fs.mkdirSync(path.dirname(REREVIEW_FILE()), { recursive: true }); fs.writeFileSync(REREVIEW_FILE(), JSON.stringify(r, null, 1)); }
+  catch (e) { log('Could not save the re-review list: ' + e.message, 'warn'); }
+}
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const send = (ch, payload) => controlWin && !controlWin.isDestroyed() && controlWin.webContents.send(ch, payload);
 const log = (msg, level = 'info') => send('log', { msg, level, t: Date.now() });
@@ -930,6 +944,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             mls: c.mls, addr: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
             price: c._price, ppsf: c._ppsf, sqft: c._sqft, dom: domOf(c),
             reason: dropReason || 'dropped at photo review',
+            score: c._q ? c._q.score : '', why: c._q ? c._q.why : '',
             stage: c._q && !c._q.hard && !/^AI/.test(c._q.why) ? 'Qualification gate' : 'Photo review',
             link: core.mlsUrl(c.mls),
           });
@@ -1330,15 +1345,21 @@ const rejectRecord = r => ({
   'By': 'FlipScout', 'MLS Link': core.fixLink(r.link, r.mls),
 });
 
-/** Every MLS # already on the Rejected tab. */
+/** Every MLS # a PERSON rejected on the Rejected tab. The scan's own drops
+ *  ('FlipScout' in By) are not a permanent verdict — a re-review may keep them. */
 async function rejectedOnSheet(token) {
   const g = googleCfg();
   const info = await gsheets.listTabs(token, g.sheetId);
   if (info.tabs.indexOf(g.rejectTab) < 0) return {};
-  const col = gsheets.colName(REJECT_HEADERS.indexOf('MLS #'));
+  return personRejections(await gsheets.readAll(token, g.sheetId, g.rejectTab));
+}
+function personRejections(grid) {
+  const h = (grid && grid[0]) || [], iM = h.indexOf('MLS #'), iB = h.indexOf('By'), iS = h.indexOf('Stage');
   const out = {};
-  (await gsheets.readCol(token, g.sheetId, g.rejectTab, `${col}2:${col}`))
-    .forEach(m => { const k = String(m || '').trim().toUpperCase(); if (k) out[k] = true; });
+  (grid || []).slice(1).forEach(r => {
+    const k = String((r && r[iM]) || '').trim().toUpperCase();
+    if (k && core.isPersonRejection(r[iB], r[iS])) out[k] = true;
+  });
   return out;
 }
 
@@ -1367,10 +1388,37 @@ async function googleSync(leads, rejects) {
       : blank;
     // Rejections can repeat an MLS # across stages; key on it anyway so the tab
     // holds one row per property rather than growing a row per scan.
-    const R = (rejects && rejects.length)
-      ? await gsheets.syncRows(token, g.sheetId, g.rejectTab, REJECT_HEADERS, 'MLS #',
-          rejects.filter(r => r && r.mls).map(rejectRecord))
+    // A re-reviewed listing that now fails and is already on Leads is re-judged
+    // IN PLACE — bucket C, the new score and why — so the Board stops listing it.
+    // Its Rejected row takes the new date, reason and stage.
+    const rr = loadRereview(), isRR = r => r && rr.mls[String(r.mls || '').trim().toUpperCase()];
+    const rrRejects = (rejects || []).filter(isRR);
+    if (rrRejects.length) {
+      const lcol = gsheets.colName(LEAD_HEADERS.indexOf('MLS #'));
+      const onLeads = {};
+      (await gsheets.readCol(token, g.sheetId, g.leadTab, `${lcol}2:${lcol}`))
+        .forEach(m => { const k = String(m || '').trim().toUpperCase(); if (k) onLeads[k] = true; });
+      const down = rrRejects.filter(r => onLeads[String(r.mls).trim().toUpperCase()]).map(r => ({
+        'MLS #': r.mls, 'Bucket': core.BUCKET_LABEL.C, 'Opportunity Score': r.score != null && r.score !== '' ? r.score : 0,
+        'Why': (r.why || r.reason || 'dropped') + ' (re-review ' + today() + ')',
+      }));
+      if (down.length) {
+        await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', down, { overwrite: ['Bucket', 'Opportunity Score', 'Why'] });
+        log(`${down.length} lead(s) already on the sheet failed the re-review — moved to C.`, 'warn');
+      }
+    }
+    const plainRejects = (rejects || []).filter(r => r && r.mls && !isRR(r));
+    const R = plainRejects.length
+      ? await gsheets.syncRows(token, g.sheetId, g.rejectTab, REJECT_HEADERS, 'MLS #', plainRejects.map(rejectRecord))
       : blank;
+    if (rrRejects.length) await gsheets.syncRows(token, g.sheetId, g.rejectTab, REJECT_HEADERS, 'MLS #',
+      rrRejects.map(rejectRecord), { overwrite: ['Rejected On', 'Reason', 'Stage', 'By'] });
+    // Everything this batch judged has its new verdict on the sheet now.
+    const doneRR = (leads || []).concat(rejects || []).filter(isRR);
+    if (doneRR.length) {
+      doneRR.forEach(r => { delete rr.mls[String(r.mls).trim().toUpperCase()]; });
+      saveRereview(rr);
+    }
     return { ok: true, leads: L, rejects: R, blocked };
   } catch (e) { return { ok: false, error: e.message }; }
 }
@@ -1517,15 +1565,22 @@ async function syncRejectedIntoLedger() {
     try {
       const g = googleCfg();
       const token = await googleToken();
-      const col = gsheets.colName(REJECT_HEADERS.indexOf('MLS #'));
       const info = await gsheets.listTabs(token, g.sheetId);
-      const ids = info.tabs.indexOf(g.rejectTab) < 0 ? []
-        : await gsheets.readCol(token, g.sheetId, g.rejectTab, `${col}2:${col}`);
+      const rgrid = info.tabs.indexOf(g.rejectTab) < 0 ? [] : await gsheets.readAll(token, g.sheetId, g.rejectTab);
+      const people = personRejections(rgrid);
+      const iM = ((rgrid[0]) || []).indexOf('MLS #');
+      // Every MLS # on the tab still counts as checked — the scan's own drops
+      // too, so a second computer does not redo the first one's work. But the
+      // listings a "Re-review a past scan" freed are left alone until the scan
+      // re-judges them, and only a PERSON's rejection is permanent on the sheet.
+      const rrSet = loadRereview().mls;
+      const ids = rgrid.slice(1).map(r => String((r && r[iM]) || '').trim().toUpperCase())
+        .filter(k => k && !rrSet[k]);
       const seen = loadLedger();
       const fresh = ids.filter(m => m && !seen[String(m).trim().toUpperCase()]);
       if (fresh.length) {
-        ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: 'reviewer-rejected' })));
-        log(`Reviewer rejections synced: ${fresh.length} new (won't be checked again).`);
+        ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: people[m] ? 'reviewer-rejected' : 'scan-dropped' })));
+        log(`Rejections synced: ${fresh.length} new (won't be checked again unless you re-review their scan).`);
       }
       // Leads already on the board are not re-reviewed by a scan either — that
       // was 15 of 16 listings on the first test run, re-reviewed for nothing.
@@ -1533,8 +1588,10 @@ async function syncRejectedIntoLedger() {
       const lcol = gsheets.colName(LEAD_HEADERS.indexOf('MLS #'));
       const onBoard = info.tabs.indexOf(g.leadTab) < 0 ? []
         : await gsheets.readCol(token, g.sheetId, g.leadTab, `${lcol}2:${lcol}`);
-      const seen2 = loadLedger();
-      const freshBoard = onBoard.filter(m => m && !seen2[String(m).trim().toUpperCase()]);
+      const seen2 = loadLedger(), rr = loadRereview().mls;
+      const freshBoard = onBoard.filter(m => m && !seen2[String(m).trim().toUpperCase()] && !rr[String(m).trim().toUpperCase()]);
+      const rrLeft = Object.keys(rr).length;
+      if (rrLeft) log(`Re-review: ${rrLeft} listing(s) from ${loadRereview().date} will be judged again by this scan (if they are still in the areas you picked).`, 'warn');
       if (freshBoard.length) {
         ledgerRecordMany(freshBoard.map(m => ({ mls: m, verdict: 'on-board' })));
         log(`Leads already on the sheet: ${freshBoard.length} (skipped by scans — use "Refresh leads on the board").`);
@@ -1719,6 +1776,36 @@ ipcMain.handle('ledger-clear', async () => {
   saveLedger({});
   log('Seen-ledger cleared — the next scan re-reviews everything.', 'warn');
   return { ok: true };
+});
+
+ipcMain.handle('rereview', async (_e, date) => {
+  date = String(date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: 'pick the date of the scan to re-review' };
+  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 7 first' };
+  try {
+    const g = googleCfg(), token = await googleToken();
+    const info = await gsheets.listTabs(token, g.sheetId);
+    const rgrid = info.tabs.indexOf(g.rejectTab) < 0 ? [] : await gsheets.readAll(token, g.sheetId, g.rejectTab);
+    const lgrid = info.tabs.indexOf(g.leadTab) < 0 ? [] : await gsheets.readAll(token, g.sheetId, g.leadTab);
+    const led = loadLedger();
+    const plan = core.rereviewPlan(led, rgrid, lgrid, date);
+    if (!plan.forget.length) return { ok: true, forget: 0, leads: 0, date };
+    const { response } = await dialog.showMessageBox(controlWin, {
+      type: 'question', buttons: ['Cancel', 'Re-review them'], defaultId: 1, cancelId: 0,
+      message: `Re-review ${plan.forget.length} listing(s) from the ${date} scan?`,
+      detail: `${plan.leads.length} of them are on the Leads tab: they are re-judged in place (Bucket, Score and Why change; Notes are never touched) and any that now fail move to C.\n\n` +
+        `The rest were dropped by that scan and get another look.\n\nNothing a person rejected is included. Run a scan of the same area(s) next.`,
+    });
+    if (response !== 1) return { ok: false, cancelled: true };
+    plan.forget.forEach(k => { delete led[k]; });
+    saveLedger(led);
+    const rr = loadRereview();
+    rr.date = date;
+    plan.forget.forEach(k => { rr.mls[k] = true; });
+    saveRereview(rr);
+    log(`Re-review ready — ${plan.forget.length} listing(s) from ${date} (${plan.leads.length} on the Leads tab) will be judged again by the next scan of their area.`, 'warn');
+    return { ok: true, forget: plan.forget.length, leads: plan.leads.length, date };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 
 // ---------- daily KPI report ----------

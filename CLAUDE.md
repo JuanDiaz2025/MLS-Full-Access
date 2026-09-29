@@ -750,6 +750,21 @@ rules do, and `whenUnsure` (keep/drop) settles the cases the rules cannot read.
 Section 4 is a live read-out, not a prompt. The sheet reviewer is the backstop,
 and every rejection she makes flows back into the ledger.
 
+**v1.46 — "Re-review a past scan" (Seth, 29 Sep: a teammate scanned with an
+outdated version).** Section 6 takes a date; `core.rereviewPlan()` frees that
+day's verdicts — the scan's own Rejected rows (By = FlipScout, `Rejected On` =
+the date), the Leads rows `First Added` that day (not passed in Notes) and this
+computer's ledger entries — and lists them in `rereview.json` (userData). The
+next scan of that area judges them again: a kept one is re-scored in place, a
+lead that now fails is moved to C on the Leads tab (Why ends "(re-review
+<date>)"), its Rejected row takes the new reason. **Only a person's rejection
+(email in By, or stage Reviewer / Deleted by hand — `core.isPersonRejection`)
+is permanent**: the writer's "never comes back" guard now checks person rows
+only, so a re-review can keep a listing the old scan dropped. The scan's own
+drops are still pulled into every computer's ledger (verdict `scan-dropped`) so
+a second computer does not redo the first one's work. Tested in
+`test-google-sheets.js` §18.
+
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope
 `spreadsheets` only) and pastes the spreadsheet URL; as each city finishes, the

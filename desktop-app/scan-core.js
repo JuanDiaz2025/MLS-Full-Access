@@ -962,7 +962,65 @@ function boardLead(l) {
   };
 }
 
+// ---------- re-reviewing a past scan (v1.46) ----------
+// Seth, 29 Sep: a teammate scanned with an outdated app and there was no way
+// to re-check those listings. Two things made "Clear ledger" useless: the scan
+// pulled EVERY MLS # on the Rejected tab back in as checked (its own drops
+// included, on every computer), and leads already on the sheet are always
+// skipped. Only a PERSON's rejection is permanent; the scan's own drops live in
+// each computer's local ledger, and a past scan can be re-reviewed by date.
+
+/** A Rejected row a person made (email in By, or a Reviewer / Deleted-by-hand
+ *  stage) — as opposed to one the scan wrote ('FlipScout'). */
+function isPersonRejection(by, stage) {
+  return /@/.test(String(by || '')) || /reviewer|deleted by hand/i.test(String(stage || ''));
+}
+
+/** A sheet date cell as YYYY-MM-DD: "2026-09-27", "9/27/2026", "9/27/26". */
+function dayKey(cell) {
+  const t = String(cell == null ? '' : cell).trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) return (m[3].length === 2 ? '20' + m[3] : m[3]) + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+  return '';
+}
+
+/**
+ * What to forget so the next scan re-reviews one day's work.
+ *   ledger     — the local seen-ledger { MLS: {last_seen, verdict} }
+ *   rejectGrid — the Rejected tab (header row first), leadGrid — the Leads tab
+ * Returns { forget: [MLS…] (drop from the ledger), leads: [MLS…] (on the sheet,
+ * re-judged in place) }. Never touches a person's rejection or a lead the team
+ * passed in Notes.
+ */
+function rereviewPlan(ledger, rejectGrid, leadGrid, date, passedNote) {
+  const col = (grid, h) => ((grid && grid[0]) || []).indexOf(h);
+  const up = v => String(v || '').trim().toUpperCase();
+  const person = {}, forget = {}, leads = {};
+  const R = rejectGrid || [], rM = col(R, 'MLS #'), rOn = col(R, 'Rejected On'), rBy = col(R, 'By'), rSt = col(R, 'Stage');
+  R.slice(1).forEach(r => {
+    const k = up(r[rM]); if (!k) return;
+    if (isPersonRejection(r[rBy], r[rSt])) { person[k] = true; return; }
+    if (dayKey(r[rOn]) === date) forget[k] = true;
+  });
+  const L = leadGrid || [], lM = col(L, 'MLS #'), lAdd = col(L, 'First Added'), lN = col(L, 'Notes');
+  const pass = passedNote || PASSED_NOTE;
+  L.slice(1).forEach(r => {
+    const k = up(r[lM]); if (!k || dayKey(r[lAdd]) !== date) return;
+    if (pass.test(String(r[lN] || ''))) return;
+    leads[k] = true; forget[k] = true;
+  });
+  Object.keys(ledger || {}).forEach(k => {
+    const e = ledger[k] || {};
+    if (e.last_seen === date && /^(kept|dropped)$/.test(e.verdict || '')) forget[k] = true;
+  });
+  Object.keys(person).forEach(k => { delete forget[k]; delete leads[k]; });
+  return { forget: Object.keys(forget), leads: Object.keys(leads) };
+}
+
 module.exports = {
+  isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   boardLead,
   redfinUrlFrom,

@@ -488,6 +488,31 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
       'boilerplate "as is" does not overrule photos that show no wear');
   }
 
+  // 18. Re-review a past scan (v1.46): a teammate scanned with an old version.
+  {
+    const core = require('./scan-core');
+    eq(core.dayKey('9/27/2026'), '2026-09-27', 'sheet date 9/27/2026 reads as 2026-09-27');
+    eq(core.dayKey('2026-09-27'), '2026-09-27', 'ISO date passes through');
+    eq(core.isPersonRejection('bryan@twinhomebuyer.com', 'Reviewer'), true, 'an email in By is a person');
+    eq(core.isPersonRejection('', 'Deleted by hand'), true, 'a row deleted by hand is a person');
+    eq(core.isPersonRejection('FlipScout', 'Photo review'), false, 'the scan is not a person');
+    const R = [['Rejected On', 'MLS #', 'Address', 'Reason', 'Stage', 'By'],
+      ['9/27/2026', 'AA1', 'x', 'renovated', 'Photo review', 'FlipScout'],
+      ['9/27/2026', 'AA2', 'x', 'no', 'Reviewer', 'seth@twinhomebuyer.com'],
+      ['9/26/2026', 'AA3', 'x', 'renovated', 'Photo review', 'FlipScout']];
+    const L = [['Status', 'MLS #', 'Notes', 'First Added'],
+      ['', 'BB1', '', '2026-09-27'], ['', 'BB2', 'PASS — Seth: looks good', '2026-09-27'],
+      ['', 'BB3', '', '2026-09-28'], ['', 'AA2', '', '2026-09-27']];
+    const led = { CC1: { last_seen: '2026-09-27', verdict: 'dropped' }, CC2: { last_seen: '2026-09-27', verdict: 'on-board' },
+      CC3: { last_seen: '2026-09-28', verdict: 'kept' } };
+    const p = core.rereviewPlan(led, R, L, '2026-09-27');
+    eq(p.forget.sort().join(','), 'AA1,BB1,CC1', "frees that day's scan drops, leads and local verdicts");
+    eq(p.leads.join(','), 'BB1', 'lead added that day is re-judged in place');
+    eq(p.forget.indexOf('AA2'), -1, "never a person's rejection");
+    eq(p.forget.indexOf('BB2'), -1, 'never a lead the team passed in Notes');
+    eq(p.forget.indexOf('AA3') + p.forget.indexOf('BB3') + p.forget.indexOf('CC3'), -3, 'nothing from another day');
+  }
+
   // 16. The composed sheet value, end to end.
   eq(fa(d1.address, 'San Francisco', d1.zip), '844 Brunswick Street, San Francisco, CA 94112',
     'report address + zip compose without doubling the city');

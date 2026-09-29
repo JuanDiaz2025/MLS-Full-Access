@@ -178,6 +178,14 @@
       <button id="kpiExport">Export CSV / JSON</button>
       <button id="ledgerClear" class="drop">Clear ledger</button>
     </div>
+    <div class="row" style="margin-top:12px">
+      <label for="rrDate" style="margin:0">Re-review a past scan:</label>
+      <input type="date" id="rrDate" style="width:auto">
+      <button id="rrGo">Re-review that day</button>
+    </div>
+    <div class="hint">For a scan made with an outdated version. Every listing that scan judged gets
+      judged again by the next scan of the same area(s) — kept leads are re-scored in place on the
+      Leads tab, dropped ones get another look. A person's rejection is never undone.</div>
     <div class="hint">Counts accumulate per calendar day and survive closing the app. They
       go to the sheet's KPI tab automatically at the end of each run, and the reviewer's
       rejections come back into the ledger at the start of the next one.</div>
@@ -567,6 +575,13 @@
       : 'Ledger: empty — the next scan reviews every candidate in the buy box.';
   }
   async function refreshKpi(){ renderKpi(await window.fs.kpiReport(14)); refreshLedger(); }
+  $('rrGo').onclick = async () => {
+    const r = await window.fs.rereview($('rrDate').value);
+    if (r.cancelled) return;
+    if (!r.ok) { log('Re-review: ' + r.error, 'error'); return; }
+    if (!r.forget) log('Re-review: nothing from ' + r.date + ' to re-check (no scan verdicts or leads from that day).', 'warn');
+    refreshLedger();
+  };
   $('ledgerClear').onclick = async () => { const r = await window.fs.ledgerClear(); if(r.ok){ log('Ledger cleared.','warn'); refreshLedger(); } };
   $('kpiRefresh').onclick = refreshKpi;
   $('kpiExport').onclick = async () => { const r = await window.fs.kpiExport(90); if(r.ok) log('KPI exported → '+r.filePath,'good'); };
