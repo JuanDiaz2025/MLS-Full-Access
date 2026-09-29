@@ -549,6 +549,10 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .acq-chip[aria-pressed="true"]{background:var(--brand); border-color:var(--brand); color:#FFFFFF}
 .acq-chip[aria-pressed="true"] .n{color:#FFFFFF; opacity:.85}
 .acq-clear{font:600 12.5px Archivo,sans-serif; color:var(--brand); background:none; border:0; cursor:pointer; text-decoration:underline; padding:4px}
+.rei{display:inline-block; font-size:11px; font-weight:600; padding:1px 7px; border-radius:999px; margin:0 4px 0 0; text-decoration:none; white-space:nowrap}
+.rei-won{background:var(--b-won); color:var(--t-won)} .rei-hot{background:var(--b-offer); color:var(--t-offer)}
+.rei-dead{background:var(--b-pass); color:var(--t-pass)} .rei-open{background:var(--b-review); color:var(--t-review)}
+.rei:hover{text-decoration:underline}
 /* the four cards are Juan's: what needs him and when */
 #viewAcq .acq-tiles{grid-template-columns:repeat(6,minmax(0,1fr))}
 @media (max-width:1100px){ #viewAcq .acq-tiles{grid-template-columns:repeat(3,minmax(0,1fr))} }
@@ -1232,6 +1236,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 </div>
 
 <script src="data.js"></script>
+<script src="rei.js" onerror="window.__REI__=null"></script>
 <script>
 (function(){
   "use strict";
@@ -1695,7 +1700,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<td data-l="Property" class="wide">' + addrHTML(l) +
         '<span class="mls">' + esc(l.mls) + '</span>' +
         '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' +
-        mlsStatusHTML(l.mlsStatus) + occCutHTML(l) +
+        mlsStatusHTML(l.mlsStatus) + reiHTML(l) + occCutHTML(l) +
         contactHTML(l) +
         (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + '</td>' +
       '<td data-l="Price" class="num">' + fmtMoney(l.price) + '</td>' +
@@ -1826,6 +1831,18 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     var o = l.occ || "", c = l.cut || "";
     return (o ? '<span class="mst ' + (/tenant/i.test(o) ? 'mst-closed' : /vacant/i.test(o) ? 'mst-active' : 'mst-other') + '">' + esc(o) + '</span>' : '') +
            (c ? '<span class="mst mst-pending">cut ' + esc(c) + '</span>' : '');
+  }
+  // REI Blackbook: the listing agent's contact status (their tags), matched by
+  // phone, then the property address, then the agent's name. Built from REI by
+  // Claude (rei.js); a lead with no match shows nothing.
+  var REI = (window.__REI__ && window.__REI__.items) || {};
+  function reiHTML(l){
+    var x = REI[l.mls]; if (!x) return "";
+    var c = /under contract|contract sent|deal closed/i.test(x.s) ? "rei-won"
+          : /offer sent|appointment/i.test(x.s) ? "rei-hot"
+          : /passing|lost|dead|sold|top dollar/i.test(x.s) ? "rei-dead" : "rei-open";
+    var tip = "REI Blackbook — " + x.n + " (matched by " + x.how + ")" + (x.t.length ? "\nTags: " + x.t.join(", ") : "") + (x.last ? "\nLast activity " + x.last : "");
+    return '<a class="rei ' + c + '" href="https://my.reiblackbook.com/contacts/' + esc(x.id) + '" target="_blank" rel="noopener" title="' + esc(tip) + '">REI: ' + esc(x.s) + '</a>';
   }
   function mlsStatusHTML(st){
     if (!st) return "";
@@ -2662,7 +2679,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<div class="dx-facts">' + (l.price ? '<span><b>' + fmtMoney(l.price) + '</b></span>' : '') + fact(l.ppsf ? "$" + l.ppsf : "", "/sqft") +
         fact(l.sqft ? fmtNum(l.sqft) : "", "sqft") + fact(l.beds, "bd") + fact(l.year, "built") + fact(l.dom, "DOM") + '</div>' +
       '<div class="dx-tags"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' +
-        mlsStatusHTML(l.mlsStatus) + occCutHTML(l) + bucketHTML(l).replace(/^<br>/, "") + '</div>' +
+        mlsStatusHTML(l.mlsStatus) + reiHTML(l) + occCutHTML(l) + bucketHTML(l).replace(/^<br>/, "") + '</div>' +
 
       // one bar: where it is, who has it, and the single next step
       '<div class="dx-bar">' +
