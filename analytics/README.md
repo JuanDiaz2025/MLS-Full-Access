@@ -35,7 +35,7 @@ Output: `reports/<date>/report.md` plus CSVs per section.
 - **Forecast** (`forecast.py`): log-log fit of monthly leads on spend since 2025-01
   (older months overstate what a dollar buys today), deal rate with a Beta prior,
   deal profits resampled from actual deals; P10/P50/P90 from 20k simulations.
-  Includes a $2,000/month agency fee.
+  Costs are Google Ads spend only.
 - **Behavior** (`behavior.py`): PostHog sessions; a conversion is a form submit.
   Staging hosts and visitors with >150 pageviews (the team) are excluded.
 - **Anomalies** (`anomalies.py`): robust z-score (median/MAD of the prior 8 weeks) on

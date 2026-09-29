@@ -13,7 +13,6 @@ import pandas as pd
 from . import anomalies, behavior, forecast, lp_audit, sources
 
 BUDGETS = [5000, 10000, 15000, 20000, 30000]
-AGENCY_FEE = 2000  # Bateman management fee per month
 
 
 def money(x):
@@ -50,7 +49,7 @@ def main():
 
     # ---- forecast
     model = forecast.fit(monthly)
-    fc = forecast.simulate(model, deals[deals.acquired].net_revenue, BUDGETS, months=3, fee=AGENCY_FEE)
+    fc = forecast.simulate(model, deals[deals.acquired].net_revenue, BUDGETS, months=3)
     fc.to_csv(f"{out}/forecast.csv", index=False)
     md += ["## 1. Forecast (next 3 months)", "",
            f"Model fit on {model['months']} months since {forecast.FIT_START}: spend explains "
@@ -58,7 +57,7 @@ def main():
            f"+{(1.1 ** model['elasticity'] - 1):.0%} leads (diminishing returns). "
            f"Deal rate {model['deal_prior'][0] / sum(model['deal_prior']):.1%} of leads; "
            f"median deal profit {money(deals[deals.acquired].net_revenue.median())}. "
-           f"Costs include a {money(AGENCY_FEE)}/month agency fee.", ""]
+           "Costs are Google Ads spend only.", ""]
     t = pd.DataFrame({
         "Monthly budget": fc.monthly_budget.map(money),
         "3-mo cost": fc.total_cost.map(money),

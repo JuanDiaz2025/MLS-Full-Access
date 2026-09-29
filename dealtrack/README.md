@@ -13,7 +13,7 @@ It reports on one Google Ads account and shows:
 - **Conversions:** what Google counts as a conversion, with a warning if a primary conversion isn't really a lead.
 - **Landing pages:** where ads sent people. The 8 pages with the most spend get a mobile PageSpeed test and a check for a short form, tap-to-call, and reviews, next to their spend, conversions, and PostHog submit rate.
 - **Behavior:** from PostHog: submit rate by traffic source, device, landing page, day, and hour; how people who submit behave (pages, time to submit, rage clicks). The team and the staging site are left out.
-- **Forecast:** leads, deals, and net revenue to expect at $5k–$30k a month over 3, 6, or 12 months, with ranges and the chance of zero deals. Built from Google Ads spend and the PPC LEAD sheet.
+- **Forecast:** leads, deals, net revenue, and ad spend per deal to expect at a $5k–$30k monthly Google Ads budget over 3, 6, or 12 months, with ranges and the chance of zero deals. Costs are ad spend only. Built from Google Ads spend and the PPC LEAD sheet.
 - **Alerts:** health checks (ads pointing at broken or deleted pages, primary conversions that aren't leads, JavaScript errors, bot and team traffic) and weeks where spend, clicks, cost per click, conversions, or site traffic jumped far outside normal.
 - **Changes:** Google's own change history for the last 30 days: who changed what, and from where (DealTrack, the Google Ads website, Editor, scripts).
 
@@ -70,7 +70,6 @@ All settings are environment variables. On your computer they go in `.env.local`
 | `SESSION_SECRET` | Any long random string |
 | `LEADS_SHEET_ID` | Forecast. The PPC LEAD sheet's ID, from its URL between `/d/` and `/edit` |
 | `GOOGLE_SHEETS_REFRESH_TOKEN` | Forecast. OAuth Playground → gear → "Use your own OAuth credentials" (the Ads web client) → scope `https://www.googleapis.com/auth/spreadsheets.readonly`. Enable the Google Sheets API in the same Cloud project. Optional if `GOOGLE_ADS_REFRESH_TOKEN` has both scopes |
-| `FORECAST_MONTHLY_FEE` | Optional. Agency fee per month added to forecast costs (default 2000) |
 | `POSTHOG_API_KEY`, `POSTHOG_PROJECT_ID`, `POSTHOG_HOST` | Behavior, Alerts. PostHog → Settings → Personal API keys → "Read-only access", limited to the project (Twin Home Buyer: `421236`, host `https://us.posthog.com`) |
 | `CLARITY_API_TOKEN` | Alerts. Clarity → Settings → Data export. Allows ~10 calls a day, so results are cached 3 hours |
 | `PAGESPEED_API_KEY` | Landing pages. Google Cloud → enable PageSpeed Insights API → Credentials → Create API key |

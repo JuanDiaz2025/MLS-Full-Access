@@ -12,7 +12,6 @@ export const metadata: Metadata = { title: "Forecast · DealTrack" }
 
 const BUDGETS = [5_000, 10_000, 15_000, 20_000, 30_000]
 const MONTH_CHOICES = [3, 6, 12]
-const DEFAULT_FEE = Number(process.env.FORECAST_MONTHLY_FEE ?? 2000) || 0
 
 type Params = Record<string, string | string[] | undefined>
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
@@ -20,8 +19,6 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
 export default async function ForecastPage({ searchParams }: { searchParams: Promise<Params> }) {
   const params = await searchParams
   const months = MONTH_CHOICES.includes(Number(first(params.months))) ? Number(first(params.months)) : 3
-  const feeParam = Number(first(params.fee))
-  const fee = first(params.fee) !== undefined && Number.isFinite(feeParam) && feeParam >= 0 ? Math.min(feeParam, 50_000) : DEFAULT_FEE
 
   const result = await load(async () => {
     const [sheet, spend] = await Promise.all([getLeadData(), getMonthlySpend("2023-01-01", today())])
@@ -32,12 +29,12 @@ export default async function ForecastPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Forecast"
-        description="What a monthly Google Ads budget is likely to bring in: leads, deals, and net revenue, with honest ranges. Built from the account's spend and the PPC LEAD sheet's lead stages and acquired deals."
+        description="What a monthly Google Ads budget is likely to bring in: leads, deals, and net revenue, with honest ranges. Costs are Google Ads spend only. Built from the account's spend and the PPC LEAD sheet's lead stages and acquired deals."
       />
       {!result.ok ? (
         <ReportProblem problem={result} />
       ) : (
-        <Body {...result.data} months={months} fee={fee} />
+        <Body {...result.data} months={months} />
       )}
     </>
   )
@@ -48,13 +45,11 @@ function Body({
   deals,
   monthly,
   months,
-  fee,
 }: {
   leads: { date: string }[]
   deals: Parameters<typeof fit>[1]
   monthly: MonthRow[]
   months: number
-  fee: number
 }) {
   const model = fit(monthly, deals)
   const lastLead = leads.map((l) => l.date).sort().at(-1)!
@@ -66,7 +61,7 @@ function Body({
       </p>
     )
   }
-  const scenarios = simulate(model, BUDGETS, { months, monthlyFee: fee })
+  const scenarios = simulate(model, BUDGETS, { months })
   const medianProfit = median(model.profits)!
   const tenPercent = 1.1 ** model.elasticity - 1
   const history = monthly.filter((m) => m.month >= "2024-05" && (m.cost > 0 || m.leads > 0)).reverse()
@@ -86,7 +81,7 @@ function Body({
 
       <Section
         title={`Next ${months} months by monthly budget`}
-        description={`Each row is ${formatNumber(5000)} simulated ${months}-month periods. "Likely" is the middle result; the range covers 8 in 10 outcomes. Cost includes a ${formatUsd(fee)}/month agency fee.`}
+        description={`Each row is ${formatNumber(5000)} simulated ${months}-month periods. "Likely" is the middle result; the range covers 8 in 10 outcomes.`}
         actions={
           <form className="flex flex-wrap items-end gap-2 text-sm" method="get">
             <label className="flex flex-col gap-1">
@@ -99,10 +94,6 @@ function Body({
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">Agency fee / month</span>
-              <input name="fee" type="number" min={0} step={100} defaultValue={fee} className="h-8 w-28 rounded-md border bg-background px-2" />
-            </label>
             <button type="submit" className="h-8 rounded-md bg-primary px-3 font-medium text-primary-foreground">
               Update
             </button>
@@ -113,11 +104,17 @@ function Body({
           rows={scenarios}
           rowKey={(s) => String(s.budget)}
           columns={[
-            { key: "budget", label: "Ad budget / month", render: (s) => <span className="font-medium">{formatUsd(s.budget)}</span> },
-            { key: "cost", label: `Total cost (${months} mo)`, align: "right", render: (s) => formatUsd(s.totalCost) },
+            { key: "budget", label: "Google Ads budget / month", render: (s) => <span className="font-medium">{formatUsd(s.budget)}</span> },
+            { key: "cost", label: `Ad spend (${months} mo)`, align: "right", render: (s) => formatUsd(s.totalCost) },
             { key: "leads", label: "Leads", align: "right", render: (s) => `${formatNumber(s.leads[1])} (${formatNumber(s.leads[0])}–${formatNumber(s.leads[2])})` },
             { key: "deals", label: "Deals", align: "right", render: (s) => `${s.deals[1]} (${s.deals[0]}–${s.deals[2]})` },
             { key: "rev", label: "Net revenue, likely", align: "right", render: (s) => formatUsd(s.netRevenue[1]) },
+            {
+              key: "cpd",
+              label: "Ad spend per deal",
+              align: "right",
+              render: (s) => (s.deals[1] ? formatUsd(s.totalCost / s.deals[1]) : "—"),
+            },
             {
               key: "none",
               label: "Chance of 0 deals",
@@ -126,7 +123,7 @@ function Body({
             },
             {
               key: "profit",
-              label: "Chance revenue beats cost",
+              label: "Chance revenue beats ad spend",
               align: "right",
               render: (s) => <span className={s.chanceProfit >= 0.6 ? "text-emerald-600" : undefined}>{formatPercent(s.chanceProfit, 0)}</span>,
             },

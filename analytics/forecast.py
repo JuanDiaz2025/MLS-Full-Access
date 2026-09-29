@@ -52,7 +52,7 @@ def fit(monthly, start=FIT_START):
     }
 
 
-def simulate(model, deal_profits, budgets, months=3, fee=0, n=20000, seed=7):
+def simulate(model, deal_profits, budgets, months=3, n=20000, seed=7):
     """Monte Carlo over `months` at each monthly budget. Returns a summary DataFrame."""
     rng = np.random.default_rng(seed)
     profits = np.asarray([p for p in deal_profits if pd.notna(p)])
@@ -70,7 +70,7 @@ def simulate(model, deal_profits, budgets, months=3, fee=0, n=20000, seed=7):
             tot_leads += leads
             tot_deals += deals
             tot_rev += np.array([rng.choice(profits, size=d).sum() if d else 0.0 for d in deals])
-        cost = budget * months + fee * months
+        cost = budget * months  # Google Ads spend only
         roi = (tot_rev - cost) / cost
         pct = lambda a: np.percentile(a, [10, 50, 90])
         rows.append({
