@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# DealTrack source code (the Python "lib/" rule above would hide it)
+!dealtrack/src/lib/
