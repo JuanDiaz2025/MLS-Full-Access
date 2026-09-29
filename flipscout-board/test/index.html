@@ -550,7 +550,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .acq-chip[aria-pressed="true"] .n{color:#FFFFFF; opacity:.85}
 .acq-clear{font:600 12.5px Archivo,sans-serif; color:var(--brand); background:none; border:0; cursor:pointer; text-decoration:underline; padding:4px}
 /* the four cards are Juan's: what needs him and when */
-#viewAcq .acq-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+#viewAcq .acq-tiles{grid-template-columns:repeat(6,minmax(0,1fr))}
+@media (max-width:1100px){ #viewAcq .acq-tiles{grid-template-columns:repeat(3,minmax(0,1fr))} }
 @media (max-width:700px){ #viewAcq .acq-tiles{grid-template-columns:repeat(2,minmax(0,1fr))} }
 .acq-tile .sub.warn{color:var(--t-pass); font-weight:600}
 .acq-tile.hot{border-color:var(--t-pass); box-shadow:inset 3px 0 0 var(--t-pass)}
@@ -2438,6 +2439,8 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   }
   function acqSoonest(ls, key){ return ls.slice().sort(function(a, b){ return key(a) - key(b); })[0]; }
   var ACQ_TILES = [
+    {k: "", t: "Working", c: "--ink", f: function(){ return true; },
+     sub: function(){ return {s: "every live lead · show all"}; }},
     {k: "due", t: "Offers due", c: "--t-offer",
      f: function(l){ var n = acqDueDays(l); return n !== null && n >= 0 && n <= 3; },
      sub: function(ls){
@@ -2448,6 +2451,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     {k: "review", t: "To review", c: "--t-review",
      f: function(l){ return acqStage(l) === "new"; },
      sub: function(ls){ var n = ls.filter(acqIsNew).length; return {s: n ? n + " new since yesterday" : "waiting on Juan’s yes or no", amber: n > 0}; }},
+    {k: "interest", t: "Juan interested", c: "--st-int-t",
+     f: function(l){ return acqStage(l) === "interest"; },
+     sub: function(ls){ return {s: ls.length ? "said yes — book a visit" : "none yet", amber: ls.length > 0}; }},
     {k: "visits", t: "Visits", c: "--st-visit-t", n: function(ls){ return ls.filter(acqVisitSoon).length; },
      f: function(l){ return acqVisitSoon(l) || acqVisitPast(l); },
      sub: function(ls){
@@ -2514,14 +2520,14 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     // the cards: counts over everything being worked (filters aside); one picked narrows the list
     var tileF = acqF.tile && ACQ_TILES.filter(function(t){ return t.k === acqF.tile; })[0];
     $("acqTiles").innerHTML = ACQ_TILES.map(function(t){
-      var ls = open.filter(t.f), n = t.n ? t.n(ls) : ls.length, on = acqF.tile === t.k, sb = t.sub(ls);
+      var ls = open.filter(t.f), n = t.n ? t.n(ls) : ls.length, on = t.k ? acqF.tile === t.k : !acqF.tile, sb = t.sub(ls);
       return '<button type="button" class="kpi acq-tile' + (sb.hot ? ' hot' : sb.amber ? ' amber' : '') + '" data-acq-tile="' + t.k + '" aria-pressed="' + on + '"' +
         ' title="' + (on ? 'Showing only these — click again to show everything' : 'Show only these in the list') + '">' +
         '<span class="t">' + t.t + '</span><span class="v" style="color:var(' + t.c + ')">' + n + '</span>' +
         '<span class="sub' + (sb.hot ? ' warn' : '') + '">' + esc(sb.s) + '</span></button>';
     }).join("");
     var won = closed.filter(function(l){ return acqStage(l) === "won"; }).length;
-    $("acqMeta").textContent = open.length + " working · " + open.filter(acqEmailed).length + " emailed · " +
+    $("acqMeta").textContent = open.filter(acqEmailed).length + " emailed · " +
       open.filter(acqReplied).length + " replied" + (won ? " · " + won + " won" : "");
     // the stage tabs: counts follow the card and the area filters, not the tab
     var base = open.filter(function(l){ return who(l) && extra(l) && (!tileF || tileF.f(l)); });
