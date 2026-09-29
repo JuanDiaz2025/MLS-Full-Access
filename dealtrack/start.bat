@@ -29,8 +29,16 @@ if not exist node_modules (
   )
 )
 
+echo Preparing DealTrack. This takes about a minute...
+call npm run build
+if errorlevel 1 (
+  echo The build failed. Take a screenshot of this window and send it over.
+  pause
+  exit /b 1
+)
+
 echo Starting DealTrack. Your browser will open at http://localhost:3000
 echo Keep this window open while you use it. Close it to stop.
-start "" cmd /c "timeout /t 8 >nul & start http://localhost:3000/overview"
-call npm run dev
+start "" cmd /c "timeout /t 5 >nul & start http://localhost:3000/overview"
+call npm start
 pause
