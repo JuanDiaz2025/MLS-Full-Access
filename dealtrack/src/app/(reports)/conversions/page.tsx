@@ -3,17 +3,14 @@ import type { Metadata } from "next"
 import { formatConversions } from "@/components/dashboard/format"
 import { DataTable, PageHeader, Pill, ReportProblem, Section, enumLabel } from "@/components/report"
 import { parseRange } from "@/lib/date-range"
-import { getConversionActions, type ConversionActionRow } from "@/lib/google-ads/reports"
+import { getConversionActions, isLeadConversion, type ConversionActionRow } from "@/lib/google-ads/reports"
 import { load } from "@/lib/load"
 
 export const metadata: Metadata = { title: "Conversions · DealTrack" }
 
-// Categories that usually aren't a seller raising their hand. If one of these counts as a primary
-// conversion, "cost per conversion" can look much better than the real cost per lead.
-const SOFT_CATEGORIES = new Set(["PAGE_VIEW", "DEFAULT", "ENGAGEMENT", "DOWNLOAD", "ADD_TO_CART", "BEGIN_CHECKOUT"])
-// A thank-you page view named "Lead" or an uploaded "Phone Call" is a real lead despite its category.
-const LEAD_NAME = /\b(lead|call|form|submission|appointment|contract|offer)\b/i
-const isSoft = (a: ConversionActionRow) => SOFT_CATEGORIES.has(a.category) && !LEAD_NAME.test(a.name)
+// If a soft action counts as a primary conversion, "cost per conversion" can look much better
+// than the real cost per lead.
+const isSoft = (a: ConversionActionRow) => !isLeadConversion(a.name, a.category)
 
 export default async function ConversionsPage({
   searchParams,

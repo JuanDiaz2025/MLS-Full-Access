@@ -69,29 +69,36 @@ export type Model = {
   profits: number[]
 }
 
+// Least-squares fit of log(y) = intercept + elasticity·log(x). sigma is the spread of the
+// residuals (in log units), used as month-to-month noise in the simulations.
+type LogFit = { intercept: number; elasticity: number; sigma: number; r2: number }
+
+// maxElasticity caps returns to scale: in Google's auction more spend never makes each lead
+// cheaper, so a slope above 1 only means the high-spend months happened to be cheaper ones.
+function fitLogLog(points: [number, number][], maxElasticity = Infinity): LogFit {
+  const x = points.map(([v]) => Math.log(v))
+  const y = points.map(([, v]) => Math.log(v))
+  const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length
+  const mx = mean(x)
+  const my = mean(y)
+  const sxx = x.reduce((s, v) => s + (v - mx) ** 2, 0)
+  const b = Math.min(sxx ? x.reduce((s, v, i) => s + (v - mx) * (y[i] - my), 0) / sxx : 0, maxElasticity)
+  const a = my - b * mx
+  const sse = y.reduce((s, v, i) => s + (v - (a + b * x[i])) ** 2, 0)
+  const sst = y.reduce((s, v) => s + (v - my) ** 2, 0)
+  return { intercept: a, elasticity: b, sigma: Math.sqrt(sse / Math.max(points.length - 2, 1)), r2: sst ? 1 - sse / sst : 0 }
+}
+
 export function fit(monthly: MonthRow[], deals: Deal[]): Model | null {
   const rows = monthly.filter((r) => r.hasLeadData && r.month >= FIT_START && r.cost >= MIN_MONTHLY_SPEND && r.leads > 0)
   const profits = deals.filter((d) => d.acquired && d.netRevenue !== null).map((d) => d.netRevenue!)
   if (rows.length < 4 || !profits.length) return null
 
-  const x = rows.map((r) => Math.log(r.cost))
-  const y = rows.map((r) => Math.log(r.leads))
-  const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length
-  const mx = mean(x)
-  const my = mean(y)
-  const sxx = x.reduce((s, v) => s + (v - mx) ** 2, 0)
-  const b = sxx ? x.reduce((s, v, i) => s + (v - mx) * (y[i] - my), 0) / sxx : 0
-  const a = my - b * mx
-  const resid = y.map((v, i) => v - (a + b * x[i]))
-  const sse = resid.reduce((s, v) => s + v * v, 0)
-  const sst = y.reduce((s, v) => s + (v - my) ** 2, 0)
+  const f = fitLogLog(rows.map((r) => [r.cost, r.leads]), 1)
   const leads = rows.reduce((s, r) => s + r.leads, 0)
   const dealCount = rows.reduce((s, r) => s + r.deals, 0)
   return {
-    intercept: a,
-    elasticity: b,
-    sigma: Math.sqrt(sse / Math.max(rows.length - 2, 1)),
-    r2: sst ? 1 - sse / sst : 0,
+    ...f,
     months: rows.length,
     leads,
     deals: dealCount,
@@ -216,4 +223,57 @@ export function median(values: number[]) {
   const s = [...values].sort((a, b) => a - b)
   const mid = Math.floor(s.length / 2)
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2
+}
+
+// ---- Google Ads only ----------------------------------------------------------------------
+// Works without the lead sheet: spend -> Google-counted leads (lead forms and calls; page views,
+// directions, and other soft actions are left out before this point). Clicks aren't forecast:
+// cost per click moved from ~$10 to $130+ when the bidding changed in 2026, so spend doesn't
+// predict them.
+
+export type AdsMonth = { month: string; cost: number; clicks: number; leads: number }
+
+export type AdsModel = {
+  leads: LogFit
+  months: number
+  costPerLead: number
+}
+
+export function fitAds(monthly: AdsMonth[]): AdsModel | null {
+  const rows = monthly.filter((r) => r.month >= FIT_START && r.cost >= MIN_MONTHLY_SPEND && r.leads > 0)
+  if (rows.length < 4) return null
+  return {
+    leads: fitLogLog(rows.map((r) => [r.cost, r.leads]), 1),
+    months: rows.length,
+    costPerLead: rows.reduce((s, r) => s + r.cost, 0) / rows.reduce((s, r) => s + r.leads, 0),
+  }
+}
+
+export type AdsScenario = {
+  budget: number
+  totalCost: number
+  leads: [number, number, number] // P10, P50, P90
+  costPerLead: [number, number, number] // P10 is the cheapest outcome
+}
+
+export function simulateAds(model: AdsModel, budgets: number[], { months = 3, runs = 5000, seed = 11 } = {}): AdsScenario[] {
+  const draw = (u: () => number, f: LogFit, budget: number) =>
+    Math.exp(f.intercept + f.elasticity * Math.log(budget) + f.sigma * normal(u))
+  return budgets.map((budget) => {
+    const u = rng(seed + budget)
+    const leads: number[] = []
+    const cpl: number[] = []
+    const cost = budget * months
+    for (let run = 0; run < runs; run++) {
+      let l = 0
+      for (let m = 0; m < months; m++) l += poisson(u, draw(u, model.leads, budget))
+      leads.push(l)
+      cpl.push(l ? cost / l : cost)
+    }
+    const q = (a: number[]): [number, number, number] => {
+      const s = [...a].sort((x, y) => x - y)
+      return [percentile(s, 0.1), percentile(s, 0.5), percentile(s, 0.9)]
+    }
+    return { budget, totalCost: cost, leads: q(leads), costPerLead: q(cpl) }
+  })
 }

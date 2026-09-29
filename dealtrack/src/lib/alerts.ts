@@ -2,7 +2,7 @@
 // that should never fail (ads pointing at dead pages, fake conversions, broken scripts).
 
 import type { ClaritySnapshot } from "@/lib/clarity"
-import type { AdDestination, ConversionActionRow, WeekPoint } from "@/lib/google-ads/reports"
+import { isLeadConversion, type AdDestination, type ConversionActionRow, type WeekPoint } from "@/lib/google-ads/reports"
 import { checkPage } from "@/lib/pagespeed"
 import type { SiteWeek } from "@/lib/posthog"
 
@@ -115,10 +115,8 @@ export async function brokenDestinations(destinations: AdDestination[]): Promise
   return issues
 }
 
-const SOFT = new Set(["PAGE_VIEW", "GET_DIRECTIONS", "ENGAGEMENT"])
-
 export function softConversions(actions: ConversionActionRow[]): HealthIssue[] {
-  const soft = actions.filter((a) => a.status === "ENABLED" && a.primary && SOFT.has(a.category))
+  const soft = actions.filter((a) => a.status === "ENABLED" && a.primary && !isLeadConversion(a.name, a.category))
   if (!soft.length) return []
   return [
     {

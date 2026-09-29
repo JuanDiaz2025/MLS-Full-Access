@@ -444,3 +444,48 @@ export async function getAdDestinations(): Promise<AdDestination[]> {
   }
   return [...byUrl.values()]
 }
+
+// ---- Which conversions are leads ------------------------------------------------------------
+
+// Categories that usually aren't a seller raising their hand. A thank-you page view named "Lead"
+// or an uploaded "Phone Call" is still a real lead, so the name can override the category.
+const SOFT_CATEGORIES = new Set(["PAGE_VIEW", "DEFAULT", "ENGAGEMENT", "DOWNLOAD", "ADD_TO_CART", "BEGIN_CHECKOUT", "GET_DIRECTIONS"])
+const LEAD_NAME = /\b(lead|call|form|submission|appointment|contract|offer)\b/i
+
+export function isLeadConversion(name: string, category: string) {
+  return !SOFT_CATEGORIES.has(category) || LEAD_NAME.test(name)
+}
+
+// ---- Monthly spend, clicks, and leads (forecast without the lead sheet) --------------------
+
+export async function getMonthlyAds(from: string, to: string) {
+  const [totals, byAction, actions] = await Promise.all([
+    gaql<{ segments: { month: string }; metrics?: MetricsRow }>(
+      `SELECT segments.month, ${METRICS} FROM customer WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+    ),
+    gaql<{ segments: { month: string; conversionActionName?: string }; metrics?: { conversions?: Num } }>(
+      `SELECT segments.month, segments.conversion_action_name, metrics.conversions FROM customer
+       WHERE segments.date BETWEEN '${from}' AND '${to}'`,
+    ),
+    gaql<{ conversionAction: { name?: string; category?: string } }>("SELECT conversion_action.name, conversion_action.category FROM conversion_action"),
+  ])
+  const category = new Map(actions.map((a) => [a.conversionAction.name ?? "", a.conversionAction.category ?? ""]))
+  const months = new Map<string, { month: string; cost: number; clicks: number; leads: number }>()
+  const row = (m: string) => {
+    const month = m.slice(0, 7)
+    const r = months.get(month) ?? { month, cost: 0, clicks: 0, leads: 0 }
+    months.set(month, r)
+    return r
+  }
+  for (const t of totals) {
+    const m = toMetrics(t.metrics)
+    const r = row(t.segments.month)
+    r.cost += m.cost
+    r.clicks += m.clicks
+  }
+  for (const a of byAction) {
+    const name = a.segments.conversionActionName ?? ""
+    if (isLeadConversion(name, category.get(name) ?? "")) row(a.segments.month).leads += num(a.metrics?.conversions)
+  }
+  return [...months.values()].sort((a, b) => a.month.localeCompare(b.month))
+}
