@@ -219,7 +219,27 @@ export type LocationRow = {
   metrics: Metrics
 }
 
-const GEO_RESOURCE = /^geoTargetConstants\/\d+$/
+export const GEO_RESOURCE = /^geoTargetConstants\/\d+$/
+
+// City names for geo target resource names ("geoTargetConstants/1014221"), looked up in batches.
+export async function geoNames(ids: string[]): Promise<Map<string, { name: string; canonical: string }>> {
+  const names = new Map<string, { name: string; canonical: string }>()
+  const valid = ids.filter((id) => GEO_RESOURCE.test(id))
+  for (let i = 0; i < valid.length; i += 200) {
+    const batch = valid.slice(i, i + 200).map((id) => `'${id}'`).join(", ")
+    const geo = await gaql<{ geoTargetConstant: { resourceName: string; name?: string; canonicalName?: string } }>(
+      `SELECT geo_target_constant.resource_name, geo_target_constant.name, geo_target_constant.canonical_name
+       FROM geo_target_constant WHERE geo_target_constant.resource_name IN (${batch})`,
+    )
+    for (const g of geo) {
+      names.set(g.geoTargetConstant.resourceName, {
+        name: g.geoTargetConstant.name ?? "",
+        canonical: g.geoTargetConstant.canonicalName ?? "",
+      })
+    }
+  }
+  return names
+}
 
 export async function getLocations(range: DateRange): Promise<LocationRow[]> {
   const rows = await gaql<{ segments?: { geoTargetCity?: string }; metrics?: MetricsRow }>(
@@ -232,22 +252,7 @@ export async function getLocations(range: DateRange): Promise<LocationRow[]> {
     byCity.set(key, add(byCity.get(key) ?? emptyMetrics(), toMetrics(r.metrics)))
   }
 
-  // Look up city names, a batch at a time.
-  const names = new Map<string, { name: string; canonical: string }>()
-  const ids = [...byCity.keys()].filter((k) => k !== "unknown")
-  for (let i = 0; i < ids.length; i += 200) {
-    const batch = ids.slice(i, i + 200).map((id) => `'${id}'`).join(", ")
-    const geo = await gaql<{ geoTargetConstant: { resourceName: string; name?: string; canonicalName?: string } }>(
-      `SELECT geo_target_constant.resource_name, geo_target_constant.name, geo_target_constant.canonical_name
-       FROM geo_target_constant WHERE geo_target_constant.resource_name IN (${batch})`,
-    )
-    for (const g of geo) {
-      names.set(g.geoTargetConstant.resourceName, {
-        name: g.geoTargetConstant.name ?? "",
-        canonical: g.geoTargetConstant.canonicalName ?? "",
-      })
-    }
-  }
+  const names = await geoNames([...byCity.keys()].filter((k) => k !== "unknown"))
 
   return [...byCity.entries()]
     .map(([key, metrics]) => {
@@ -257,7 +262,11 @@ export async function getLocations(range: DateRange): Promise<LocationRow[]> {
       return {
         key,
         city: geo.name || geo.canonical.split(",")[0],
-        region: geo.canonical.split(",").slice(1).join(", "),
+        region: geo.canonical
+          .split(",")
+          .slice(1)
+          .filter((part) => part !== "United States")
+          .join(", "),
         status,
         county,
         metrics,

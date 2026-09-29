@@ -1,3 +1,5 @@
+import { unstable_rethrow } from "next/navigation"
+
 import { GoogleAdsError, MissingKeysError } from "@/lib/google-ads/client"
 
 export type Problem =
@@ -11,6 +13,8 @@ export async function load<T>(fn: () => Promise<T>): Promise<Loaded<T>> {
   try {
     return { ok: true, data: await fn() }
   } catch (err) {
+    // Let Next.js's own signals (redirects, dynamic rendering) through.
+    unstable_rethrow(err)
     if (err instanceof MissingKeysError) return { ok: false, kind: "missing", keys: err.keys }
     if (err instanceof GoogleAdsError) return { ok: false, kind: "error", message: err.message, detail: err.detail }
     console.error(err)

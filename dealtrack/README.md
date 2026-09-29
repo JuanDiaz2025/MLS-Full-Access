@@ -2,7 +2,7 @@
 
 Google Ads results for Twin Home Buyer, built from the AdPilot hackathon app.
 
-It reads one Google Ads account (read-only; it never changes your ads) and shows:
+It reports on one Google Ads account and shows:
 
 - **Overview:** spend, clicks, conversions, cost per conversion, daily trends, and what needs attention.
 - **Campaigns:** every campaign that ran in the period, including paused and removed ones.
@@ -11,8 +11,28 @@ It reads one Google Ads account (read-only; it never changes your ads) and shows
 - **Locations:** spend by city, with anything outside the nine Bay Area counties flagged.
 - **Day & hour:** a heat map of spend and conversions by weekday and hour.
 - **Conversions:** what Google counts as a conversion, with a warning if a primary conversion isn't really a lead.
+- **Changes:** Google's own change history for the last 30 days: who changed what, and from where (DealTrack, the Google Ads website, Editor, scripts).
 
 Every page has date presets (including the Bateman period, Jun 5 – Jul 23, 2026) and a custom from/to range.
+
+## Making changes (admins only)
+
+Reports are read-only for everyone. People who sign in with `ADMIN_PASSWORD` can also:
+
+- **Add negative keywords** from the Search terms page: tick suggested ones or type your own, choose phrase, exact, or broad match, and choose campaigns.
+- **Exclude cities** outside the Bay Area from the Locations page.
+- **Undo** either one with Remove, in the lists below each panel.
+
+Safeguards:
+
+- Every change shows exactly what will happen and needs a second click to confirm.
+- Only running campaigns are chosen by default. Paused ones can be added from a search box.
+- Terms and cities that brought conversions are left unchecked.
+- Bay Area cities can't be excluded, whatever is sent to the server.
+- Remove only works on negative keywords and location exclusions, so it can't delete keywords, ads, or campaigns.
+- Changes appear in Google Ads' change history (and on the Changes page) as made through the API.
+
+Without `ADMIN_PASSWORD`, nobody can make changes and the dashboard is read-only.
 
 ## Run it
 
@@ -41,7 +61,8 @@ All settings are environment variables. On your computer they go in `.env.local`
 | `GOOGLE_ADS_REFRESH_TOKEN` | OAuth Playground with the `https://www.googleapis.com/auth/adwords` scope |
 | `GOOGLE_ADS_CUSTOMER_ID` | The ad account's 10-digit ID, top right in Google Ads (Twin Home Buyer: `9897155298`) |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | Optional. The manager account's ID, only if access goes through it |
-| `APP_PASSWORD` | A team password you choose. Required online; optional on your computer |
+| `APP_PASSWORD` | A team password you choose, for viewing. Required online; optional on your computer |
+| `ADMIN_PASSWORD` | Optional. A separate password that allows changes in Google Ads |
 | `SESSION_SECRET` | Any long random string |
 
 If a Google Ads value is missing, the pages say which one.
@@ -52,6 +73,7 @@ If a Google Ads value is missing, the pages say which one.
 - `src/lib/google-ads/reports.ts` holds the report queries and turns Google's micros and strings into dollars and numbers.
 - `src/lib/service-area.ts` lists the Bay Area cities used to flag out-of-area spend. Edit it to change the buy box.
 - `src/lib/negatives.ts` holds the rules behind suggested negative keywords. Edit them as the team learns from lead outcomes.
+- `src/lib/google-ads/changes.ts` makes the changes (campaign negative keywords and location exclusions) and re-checks every input against the live account first. `src/app/actions/changes.ts` is the only way the pages reach it, and it checks for an admin session.
 
 ## Next steps
 

@@ -1,7 +1,9 @@
-// A shared team password keeps the dashboard private. Set APP_PASSWORD (and ideally
-// SESSION_SECRET) in the server environment. Signing in sets a signed cookie for 30 days.
-//
-// Without APP_PASSWORD the dashboard is open in local development and locked in production.
+// Two shared passwords keep the dashboard private:
+//   APP_PASSWORD   views reports.
+//   ADMIN_PASSWORD views reports and can change Google Ads (negative keywords, location
+//                  exclusions). Without it, nobody can make changes.
+// Signing in sets a signed cookie for 30 days. Without APP_PASSWORD the reports are open in
+// local development (never in production); changes still need the admin password.
 
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { cookies } from "next/headers"
@@ -9,16 +11,22 @@ import { cookies } from "next/headers"
 export const SESSION_COOKIE = "dt_session"
 export const SESSION_DAYS = 30
 
+export type Role = "viewer" | "admin"
+
 export function passwordConfigured() {
-  return !!process.env.APP_PASSWORD
+  return !!process.env.APP_PASSWORD || !!process.env.ADMIN_PASSWORD
+}
+
+export function changesEnabled() {
+  return !!process.env.ADMIN_PASSWORD
 }
 
 export function openWithoutPassword() {
-  return !passwordConfigured() && process.env.NODE_ENV !== "production"
+  return !process.env.APP_PASSWORD && process.env.NODE_ENV !== "production"
 }
 
 function secret() {
-  return process.env.SESSION_SECRET || `dealtrack:${process.env.APP_PASSWORD ?? ""}`
+  return process.env.SESSION_SECRET || `dealtrack:${process.env.APP_PASSWORD ?? ""}:${process.env.ADMIN_PASSWORD ?? ""}`
 }
 
 function sign(value: string) {
@@ -31,21 +39,40 @@ function safeEqual(a: string, b: string) {
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-export function checkPassword(input: string) {
-  const expected = process.env.APP_PASSWORD
+function matches(input: string, expected: string | undefined) {
   return !!expected && safeEqual(sign(input), sign(expected))
 }
 
-export function newSessionToken() {
+// The role a password signs in as, or null if it matches neither.
+export function roleForPassword(input: string): Role | null {
+  if (matches(input, process.env.ADMIN_PASSWORD)) return "admin"
+  if (matches(input, process.env.APP_PASSWORD)) return "viewer"
+  return null
+}
+
+export function newSessionToken(role: Role) {
   const expires = Date.now() + SESSION_DAYS * 86_400_000
-  return `${expires}.${sign(String(expires))}`
+  const payload = `${expires}.${role}`
+  return `${payload}.${sign(payload)}`
+}
+
+async function sessionRole(): Promise<Role | null> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value
+  if (!token) return null
+  const [expires, role, signature] = token.split(".")
+  if (!signature || Number(expires) <= Date.now()) return null
+  if (role !== "viewer" && role !== "admin") return null
+  if (!safeEqual(signature, sign(`${expires}.${role}`))) return null
+  if (role === "admin" && !changesEnabled()) return "viewer"
+  return role
 }
 
 export async function isSignedIn() {
   if (openWithoutPassword()) return true
   if (!passwordConfigured()) return false
-  const token = (await cookies()).get(SESSION_COOKIE)?.value
-  if (!token) return false
-  const [expires, signature] = token.split(".")
-  return !!signature && Number(expires) > Date.now() && safeEqual(signature, sign(expires))
+  return (await sessionRole()) !== null
+}
+
+export async function isAdmin() {
+  return changesEnabled() && (await sessionRole()) === "admin"
 }

@@ -1,8 +1,17 @@
 import type { Metadata } from "next"
 
+import CityExclusionPanel from "@/components/changes/city-exclusion-panel"
+import NegativesList from "@/components/changes/negatives-list"
 import { formatConversions, formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
-import { DataTable, KpiGrid, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
+import { AdminLink, DataTable, KpiGrid, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
+import { isAdmin } from "@/lib/auth"
 import { parseRange } from "@/lib/date-range"
+import {
+  getCampaignNegatives,
+  getEditableCampaigns,
+  type CampaignNegative,
+  type EditableCampaign,
+} from "@/lib/google-ads/changes"
 import { getLocations, rates, sumMetrics, type LocationRow } from "@/lib/google-ads/reports"
 import { load } from "@/lib/load"
 
@@ -14,7 +23,14 @@ export default async function LocationsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const range = parseRange(await searchParams)
-  const result = await load(() => getLocations(range))
+  const admin = await isAdmin()
+  const result = await load(async () => {
+    const [rows, campaigns] = await Promise.all([getLocations(range), getEditableCampaigns()])
+    // Old paused campaigns hold thousands of exclusions; show the ones on running campaigns.
+    const running = campaigns.filter((c) => c.status === "ENABLED").map((c) => c.id)
+    const negatives = await getCampaignNegatives({ campaignIds: running })
+    return { rows, negatives, campaigns }
+  })
 
   return (
     <>
@@ -23,12 +39,23 @@ export default async function LocationsPage({
         description="Where the people who saw and clicked your ads were, by city. Anything outside the nine Bay Area counties is flagged, since that's not where you buy."
         range={range}
       />
-      {!result.ok ? <ReportProblem problem={result} /> : <Body rows={result.data} />}
+      {!result.ok ? <ReportProblem problem={result} /> : <Body {...result.data} admin={admin} />}
     </>
   )
 }
 
-function Body({ rows: allRows }: { rows: LocationRow[] }) {
+function Body({
+  rows: allRows,
+  negatives,
+  campaigns,
+  admin,
+}: {
+  rows: LocationRow[]
+  negatives: CampaignNegative[]
+  campaigns: EditableCampaign[]
+  admin: boolean
+}) {
+  const exclusions = negatives.filter((n) => n.kind === "location")
   // Cities that only had impressions add noise; keep the ones with spend, clicks, or conversions.
   const rows = allRows.filter((r) => r.metrics.cost > 0 || r.metrics.clicks > 0 || r.metrics.conversions > 0)
   const hidden = allRows.length - rows.length
@@ -55,6 +82,41 @@ function Body({ rows: allRows }: { rows: LocationRow[] }) {
           { label: "Cities with spend or clicks", value: formatNumber(rows.length), note: hidden ? `${hidden} with only impressions hidden` : undefined },
         ]}
       />
+      <Section
+        title="Exclude cities outside the Bay Area"
+        description="Stops ads from showing to people in these cities. Cities with spend are pre-selected; ones that converted are highlighted so you can decide."
+        actions={!admin && <AdminLink />}
+      >
+        {admin ? (
+          <CityExclusionPanel
+            cities={rows
+              .filter((r) => r.status === "outside" && r.key.startsWith("geoTargetConstants/"))
+              .map((r) => ({ geo: r.key, city: r.city, region: r.region, cost: r.metrics.cost, conversions: r.metrics.conversions }))}
+            campaigns={campaigns}
+            existing={exclusions.map((n) => `${n.campaignId}|${n.geo}`)}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {rows.filter((r) => r.status === "outside").length} cities outside the Bay Area had clicks or spend in this period.
+            They&apos;re highlighted in red below.
+          </p>
+        )}
+      </Section>
+
+      <Section
+        title={`Excluded locations on running campaigns (${exclusions.length})`}
+        description="Places your enabled campaigns are set not to show ads in. Paused campaigns aren't shown."
+      >
+        <NegativesList
+          canEdit={admin}
+          noun="location exclusion"
+          empty="No excluded locations yet."
+          items={exclusions
+            .sort((a, b) => (a.place ?? "").localeCompare(b.place ?? ""))
+            .map((n) => ({ resourceName: n.resourceName, label: n.place ?? n.geo ?? "", campaignName: n.campaignName }))}
+        />
+      </Section>
+
       <Section
         title="By city"
         description="To stop showing ads outside the Bay Area, set the campaign's location option to people in or regularly in your targeted locations, and exclude the flagged cities."

@@ -138,17 +138,9 @@ export function lastFetchedAt() {
   return lastDataAt
 }
 
-// Runs one GAQL query against the configured account and returns every row.
-// Field names come back in camelCase, e.g. metrics.costMicros.
-export async function gaql<Row>(query: string): Promise<Row[]> {
-  const cfg = config()
-  const key = `${cfg.customerId}\n${query}`
-  const hit = cache.get(key)
-  if (hit && Date.now() - hit.at < CACHE_MS) {
-    lastDataAt = hit.at
-    return hit.rows as Row[]
-  }
-
+// Sends one request to the Google Ads API for the configured account, retrying once with a fresh
+// access token if Google says the token expired. Returns the parsed JSON body.
+async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unknown> {
   const send = async () => {
     const headers: Record<string, string> = {
       authorization: `Bearer ${await getAccessToken(cfg)}`,
@@ -156,10 +148,10 @@ export async function gaql<Row>(query: string): Promise<Row[]> {
       "content-type": "application/json",
     }
     if (cfg.loginCustomerId) headers["login-customer-id"] = cfg.loginCustomerId
-    return fetch(`${ADS_ENDPOINT}/${API_VERSION}/customers/${cfg.customerId}/googleAds:searchStream`, {
+    return fetch(`${ADS_ENDPOINT}/${API_VERSION}/customers/${cfg.customerId}/${path}`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ query }),
+      body: JSON.stringify(payload),
       cache: "no-store",
     })
   }
@@ -183,11 +175,86 @@ export async function gaql<Row>(query: string): Promise<Row[]> {
     const errorBody = (Array.isArray(body) ? body[0] : body) as ApiErrorBody | undefined
     throw explain(res.status, errorBody ?? { error: { message: text.slice(0, 300) } })
   }
+  return body
+}
 
+// Runs one GAQL query against the configured account and returns every row.
+// Field names come back in camelCase, e.g. metrics.costMicros.
+export async function gaql<Row>(query: string): Promise<Row[]> {
+  const cfg = config()
+  const key = `${cfg.customerId}\n${query}`
+  const hit = cache.get(key)
+  if (hit && Date.now() - hit.at < CACHE_MS) {
+    lastDataAt = hit.at
+    return hit.rows as Row[]
+  }
+
+  const body = await call(cfg, "googleAds:searchStream", { query })
   const batches = (Array.isArray(body) ? body : []) as { results?: Row[] }[]
   const rows = batches.flatMap((batch) => batch.results ?? [])
   const at = Date.now()
   cache.set(key, { at, rows })
   lastDataAt = at
   return rows
+}
+
+// ---- Changes --------------------------------------------------------------------------------
+// Everything below writes to the Google Ads account. Only the server actions in
+// src/app/actions/changes.ts call it, after checking that an admin confirmed the change.
+
+export function customerResource() {
+  return `customers/${config().customerId}`
+}
+
+export type MutateResult = {
+  // Resource names of what was created or removed, in operation order ("" where it failed).
+  resourceNames: string[]
+  // Google's message for each failed operation, keyed by operation index.
+  failures: Map<number, string>
+}
+
+type PartialFailureDetail = {
+  errors?: {
+    message?: string
+    location?: { fieldPathElements?: { fieldName?: string; index?: number }[] }
+  }[]
+}
+
+// Runs a batch of create/remove operations on one Google Ads service, e.g. "campaignCriteria".
+// With partialFailure, the operations that work are applied even if others fail (for example a
+// negative keyword that already exists). With validateOnly, Google checks the request and
+// changes nothing.
+export async function mutate(
+  service: string,
+  operations: unknown[],
+  { validateOnly = false }: { validateOnly?: boolean } = {},
+): Promise<MutateResult> {
+  const cfg = config()
+  const body = (await call(cfg, `${service}:mutate`, {
+    operations,
+    partialFailure: true,
+    validateOnly,
+  })) as {
+    results?: { resourceName?: string }[]
+    partialFailureError?: { message?: string; details?: PartialFailureDetail[] }
+  }
+
+  const failures = new Map<number, string>()
+  for (const detail of body?.partialFailureError?.details ?? []) {
+    for (const err of detail.errors ?? []) {
+      const index = err.location?.fieldPathElements?.find((e) => e.fieldName === "operations")?.index ?? 0
+      failures.set(index, err.message ?? "Google rejected this change.")
+    }
+  }
+  if (body?.partialFailureError && !failures.size) {
+    failures.set(0, body.partialFailureError.message ?? "Google rejected this change.")
+  }
+
+  // Reports read before the change are now out of date.
+  if (!validateOnly) cache.clear()
+
+  return {
+    resourceNames: (body?.results ?? []).map((r) => r.resourceName ?? ""),
+    failures,
+  }
 }

@@ -2,9 +2,12 @@
 // status pills, and the "keys missing" / "Google returned an error" states.
 
 import type { ReactNode } from "react"
+import { headers } from "next/headers"
+import Link from "next/link"
 import { AlertTriangle, KeyRound } from "lucide-react"
 
 import RangePicker from "@/components/range-picker"
+import { changesEnabled } from "@/lib/auth"
 import type { DateRange } from "@/lib/date-range"
 import type { Problem } from "@/lib/load"
 import { cn } from "@/lib/utils"
@@ -179,6 +182,22 @@ export function enumLabel(value: string) {
 export function StatusPill({ status }: { status: string }) {
   const tone = status === "ENABLED" ? "green" : status === "PAUSED" ? "amber" : "gray"
   return <Pill tone={tone}>{enumLabel(status)}</Pill>
+}
+
+// Shown to viewers where admins get change buttons.
+export async function AdminLink() {
+  if (!changesEnabled()) {
+    return <span className="text-xs text-muted-foreground">Set ADMIN_PASSWORD to make changes from here.</span>
+  }
+  const path = (await headers()).get("x-pathname") ?? "/overview"
+  return (
+    <Link
+      href={`/login?admin=1&next=${encodeURIComponent(path)}`}
+      className="text-sm font-medium text-primary hover:underline"
+    >
+      Sign in as admin to make changes
+    </Link>
+  )
 }
 
 export function ReportProblem({ problem }: { problem: Problem }) {

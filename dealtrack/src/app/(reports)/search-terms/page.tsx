@@ -1,10 +1,19 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 
+import NegativeKeywordPanel from "@/components/changes/negative-keyword-panel"
+import NegativesList from "@/components/changes/negatives-list"
 import CopyButton from "@/components/copy-button"
 import { formatConversions, formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
-import { DataTable, KpiGrid, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
+import { AdminLink, DataTable, KpiGrid, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
+import { isAdmin } from "@/lib/auth"
 import { parseRange, rangeQuery, type DateRange } from "@/lib/date-range"
+import {
+  getCampaignNegatives,
+  getEditableCampaigns,
+  type CampaignNegative,
+  type EditableCampaign,
+} from "@/lib/google-ads/changes"
 import { getSearchTerms, isWaste, rates, sumMetrics, type Metrics, type SearchTermRow } from "@/lib/google-ads/reports"
 import { load } from "@/lib/load"
 import { cn } from "@/lib/utils"
@@ -29,7 +38,14 @@ export default async function SearchTermsPage({
   const params = await searchParams
   const range = parseRange(params)
   const view: View = views.some((v) => v.id === params.view) ? (params.view as View) : "waste"
-  const result = await load(() => getSearchTerms(range))
+  const admin = await isAdmin()
+  const result = await load(async () => {
+    const [terms, campaigns] = await Promise.all([getSearchTerms(range), getEditableCampaigns()])
+    // Old paused campaigns hold thousands of negatives; show the ones on running campaigns.
+    const running = campaigns.filter((c) => c.status === "ENABLED").map((c) => c.id)
+    const negatives = await getCampaignNegatives({ campaignIds: running })
+    return { terms, negatives, campaigns }
+  })
 
   return (
     <>
@@ -38,14 +54,33 @@ export default async function SearchTermsPage({
         description="What people actually typed before clicking your ads. Terms that cost money without converting are the first place to add negative keywords."
         range={range}
       />
-      {!result.ok ? <ReportProblem problem={result} /> : <Body terms={result.data} range={range} view={view} />}
+      {!result.ok ? (
+        <ReportProblem problem={result} />
+      ) : (
+        <Body {...result.data} range={range} view={view} admin={admin} />
+      )}
     </>
   )
 }
 
 type Suggestion = { negative: string; reason: string; terms: number; metrics: Metrics }
 
-function Body({ terms, range, view }: { terms: SearchTermRow[]; range: DateRange; view: View }) {
+function Body({
+  terms,
+  negatives,
+  campaigns,
+  range,
+  view,
+  admin,
+}: {
+  terms: SearchTermRow[]
+  negatives: CampaignNegative[]
+  campaigns: EditableCampaign[]
+  range: DateRange
+  view: View
+  admin: boolean
+}) {
+  const keywordNegatives = negatives.filter((n) => n.kind === "keyword")
   const totals = sumMetrics(terms)
   const waste = terms.filter((t) => isWaste(t.metrics))
   const wasteCost = waste.reduce((s, t) => s + t.metrics.cost, 0)
@@ -99,29 +134,66 @@ function Body({ terms, range, view }: { terms: SearchTermRow[]; range: DateRange
 
       <Section
         title="Suggested negative keywords"
-        description="Based on terms that usually aren't cash sellers: agents, buyers, renters, loans, jobs, listing sites, and cities outside the Bay Area. Review each one before adding it in Google Ads. Some flagged terms may still have converted."
-        actions={suggestions.length > 0 && <CopyButton text={pasteList} label="Copy as phrase match" />}
+        description="Based on terms that usually aren't cash sellers: agents, buyers, renters, loans, jobs, listing sites, and cities outside the Bay Area. Review each one before adding it. Some flagged terms may still have converted."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {!admin && <AdminLink />}
+            {suggestions.length > 0 && <CopyButton text={pasteList} label="Copy as phrase match" />}
+          </div>
+        }
       >
-        <DataTable<Suggestion>
-          rows={suggestions}
-          rowKey={(s) => s.negative}
-          empty="No flagged search terms in this period."
-          columns={[
-            { key: "negative", label: "Negative keyword", render: (s) => <code className="font-mono text-xs">&quot;{s.negative}&quot;</code> },
-            { key: "reason", label: "Why", render: (s) => <span className="text-muted-foreground">{s.reason}</span> },
-            { key: "terms", label: "Terms", align: "right", render: (s) => formatNumber(s.terms) },
-            { key: "cost", label: "Spend", align: "right", render: (s) => formatUsd(s.metrics.cost) },
-            {
-              key: "conv",
-              label: "Conversions",
-              align: "right",
-              render: (s) => (
-                <span className={cn(s.metrics.conversions > 0 && "font-medium text-amber-700")}>
-                  {formatConversions(s.metrics.conversions)}
-                </span>
-              ),
-            },
-          ]}
+        {admin ? (
+          <NegativeKeywordPanel
+            suggestions={suggestions.map((s) => ({
+              negative: s.negative,
+              reason: s.reason,
+              terms: s.terms,
+              cost: s.metrics.cost,
+              conversions: s.metrics.conversions,
+            }))}
+            campaigns={campaigns}
+            existing={keywordNegatives.map((n) => `${n.campaignId}|${n.text}|${n.matchType}`)}
+          />
+        ) : (
+          <DataTable<Suggestion>
+            rows={suggestions}
+            rowKey={(s) => s.negative}
+            empty="No flagged search terms in this period."
+            columns={[
+              { key: "negative", label: "Negative keyword", render: (s) => <code className="font-mono text-xs">&quot;{s.negative}&quot;</code> },
+              { key: "reason", label: "Why", render: (s) => <span className="text-muted-foreground">{s.reason}</span> },
+              { key: "terms", label: "Terms", align: "right", render: (s) => formatNumber(s.terms) },
+              { key: "cost", label: "Spend", align: "right", render: (s) => formatUsd(s.metrics.cost) },
+              {
+                key: "conv",
+                label: "Conversions",
+                align: "right",
+                render: (s) => (
+                  <span className={cn(s.metrics.conversions > 0 && "font-medium text-amber-700")}>
+                    {formatConversions(s.metrics.conversions)}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        )}
+      </Section>
+
+      <Section
+        title={`Negative keywords on running campaigns (${keywordNegatives.length})`}
+        description="Set directly on campaigns that are currently enabled. Paused campaigns and shared negative keyword lists aren't shown."
+      >
+        <NegativesList
+          canEdit={admin}
+          noun="negative keyword"
+          empty="No campaign-level negative keywords yet."
+          items={keywordNegatives
+            .sort((a, b) => (a.text ?? "").localeCompare(b.text ?? ""))
+            .map((n) => ({
+              resourceName: n.resourceName,
+              label: n.matchType === "EXACT" ? `[${n.text}]` : n.matchType === "PHRASE" ? `"${n.text}"` : (n.text ?? ""),
+              campaignName: n.campaignName,
+            }))}
         />
       </Section>
 
