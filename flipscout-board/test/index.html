@@ -553,6 +553,13 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
 .rei-won{background:var(--b-won); color:var(--t-won)} .rei-hot{background:var(--b-offer); color:var(--t-offer)}
 .rei-dead{background:var(--b-pass); color:var(--t-pass)} .rei-open{background:var(--b-review); color:var(--t-review)}
 .rei:hover{text-decoration:underline}
+button.lnk-edit{background:none; border:0; padding:0; cursor:pointer; font:inherit; font-size:12px}
+.lnk-box{display:block; margin:6px 0; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface-2); max-width:520px}
+.lnk-row{display:flex; align-items:center; gap:8px; margin:0 0 6px; font-size:12px; color:var(--muted)}
+.lnk-row span{width:56px; flex:none; font-weight:600}
+.lnk-row input{flex:1; min-width:0; font-size:12.5px; padding:4px 8px; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--ink)}
+.lnk-act{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.lnk-hint{font-size:11.5px; color:var(--muted)}
 /* the four cards are Juan's: what needs him and when */
 #viewAcq .acq-tiles{grid-template-columns:repeat(6,minmax(0,1fr))}
 @media (max-width:1100px){ #viewAcq .acq-tiles{grid-template-columns:repeat(3,minmax(0,1fr))} }
@@ -1699,7 +1706,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         (st === "Pass" && e && e.pr ? '<span class="pass-why">“' + esc(e.pr) + '”</span>' : '') + bucketHTML(l) + '</td>' +
       '<td data-l="Property" class="wide">' + addrHTML(l) +
         '<span class="mls">' + esc(l.mls) + '</span>' +
-        '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' + reiLinkHTML(l) +
+        '<a class="mlslink" href="' + esc(mlsLinkOf(l)) + '" target="_blank" rel="noopener" title="Open the listing on MLSListings">MLS ↗</a>' + reiLinkHTML(l) + linkEditHTML(l) +
         mlsStatusHTML(l.mlsStatus) + reiHTML(l) + occCutHTML(l) +
         contactHTML(l) +
         (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + notesHTML(l) + '</td>' +
@@ -1842,13 +1849,66 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
           : /offer sent|appointment/i.test(x.s) ? "rei-hot"
           : /passing|lost|dead|sold|top dollar/i.test(x.s) ? "rei-dead" : "rei-open";
     var tip = "REI Blackbook — " + x.n + " (matched by " + x.how + ")" + (x.t.length ? "\nTags: " + x.t.join(", ") : "") + (x.last ? "\nLast activity " + x.last : "");
-    return '<a class="rei ' + c + '" href="https://my.reiblackbook.com/contacts/' + esc(x.id) + '" target="_blank" rel="noopener" title="' + esc(tip) + '">REI: ' + esc(x.s) + '</a>';
+    return '<a class="rei ' + c + '" href="' + esc(reiUrlOf(l)) + '" target="_blank" rel="noopener" title="' + esc(tip) + '">REI: ' + esc(x.s) + '</a>';
   }
   // The lead's REI Blackbook contact, next to the MLS link.
-  function reiLinkHTML(l){
-    var x = REI[l.mls]; if (!x) return "";
-    return '<a class="mlslink" href="https://my.reiblackbook.com/contacts/' + esc(x.id) + '" target="_blank" rel="noopener" title="Open ' + esc(x.n) + ' in REI Blackbook">REI ↗</a>';
+  function reiUrlOf(l){
+    var o = linkOverride(l.mls).ru; if (o) return o;
+    var x = REI[l.mls]; return x ? "https://my.reiblackbook.com/contacts/" + x.id : "";
   }
+  function reiLinkHTML(l){
+    var u = reiUrlOf(l); if (!u) return "";
+    var x = REI[l.mls];
+    return '<a class="mlslink" href="' + esc(u) + '" target="_blank" rel="noopener" title="Open ' + esc(x ? x.n : "this lead") + ' in REI Blackbook">REI ↗</a>';
+  }
+  // ---- links anyone can add or fix: the address, MLS and REI links ----
+  // links/<MLS> keeps them as {au, mu, ru, by, at} beside the Redfin page the
+  // app found ({redfin}). A blank box means "use the automatic one".
+  var linkEdit = "", pendingLinkEdits = {};
+  function linkOverride(mls){
+    var o = pendingLinkEdits[mls] || links[mls] || {};
+    var ok = function(u){ return typeof u === "string" && LINK_OK.test(u) ? u.slice(0, 600) : ""; };
+    return {au: ok(o.au), mu: ok(o.mu), ru: ok(o.ru), by: str(o.by, 40), at: str(o.at, 40)};
+  }
+  function mlsLinkOf(l){ return linkOverride(l.mls).mu || mlsUrl(l.mls); }
+  function linkEditHTML(l){
+    if (linkEdit !== l.mls) return '<button type="button" class="mlslink lnk-edit" data-lnk-open="' + esc(l.mls) + '" title="Add or fix the address, MLS and REI links">✎ Links</button>';
+    var o = linkOverride(l.mls);
+    var row = function(k, lab, v, ph){ return '<label class="lnk-row"><span>' + lab + '</span><input type="url" data-lnk="' + k + '" value="' + esc(v) + '" placeholder="' + esc(ph) + '"></label>'; };
+    var reiAuto = REI[l.mls] ? "https://my.reiblackbook.com/contacts/" + REI[l.mls].id : "https://my.reiblackbook.com/contacts/…";
+    return '<div class="lnk-box" data-lnk-mls="' + esc(l.mls) + '">' +
+      row("au", "Address", o.au, redfinOf(l) || "https://www.redfin.com/…") +
+      row("mu", "MLS", o.mu, mlsUrl(l.mls) || "https://…") +
+      row("ru", "REI", o.ru, reiAuto) +
+      '<div class="lnk-act"><button type="button" class="btn tiny go" data-lnk-save="' + esc(l.mls) + '">Save links</button>' +
+      '<button type="button" class="btn tiny" data-lnk-cancel="1">Cancel</button>' +
+      '<span class="lnk-hint">Empty = the automatic link (shown faded).' + (o.by ? ' Last set by ' + esc(o.by) + '.' : '') + '</span></div></div>';
+  }
+  function saveLinks(mls){
+    var box = document.querySelector('.lnk-box[data-lnk-mls="' + mls + '"]'); if (!box) return;
+    if (!myName){ toast("Type your name in the box at the top first, so the team knows who changed it"); $("nameIn").focus(); return; }
+    var val = function(k){ return (box.querySelector('input[data-lnk="' + k + '"]').value || "").trim(); };
+    var next = {au: val("au"), mu: val("mu"), ru: val("ru")};
+    for (var k in next) if (next[k] && !LINK_OK.test(next[k])) { toast("The " + ({au: "address", mu: "MLS", ru: "REI"})[k] + " link must be a whole link starting with https://"); return; }
+    next.by = myName; next.at = new Date().toISOString();
+    pendingLinkEdits[mls] = next; linkEdit = ""; draw();
+    if (!db){ note("The shared board isn't connected, so these links are on this screen only. Reload the page.", true); return; }
+    var body = Object.assign({}, links[mls] || {}, next);
+    db.doc("links/" + mls).set(body).then(function(){ toast("Links saved for the team"); })
+      .catch(function(){ delete pendingLinkEdits[mls]; draw(); note("Couldn't save those links to the shared board. Reload the page and try again.", true); });
+  }
+  document.addEventListener("click", function(ev){
+    var b = ev.target.closest && ev.target.closest("[data-lnk-open],[data-lnk-save],[data-lnk-cancel]"); if (!b) return;
+    ev.preventDefault(); ev.stopPropagation();
+    if (b.dataset.lnkSave) { saveLinks(b.dataset.lnkSave); return; }
+    linkEdit = b.dataset.lnkOpen || ""; draw();
+    if (linkEdit) { var i = document.querySelector(".lnk-box input"); if (i) i.focus(); }
+  }, true);
+  document.addEventListener("keydown", function(ev){
+    var box = ev.target.closest && ev.target.closest(".lnk-box"); if (!box) return;
+    if (ev.key === "Enter") { ev.preventDefault(); saveLinks(box.dataset.lnkMls); }
+    if (ev.key === "Escape") { linkEdit = ""; draw(); }
+  });
   function mlsStatusHTML(st){
     if (!st) return "";
     var c = /sold|withdrawn|expired|cancel|off.?market|closed/i.test(st) ? "mst-closed"
@@ -1928,9 +1988,9 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
     return d.toLocaleDateString("en-US", d.getFullYear() === new Date().getFullYear() ? {month: "short", day: "numeric"} : {month: "short", day: "numeric", year: "2-digit"});
   }
   function addrHTML(l){
-    var u = redfinOf(l);
+    var own = linkOverride(l.mls).au, u = own || redfinOf(l);
     return u
-      ? '<a class="addr" href="' + esc(u) + '" target="_blank" rel="noopener" title="Open this house on Redfin">' + esc(l.addr) + '</a>'
+      ? '<a class="addr" href="' + esc(u) + '" target="_blank" rel="noopener" title="' + (own ? 'Open the link the team added' : 'Open this house on Redfin') + '">' + esc(l.addr) + '</a>'
       : '<span class="addr nolink">' + esc(l.addr) + '</span><span class="rf-wait">' +
         (triedLinks[l.mls] ? 'Redfin page not found yet — checking again' : 'Finding this house on Redfin…') + '</span>';
   }
@@ -2669,7 +2729,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
   };
   function acqDetailHTML(l){
     if (!l) return '<div class="lp-empty">Pick a lead on the left.</div>';
-    var e = rec(l.date, l.mls) || {}, st = acqStage(l), ow = acqOwner(l), u = redfinOf(l), urg = acqUrgent(l);
+    var e = rec(l.date, l.mls) || {}, st = acqStage(l), ow = acqOwner(l), u = linkOverride(l.mls).au || redfinOf(l), urg = acqUrgent(l);
     var canSave = !!l.date, dis = canSave ? '' : ' disabled', nx = NEXT[st];
     var fact = function(v, k){ return v || v === 0 ? '<span><b>' + v + '</b> ' + k + '</span>' : ''; };
     var open = OPEN_STAGES.indexOf(st) !== -1;
@@ -2683,7 +2743,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       '<h2>' + (u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener" title="Open on Redfin">' + esc(l.addr) + ' ↗</a>' : esc(l.addr)) + '</h2>' +
       '<div class="dx-facts">' + (l.price ? '<span><b>' + fmtMoney(l.price) + '</b></span>' : '') + fact(l.ppsf ? "$" + l.ppsf : "", "/sqft") +
         fact(l.sqft ? fmtNum(l.sqft) : "", "sqft") + fact(l.beds, "bd") + fact(l.year, "built") + fact(l.dom, "DOM") + '</div>' +
-      '<div class="dx-tags"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' + reiLinkHTML(l) +
+      '<div class="dx-tags"><span class="mono">' + esc(l.mls) + '</span><a class="mlslink" href="' + esc(mlsLinkOf(l)) + '" target="_blank" rel="noopener">MLS ↗</a>' + reiLinkHTML(l) + linkEditHTML(l) +
         mlsStatusHTML(l.mlsStatus) + reiHTML(l) + occCutHTML(l) + bucketHTML(l).replace(/^<br>/, "") + '</div>' +
 
       // one bar: where it is, who has it, and the single next step
@@ -3231,7 +3291,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
       [esc(l.agentName), esc(l.agentPhone), esc(l.agentEmail)].filter(Boolean).join('<br>') + (l.agentEmail ? '<br>' + mailHTML(l) : '')]);
     $("sideTitle").textContent = l.addr;
     $("sideBody").innerHTML = '<span class="mls">' + esc(l.mls) + '</span>' + mlsStatusHTML(l.mlsStatus) +
-      '<a class="mlslink" href="' + esc(mlsUrl(l.mls)) + '" target="_blank" rel="noopener">MLS ↗</a>' + reiLinkHTML(l) +
+      '<a class="mlslink" href="' + esc(mlsLinkOf(l)) + '" target="_blank" rel="noopener">MLS ↗</a>' + reiLinkHTML(l) + linkEditHTML(l) +
       secs.map(function(x){ return '<div class="sec"><h3>' + x[0] + '</h3><p>' + x[1] + '</p></div>'; }).join("");
     sideFrom = from || null;
     $("side").hidden = false;
@@ -3914,6 +3974,7 @@ button.acq-tile[aria-pressed="true"]{outline:2px solid var(--brand-2); outline-o
         Object.keys(pendingLinks).forEach(function(m){
           if (links[m] && links[m].redfin === pendingLinks[m]) delete pendingLinks[m];
         });
+        Object.keys(pendingLinkEdits).forEach(function(m){ if (links[m] && links[m].at === pendingLinkEdits[m].at) delete pendingLinkEdits[m]; });
         draw();
       }, function(){});
       db.collection("notes").onSnapshot(function(snap){
