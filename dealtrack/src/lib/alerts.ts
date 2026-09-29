@@ -68,6 +68,7 @@ export function siteOutliers(weeks: SiteWeek[]): Outlier[] {
 }
 
 export type HealthIssue = {
+  key: string // stable id, so the alert history can follow one issue across visits
   severity: "critical" | "high" | "medium" | "info"
   title: string
   detail: string
@@ -97,6 +98,7 @@ export async function brokenDestinations(destinations: AdDestination[]): Promise
   const issues: HealthIssue[] = broken
     .filter((b) => b.live)
     .map((b) => ({
+      key: `health:broken:${b.page}`,
       severity: "critical",
       title: `${b.page} ${b.problem}`,
       detail: `${ads(b.d)}. These ads are running now: every click is wasted.`,
@@ -106,6 +108,7 @@ export async function brokenDestinations(destinations: AdDestination[]): Promise
   if (paused.length) {
     const adCount = paused.reduce((s, b) => s + b.d.ads, 0)
     issues.push({
+      key: "health:broken-paused",
       severity: "medium",
       title: `${paused.length} broken page${paused.length === 1 ? "" : "s"} behind ${adCount} paused ads`,
       detail: "Nothing is wasted today, but these ads would send clicks to an error if their campaigns were turned back on. Fix or redirect the pages, or change the ads' final URLs first.",
@@ -120,6 +123,7 @@ export function softConversions(actions: ConversionActionRow[]): HealthIssue[] {
   if (!soft.length) return []
   return [
     {
+      key: "health:soft-conversions",
       severity: "high",
       title: `${soft.length} primary conversion${soft.length === 1 ? " isn't" : "s aren't"} a lead`,
       detail: `${soft.map((a) => a.name).join(", ")}. Google's bidding learns to find people who do these, not sellers who book appointments.`,
@@ -132,6 +136,7 @@ export function clarityIssues(c: ClaritySnapshot): HealthIssue[] {
   const issues: HealthIssue[] = []
   if (c.scriptErrorPct !== null && c.scriptErrorPct > 10) {
     issues.push({
+      key: "health:clarity:script-errors",
       severity: "high",
       title: `${Math.round(c.scriptErrorPct)}% of visits hit a JavaScript error`,
       detail: "Script errors can stop forms from submitting and tracking from firing. Last 3 days, from Microsoft Clarity.",
@@ -139,6 +144,7 @@ export function clarityIssues(c: ClaritySnapshot): HealthIssue[] {
   }
   if (c.sessions && c.botSessions > c.sessions) {
     issues.push({
+      key: "health:clarity:bots",
       severity: "info",
       title: `More bot visits than people (${c.botSessions} bots vs ${c.sessions} people)`,
       detail: "Last 3 days, from Microsoft Clarity. Bots inflate traffic reports; they're not counted as sessions here.",
@@ -154,6 +160,7 @@ export function internalTraffic(weeks: SiteWeek[]): HealthIssue[] {
   if (!total || internal / total < 0.1) return []
   return [
     {
+      key: "health:internal-traffic",
       severity: "medium",
       title: `${Math.round((internal / total) * 100)}% of pageviews are the team or the staging site`,
       detail:

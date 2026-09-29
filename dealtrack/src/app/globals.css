@@ -134,4 +134,12 @@
     size: letter;
     margin: 0;
   }
+  /* The weekly report prints with normal margins (see .print-report). */
+  @page report {
+    size: letter;
+    margin: 0.5in;
+  }
+  .print-report {
+    page: report;
+  }
 }

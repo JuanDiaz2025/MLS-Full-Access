@@ -2,43 +2,65 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { ArrowRight } from "lucide-react"
 
-import { formatConversions, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
-import TrendChart from "@/components/dashboard/trend-chart"
-import { DataTable, KpiGrid, PageHeader, ReportProblem, Section, StatusPill } from "@/components/report"
-import { parseRange, rangeQuery } from "@/lib/date-range"
+import CompareChart from "@/components/dashboard/compare-chart"
+import { formatConversions, formatDate, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
+import TrendKpis from "@/components/dashboard/trend-kpis"
+import MetricPicker from "@/components/metric-picker"
+import { DataTable, PageHeader, Pill, ReportProblem, Section, StatusPill } from "@/components/report"
+import { bySeverity, checkAlerts, googleAdsRules } from "@/lib/alert-rules"
+import { getPacing, type Pacing } from "@/lib/budget"
+import { formatDay, parseRange, rangeQuery } from "@/lib/date-range"
+import { daysIn, getOverview, type Bucket, type Grain } from "@/lib/google-ads/overview"
 import {
   getAccount,
   getCampaigns,
-  getDaily,
   getLocations,
   getSearchTerms,
   isWaste,
   rates,
-  sumMetrics,
   type CampaignRow,
 } from "@/lib/google-ads/reports"
 import { lastFetchedAt } from "@/lib/google-ads/client"
-import { load } from "@/lib/load"
+import { load, type Loaded } from "@/lib/load"
+import { OVERVIEW_METRICS, delta, formatUnit, metricById, type MetricDef } from "@/lib/overview-metrics"
+import { completeWeeks, stageOf } from "@/lib/negative-batches"
+import { readData, type AlertRecord, type NegativeBatch } from "@/lib/store"
+import { cn } from "@/lib/utils"
 
 export const metadata: Metadata = { title: "Overview · DealTrack" }
+
+const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
+
+function bucketLabel(start: string, grain: Grain) {
+  if (grain === "day") return formatDate(start)
+  if (grain === "week") return `Week of ${formatDate(start)}`
+  return new Date(`${start}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
+}
 
 export default async function OverviewPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const range = parseRange(await searchParams)
+  const params = await searchParams
+  const range = parseRange(params)
   const q = rangeQuery(range)
+  const m1 = metricById(first(params.m1)) ?? metricById("cost")!
+  const m2 = first(params.m2) === "none" ? null : (metricById(first(params.m2)) ?? (m1.id === "leads" ? metricById("cost")! : metricById("leads")!))
   const result = await load(async () => {
-    const [account, daily, campaigns, terms, locations] = await Promise.all([
+    const [account, overview, campaigns, terms, locations] = await Promise.all([
       getAccount(),
-      getDaily(range),
+      getOverview(range),
       getCampaigns(range),
       getSearchTerms(range),
       getLocations(range),
     ])
-    return { account, daily, campaigns, terms, locations }
+    return { account, overview, campaigns, terms, locations }
   })
+  // Pacing first, then the alert rules, which reuse its (cached) numbers.
+  const saved = await load(() => readData())
+  const pacing = saved.ok ? await load(() => getPacing(saved.data.budget)) : saved
+  const alerts = saved.ok ? await load(() => checkAlerts(googleAdsRules(saved.data))) : saved
 
   if (!result.ok) {
     return (
@@ -49,10 +71,16 @@ export default async function OverviewPage({
     )
   }
 
-  const { account, daily, campaigns, terms, locations } = result.data
+  const { account, overview, campaigns, terms, locations } = result.data
   const fetchedAt = lastFetchedAt()
-  const totals = sumMetrics(daily)
-  const r = rates(totals)
+  const totals = overview.totals
+  const before = overview.previous.totals
+  const series = (m: MetricDef) => overview.buckets.map((b: Bucket) => m.value(b))
+  const kpi = (id: string, note?: string) => {
+    const m = metricById(id)!
+    return { label: m.label, value: formatUnit(m.unit, m.value(totals)), delta: delta(m, m.value(totals), m.value(before)), note, spark: series(m) }
+  }
+  const prev = overview.previous.range
 
   const wastedTerms = terms.filter((t) => isWaste(t.metrics))
   const wastedTermCost = wastedTerms.reduce((s, t) => s + t.metrics.cost, 0)
@@ -70,7 +98,7 @@ export default async function OverviewPage({
     },
     {
       href: `/locations${q}`,
-      title: `${formatUsd(outsideCost)} spent outside the Bay Area (${formatPercent(totals.cost ? outsideCost / totals.cost : 0, 0)} of spend)`,
+      title: `${formatUsd(outsideCost)} spent outside the buy area (${formatPercent(totals.cost ? outsideCost / totals.cost : 0, 0)} of spend)`,
       detail: outside.length
         ? `Top: ${outside.slice(0, 3).map((l) => l.city).join(", ")}.`
         : "",
@@ -104,18 +132,22 @@ export default async function OverviewPage({
         </span>
       </p>
 
-      <KpiGrid
+      <StatusCards pacing={pacing} alerts={alerts} batches={saved.ok ? saved.data.batches : null} />
+
+      <TrendKpis
+        caption={`Changes compare with the ${formatNumber(daysIn(range))} days before (${formatDay(prev.from)} – ${formatDay(prev.to)}). Leads are Google lead conversions: forms, calls, and lead stages.`}
         items={[
-          { label: "Spend", value: formatUsd(totals.cost) },
-          { label: "Clicks", value: formatNumber(totals.clicks), note: `${formatNumber(totals.impressions)} impressions` },
-          { label: "Conversions", value: formatConversions(totals.conversions), note: `${formatPercent(r.conversionRate)} of clicks` },
-          {
-            label: "Cost per conversion",
-            value: r.costPerConversion === null ? "—" : formatUsd(r.costPerConversion),
-            tone: r.costPerConversion === null && totals.cost > 0 ? "bad" : "default",
-          },
-          { label: "Click-through rate", value: formatPercent(r.ctr) },
-          { label: "Avg. cost per click", value: formatUsdCents(r.cpc) },
+          kpi("cost"),
+          kpi("leads", totals.conversions > totals.leads ? `${formatConversions(totals.conversions)} incl. soft` : undefined),
+          kpi("cpl"),
+          kpi("clicks", totals.clicks ? `${formatUsdCents(totals.cost / totals.clicks)} each` : undefined),
+          kpi("ctr", `${formatNumber(totals.impressions)} impr.`),
+          kpi(
+            "is",
+            totals.lostToBudget !== null && totals.lostToRank !== null
+              ? `lost ${formatPercent(totals.lostToBudget, 0)} budget, ${formatPercent(totals.lostToRank, 0)} rank`
+              : undefined,
+          ),
         ]}
       />
 
@@ -137,23 +169,16 @@ export default async function OverviewPage({
         </Section>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Spend per day">
-          <TrendChart
-            label="Spend"
-            unit="usd"
-            color="var(--primary)"
-            data={daily.map((d) => ({ date: d.date, value: Math.round(d.metrics.cost) }))}
-          />
-        </Section>
-        <Section title="Conversions per day">
-          <TrendChart
-            label="Conversions"
-            color="var(--chart-2)"
-            data={daily.map((d) => ({ date: d.date, value: d.metrics.conversions }))}
-          />
-        </Section>
-      </div>
+      <Section
+        title="Compare two metrics"
+        description={`By ${overview.grain} over the date range, each on its own scale: ${m1.label.toLowerCase()} on the left${m2 ? `, ${m2.label.toLowerCase()} (dashed) on the right` : ""}.`}
+        actions={<MetricPicker options={OVERVIEW_METRICS.map((m) => ({ id: m.id, label: m.label }))} m1={m1.id} m2={m2?.id ?? "none"} />}
+      >
+        <CompareChart
+          labels={overview.buckets.map((b) => bucketLabel(b.start, overview.grain))}
+          series={[m1, ...(m2 ? [m2] : [])].map((m) => ({ label: m.label, unit: m.unit, values: series(m) }))}
+        />
+      </Section>
 
       <Section
         title="Campaigns"
@@ -186,5 +211,90 @@ export default async function OverviewPage({
         />
       </Section>
     </>
+  )
+}
+
+const paceTone = { "no-budget": "gray", under: "amber", on: "green", over: "red" } as const
+const paceLabel = { "no-budget": "No budget set", under: "Under pace", on: "On pace", over: "Over pace" } as const
+
+type Card = { href: string; title: string; value: string; note: string; pill?: { tone: "green" | "amber" | "red" | "gray" | "violet"; label: string } }
+
+// Where things stand right now, whatever the date range: open alerts, this month's pacing, and
+// the go-live grade.
+function StatusCards({
+  pacing,
+  alerts,
+  batches,
+}: {
+  pacing: Loaded<Pacing>
+  alerts: Loaded<{ log: AlertRecord[] }>
+  batches: NegativeBatch[] | null
+}) {
+  const cards: Card[] = []
+  if (alerts.ok) {
+    const open = alerts.data.log.filter((r) => !r.resolvedAt).sort(bySeverity)
+    const top = open[0]
+    cards.push({
+      href: "/alerts",
+      title: "Alerts",
+      value: open.length ? `${open.length} open` : "All clear",
+      note: top ? top.title : "Nothing needs attention right now",
+      pill: top ? { tone: top.severity === "medium" ? "amber" : top.severity === "info" ? "gray" : "red", label: top.severity === "critical" ? "Critical" : top.severity === "high" ? "High" : top.severity === "medium" ? "Medium" : "Info" } : { tone: "green", label: "OK" },
+    })
+  } else {
+    cards.push({ href: "/alerts", title: "Alerts", value: "Couldn't check", note: alerts.kind === "missing" ? "Keys missing" : alerts.message })
+  }
+  if (pacing.ok) {
+    const p = pacing.data
+    cards.push({
+      href: "/budget",
+      title: "Budget & pacing",
+      value: `${formatUsd(p.spent)} in ${p.monthLabel.split(" ")[0]}`,
+      note: p.budget.monthly
+        ? `of ${formatUsd(p.budget.monthly)}; month ends near ${formatUsd(p.projectedByPace)} at the recent pace`
+        : "No monthly budget set yet",
+      pill: { tone: paceTone[p.status], label: paceLabel[p.status] },
+    })
+  } else {
+    cards.push({ href: "/budget", title: "Budget & pacing", value: "Couldn't load", note: pacing.kind === "missing" ? "Keys missing" : pacing.message })
+  }
+  if (batches) {
+    const lastWeek = completeWeeks(1)[0]
+    const current = batches.find((b) => b.id === lastWeek.id)
+    const open = batches.filter((b) => ["proving", "approving", "ready"].includes(stageOf(b)))
+    const next = open[0] ?? current
+    const stage = next ? stageOf(next) : null
+    const text = {
+      empty: "Nothing to add last week",
+      proving: "Waiting for Seth's proof",
+      approving: "Waiting for approval",
+      ready: "Ready to push",
+      "nothing-approved": "Nothing approved",
+      pushed: "Pushed",
+      checked: "Result checked",
+    } as const
+    cards.push({
+      href: "/negatives",
+      title: "Weekly negatives",
+      value: !current && !open.length ? "Draft last week's batch" : stage ? text[stage] : "Up to date",
+      note: next ? `Week of ${formatDate(next.from)}: ${next.items.length} line${next.items.length === 1 ? "" : "s"}` : `Search terms from ${formatDate(lastWeek.from)} – ${formatDate(lastWeek.to)}`,
+      pill: stage === "ready" ? { tone: "amber", label: "Action" } : stage === "proving" || stage === "approving" ? { tone: "violet", label: "In review" } : undefined,
+    })
+  }
+  cards.push({ href: "/audit", title: "Go-live audit", value: "Grade the account", note: "Tracking, targeting, keywords, ads, pages, and budget, A to F" })
+
+  return (
+    <section aria-label="Status" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {cards.map((c) => (
+        <Link key={c.href} href={c.href} className="group flex flex-col gap-1 rounded-2xl border bg-card p-4 shadow-xs hover:border-primary/40">
+          <span className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            {c.title}
+            {c.pill ? <Pill tone={c.pill.tone}>{c.pill.label}</Pill> : <ArrowRight className="size-3.5 group-hover:text-foreground" aria-hidden />}
+          </span>
+          <span className={cn("text-lg font-semibold tracking-tight tabular-nums")}>{c.value}</span>
+          <span className="text-xs text-muted-foreground">{c.note}</span>
+        </Link>
+      ))}
+    </section>
   )
 }

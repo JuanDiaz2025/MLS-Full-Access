@@ -106,7 +106,14 @@ export function CampaignPicker({
   )
 }
 
-type Pending = { title: string; details: ReactNode; confirmLabel: string; run: () => Promise<ActionResult> }
+type Pending = {
+  title: string
+  details: ReactNode
+  confirmLabel: string
+  run: () => Promise<ActionResult>
+  // Shown under the details. Defaults to the note about undoing from the list below.
+  note?: string
+}
 
 // Asks before running a change, then shows what Google did and refreshes the page's data.
 export function useChange() {
@@ -144,7 +151,7 @@ export function useChange() {
           </p>
           <div className="text-muted-foreground">{pending.details}</div>
           <p className="text-xs text-muted-foreground">
-            This changes your live Google Ads account. You can undo it from the list below.
+            {pending.note ?? "This changes your live Google Ads account. You can undo it from the list below."}
           </p>
           <div className="flex gap-2">
             <Button type="button" onClick={confirm} disabled={running}>

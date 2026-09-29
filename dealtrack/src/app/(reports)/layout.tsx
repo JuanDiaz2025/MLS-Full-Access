@@ -16,7 +16,7 @@ export default async function ReportsLayout({ children }: { children: React.Reac
 
   return (
     <div className="flex flex-1 flex-col">
-      <Suspense fallback={<div className="h-24 border-b" />}>
+      <Suspense fallback={<div className="h-28 border-b" />}>
         <AppHeader showSignOut={!open || admin} admin={admin} canSignInAsAdmin={changesEnabled()} />
       </Suspense>
       {open && (

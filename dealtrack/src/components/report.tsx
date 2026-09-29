@@ -6,11 +6,14 @@ import { headers } from "next/headers"
 import Link from "next/link"
 import { AlertTriangle, KeyRound } from "lucide-react"
 
+import { Pill } from "@/components/pill"
 import RangePicker from "@/components/range-picker"
 import { changesEnabled } from "@/lib/auth"
 import type { DateRange } from "@/lib/date-range"
 import type { Problem } from "@/lib/load"
 import { cn } from "@/lib/utils"
+
+export { Pill }
 
 export function PageHeader({
   title,
@@ -156,22 +159,6 @@ export function DataTable<T>({
         {footer}
       </table>
     </div>
-  )
-}
-
-const pillTones = {
-  green: "bg-emerald-100 text-emerald-800",
-  amber: "bg-amber-100 text-amber-800",
-  red: "bg-red-100 text-red-800",
-  gray: "bg-muted text-muted-foreground",
-  violet: "bg-secondary text-secondary-foreground",
-} as const
-
-export function Pill({ tone = "gray", children }: { tone?: keyof typeof pillTones; children: ReactNode }) {
-  return (
-    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap", pillTones[tone])}>
-      {children}
-    </span>
   )
 }
 

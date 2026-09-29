@@ -220,6 +220,12 @@ type PartialFailureDetail = {
   }[]
 }
 
+// Dry-run mode for trying DealTrack's change buttons safely: with DEALTRACK_VALIDATE_ONLY=1,
+// every change is sent with validateOnly, so Google checks it and applies nothing.
+export function dryRun() {
+  return process.env.DEALTRACK_VALIDATE_ONLY === "1"
+}
+
 // Runs a batch of create/remove operations on one Google Ads service, e.g. "campaignCriteria".
 // With partialFailure, the operations that work are applied even if others fail (for example a
 // negative keyword that already exists). With validateOnly, Google checks the request and
@@ -227,8 +233,9 @@ type PartialFailureDetail = {
 export async function mutate(
   service: string,
   operations: unknown[],
-  { validateOnly = false }: { validateOnly?: boolean } = {},
+  { validateOnly: asked = false }: { validateOnly?: boolean } = {},
 ): Promise<MutateResult> {
+  const validateOnly = asked || dryRun()
   const cfg = config()
   const body = (await call(cfg, `${service}:mutate`, {
     operations,

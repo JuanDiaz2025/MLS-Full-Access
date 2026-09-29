@@ -8,6 +8,8 @@ export type NegativeRule = {
   // Words or phrases to add as negative keywords when a term matches.
   negatives: string[]
   pattern: RegExp
+  // Applies even when the search says "sell" (a competitor's name or a city we don't buy in).
+  evenForSellers?: boolean
 }
 
 export const negativeRules: NegativeRule[] = [
@@ -55,24 +57,62 @@ export const negativeRules: NegativeRule[] = [
     pattern: /\b(zestimate|home value|house value|what('?s| is) my (house|home) worth|appraisal)\b/i,
   },
   {
-    id: "out-of-area",
-    reason: "A city outside the Bay Area",
+    // From the account's "Competitors" negative list, plus the iBuyers seen in search terms.
+    id: "competitor",
+    reason: "Looking for a competitor by name",
+    evenForSellers: true,
     negatives: [
-      "stockton", "fresno", "sacramento", "modesto", "merced", "visalia", "bakersfield", "tracy",
-      "manteca", "lodi", "turlock", "los angeles", "san diego", "reno",
+      "opendoor", "open door", "offerpad", "orchard", "sellfast", "homevestors", "we buy ugly houses", "we buy ugly homes",
+      "john buys", "laurel buys houses", "capital home buyers", "fair home buyers", "local home buyers inc", "24 home buyer",
+      "just home buyers", "turtle home buyer", "naca",
     ],
     pattern:
-      /\b(stockton|fresno|sacramento|modesto|merced|visalia|bakersfield|tracy|manteca|lodi|turlock|los angeles|san diego|reno)\b/i,
+      /\b(open ?door|offerpad|orchard(?! (ave|avenue|st|street|rd|road|dr|drive|ln|lane|way|blvd|ct|court|pl|place)\b)|sellfast(\.?com)?|sell fast ?\.?com|homevestors|we buy ugly (houses|homes)|john buys|laurel buys houses|capital home buyers|fair home buyers|local home buyers inc|24 home buyers?|just home buyers|turtle home buyers?|naca)\b/i,
+  },
+  {
+    id: "out-of-area",
+    reason: "A city outside the buy area",
+    evenForSellers: true,
+    negatives: [
+      "stockton", "fresno", "sacramento", "modesto", "merced", "visalia", "bakersfield", "tracy",
+      "manteca", "lodi", "turlock", "los angeles", "san diego", "reno", "santa rosa", "petaluma", "vallejo",
+      "fairfield", "vacaville", "berkeley", "san lorenzo", "castro valley", "concord", "antioch",
+    ],
+    pattern:
+      /\b(stockton|fresno|sacramento|modesto|merced|visalia|bakersfield|tracy|manteca|lodi|turlock|los angeles|san diego|reno|santa rosa|petaluma|vallejo|fairfield|vacaville|berkeley|san lorenzo|castro valley|concord|antioch)\b/i,
   },
 ]
 
+// Searches that say the person wants to sell are never flagged, whatever else they mention:
+// "sell my house without a realtor" and "selling a rental with tenants" are the sellers we want.
+// Only the competitor and out-of-area rules still apply to them.
+export const SELLER_INTENT =
+  /\b(sell|sells|selling|sold|we buy|buys? (my|your|houses|homes)|buying (houses|homes)|cash (for|offer)|cash (home |house )?buyers?|foreclos\w*|behind on)\b/i
+
 export function matchRule(term: string): NegativeRule | undefined {
-  return negativeRules.find((rule) => rule.pattern.test(term))
+  const seller = SELLER_INTENT.test(term)
+  return negativeRules.find((rule) => (!seller || rule.evenForSellers) && rule.pattern.test(term))
 }
 
-// The specific negative to suggest for a term: the rule's phrase that appears in it, or the
-// rule's first phrase when the match came from a variant (e.g. "realtors" suggests "realtor").
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+// Whether a negative keyword blocks a search, the way Google matches negatives: phrase means the
+// search contains those whole words in that order; exact means the search is exactly it. Negatives
+// don't match plurals or other variants, so "rent" doesn't block "rentals".
+export function blocks(negative: string, matchType: "PHRASE" | "EXACT" | "BROAD", term: string): boolean {
+  const search = term.toLowerCase().replace(/\s+/g, " ").trim()
+  const neg = negative.toLowerCase().replace(/\s+/g, " ").trim()
+  if (!neg) return false
+  if (matchType === "EXACT") return search === neg
+  if (matchType === "BROAD") return neg.split(" ").every((w) => search.split(" ").includes(w))
+  return new RegExp(`(^| )${escapeRegExp(neg)}( |$)`).test(search)
+}
+
+// The specific negative to suggest for a term: the rule's phrase when the term contains it as
+// whole words, otherwise the words the rule matched (e.g. "realtors" suggests "realtors", since
+// the negative "realtor" wouldn't block it).
 export function suggestedNegative(term: string, rule: NegativeRule): string {
-  const lower = term.toLowerCase()
-  return rule.negatives.find((n) => lower.includes(n)) ?? rule.negatives[0]
+  const whole = rule.negatives.find((n) => blocks(n, "PHRASE", term))
+  if (whole) return whole
+  return term.toLowerCase().match(rule.pattern)?.[0]?.replace(/\s+/g, " ").trim() || rule.negatives[0]
 }

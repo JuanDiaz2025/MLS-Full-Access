@@ -26,11 +26,12 @@ export default function TrendChart({
   data: Point[]
   color: string
   label: string
-  unit?: "number" | "usd"
+  // "score" is a 0–10 scale shown to one decimal (Quality Score).
+  unit?: "number" | "usd" | "score"
 }) {
-  const fmt = unit === "usd" ? formatUsd : formatNumber
+  const fmt = unit === "usd" ? formatUsd : unit === "score" ? (n: number) => n.toFixed(1) : formatNumber
   const [active, setActive] = useState<number | null>(null)
-  const max = niceMax(Math.max(0, ...data.map((d) => d.value)))
+  const max = unit === "score" ? 10 : niceMax(Math.max(0, ...data.map((d) => d.value)))
   const span = Math.max(data.length - 1, 1)
   const x = (i: number) => (i / span) * W
   const y = (v: number) => H - (v / max) * H

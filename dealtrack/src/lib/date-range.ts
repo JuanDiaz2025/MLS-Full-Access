@@ -29,6 +29,11 @@ export function today(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: ACCOUNT_TIME_ZONE }).format(new Date())
 }
 
+// The account-time-zone date (YYYY-MM-DD) of a moment, e.g. when something was saved.
+export function dayOf(time: string | Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: ACCOUNT_TIME_ZONE }).format(new Date(time))
+}
+
 export function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + days)

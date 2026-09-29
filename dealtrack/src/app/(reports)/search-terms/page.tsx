@@ -134,7 +134,7 @@ function Body({
 
       <Section
         title="Suggested negative keywords"
-        description="Based on terms that usually aren't cash sellers: agents, buyers, renters, loans, jobs, listing sites, and cities outside the Bay Area. Review each one before adding it. Some flagged terms may still have converted."
+        description="Based on terms that usually aren't cash sellers: agents, buyers, renters, loans, jobs, listing sites, and cities outside the buy area. Review each one before adding it. Some flagged terms may still have converted."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {!admin && <AdminLink />}

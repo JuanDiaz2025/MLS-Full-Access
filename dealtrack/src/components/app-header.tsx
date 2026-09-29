@@ -7,19 +7,52 @@ import { signOut } from "@/app/login/actions"
 import BrandLogo from "@/components/brand-logo"
 import { cn } from "@/lib/utils"
 
-export const navLinks = [
-  { href: "/overview", label: "Overview" },
-  { href: "/campaigns", label: "Campaigns" },
-  { href: "/search-terms", label: "Search terms" },
-  { href: "/keywords", label: "Keywords" },
-  { href: "/locations", label: "Locations" },
-  { href: "/schedule", label: "Day & hour" },
-  { href: "/conversions", label: "Conversions" },
-  { href: "/landing-pages", label: "Landing pages" },
-  { href: "/behavior", label: "Behavior" },
-  { href: "/forecast", label: "Forecast" },
-  { href: "/alerts", label: "Alerts" },
-  { href: "/changes", label: "Changes" },
+// Pages grouped the way PPC tools like Optmyzr group them. The first row picks a group, the
+// second row shows that group's pages.
+export const navGroups = [
+  { label: "Overview", links: [{ href: "/overview", label: "Overview" }] },
+  {
+    label: "Monitor",
+    links: [
+      { href: "/alerts", label: "Alerts" },
+      { href: "/budget", label: "Budget & pacing" },
+      { href: "/quality-score", label: "Quality Score" },
+    ],
+  },
+  {
+    label: "Audit",
+    links: [
+      { href: "/audit", label: "Go-live audit" },
+      { href: "/ads", label: "Ads & creatives" },
+      { href: "/landing-pages", label: "Landing pages" },
+      { href: "/conversions", label: "Conversions" },
+    ],
+  },
+  {
+    label: "Optimize",
+    links: [
+      { href: "/campaigns", label: "Campaigns" },
+      { href: "/search-terms", label: "Search terms" },
+      { href: "/negatives", label: "Weekly negatives" },
+      { href: "/keywords", label: "Keywords" },
+      { href: "/locations", label: "Locations" },
+      { href: "/schedule", label: "Day & hour" },
+    ],
+  },
+  {
+    label: "Insights",
+    links: [
+      { href: "/behavior", label: "Behavior" },
+      { href: "/forecast", label: "Forecast" },
+    ],
+  },
+  {
+    label: "Reports",
+    links: [
+      { href: "/report", label: "Weekly report" },
+      { href: "/changes", label: "Changes" },
+    ],
+  },
 ] as const
 
 // Keep the selected date range when switching pages.
@@ -45,33 +78,31 @@ export default function AppHeader({
 }) {
   const pathname = usePathname()
   const query = useRangeQuery()
+  const active = navGroups.find((g) => g.links.some((l) => pathname === l.href)) ?? navGroups[0]
 
-  const links = navLinks.map((l) => {
-    const current = pathname === l.href
-    return (
-      <Link
-        key={l.href}
-        href={`${l.href}${query}`}
-        aria-current={current ? "page" : undefined}
-        className={cn(
-          "shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground",
-          current && "bg-muted font-medium text-foreground",
-        )}
-      >
-        {l.label}
-      </Link>
-    )
-  })
+  const tab = (href: string, label: string, current: boolean) => (
+    <Link
+      key={href}
+      href={`${href}${query}`}
+      aria-current={current ? "page" : undefined}
+      className={cn(
+        "shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground",
+        current && "bg-muted font-medium text-foreground",
+      )}
+    >
+      {label}
+    </Link>
+  )
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur-md">
+    <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur-md print:hidden">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
         <BrandLogo />
         <div className="flex items-center gap-2">
           {admin ? (
             <span
               className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
-              title="You can change negative keywords and excluded locations in Google Ads."
+              title="You can change negative keywords, excluded locations, and campaign status in Google Ads."
             >
               Admin
             </span>
@@ -94,9 +125,14 @@ export default function AppHeader({
           )}
         </div>
       </div>
-      <nav aria-label="Reports" className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 text-sm sm:px-6">
-        {links}
+      <nav aria-label="Sections" className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-1 text-sm sm:px-6">
+        {navGroups.map((g) => tab(g.links[0].href, g.label, g === active))}
       </nav>
+      {active.links.length > 1 && (
+        <nav aria-label={active.label} className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 text-xs sm:px-6">
+          {active.links.map((l) => tab(l.href, l.label, pathname === l.href))}
+        </nav>
+      )}
     </header>
   )
 }

@@ -30,7 +30,7 @@ export default function CityExclusionPanel({
   const campaignNames = campaigns.filter((c) => campaignIds.includes(c.id)).map((c) => c.name)
 
   if (!cities.length) {
-    return <p className="py-2 text-sm text-muted-foreground">No clicks or spend outside the Bay Area in this period.</p>
+    return <p className="py-2 text-sm text-muted-foreground">No clicks or spend outside the buy area in this period.</p>
   }
 
   return (
@@ -107,7 +107,7 @@ export default function CityExclusionPanel({
         >
           Exclude {toExclude.length} selected
         </Button>
-        <span className="text-xs text-muted-foreground">Bay Area cities can&apos;t be excluded from here.</span>
+        <span className="text-xs text-muted-foreground">Cities in the buy area can&apos;t be excluded from here.</span>
       </div>
 
       {ui}

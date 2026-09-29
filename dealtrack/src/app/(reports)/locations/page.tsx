@@ -36,7 +36,7 @@ export default async function LocationsPage({
     <>
       <PageHeader
         title="Locations"
-        description="Where the people who saw and clicked your ads were, by city. Anything outside the nine Bay Area counties is flagged, since that's not where you buy."
+        description="Where the people who saw and clicked your ads were, by city. Anything outside the buy area (SF through San Jose, plus Oakland, San Leandro, and Hayward) is flagged, since that's not where you buy."
         range={range}
       />
       {!result.ok ? <ReportProblem problem={result} /> : <Body {...result.data} admin={admin} />}
@@ -69,10 +69,10 @@ function Body({
     <>
       <KpiGrid
         items={[
-          { label: "Spend in the Bay Area", value: formatUsd(inside.cost), note: `${share(inside.cost)} of spend` },
-          { label: "Conversions in the Bay Area", value: formatConversions(inside.conversions) },
+          { label: "Spend in the buy area", value: formatUsd(inside.cost), note: `${share(inside.cost)} of spend` },
+          { label: "Conversions in the buy area", value: formatConversions(inside.conversions) },
           {
-            label: "Spend outside the Bay Area",
+            label: "Spend outside the buy area",
             value: formatUsd(outside.cost),
             note: `${share(outside.cost)} of spend`,
             tone: outside.cost > 0 ? "bad" : "default",
@@ -83,7 +83,7 @@ function Body({
         ]}
       />
       <Section
-        title="Exclude cities outside the Bay Area"
+        title="Exclude cities outside the buy area"
         description="Stops ads from showing to people in these cities. Cities with spend are pre-selected; ones that converted are highlighted so you can decide."
         actions={!admin && <AdminLink />}
       >
@@ -97,7 +97,7 @@ function Body({
           />
         ) : (
           <p className="text-sm text-muted-foreground">
-            {rows.filter((r) => r.status === "outside").length} cities outside the Bay Area had clicks or spend in this period.
+            {rows.filter((r) => r.status === "outside").length} cities outside the buy area had clicks or spend in this period.
             They&apos;re highlighted in red below.
           </p>
         )}
@@ -119,7 +119,7 @@ function Body({
 
       <Section
         title="By city"
-        description="To stop showing ads outside the Bay Area, set the campaign's location option to people in or regularly in your targeted locations, and exclude the flagged cities."
+        description="To stop showing ads outside the buy area, set the campaign's location option to people in or regularly in your targeted locations, and exclude the flagged cities."
       >
         <DataTable<LocationRow>
           rows={rows}
@@ -141,7 +141,7 @@ function Body({
               label: "Service area",
               render: (r) =>
                 r.status === "inside" ? (
-                  <Pill tone="green">Bay Area</Pill>
+                  <Pill tone="green">Buy area</Pill>
                 ) : r.status === "outside" ? (
                   <Pill tone="red">Outside</Pill>
                 ) : (

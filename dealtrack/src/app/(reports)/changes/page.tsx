@@ -46,7 +46,7 @@ export default async function ChangesPage() {
         <Section title={`${result.data.length} changes`} description={result.data.length === 500 ? "Showing the latest 500." : undefined}>
           <DataTable<ChangeEvent>
             rows={result.data}
-            rowKey={(e) => `${e.at}|${e.resourceType}|${e.detail}|${e.campaign}`}
+            rowKey={(e) => e.id}
             empty="No changes in the last 30 days."
             columns={[
               {

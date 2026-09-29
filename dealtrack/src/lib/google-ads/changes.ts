@@ -115,6 +115,7 @@ export async function getCampaignNegatives(
 // ---- Change history (read-only) -------------------------------------------------------------
 
 export type ChangeEvent = {
+  id: string // Google's resource name for the change, unique
   at: string // "2026-09-29 08:14:03.123456" in the account's time zone
   user: string
   client: string // GOOGLE_ADS_API, GOOGLE_ADS_WEB_CLIENT, …
@@ -135,6 +136,7 @@ export async function getChangeHistory(from: string, to: string): Promise<Change
   const [rows, campaigns] = await Promise.all([
     gaql<{
       changeEvent: {
+        resourceName: string
         changeDateTime?: string
         userEmail?: string
         clientType?: string
@@ -146,7 +148,7 @@ export async function getChangeHistory(from: string, to: string): Promise<Change
         oldResource?: { campaignCriterion?: CriterionShape; adGroupCriterion?: CriterionShape }
       }
     }>(
-      `SELECT change_event.change_date_time, change_event.user_email, change_event.client_type,
+      `SELECT change_event.resource_name, change_event.change_date_time, change_event.user_email, change_event.client_type,
          change_event.change_resource_type, change_event.resource_change_operation,
          change_event.changed_fields, change_event.campaign, change_event.new_resource, change_event.old_resource
        FROM change_event
@@ -177,6 +179,7 @@ export async function getChangeHistory(from: string, to: string): Promise<Change
       detail = `Changed: ${e.changedFields.split(",").slice(0, 6).join(", ")}`
     }
     return {
+      id: e.resourceName,
       at: e.changeDateTime ?? "",
       user: e.userEmail ?? "",
       client: e.clientType ?? "",
@@ -276,7 +279,7 @@ export async function excludeLocations(
     const name = names.get(geo)
     if (!name) throw new Error("Google doesn't recognize one of the chosen locations.")
     if (serviceAreaStatus(name.canonical).status === "inside") {
-      throw new Error(`${name.name} is inside the Bay Area service area, so it can't be excluded here.`)
+      throw new Error(`${name.name} is inside the buy area, so it can't be excluded here.`)
     }
   }
 
@@ -331,4 +334,43 @@ export async function removeNegatives(resourceNames: string[], { validateOnly = 
     const n = current.get(targets[i])
     return n?.kind === "location" ? `${n.place}` : `"${n?.text}"`
   })
+}
+
+// ---- Pausing campaigns (budget pause line) -------------------------------------------------
+// Pauses running campaigns when spend reaches the pause line. Only an admin can do it, it's
+// never automatic, and it only ever sets status to PAUSED: it can't enable, edit, or remove
+// anything. Local Services campaigns are skipped because the API can't pause them.
+
+const NOT_PAUSABLE = new Set(["LOCAL_SERVICES"])
+
+export async function getPausableCampaigns(): Promise<EditableCampaign[]> {
+  const rows = await gaql<{
+    campaign: { id?: string | number; name?: string; status?: string; advertisingChannelType?: string }
+  }>(
+    `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type FROM campaign
+     WHERE campaign.status = 'ENABLED'`,
+  )
+  return rows
+    .map((r) => ({
+      id: String(r.campaign.id ?? ""),
+      name: r.campaign.name ?? "(no name)",
+      status: r.campaign.status ?? "",
+      channel: r.campaign.advertisingChannelType ?? "",
+    }))
+    .filter((c) => c.id && !NOT_PAUSABLE.has(c.channel))
+}
+
+export async function pauseCampaigns(campaignIds: string[], { validateOnly = false } = {}): Promise<ChangeSummary> {
+  const running = new Map((await getPausableCampaigns()).map((c) => [c.id, c.name]))
+  const targets = [...new Set(campaignIds)].filter((id) => running.has(id))
+  const skipped = campaignIds.length - targets.length
+  if (!targets.length) return { applied: 0, skipped, failures: [] }
+
+  const customer = customerResource()
+  const result = await mutate(
+    "campaigns",
+    targets.map((id) => ({ update: { resourceName: `${customer}/campaigns/${id}`, status: "PAUSED" }, updateMask: "status" })),
+    { validateOnly },
+  )
+  return summarize(targets.length, skipped, result.failures, (i) => `${running.get(targets[i])}`)
 }
