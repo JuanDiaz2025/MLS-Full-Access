@@ -32,8 +32,8 @@ function leadsText(n: number) {
 
 const batchStatus = {
   empty: "Nothing to add",
-  proving: "Waiting for Seth's proof",
-  approving: "Waiting for the PPC owner's approval",
+  proving: "Waiting for review",
+  approving: "Waiting for approval",
   ready: "Approved, waiting for an admin to push",
   "nothing-approved": "Nothing approved",
   pushed: "Pushed",

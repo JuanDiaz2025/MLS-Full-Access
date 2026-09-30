@@ -106,7 +106,7 @@ export async function removeNegativesAction(resourceNames: string[]): Promise<Ac
 }
 
 // Budget pause line: pauses the chosen running campaigns. Turning them back on is done in Google
-// Ads, on purpose: switching ads on and off resets Google's learning (decision d8).
+// Ads, on purpose: switching ads on and off resets Google's learning.
 export async function pauseCampaignsAction(campaignIds: string[]): Promise<ActionResult> {
   return guarded(async () => {
     const ids = campaignIdsFrom(campaignIds)
@@ -118,7 +118,7 @@ export async function pauseCampaignsAction(campaignIds: string[]): Promise<Actio
 }
 
 // Weekly negatives, step 4: sends a batch's approved lines to Google Ads in one change. At most
-// one batch a week (the brake), and only after Seth's proof and the PPC owner's approval.
+// one batch a week (the brake), and only after a review and an approval.
 export async function pushNegativeBatchAction(batchId: string, campaignIds: string[], rawName: string): Promise<ActionResult> {
   return guarded(async () => {
     const name = await rememberName(rawName)

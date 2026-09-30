@@ -248,7 +248,7 @@ function AlertItem({ record: r, items }: { record: AlertRecord; items?: string[]
 function Rules({ settings: s, admin, personName }: { settings: AlertSettings; admin: boolean; personName: string }) {
   const rules = [
     `Spend reaches the budget's alert or pause line, or is heading past the monthly budget (set on the Budget & pacing page).`,
-    `${formatUsd(s.monthNoLeadSpend)} or more spent in a month with no leads (Juan's rule, d1).`,
+    `${formatUsd(s.monthNoLeadSpend)} or more spent in a month with no leads.`,
     `${formatUsd(s.noLeadSpend)} or more spent over the last ${s.noLeadDays} ${s.noLeadDays === 1 ? "day" : "days"} with no leads.`,
     s.maxCostPerLead ? `Cost per lead over the last 14 days above ${formatUsd(s.maxCostPerLead)}.` : "Cost per lead limit: off until a limit is set.",
     "Yesterday's spend, clicks, or cost per click far above the 28 days before it, or ads that spent nothing after a week of spending.",
@@ -278,7 +278,7 @@ function Rules({ settings: s, admin, personName }: { settings: AlertSettings; ad
             { name: "maxCostPerLead", label: "Cost per lead limit", prefix: "$", value: s.maxCostPerLead?.toString() ?? "", placeholder: "Off", hint: "Last 14 days. Leave empty to turn off." },
             { name: "noLeadDays", label: "Days with no leads", value: String(s.noLeadDays), hint: "How many days in a row…" },
             { name: "noLeadSpend", label: "…while spending at least", prefix: "$", value: String(s.noLeadSpend) },
-            { name: "monthNoLeadSpend", label: "Monthly spend with nothing back", prefix: "$", value: String(s.monthNoLeadSpend), hint: "Juan's rule (d1): $20,000." },
+            { name: "monthNoLeadSpend", label: "Monthly spend with nothing back", prefix: "$", value: String(s.monthNoLeadSpend), hint: "Default: $20,000." },
             { name: "invalidClickRate", label: "Invalid clicks above", suffix: "%", value: String(Math.round(s.invalidClickRate * 100)), hint: "Share of the last 30 days' clicks." },
           ]}
         />

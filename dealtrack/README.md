@@ -8,13 +8,13 @@ It reports on one Google Ads account. The pages are grouped the way the work goe
 
 **Monitor**
 
-- **Alerts:** rules checked every time the page (or the Overview) opens: the budget's alert and pause lines, a month heading past budget, $20K+ in a month with no leads (Juan, d1), days of spend with no leads, cost per lead over a limit, yesterday's spend, clicks, or cost per click far above normal, ads that stopped spending, disapproved ads in running campaigns, invalid clicks, broken landing pages, soft conversions, script errors, and last week's unusual numbers. Every alert goes into a history with when it started and when it cleared. Admins set the limits on the page.
-- **Budget & pacing:** this month's spend against the monthly budget, with the alert and pause lines (d3): where the month is heading at the recent pace and at full budgets, the daily spend needed to land on budget, and each campaign's spend and share lost to budget. At the pause line, admins can pause running campaigns from here (turning them back on is done in Google Ads, on purpose).
+- **Alerts:** rules checked every time the page (or the Overview) opens: the budget's alert and pause lines, a month heading past budget, $20K+ in a month with no leads, days of spend with no leads, cost per lead over a limit, yesterday's spend, clicks, or cost per click far above normal, ads that stopped spending, disapproved ads in running campaigns, invalid clicks, broken landing pages, soft conversions, script errors, and last week's unusual numbers. Every alert goes into a history with when it started and when it cleared. Admins set the limits on the page.
+- **Budget & pacing:** this month's spend against the monthly budget, with the alert and pause lines: where the month is heading at the recent pace and at full budgets, the daily spend needed to land on budget, and each campaign's spend and share lost to budget. At the pause line, admins can pause running campaigns from here (turning them back on is done in Google Ads, on purpose).
 - **Quality Score:** each keyword's 1–10 score and its three parts, a 12-month weekly trend, how scores are spread, and what to fix. Seller (non-brand) keywords by default.
 
 **Audit**
 
-- **Go-live audit:** grades the account A to F in six areas (conversion tracking, location targeting, keywords and negatives, ads and landing pages, budget, campaign setup) against the go-live checklist (d6), with a "fix first" list. Checks Google Ads can't see (click ID capture, the test lead, after-hours coverage, the call outcome form, retargeting, baseline numbers) are ticked by a person with their name.
+- **Go-live audit:** grades the account A to F in six areas (conversion tracking, location targeting, keywords and negatives, ads and landing pages, budget, campaign setup), with a "fix first" list. Checks Google Ads can't see (click ID capture, the test lead, after-hours coverage, the call outcome form, retargeting, baseline numbers) are ticked by a person with their name.
 - **Ads & creatives:** every enabled ad: disapprovals and limits with the reason in plain English and the fix, ad strength, too few headlines or descriptions, heavy pinning, broken landing pages, and Google's Best/Good/Low rating of each headline and description.
 - **Landing pages:** where your ads send people. Pages behind ads that are running right now come first, then the most-spent pages. Up to 8 get a mobile PageSpeed test and a check for a short form, tap-to-call, and reviews, next to their spend, conversions, and PostHog submit rate.
 - **Conversions:** what Google counts as a conversion, with a warning if a primary conversion isn't really a lead.
@@ -23,9 +23,9 @@ It reports on one Google Ads account. The pages are grouped the way the work goe
 
 - **Campaigns:** every campaign in the account, running or not, with its daily budget and results. Filter by status like Google Ads.
 - **Search terms:** what people typed, which terms spent money without converting, and suggested negative keywords. Searches that say "sell" are never suggested as negatives (only competitor names and cities outside the buy area are).
-- **Weekly negatives:** the weekly routine. DealTrack drafts one batch from last week's searches (the rules in `negatives.ts`, plus words that never converted in 90 days), Seth proves each line, the PPC owner approves, an admin pushes the approved lines to Google Ads in one change, and a week later the result is checked (did spend on those searches stop, and did leads hold up?). Anything that would block a search that converted, or a seller saying "sell", is held back. At most one push a week.
+- **Weekly negatives:** the weekly routine. DealTrack drafts one batch from last week's searches (the rules in `negatives.ts`, plus words that never converted in 90 days), someone reviews each line, someone else approves, an admin pushes the approved lines to Google Ads in one change, and a week later the result is checked (did spend on those searches stop, and did leads hold up?). Anything that would block a search that converted, or a seller saying "sell", is held back. At most one push a week.
 - **Keywords:** each keyword marked "Stop or fix" (spent $100+ without converting) or "Scale" (converting cheaper than average).
-- **Locations:** spend by city, with anything outside Juan's buy area (d2) flagged.
+- **Locations:** spend by city, with anything outside the buy area flagged.
 - **Day & hour:** a heat map of spend and conversions by weekday and hour.
 
 **Insights**
@@ -68,7 +68,7 @@ Safeguards:
 - Terms and cities that brought conversions are left unchecked.
 - Cities in the buy area can't be excluded, whatever is sent to the server.
 - Remove only works on negative keywords and location exclusions, so it can't delete keywords, ads, or campaigns.
-- Nothing is changed automatically: alerts and the budget's pause line only ask a person (decision d8).
+- Nothing is changed automatically: alerts and the budget's pause line only ask a person.
 - Changes appear in Google Ads' change history (and on the Changes page) as made through the API.
 - **Dry run:** with `DEALTRACK_VALIDATE_ONLY=1`, every change is sent with Google's validate-only flag: Google checks it and applies nothing. Use it to try the buttons.
 
@@ -120,7 +120,7 @@ If a value is missing, the page that needs it says which one; the other pages ke
 - `src/lib/google-ads/reports.ts` holds the report queries and turns Google's micros and strings into dollars and numbers. `overview.ts`, `ads.ts`, `quality.ts`, and `invalid-clicks.ts` hold the newer pages' queries.
 - `src/lib/store.ts` reads and writes the saved data file. Saves are queued and written to a temporary file first, so two at once can't overwrite each other and a crash can't leave half a file.
 - `src/lib/alert-rules.ts` holds the alert rules and the alert history; `src/lib/budget.ts` the pacing; `src/lib/audit.ts` the go-live audit; `src/lib/negative-batches.ts` the weekly negatives.
-- `src/lib/service-area.ts` lists Juan's buy area. Edit it to change the buy box.
+- `src/lib/service-area.ts` lists the buy area. Edit it to change the buy box.
 - `src/lib/negatives.ts` holds the rules behind suggested negative keywords. Edit them as the team learns from lead outcomes.
 - `src/lib/google-ads/changes.ts` makes the changes (negative keywords, location exclusions, pausing) and re-checks every input against the live account first. `src/app/actions/changes.ts` is the only way the pages reach it, and it checks for an admin session.
 

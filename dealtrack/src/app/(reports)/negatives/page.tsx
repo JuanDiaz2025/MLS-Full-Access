@@ -43,7 +43,7 @@ export default async function NegativesPage() {
     <>
       <PageHeader
         title="Weekly negatives"
-        description={`Once a week, last week's wasted searches become one batch of negative keywords: DealTrack drafts it from the rules (and words that never converted), Seth proves each line, the PPC owner approves, an admin pushes the approved lines to Google Ads in one change, and a week later the result is checked. Anything that would block a search that converted in the last ${LOOKBACK_DAYS} days, or a seller saying "sell", is held back. At most one push every ${BRAKE_DAYS} days. Saved on this computer.`}
+        description={`Once a week, last week's wasted searches become one batch of negative keywords: DealTrack drafts it from the rules (and words that never converted), someone reviews each line, someone approves, an admin pushes the approved lines to Google Ads in one change, and a week later the result is checked. Anything that would block a search that converted in the last ${LOOKBACK_DAYS} days, or a seller saying "sell", is held back. At most one push every ${BRAKE_DAYS} days. Saved on this computer.`}
       />
       {!data.ok ? (
         <ReportProblem problem={data} />

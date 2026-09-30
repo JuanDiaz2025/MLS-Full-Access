@@ -1,4 +1,4 @@
-// Where Twin Home Buyer buys houses: Juan's final buy area (decision d2, Sep 29, 2026).
+// Where Twin Home Buyer buys houses.
 // San Francisco through San Jose on the Peninsula, every city in between, plus Oakland,
 // San Leandro, and Hayward. Everything else is outside, including Sonoma (Santa Rosa, Petaluma),
 // San Lorenzo, Castro Valley, Berkeley, Stockton, Fresno, and Sacramento.

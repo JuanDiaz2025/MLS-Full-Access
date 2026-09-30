@@ -266,7 +266,7 @@ function StatusCards({
     const stage = next ? stageOf(next) : null
     const text = {
       empty: "Nothing to add last week",
-      proving: "Waiting for Seth's proof",
+      proving: "Waiting for review",
       approving: "Waiting for approval",
       ready: "Ready to push",
       "nothing-approved": "Nothing approved",

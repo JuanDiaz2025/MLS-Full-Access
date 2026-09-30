@@ -57,7 +57,7 @@ export async function draftNegativeBatch(weekId: string, rawName: string): Promi
     return {
       ok: true,
       message: n
-        ? `Drafted ${n} negative${n === 1 ? "" : "s"} from ${formatDay(week.from)} – ${formatDay(week.to)}. Next: Seth proves each line.`
+        ? `Drafted ${n} negative${n === 1 ? "" : "s"} from ${formatDay(week.from)} – ${formatDay(week.to)}. Next: someone reviews each line.`
         : "Nothing to add this week: no search matched the rules without converting.",
     }
   } catch (e) {
@@ -82,11 +82,11 @@ export async function markNegativeLine(
       if (!Number.isInteger(index) || !item) return "That line doesn't exist any more. Reload the page."
       const stage = stageOf(b)
       if (field === "proven") {
-        if (stage !== "proving") return "The proof step is closed. Reopen it to change a line."
+        if (stage !== "proving") return "The review step is closed. Reopen it to change a line."
         item.proven = value
         item.provenBy = value === null ? undefined : who.name
       } else {
-        if (stage !== "approving") return b.proven ? "The approval step is closed. Reopen it to change a line." : "Seth proves the lines first."
+        if (stage !== "approving") return b.proven ? "The approval step is closed. Reopen it to change a line." : "The lines need a review first."
         if (!item.proven) return "Only lines whose evidence holds up can be approved."
         item.approved = value
         item.approvedBy = value === null ? undefined : who.name
@@ -107,12 +107,12 @@ export async function finishNegativeStep(batchId: string, step: "proven" | "appr
     const problem = await changeBatch(batchId, (b) => {
       const stage = stageOf(b)
       if (step === "proven") {
-        if (stage !== "proving") return "The proof step is already done."
+        if (stage !== "proving") return "The review step is already done."
         const open = b.items.filter((i) => i.proven === null).length
         if (open) return `${open} line${open === 1 ? " still needs" : "s still need"} a decision.`
         b.proven = { by: who.name, at: new Date().toISOString() }
       } else if (step === "approved") {
-        if (stage !== "approving") return b.approved ? "The approval step is already done." : "Seth proves the lines first."
+        if (stage !== "approving") return b.approved ? "The approval step is already done." : "The lines need a review first."
         const open = b.items.filter((i) => i.proven && i.approved === null).length
         if (open) return `${open} line${open === 1 ? " still needs" : "s still need"} a decision.`
         b.approved = { by: who.name, at: new Date().toISOString() }
@@ -124,8 +124,8 @@ export async function finishNegativeStep(batchId: string, step: "proven" | "appr
     const next =
       step === "proven"
         ? batch?.items.some((i) => i.proven)
-          ? "Proof done. Next: the PPC owner approves."
-          : "Proof done. Nothing held up, so there's nothing to approve or push."
+          ? "Review done. Next: approval."
+          : "Review done. Nothing held up, so there's nothing to approve or push."
         : batch?.items.some((i) => i.proven && i.approved)
           ? "Approval done. Next: an admin pushes the approved lines."
           : "Approval done. Nothing was approved, so there's nothing to push."
@@ -143,7 +143,7 @@ export async function reopenNegativeStep(batchId: string, step: "proven" | "appr
     const problem = await changeBatch(batchId, (b) => {
       if (b.pushed) return "This batch was already pushed, so it can't change."
       if (step === "proven") {
-        if (!b.proven) return "The proof step is still open."
+        if (!b.proven) return "The review step is still open."
         if (b.approved) return "Reopen the approval first."
         b.proven = undefined
         for (const i of b.items) {

@@ -3,9 +3,8 @@
 // saved on this computer: a new alert gets a first-seen time, one that is still there gets its
 // last-seen time bumped, and one that went away is marked resolved.
 //
-// Thresholds come from the alert settings (admins edit them on the Alerts page). The defaults and
-// Juan's decisions: $20K+ in a month with nothing back is not acceptable (d1); the budget's alert
-// and pause lines come from the Budget & pacing page (d3).
+// Thresholds come from the alert settings (admins edit them on the Alerts page); the budget's
+// alert and pause lines come from the Budget & pacing page.
 
 import { formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
 import { getPacing } from "@/lib/budget"
@@ -57,7 +56,7 @@ function budgetRules(data: Data): RuleGroup {
           key: `budget:nothing-back:${month}`,
           severity: "critical",
           title: `${formatUsd(p.spent)} spent in ${p.monthLabel} with no leads`,
-          detail: `Juan's rule (d1): ${formatUsd(data.alerts.monthNoLeadSpend)}+ in a month with nothing back isn't acceptable. Check tracking, search terms, and the landing page before spending more.`,
+          detail: `${formatUsd(data.alerts.monthNoLeadSpend)}+ in a month with nothing back. Check tracking, search terms, and the landing page before spending more.`,
           href: "/budget",
         })
       }

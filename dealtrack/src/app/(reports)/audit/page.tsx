@@ -51,7 +51,7 @@ export default async function AuditPage() {
     <>
       <PageHeader
         title="Go-live audit"
-        description="Grades the account against the go-live checklist (d6) and PPC basics, in six areas plus the checks only a person can confirm. Every check reads the live account each time this page opens. Grades: pass counts fully, a warning counts half, and anything to fix or still unchecked counts zero."
+        description="Grades the account against go-live and PPC basics, in six areas plus the checks only a person can confirm. Every check reads the live account each time this page opens. Grades: pass counts fully, a warning counts half, and anything to fix or still unchecked counts zero."
       />
       {!result.ok ? <ReportProblem problem={result} /> : <Body audit={result.data} personName={await currentName()} />}
     </>
@@ -119,7 +119,6 @@ function Body({ audit, personName }: { audit: Audit; personName: string }) {
             items={manual.checks.map((c) => ({
               id: c.id,
               title: c.title,
-              plan: c.plan,
               done: c.status === "pass",
               by: c.manual?.by,
               when: c.manual?.at ? when(c.manual.at) : undefined,
@@ -175,7 +174,6 @@ function CheckRow({ check: c }: { check: Check }) {
             {c.fix}
           </span>
         )}
-        {c.plan && <span className="text-xs text-muted-foreground">Plan: {c.plan}</span>}
       </div>
     </li>
   )

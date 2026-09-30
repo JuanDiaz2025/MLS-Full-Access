@@ -29,7 +29,7 @@ export default async function BudgetPage() {
     <>
       <PageHeader
         title="Budget & pacing"
-        description="This month's Google Ads spend against the monthly budget: where the month is heading, the daily spend needed to land on budget, and the alert and pause lines from the budget decision (d3). Nothing here changes Google Ads on its own; pausing is always an admin's click."
+        description="This month's Google Ads spend against the monthly budget: where the month is heading, the daily spend needed to land on budget, and the alert and pause lines. Nothing here changes Google Ads on its own; pausing is always an admin's click."
       />
       {!result.ok ? <ReportProblem problem={result} /> : <Body {...result.data} />}
     </>
@@ -87,7 +87,7 @@ async function Body({ data, pacing: p }: { data: Data; pacing: Pacing }) {
       <div className="flex flex-col gap-2">
         {nothingBack && (
           <Banner tone="red" title={`${formatUsd(p.spent)} spent this month with no leads`}>
-            Juan&apos;s rule (d1): putting {formatUsd(data.alerts.monthNoLeadSpend)}+ into a month and getting nothing back isn&apos;t acceptable.
+            Putting {formatUsd(data.alerts.monthNoLeadSpend)}+ into a month and getting nothing back isn&apos;t acceptable.
             Check tracking and search terms before spending more.
           </Banner>
         )}
@@ -183,7 +183,7 @@ async function Body({ data, pacing: p }: { data: Data; pacing: Pacing }) {
         description={
           b.updatedAt
             ? `Set by ${b.updatedBy ?? "someone"} on ${new Date(b.updatedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}. Saved on this computer.`
-            : "Not set yet. Juan's floor from decision d3: at least $1,500 a day. Kristine's budget proposal sets the monthly total and the two lines. Saved on this computer."
+            : "Not set yet. Set the monthly total and the two lines here. Saved on this computer."
         }
       >
         {admin ? (

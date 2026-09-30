@@ -1,4 +1,4 @@
-// Go-live audit: grades the account against Juan's go-live checklist (decision d6) and PPC basics,
+// Go-live audit: grades the account against go-live basics,
 // in areas scored A–F like Optmyzr's PPC audit. Every check reads the live account; the few that
 // Google Ads can't show are manual checks a person ticks (saved locally).
 
@@ -20,7 +20,6 @@ export type Check = {
   status: CheckStatus
   detail: string
   fix?: string
-  plan?: string // action plan item or decision it maps to
   manual?: ManualCheck // for manual checks: who ticked it
 }
 
@@ -28,14 +27,14 @@ export type Area = { title: string; checks: Check[]; score: number | null; grade
 
 export type Audit = { areas: Area[]; score: number | null; grade: string }
 
-// Things only a person can confirm, with the action plan item and owner behind each.
+// Things only a person can confirm.
 export const MANUAL_CHECKS = [
-  { id: "click-id", title: "Click ID captured on every form and call", plan: "a5, a13 · Jonathan" },
-  { id: "test-lead", title: "A test lead ran from click to Google and showed up", plan: "a13 · Jonathan" },
-  { id: "after-hours", title: "After-hours calls and forms get answered", plan: "a10 · Cherry" },
-  { id: "call-form", title: "Acquisitions fills the call outcome form after every call", plan: "a7 · Cherry" },
-  { id: "retargeting", title: "Facebook retargeting is running", plan: "b5 · Cherry" },
-  { id: "baseline", title: "Baseline numbers saved before launch", plan: "d6" },
+  { id: "click-id", title: "Click ID captured on every form and call" },
+  { id: "test-lead", title: "A test lead ran from click to Google and showed up" },
+  { id: "after-hours", title: "After-hours calls and forms get answered" },
+  { id: "call-form", title: "Acquisitions fills the call outcome form after every call" },
+  { id: "retargeting", title: "Retargeting is running" },
+  { id: "baseline", title: "Baseline numbers saved before launch" },
 ] as const
 
 const points: Record<CheckStatus, number | null> = { pass: 1, warn: 0.5, fail: 0, manual: 0, info: null }
@@ -125,7 +124,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
         ? `${soft.map((a) => a.conversionAction.name).join(", ")} ${soft.length === 1 ? "counts as a conversion but isn't a lead" : "count as conversions but aren't leads"}. Google bids toward whatever counts.`
         : "Every primary conversion is a form, call, or lead stage.",
       fix: soft.length ? "In Google Ads → Goals, make these secondary so bidding ignores them." : undefined,
-      plan: "Conversions page",
     },
     {
       id: "conv-offline",
@@ -136,8 +134,7 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
         : lastUpload
           ? `The latest lead stage uploaded is from ${formatDay(lastUpload)}. With ads mostly off there are few new leads, so confirm the upload still runs before launch.`
           : "No lead stages were uploaded in the last 6 months, so Google can't learn which clicks become deals.",
-      fix: uploadFresh ? undefined : "Upload each lead's stage by click ID (Bryan's Apps Script, a8). Run one test lead through it (a13).",
-      plan: "d6 #1, a8",
+      fix: uploadFresh ? undefined : "Upload each lead's stage by click ID, and run one test lead through it.",
     },
     {
       id: "conv-calls",
@@ -149,7 +146,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
           ? `${shortCalls.map((a) => `${a.conversionAction.name} (${num(a.conversionAction.phoneCallDurationSeconds)}s)`).join(", ")} count shorter calls.`
           : `Call conversions count after ${Math.min(...callActions.map((a) => num(a.conversionAction.phoneCallDurationSeconds)))} seconds.`,
       fix: shortCalls.length || !callActions.length ? "Set the call length to 60 seconds in the call conversion's settings." : undefined,
-      plan: "d6, a16",
     },
   ]
 
@@ -178,7 +174,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
           ? `${notPresence.map((c) => c.campaign.name).join(", ")} also ${notPresence.length === 1 ? "shows" : "show"} ads to people outside who search about the area.`
           : "Running search campaigns target people located in their locations.",
       fix: notPresence.length ? "Campaign settings → Locations → Location options → Presence: people in or regularly in your locations." : undefined,
-      plan: "a3",
     },
     {
       id: "geo-inside",
@@ -189,10 +184,9 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
           ? "Running search campaigns have no location targets, so they show everywhere."
           : "No search campaign is running."
         : outsideTargets.length
-          ? `${plural(outsideTargets.length, "target")} reach past Juan's buy area: ${outsideTargets.slice(0, 8).map((p) => p.name).join(", ")}${outsideTargets.length > 8 ? "…" : ""}.`
+          ? `${plural(outsideTargets.length, "target")} reach past the buy area: ${outsideTargets.slice(0, 8).map((p) => p.name).join(", ")}${outsideTargets.length > 8 ? "…" : ""}.`
           : `All ${plural(targetIds.length, "location target")} are in the buy area.`,
       fix: outsideTargets.length ? "Target only the buy-area cities (SF through San Jose, plus Oakland, San Leandro, Hayward)." : undefined,
-      plan: "d2, a3",
     },
   ]
 
@@ -210,8 +204,7 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
         : negativeCount
           ? `${negativeCount.toLocaleString("en-US")} negatives on running campaigns (${campaignNegatives.length} on the campaigns, ${sharedNegatives} in shared lists).`
           : "Running search campaigns have no negative keywords.",
-      fix: negativeCount ? undefined : "Load the starting negative list (a9) from the Search terms page.",
-      plan: "d6 #2, a9",
+      fix: negativeCount ? undefined : "Add a starting negative list from the Search terms page.",
     },
     {
       id: "kw-match",
@@ -223,7 +216,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
           ? `${plural(broad.length, "broad match keyword")} in running campaigns. Broad match needs lots of conversion data to stay on target.`
           : `All ${plural(keywords.length, "keyword")} in running campaigns are phrase or exact match.`,
       fix: broad.length ? "Switch to phrase or exact until Google has conversion history." : undefined,
-      plan: "d6",
     },
   ]
 
@@ -258,7 +250,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
       status: !running.length ? "info" : disapproved.length ? "fail" : "pass",
       detail: !running.length ? "No ads are running." : disapproved.length ? `${plural(disapproved.length, "ad")} disapproved.` : `All ${plural(running.length, "running ad")} are approved.`,
       fix: disapproved.length ? "See the reasons on the Ads & creatives page." : undefined,
-      plan: "ag4",
     },
     {
       id: "ads-strength",
@@ -270,14 +261,12 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
           ? `${plural(weak.length, "ad")} rated Average or Poor${weak.some((a) => a.pinned >= 3) ? "; heavy pinning is part of it" : ""}.`
           : "All running responsive ads are rated Good or better.",
       fix: weak.length ? "Add distinct headlines, unpin most of them, and use all 4 descriptions." : undefined,
-      plan: "ag4",
     },
     {
       id: "lp-loads",
       title: "Landing pages behind running ads load",
       status: !urls.length ? "info" : broken.length ? "fail" : "pass",
       detail: !urls.length ? "No ads are running." : broken.length ? `${broken.map((b) => b.u).join(", ")} ${broken.length === 1 ? "doesn't" : "don't"} load.` : `${plural(urls.length, "page")} checked; all load.`,
-      plan: "a12, ag4",
     },
     {
       id: "lp-speed",
@@ -291,7 +280,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
             ? slow.map((s) => `${s.u.replace(/^https?:\/\/(www\.)?/, "")} scores ${s.speed.ok ? s.speed.data.performance : "?"}`).join(", ") + " on mobile."
             : "Every landing page scores 50+ on mobile.",
       fix: slow.length ? "Remove or delay heavy third-party scripts, compress images, and cut form fields." : undefined,
-      plan: "a12 · Seth",
     },
   ]
 
@@ -309,7 +297,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
         budget.monthly && budget.alertLine && budget.pauseLine
           ? `$${budget.monthly.toLocaleString("en-US")} a month, alert at $${budget.alertLine.toLocaleString("en-US")}, pause at $${budget.pauseLine.toLocaleString("en-US")}.`
           : "Set them on the Budget & pacing page, so spend is watched from day one.",
-      plan: "d3, xjuan1",
     },
     {
       id: "budget-learn",
@@ -321,7 +308,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
           ? "No lead history to compare with."
           : `Seller campaigns budget $${Math.round(sellerDaily).toLocaleString("en-US")}/day against about $${Math.round(cpl).toLocaleString("en-US")} per lead over the last 12 months.`,
       fix: sellerSearch.length && cpl !== null && sellerDaily < cpl ? "Google learns slowly with less than about one lead a day." : undefined,
-      plan: "d3",
     },
   ]
 
@@ -333,12 +319,11 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
       status: sellerSearch.length === 1 ? "pass" : sellerSearch.length === 0 ? "info" : "warn",
       detail:
         sellerSearch.length === 0
-          ? "The relaunch campaign isn't running yet (a4)."
+          ? "No seller campaign is running yet."
           : sellerSearch.length === 1
             ? `${sellerSearch[0].campaign.name} is the one seller campaign.`
             : `${sellerSearch.length} seller campaigns are running: ${sellerSearch.map((c) => c.campaign.name).join(", ")}.`,
-      fix: sellerSearch.length > 1 ? "Juan's decision d4: one campaign with ad groups; pause the others." : undefined,
-      plan: "d4, a4",
+      fix: sellerSearch.length > 1 ? "Run one seller campaign with several ad groups, and pause the others." : undefined,
     },
     {
       id: "ad-schedule",
@@ -349,7 +334,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
         : schedule.length
           ? `An ad schedule is set (${plural(schedule.length, "time slot")}). Confirm it matches the hours Acquisitions answers.`
           : "No ad schedule: ads run around the clock, so night and weekend leads need after-hours coverage.",
-      plan: "d6, b4, a10",
     },
   ]
 
@@ -360,7 +344,6 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
       title: m.title,
       status: tick?.done ? "pass" : "manual",
       detail: tick?.done ? `Confirmed by ${tick.by}.` : "Google Ads can't see this. Tick it once someone has checked.",
-      plan: m.plan,
       manual: tick,
     }
   })

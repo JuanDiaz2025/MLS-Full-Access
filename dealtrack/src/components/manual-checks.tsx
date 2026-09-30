@@ -10,7 +10,7 @@ import { Pill } from "@/components/pill"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-export type ManualItem = { id: string; title: string; plan?: string; done: boolean; by?: string; when?: string }
+export type ManualItem = { id: string; title: string; done: boolean; by?: string; when?: string }
 
 export default function ManualChecks({ items, personName }: { items: ManualItem[]; personName: string }) {
   const [name, setName] = useState(personName)
@@ -47,7 +47,6 @@ export default function ManualChecks({ items, personName }: { items: ManualItem[
               </span>
               <span className="text-xs text-muted-foreground">
                 {m.done ? `Checked by ${m.by}${m.when ? ` on ${m.when}` : ""}` : "Not checked yet"}
-                {m.plan ? ` · Plan: ${m.plan}` : ""}
               </span>
             </div>
             <Button size="sm" variant={m.done ? "outline" : "default"} disabled={saving !== null} onClick={() => toggle(m.id, !m.done)}>

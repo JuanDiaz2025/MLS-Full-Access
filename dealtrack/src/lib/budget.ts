@@ -1,5 +1,5 @@
 // Budget pacing for the current month: spend so far against the monthly budget, where the month
-// is heading, and the alert and pause lines (decision d3). Settings come from the local store.
+// is heading, and the alert and pause lines. Settings come from the local store.
 
 import { addDays, today, type DateRange } from "@/lib/date-range"
 import { gaql } from "@/lib/google-ads/client"

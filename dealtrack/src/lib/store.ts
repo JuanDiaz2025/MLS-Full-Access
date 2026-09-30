@@ -27,7 +27,7 @@ export type AlertSettings = {
   maxCostPerLead: Money // alert when the last 14 days' cost per lead is above this
   noLeadDays: number // alert after this many days of spend with no leads…
   noLeadSpend: number // …once at least this much was spent in them
-  monthNoLeadSpend: number // Juan's rule: this much in a month with nothing back
+  monthNoLeadSpend: number // this much in a month with nothing back
   invalidClickRate: number // alert when a month's invalid-click share is above this (0–1)
   updatedBy?: string
   updatedAt?: string
@@ -54,9 +54,9 @@ export type BatchItem = {
   clicks: number
   cost: number
   conversions: number
-  proven: boolean | null // Seth: the evidence holds up (null = not reviewed yet)
+  proven: boolean | null // review: the evidence holds up (null = not reviewed yet)
   provenBy?: string
-  approved: boolean | null // PPC owner: approve or reject (null = not reviewed yet)
+  approved: boolean | null // approval: approve or reject (null = not reviewed yet)
   approvedBy?: string
 }
 
@@ -105,7 +105,7 @@ export const DEFAULT_ALERTS: AlertSettings = {
   maxCostPerLead: null,
   noLeadDays: 3,
   noLeadSpend: 1000,
-  monthNoLeadSpend: 20000, // Juan, decision d1: $20K+ in a month with nothing back is not acceptable
+  monthNoLeadSpend: 20000,
   invalidClickRate: 0.25,
 }
 

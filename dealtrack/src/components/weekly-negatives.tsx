@@ -1,6 +1,6 @@
 "use client"
 
-// The weekly negative keyword routine: draft, prove (Seth), approve (PPC owner), push (admin), and
+// The weekly negative keyword routine: draft, review, approve, push (admin), and
 // the result check a week later. Every step records the name typed at the top.
 
 import { useState, useTransition, type ReactNode } from "react"
@@ -45,7 +45,7 @@ type Props = {
 
 const stageLabel: Record<Stage, { tone: PillTone; label: string }> = {
   empty: { tone: "gray", label: "Nothing to add" },
-  proving: { tone: "violet", label: "Seth is proving" },
+  proving: { tone: "violet", label: "In review" },
   approving: { tone: "violet", label: "Waiting for approval" },
   ready: { tone: "amber", label: "Ready to push" },
   "nothing-approved": { tone: "gray", label: "Nothing approved" },
@@ -131,8 +131,8 @@ export default function WeeklyNegatives({ batches, weeks, campaigns, admin, admi
 function Steps({ b }: { b: BatchView }) {
   const steps = [
     { key: "drafted", done: "Drafted", todo: "Draft", who: b.drafted.by },
-    { key: "proven", done: "Proved", todo: "Seth proves", who: b.proven?.by },
-    { key: "approved", done: "Approved", todo: "PPC owner approves", who: b.approved?.by },
+    { key: "proven", done: "Reviewed", todo: "Review", who: b.proven?.by },
+    { key: "approved", done: "Approved", todo: "Approve", who: b.approved?.by },
     { key: "pushed", done: b.pushed?.dryRun ? "Pushed (dry run)" : "Pushed", todo: "Admin pushes", who: b.pushed?.by },
     { key: "checked", done: "Result checked", todo: "Result check", who: b.checked?.by },
   ] as const
@@ -279,8 +279,8 @@ function BatchCard({
                 <th scope="col" className="px-4 py-2 font-medium">Evidence: searches it blocks</th>
                 <th scope="col" className="px-4 py-2 text-right font-medium">Clicks</th>
                 <th scope="col" className="px-4 py-2 text-right font-medium">Spend</th>
-                <th scope="col" className="px-4 py-2 font-medium">Proof (Seth)</th>
-                <th scope="col" className="px-4 py-2 font-medium sm:pr-5">Approval (PPC owner)</th>
+                <th scope="col" className="px-4 py-2 font-medium">Review</th>
+                <th scope="col" className="px-4 py-2 font-medium sm:pr-5">Approval</th>
               </tr>
             </thead>
             <tbody>
@@ -344,7 +344,7 @@ function BatchCard({
       <div className="flex flex-wrap items-center gap-2">
         {proving && (
           <Button type="button" disabled={busy !== null || openProof > 0} onClick={() => run(k("prove"), () => finishNegativeStep(b.id, "proven", name))}>
-            {busy === k("prove") ? "Saving…" : openProof ? `Proof done (${openProof} left)` : "Proof done"}
+            {busy === k("prove") ? "Saving…" : openProof ? `Review done (${openProof} left)` : "Review done"}
           </Button>
         )}
         {approving && (
@@ -353,7 +353,7 @@ function BatchCard({
               {busy === k("approve") ? "Saving…" : openApproval ? `Approval done (${openApproval} left)` : "Approval done"}
             </Button>
             <Button type="button" variant="outline" disabled={busy !== null} onClick={() => run(k("reopen-p"), () => reopenNegativeStep(b.id, "proven", name))}>
-              Reopen proof
+              Reopen review
             </Button>
           </>
         )}
@@ -364,7 +364,7 @@ function BatchCard({
         )}
         {b.stage === "nothing-approved" && !b.approved && b.proven && (
           <Button type="button" variant="outline" disabled={busy !== null} onClick={() => run(k("reopen-p"), () => reopenNegativeStep(b.id, "proven", name))}>
-            Reopen proof
+            Reopen review
           </Button>
         )}
         {!b.pushed && (
@@ -441,7 +441,7 @@ function PushPanel({
       <p className="text-sm font-medium">
         Push {lines.length} approved negative{lines.length === 1 ? "" : "s"} to Google Ads in one change
       </p>
-      {sameName && <p className="text-xs text-amber-900">The same person proved and approved this batch. The plan has a second person approve.</p>}
+      {sameName && <p className="text-xs text-amber-900">The same person reviewed and approved this batch. A second person usually approves.</p>}
       {brakeNote ? (
         <p className="text-sm">{brakeNote}</p>
       ) : !admin ? (

@@ -1,8 +1,8 @@
-// The weekly negative keyword routine, in five steps (action plan):
+// The weekly negative keyword routine, in five steps:
 //   1. Draft: last week's search terms that match a rule in negatives.ts and brought no
 //      conversions, grouped into one line per negative keyword, with the evidence.
-//   2. Prove (Seth): each line's evidence holds up, or it's dropped.
-//   3. Approve (PPC owner): each proven line is approved or rejected.
+//   2. Review: each line's evidence holds up, or it's dropped.
+//   3. Approve: each reviewed line is approved or rejected.
 //   4. Push (admin): the approved lines go to Google Ads in one change. One batch a week, so
 //      Google's learning isn't shaken up by constant changes (the brake check).
 //   5. Check (a week later): did spend on the blocked searches stop, and did leads hold up?
@@ -76,8 +76,8 @@ const MAX_WORD_LINES = 10
 
 // Words (and two-word phrases) in last week's searches that cost money and never converted in the
 // last 90 days, and aren't a buy-area place, a keyword we bid on, or seller language: Optmyzr's
-// n-gram waste analysis. "sell my timeshare" makes "timeshare" a candidate. These need Seth's
-// proof like every other line.
+// n-gram waste analysis. "sell my timeshare" makes "timeshare" a candidate. These need a
+// review like every other line.
 function wasteWords(week: SearchTermRow[], history: SearchTermRow[], keywordWords: Set<string>) {
   const grams = new Map<string, { cost: number; clicks: number; terms: SearchTermRow[] }>()
   for (const t of week) {
