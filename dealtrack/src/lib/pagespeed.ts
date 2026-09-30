@@ -51,7 +51,7 @@ export function getPageSpeed(url: string): Promise<PageSpeed> {
         .slice(0, 3)
         .map((i) => (typeof i.entity === "string" ? i.entity : (i.entity?.text ?? "Unknown"))),
     }
-  })
+  }, { staleMs: 7 * 24 * HOUR })
 }
 
 export type PageCheck = {
@@ -67,13 +67,13 @@ export type PageCheck = {
 export function domainResolves(host: string): Promise<boolean> {
   return cached(`dns:${host}`, HOUR, async () => {
     try {
-      const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(host)}&type=A`, { cache: "no-store" })
+      const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(host)}&type=A`, { cache: "no-store", signal: AbortSignal.timeout(5000) })
       const body = (await res.json()) as { Status?: number }
       return body.Status === 0
     } catch {
       return true // can't tell: don't raise a false alarm
     }
-  })
+  }, { staleMs: 24 * HOUR })
 }
 
 // The site's firewall answers 403 to HEAD and bot-looking requests, so this is a normal GET
@@ -91,6 +91,7 @@ export function checkPage(url: string): Promise<PageCheck> {
         },
         redirect: "follow",
         cache: "no-store",
+        signal: AbortSignal.timeout(8000), // a hung server counts as unreachable instead of stalling the page
       })
       if (!res.ok) return { status: res.status, resolves: true, ...empty }
       const html = await res.text()
@@ -109,5 +110,5 @@ export function checkPage(url: string): Promise<PageCheck> {
     } catch {
       return { status: null, resolves: true, ...empty } // timed out or refused: shown as unreachable
     }
-  })
+  }, { staleMs: 24 * HOUR })
 }

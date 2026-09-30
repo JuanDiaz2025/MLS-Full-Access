@@ -5,6 +5,8 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
+import { NAVIGATE_EVENT } from "@/components/nav-progress"
+
 export default function MetricPicker({ options, m1, m2 }: { options: { id: string; label: string }[]; m1: string; m2: string }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -13,6 +15,7 @@ export default function MetricPicker({ options, m1, m2 }: { options: { id: strin
   const set = (key: "m1" | "m2", value: string) => {
     const next = new URLSearchParams(params.toString())
     next.set(key, value)
+    window.dispatchEvent(new Event(NAVIGATE_EVENT))
     router.push(`${pathname}?${next}`, { scroll: false })
   }
 

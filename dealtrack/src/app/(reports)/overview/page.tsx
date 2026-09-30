@@ -6,6 +6,7 @@ import CompareChart from "@/components/dashboard/compare-chart"
 import { formatConversions, formatDate, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
 import TrendKpis from "@/components/dashboard/trend-kpis"
 import MetricPicker from "@/components/metric-picker"
+import RefreshButton from "@/components/refresh-button"
 import { DataTable, PageHeader, Pill, ReportProblem, Section, StatusPill } from "@/components/report"
 import { bySeverity, checkAlerts, googleAdsRules } from "@/lib/alert-rules"
 import { getPacing, type Pacing } from "@/lib/budget"
@@ -47,20 +48,23 @@ export default async function OverviewPage({
   const q = rangeQuery(range)
   const m1 = metricById(first(params.m1)) ?? metricById("cost")!
   const m2 = first(params.m2) === "none" ? null : (metricById(first(params.m2)) ?? (m1.id === "leads" ? metricById("cost")! : metricById("leads")!))
-  const result = await load(async () => {
-    const [account, overview, campaigns, terms, locations] = await Promise.all([
-      getAccount(),
-      getOverview(range),
-      getCampaigns(range),
-      getSearchTerms(range),
-      getLocations(range),
-    ])
-    return { account, overview, campaigns, terms, locations }
-  })
-  // Pacing first, then the alert rules, which reuse its (cached) numbers.
-  const saved = await load(() => readData())
-  const pacing = saved.ok ? await load(() => getPacing(saved.data.budget)) : saved
-  const alerts = saved.ok ? await load(() => checkAlerts(googleAdsRules(saved.data))) : saved
+  // Everything at once; identical Google Ads queries from different parts share one request.
+  const savedData = load(() => readData())
+  const [result, saved, pacing, alerts] = await Promise.all([
+    load(async () => {
+      const [account, overview, campaigns, terms, locations] = await Promise.all([
+        getAccount(),
+        getOverview(range),
+        getCampaigns(range),
+        getSearchTerms(range),
+        getLocations(range),
+      ])
+      return { account, overview, campaigns, terms, locations }
+    }),
+    savedData,
+    savedData.then((s) => (s.ok ? load(() => getPacing(s.data.budget)) : s)),
+    savedData.then((s) => (s.ok ? load(() => checkAlerts(googleAdsRules(s.data))) : s)),
+  ])
 
   if (!result.ok) {
     return (
@@ -127,9 +131,10 @@ export default async function OverviewPage({
         <span>
           <span className="font-medium text-emerald-700">Connected to Google Ads.</span>{" "}
           {fetchedAt
-            ? `Data fetched at ${new Date(fetchedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" })} Pacific. It refreshes every 10 minutes.`
+            ? `Data fetched at ${new Date(fetchedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" })} Pacific. Older than 10 minutes, it's updated in the background.`
             : "Live data."}
         </span>
+        <RefreshButton />
       </p>
 
       <StatusCards pacing={pacing} alerts={alerts} batches={saved.ok ? saved.data.batches : null} />

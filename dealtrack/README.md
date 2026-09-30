@@ -87,6 +87,8 @@ Without `ADMIN_PASSWORD`, nobody can make changes and the dashboard is read-only
 
 4. Open http://localhost:3000.
 
+**Faster for everyday use:** `npm run dev` compiles each page the first time you open it, which adds a few seconds per page. `start.bat` (or `npm run build` then `npm start`) runs the finished build and is much quicker.
+
 **Windows:** double-click `start.bat`. The first time, it creates `.env.local` and opens it in Notepad so you can paste in the keys. Run it again after saving, and it installs everything and opens the dashboard. It runs the production build, so it takes about a minute to start. For editing the code, use `npm run dev` instead.
 
 ## Settings
@@ -110,9 +112,17 @@ All settings are environment variables. On your computer they go in `.env.local`
 | `CLARITY_API_TOKEN` | Alerts. Clarity → Settings → Data export. Allows ~10 calls a day, so results are cached 3 hours |
 | `PAGESPEED_API_KEY` | Landing pages, Go-live audit. Google Cloud → enable PageSpeed Insights API → Credentials → Create API key |
 | `DEALTRACK_DATA_DIR` | Optional. Where the saved data goes (default: `.data` in this folder) |
+| `DEALTRACK_WARMUP` | Optional. `0` stops the startup warm-up (see Speed) |
 | `DEALTRACK_VALIDATE_ONLY` | Optional. `1` turns on dry-run mode: Google checks every change and applies nothing |
 
 If a value is missing, the page that needs it says which one; the other pages keep working.
+
+## Speed
+
+- When the server starts, it fetches the reports people open first (the Overview, alert rules, landing page tests, the go-live audit) in the background, so the first visit doesn't wait. It prints "DealTrack: reports ready" when done, usually within a minute.
+- Google Ads reports are fresh for 10 minutes. After that, for up to 6 hours, the last result shows at once and a new one is fetched in the background. "Refresh now" on the Overview fetches everything again.
+- PageSpeed results are kept 12 hours (and shown for up to a week while a new test runs), since each test takes 10–30 seconds.
+- A bar across the top shows a page is loading, and slow pages show what they're waiting for.
 
 ## How it works
 

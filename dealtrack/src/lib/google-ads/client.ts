@@ -7,9 +7,12 @@ const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v22"
 const ADS_ENDPOINT = "https://googleads.googleapis.com"
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
-// Report results are kept for 10 minutes. Explorer access allows 2,880 API operations a day, so
-// clicking around the dashboard shouldn't spend a new operation on every page view.
+// Report results are fresh for 10 minutes. Explorer access allows 2,880 API operations a day, so
+// clicking around the dashboard shouldn't spend a new operation on every page view. After that,
+// for up to 6 hours, the last result is shown straight away while a fresh one is fetched in the
+// background for the next view, so pages don't wait on Google.
 const CACHE_MS = 10 * 60 * 1000
+const STALE_MS = 6 * 60 * 60 * 1000
 
 export const REQUIRED_KEYS = [
   "GOOGLE_ADS_DEVELOPER_TOKEN",
@@ -130,7 +133,16 @@ function explain(status: number, body: ApiErrorBody | undefined): GoogleAdsError
   return new GoogleAdsError("Google Ads returned an error for this report.", detail)
 }
 
-const cache = new Map<string, { at: number; rows: unknown[] }>()
+// Kept on globalThis so the startup warm-up (instrumentation.ts) and the pages share one cache.
+const shared = globalThis as typeof globalThis & {
+  __dealtrackAds?: { cache: Map<string, { at: number; rows: unknown[] }>; inflight: Map<string, Promise<unknown[]>> }
+}
+const { cache, inflight } = (shared.__dealtrackAds ??= { cache: new Map(), inflight: new Map() })
+
+// Forgets every cached report, so the next view asks Google again.
+export function clearReportCache() {
+  cache.clear()
+}
 
 // When the data on screen was fetched from Google (a cached result keeps its original time).
 let lastDataAt: number | null = null
@@ -184,18 +196,32 @@ export async function gaql<Row>(query: string): Promise<Row[]> {
   const cfg = config()
   const key = `${cfg.customerId}\n${query}`
   const hit = cache.get(key)
-  if (hit && Date.now() - hit.at < CACHE_MS) {
+  const age = hit ? Date.now() - hit.at : Infinity
+  if (hit && age < STALE_MS) {
+    // Stale: show it now, refresh quietly for next time.
+    if (age >= CACHE_MS) fetchRows(cfg, key, query).catch(() => undefined)
     lastDataAt = hit.at
     return hit.rows as Row[]
   }
+  return (await fetchRows(cfg, key, query)) as Row[]
+}
 
-  const body = await call(cfg, "googleAds:searchStream", { query })
-  const batches = (Array.isArray(body) ? body : []) as { results?: Row[] }[]
-  const rows = batches.flatMap((batch) => batch.results ?? [])
-  const at = Date.now()
-  cache.set(key, { at, rows })
-  lastDataAt = at
-  return rows
+// One request per query at a time: pages that ask for the same report at once share it.
+function fetchRows(cfg: AdsConfig, key: string, query: string): Promise<unknown[]> {
+  const running = inflight.get(key)
+  if (running) return running
+  const request = call(cfg, "googleAds:searchStream", { query })
+    .then((body) => {
+      const batches = (Array.isArray(body) ? body : []) as { results?: unknown[] }[]
+      const rows = batches.flatMap((batch) => batch.results ?? [])
+      const at = Date.now()
+      cache.set(key, { at, rows })
+      lastDataAt = at
+      return rows
+    })
+    .finally(() => inflight.delete(key))
+  inflight.set(key, request)
+  return request
 }
 
 // ---- Changes --------------------------------------------------------------------------------

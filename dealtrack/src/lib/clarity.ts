@@ -54,5 +54,5 @@ export function getClarity(): Promise<ClaritySnapshot> {
       avgScrollDepth: scroll === undefined || scroll === null ? null : Number(scroll),
       fetchedAt: Date.now(),
     }
-  })
+  }, { staleMs: 24 * HOUR })
 }

@@ -78,10 +78,10 @@ export type HealthIssue = {
 
 // Enabled ads in enabled or paused campaigns whose page is gone. Critical when the campaign is live.
 export async function brokenDestinations(destinations: AdDestination[]): Promise<HealthIssue[]> {
-  // Eight at a time, so ~100 ad URLs don't hit the website all at once.
+  // Sixteen at a time, so ~100 ad URLs don't hit the website all at once.
   const checks: { d: AdDestination; page: Awaited<ReturnType<typeof checkPage>> }[] = []
-  for (let i = 0; i < destinations.length; i += 8) {
-    const batch = destinations.slice(i, i + 8)
+  for (let i = 0; i < destinations.length; i += 16) {
+    const batch = destinations.slice(i, i + 16)
     checks.push(...(await Promise.all(batch.map(async (d) => ({ d, page: await checkPage(d.url) })))))
   }
   const broken = checks

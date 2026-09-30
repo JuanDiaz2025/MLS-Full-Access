@@ -1,9 +1,12 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 
 import { formatConversions, formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
+import PageLoading from "@/components/page-loading"
 import { DataTable, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
 import { parseRange } from "@/lib/date-range"
-import { emptyMetrics, getAdDestinations, getLandingPages, type AdDestination, type LandingPageRow } from "@/lib/google-ads/reports"
+import { getAdDestinations, getLandingPages, type AdDestination, type LandingPageRow } from "@/lib/google-ads/reports"
+import { AUDITED, pagesToAudit } from "@/lib/landing-audit"
 import { load, type Loaded } from "@/lib/load"
 import { checkPage, getPageSpeed, type PageCheck, type PageSpeed } from "@/lib/pagespeed"
 import { getPageStats } from "@/lib/posthog"
@@ -11,7 +14,6 @@ import { getPageStats } from "@/lib/posthog"
 export const metadata: Metadata = { title: "Landing pages · DealTrack" }
 
 // PageSpeed runs take 10–30 seconds each, so only the pages with the most spend are tested.
-const AUDITED = 8
 const OTHERS_SHOWN = 25
 
 type Audited = LandingPageRow & {
@@ -49,10 +51,12 @@ export default async function LandingPagesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const range = parseRange(await searchParams)
-  const result = await load(() => getLandingPages(range))
-  const destinations = await load(() => getAdDestinations())
   // Visitor numbers are a bonus: the audit still works without PostHog.
-  const stats = await load(() => getPageStats(range))
+  const [result, destinations, stats] = await Promise.all([
+    load(() => getLandingPages(range)),
+    load(() => getAdDestinations()),
+    load(() => getPageStats(range)),
+  ])
 
   return (
     <>
@@ -71,11 +75,14 @@ export default async function LandingPagesPage({
               {stats.kind === "missing" ? ` (add ${stats.keys.join(", ")})` : `: ${stats.message.replace(/\.$/, "")}`}.
             </p>
           )}
-          <Body
-            pages={result.data}
-            live={destinations.ok ? destinations.data.filter((d) => d.campaigns.some((c) => c.status === "ENABLED")) : []}
-            stats={stats.ok ? stats.data : undefined}
-          />
+          {/* The page tests take a while the first time; everything above shows right away. */}
+          <Suspense fallback={<PageLoading message="Testing each page with PageSpeed. The first run can take up to 30 seconds." />}>
+            <Body
+              pages={result.data}
+              live={destinations.ok ? destinations.data.filter((d) => d.campaigns.some((c) => c.status === "ENABLED")) : []}
+              stats={stats.ok ? stats.data : undefined}
+            />
+          </Suspense>
         </>
       )}
     </>
@@ -94,18 +101,7 @@ async function Body({
   if (!pages.length && !live.length) {
     return <p className="rounded-2xl border bg-card p-5 text-sm">No running ads and no ad clicks in this date range.</p>
   }
-  const liveUrls = new Set(live.map((d) => d.url))
-  const spent = new Map(pages.map((p) => [p.url, p]))
-  // Running ads first (with this period's results, if any), then the most-spent other pages.
-  const toAudit: (LandingPageRow & { live: boolean })[] = [
-    ...live.map((d) => ({
-      url: d.url,
-      campaigns: d.campaigns.filter((c) => c.status === "ENABLED").map((c) => c.name),
-      metrics: spent.get(d.url)?.metrics ?? emptyMetrics(),
-      live: true,
-    })),
-    ...pages.filter((p) => !liveUrls.has(p.url)).map((p) => ({ ...p, live: false })),
-  ].slice(0, AUDITED)
+  const toAudit = pagesToAudit(pages, live)
 
   const audited: Audited[] = await Promise.all(
     toAudit.map(async (p) => {

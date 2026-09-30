@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 
 import AppHeader from "@/components/app-header"
+import NavProgress from "@/components/nav-progress"
 import { changesEnabled, isAdmin, isSignedIn, openWithoutPassword } from "@/lib/auth"
 
 // Every report page sits behind the team password.
@@ -16,6 +17,9 @@ export default async function ReportsLayout({ children }: { children: React.Reac
 
   return (
     <div className="flex flex-1 flex-col">
+      <Suspense fallback={null}>
+        <NavProgress />
+      </Suspense>
       <Suspense fallback={<div className="h-28 border-b" />}>
         <AppHeader showSignOut={!open || admin} admin={admin} canSignInAsAdmin={changesEnabled()} />
       </Suspense>
