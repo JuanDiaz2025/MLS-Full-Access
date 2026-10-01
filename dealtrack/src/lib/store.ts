@@ -162,6 +162,10 @@ export type KeywordBatch = {
 // Go-live checks that Google Ads can't show (e.g. after-hours coverage), ticked by a person.
 export type ManualCheck = { done: boolean; by: string; at: string }
 
+// An internet connection the team marked as its own (the office, a VA's home), so its ad clicks
+// aren't treated as an attack. Matched on the network the Fraud page shows (an IP or an IPv6 /64).
+export type KnownNetwork = { network: string; label: string; by: string; at: string }
+
 export type Data = {
   version: 1
   budget: BudgetSettings
@@ -170,6 +174,7 @@ export type Data = {
   batches: NegativeBatch[]
   keywordBatches: KeywordBatch[]
   audit: Record<string, ManualCheck>
+  knownNetworks: KnownNetwork[]
 }
 
 export const DEFAULT_ALERTS: AlertSettings = {
@@ -188,6 +193,7 @@ const empty = (): Data => ({
   batches: [],
   keywordBatches: [],
   audit: {},
+  knownNetworks: [],
 })
 
 // Lines saved before an idea could go into several ad groups had one ad group on the line itself.
@@ -220,6 +226,7 @@ export async function readData(): Promise<Data> {
           }))
         : [],
       audit: saved.audit && typeof saved.audit === "object" ? saved.audit : {},
+      knownNetworks: Array.isArray(saved.knownNetworks) ? saved.knownNetworks : [],
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return empty()

@@ -16,6 +16,7 @@ export const navGroups = [
     label: "Monitor",
     links: [
       { href: "/alerts", label: "Alerts" },
+      { href: "/fraud", label: "Fraud" },
       { href: "/budget", label: "Budget & pacing" },
       { href: "/quality-score", label: "Quality Score" },
     ],

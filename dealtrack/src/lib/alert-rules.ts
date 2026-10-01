@@ -9,6 +9,7 @@
 import { formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
 import { getPacing } from "@/lib/budget"
 import { addDays, formatDay, today } from "@/lib/date-range"
+import { fraudRules } from "@/lib/fraud/alerts"
 import { getCalls } from "@/lib/google-ads/calls"
 import { gaql } from "@/lib/google-ads/client"
 import { getSeries, type Bucket } from "@/lib/google-ads/overview"
@@ -285,7 +286,7 @@ export function googleAdsRules(data: Data): RuleGroup[] {
   const end = today()
   let series: Promise<Bucket[]> | null = null
   const days = () => (series ??= getSeries({ from: addDays(end, -34), to: end, label: "Last 35 days" }, "day"))
-  return [budgetRules(data), ...dailyRules(data, days), adRules(), callRules()]
+  return [budgetRules(data), ...dailyRules(data, days), adRules(), callRules(), ...fraudRules(data)]
 }
 
 // ---- History --------------------------------------------------------------------------------
