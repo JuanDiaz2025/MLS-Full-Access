@@ -176,7 +176,7 @@ const MAX_WORD_LINES = 10
 function wasteWords(week: SearchTermRow[], history: SearchTermRow[], keywordWords: Set<string>) {
   const grams = new Map<string, { cost: number; clicks: number; terms: SearchTermRow[] }>()
   for (const t of week) {
-    if (t.rule || t.metrics.conversions > 0 || t.status.includes("EXCLUDED") || !t.metrics.cost) continue
+    if (t.rule || t.metrics.conversions > 0 || !t.metrics.cost) continue
     const words = t.term.toLowerCase().split(/\s+/).filter(Boolean)
     const seen = new Set<string>()
     for (let n = 1; n <= 2; n++) {
@@ -259,7 +259,9 @@ export async function draftBatch(scope: Scope): Promise<Draft> {
   // One line per suggested negative, from searches that cost money and brought nothing.
   const groups = new Map<string, { why: string; evenForSellers: boolean; rows: SearchTermRow[] }>()
   for (const t of terms) {
-    if (!t.rule || !t.suggestion || t.metrics.conversions > 0 || t.status.includes("EXCLUDED")) continue
+    // No status check: "excluded" can mean excluded in just one campaign. stillOpen() already took
+    // out the campaigns and ad groups where a negative blocks it.
+    if (!t.rule || !t.suggestion || t.metrics.conversions > 0) continue
     if (!(t.metrics.clicks > 0 || t.metrics.cost > 0)) continue
     const g = groups.get(t.suggestion) ?? { why: t.rule.reason, evenForSellers: !!t.rule.evenForSellers, rows: [] }
     g.rows.push(t)

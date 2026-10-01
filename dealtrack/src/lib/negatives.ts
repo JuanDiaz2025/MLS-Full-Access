@@ -16,8 +16,8 @@ export const negativeRules: NegativeRule[] = [
   {
     id: "agent",
     reason: "Looking for an agent, not a cash buyer",
-    negatives: ["realtor", "real estate agent", "listing agent"],
-    pattern: /\b(realtors?|real estate agents?|listing agents?|broker)\b/i,
+    negatives: ["realtor", "real estate agent", "listing agent", "mls", "flat fee", "homes for heroes"],
+    pattern: /\b(realtors?|real estate agents?|listing agents?|broker|mls|flat fee|homes for heroes)\b/i,
   },
   {
     id: "buyer",
@@ -64,10 +64,11 @@ export const negativeRules: NegativeRule[] = [
     negatives: [
       "opendoor", "open door", "offerpad", "orchard", "sellfast", "homevestors", "we buy ugly houses", "we buy ugly homes",
       "john buys", "laurel buys houses", "capital home buyers", "fair home buyers", "local home buyers inc", "24 home buyer",
-      "just home buyers", "turtle home buyer", "naca",
+      "just home buyers", "turtle home buyer", "naca", "clever offers", "clever real estate", "liz buys", "homelight",
+      "redfinnow", "redfin now", "flyhomes", "jeff buys", "bobby buys", "sunomi",
     ],
     pattern:
-      /\b(open ?door|offerpad|orchard(?! (ave|avenue|st|street|rd|road|dr|drive|ln|lane|way|blvd|ct|court|pl|place)\b)|sellfast(\.?com)?|sell fast ?\.?com|homevestors|we buy ugly (houses|homes)|john buys|laurel buys houses|capital home buyers|fair home buyers|local home buyers inc|24 home buyers?|just home buyers|turtle home buyers?|naca)\b/i,
+      /\b(open ?door|offerpad|orchard(?! (ave|avenue|st|street|rd|road|dr|drive|ln|lane|way|blvd|ct|court|pl|place)\b)|sellfast(\.?com)?|sell fast ?\.?com|homevestors|we buy ugly (houses|homes)|john buys|laurel buys houses|capital home buyers|fair home buyers|local home buyers inc|24 home buyers?|just home buyers|turtle home buyers?|naca|clever (cash )?offers?|clever real estate|clever home buying|liz buys|homelight|redfin ?now|flyhomes|jeff buys|bobby buys|sunomi)\b/i,
   },
   {
     id: "out-of-area",
