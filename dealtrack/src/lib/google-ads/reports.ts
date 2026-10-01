@@ -236,23 +236,32 @@ export type LocationRow = {
 export const GEO_RESOURCE = /^geoTargetConstants\/\d+$/
 
 // City names for geo target resource names ("geoTargetConstants/1014221"), looked up in batches.
-export async function geoNames(ids: string[]): Promise<Map<string, { name: string; canonical: string }>> {
-  const names = new Map<string, { name: string; canonical: string }>()
-  const valid = ids.filter((id) => GEO_RESOURCE.test(id))
-  for (let i = 0; i < valid.length; i += 200) {
-    const batch = valid.slice(i, i + 200).map((id) => `'${id}'`).join(", ")
-    const geo = await gaql<{ geoTargetConstant: { resourceName: string; name?: string; canonicalName?: string } }>(
-      `SELECT geo_target_constant.resource_name, geo_target_constant.name, geo_target_constant.canonical_name
-       FROM geo_target_constant WHERE geo_target_constant.resource_name IN (${batch})`,
+// Place names never change, so they're kept for as long as DealTrack runs. A year of city data
+// names thousands of places; new ones are fetched several batches at a time.
+type GeoName = { name: string; canonical: string }
+const geoCache = ((globalThis as { __dtGeoNames?: Map<string, GeoName> }).__dtGeoNames ??= new Map())
+const GEO_BATCH = 200
+const GEO_PARALLEL = 6
+
+export async function geoNames(ids: string[]): Promise<Map<string, GeoName>> {
+  const valid = [...new Set(ids.filter((id) => GEO_RESOURCE.test(id)))]
+  const missing = valid.filter((id) => !geoCache.has(id))
+  const batches: string[][] = []
+  for (let i = 0; i < missing.length; i += GEO_BATCH) batches.push(missing.slice(i, i + GEO_BATCH))
+  for (let i = 0; i < batches.length; i += GEO_PARALLEL) {
+    await Promise.all(
+      batches.slice(i, i + GEO_PARALLEL).map(async (batch) => {
+        const geo = await gaql<{ geoTargetConstant: { resourceName: string; name?: string; canonicalName?: string } }>(
+          `SELECT geo_target_constant.resource_name, geo_target_constant.name, geo_target_constant.canonical_name
+           FROM geo_target_constant WHERE geo_target_constant.resource_name IN (${batch.map((id) => `'${id}'`).join(", ")})`,
+        )
+        for (const g of geo) {
+          geoCache.set(g.geoTargetConstant.resourceName, { name: g.geoTargetConstant.name ?? "", canonical: g.geoTargetConstant.canonicalName ?? "" })
+        }
+      }),
     )
-    for (const g of geo) {
-      names.set(g.geoTargetConstant.resourceName, {
-        name: g.geoTargetConstant.name ?? "",
-        canonical: g.geoTargetConstant.canonicalName ?? "",
-      })
-    }
   }
-  return names
+  return new Map(valid.filter((id) => geoCache.has(id)).map((id) => [id, geoCache.get(id)!]))
 }
 
 // Long periods are asked for in pieces of this many days: a year of city data in one request
@@ -279,16 +288,22 @@ export type LocationKind = "presence" | "interest"
 
 export type CampaignLocationSplit = { id: string; name: string; status: string; presence: Metrics; interest: Metrics }
 
+export type CityCampaign = { id: string; name: string; status: string; metrics: Metrics }
+
 export type LocationData = {
   rows: LocationRow[]
+  // Per city (by key): the campaigns that showed ads there, costliest first.
+  cityCampaigns: Map<string, CityCampaign[]>
   byKind: Record<LocationKind, Metrics>
   byCampaign: CampaignLocationSplit[]
 }
 
 const kindOf = (t?: string): LocationKind => (t === "AREA_OF_INTEREST" ? "interest" : "presence")
 
-// Cities, the presence/interest split, and that split per campaign, from one report.
-export async function getLocationData(range: DateRange): Promise<LocationData> {
+// Cities, the presence/interest split, that split per campaign, and the campaigns in each city,
+// from one report. campaignId narrows it to one campaign.
+export async function getLocationData(range: DateRange, campaignId?: string): Promise<LocationData> {
+  const oneCampaign = campaignId && /^\d+$/.test(campaignId) ? ` AND campaign.id = ${campaignId}` : ""
   type Row = {
     segments?: { geoTargetCity?: string }
     geographicView?: { locationType?: string }
@@ -299,7 +314,7 @@ export async function getLocationData(range: DateRange): Promise<LocationData> {
     chunkRange(range).map((r) =>
       gaql<Row>(
         `SELECT segments.geo_target_city, geographic_view.location_type, campaign.id, campaign.name, campaign.status, ${METRICS}
-         FROM geographic_view WHERE ${during(r)}`,
+         FROM geographic_view WHERE ${during(r)}${oneCampaign}`,
       ),
     ),
   )
@@ -308,6 +323,7 @@ export async function getLocationData(range: DateRange): Promise<LocationData> {
   const byCity = new Map<string, Metrics>()
   const byKind: Record<LocationKind, Metrics> = { presence: emptyMetrics(), interest: emptyMetrics() }
   const campaigns = new Map<string, CampaignLocationSplit>()
+  const perCity = new Map<string, Map<string, CityCampaign>>()
   for (const r of rows) {
     const m = toMetrics(r.metrics)
     const key = r.segments?.geoTargetCity && GEO_RESOURCE.test(r.segments.geoTargetCity) ? r.segments.geoTargetCity : "unknown"
@@ -319,6 +335,11 @@ export async function getLocationData(range: DateRange): Promise<LocationData> {
     const c = campaigns.get(id) ?? { id, name: r.campaign?.name ?? "", status: r.campaign?.status ?? "", presence: emptyMetrics(), interest: emptyMetrics() }
     add(c[kind], m)
     campaigns.set(id, c)
+    const inCity = perCity.get(key) ?? new Map<string, CityCampaign>()
+    const cc = inCity.get(id) ?? { id, name: c.name, status: c.status, metrics: emptyMetrics() }
+    add(cc.metrics, m)
+    inCity.set(id, cc)
+    perCity.set(key, inCity)
   }
 
   const names = await geoNames([...byCity.keys()].filter((k) => k !== "unknown"))
@@ -344,6 +365,7 @@ export async function getLocationData(range: DateRange): Promise<LocationData> {
 
   return {
     rows: cityRows,
+    cityCampaigns: new Map([...perCity.entries()].map(([key, m]) => [key, [...m.values()].sort((a, b) => b.metrics.cost - a.metrics.cost || b.metrics.impressions - a.metrics.impressions)])),
     byKind,
     byCampaign: [...campaigns.values()].sort((a, b) => b.presence.cost + b.interest.cost - (a.presence.cost + a.interest.cost)),
   }

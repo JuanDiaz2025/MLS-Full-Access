@@ -1,9 +1,13 @@
 import type { Metadata } from "next"
 import Link from "next/link"
+import { Suspense } from "react"
 
+import CampaignFilter from "@/components/campaign-filter"
 import CityExclusionPanel from "@/components/changes/city-exclusion-panel"
 import NegativesList from "@/components/changes/negatives-list"
 import { formatConversions, formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
+import CityMap from "@/components/locations/city-map"
+import PageLoading from "@/components/page-loading"
 import { AdminLink, DataTable, KpiGrid, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
 import { isAdmin } from "@/lib/auth"
 import { parseRange, rangeQuery, type DateRange } from "@/lib/date-range"
@@ -14,7 +18,9 @@ import {
   EXPENSIVE_CPA_TIMES,
   EXPENSIVE_MIN_SPEND,
   expensiveCities,
+  getLocationOptions,
   getTargeting,
+  mapCities,
   regions,
   type CampaignTargeting,
   type Region,
@@ -25,6 +31,7 @@ export const metadata: Metadata = { title: "Locations · DealTrack" }
 
 const VIEWS = [
   { id: "overview", label: "Overview" },
+  { id: "map", label: "Map" },
   { id: "cities", label: "Cities" },
   { id: "targeting", label: "Targeting" },
 ] as const
@@ -57,21 +64,10 @@ export default async function LocationsPage({ searchParams }: { searchParams: Pr
   const range = parseRange(params)
   const asked = first(params.view)
   const view: View = VIEWS.some((v) => v.id === asked) ? (asked as View) : "overview"
-  const admin = await isAdmin()
-
-  const result = await load(async () => {
-    const [data, campaigns] = await Promise.all([getLocationData(range), getEditableCampaigns()])
-    const running = campaigns.filter((c) => c.status === "ENABLED")
-    const negatives = await getCampaignNegatives({
-      campaignIds: running.map((c) => c.id),
-    })
-    // Location settings for the running campaigns and the ones that spent in the period.
-    const spent = new Set(data.byCampaign.filter((c) => c.presence.cost + c.interest.cost > 0).map((c) => c.id))
-    const checked = campaigns.filter((c) => c.status === "ENABLED" || spent.has(c.id)).slice(0, 60)
-    const converting = new Map(data.rows.map((r) => [r.key, r.metrics.conversions]))
-    const targeting = await getTargeting(checked, converting)
-    return { data, negatives, campaigns, targeting }
-  })
+  const campaignId = /^\d+$/.test(first(params.campaign) ?? "") ? first(params.campaign)! : ""
+  const campaigns = await load(() => getEditableCampaigns())
+  const list = campaigns.ok ? campaigns.data : []
+  const chosen = list.find((c) => c.id === campaignId)
 
   return (
     <>
@@ -80,42 +76,98 @@ export default async function LocationsPage({ searchParams }: { searchParams: Pr
         description="Where the people who saw and clicked your ads were. The buy area is California: anything outside it is flagged."
         range={range}
       />
-      <nav aria-label="Locations views" className="flex gap-1 border-b">
-        {VIEWS.map((v) => {
-          const q = new URLSearchParams(rangeQuery(range).replace(/^\?/, ""))
-          if (v.id !== "overview") q.set("view", v.id)
-          const href = `/locations${q.size ? `?${q}` : ""}`
-          return (
-            <Link
-              key={v.id}
-              href={href}
-              aria-current={view === v.id ? "page" : undefined}
-              className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-                view === v.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {v.label}
-            </Link>
-          )
-        })}
-      </nav>
-      {!result.ok ? (
-        <ReportProblem problem={result} />
-      ) : view === "overview" ? (
-        <Overview data={result.data.data} targeting={result.data.targeting} range={range} />
-      ) : view === "cities" ? (
-        <Cities data={result.data.data} negatives={result.data.negatives} campaigns={result.data.campaigns} admin={admin} />
-      ) : (
-        <Targeting targeting={result.data.targeting} negatives={result.data.negatives} admin={admin} />
+      <div className="flex flex-wrap items-end justify-between gap-2 border-b">
+        <nav aria-label="Locations views" className="flex gap-1">
+          {VIEWS.map((v) => {
+            const q = new URLSearchParams(rangeQuery(range).replace(/^\?/, ""))
+            if (v.id !== "overview") q.set("view", v.id)
+            if (campaignId) q.set("campaign", campaignId)
+            const href = `/locations${q.size ? `?${q}` : ""}`
+            return (
+              <Link
+                key={v.id}
+                href={href}
+                aria-current={view === v.id ? "page" : undefined}
+                className={cn(
+                  "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                  view === v.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {v.label}
+              </Link>
+            )
+          })}
+        </nav>
+        <div className="pb-1.5">
+          <CampaignFilter campaigns={list.map((c) => ({ id: c.id, name: c.name, status: c.status }))} value={chosen ? campaignId : ""} />
+        </div>
+      </div>
+      {!campaigns.ok && <ReportProblem problem={campaigns} />}
+      {chosen && (
+        <p className="text-sm">
+          Showing only <span className="font-medium">{chosen.name}</span> ({chosen.status === "ENABLED" ? "running" : "paused"}).
+        </p>
       )}
+      {/* Each tab loads only what it shows, while the header and tabs are already on screen. */}
+      <Suspense key={`${view}|${range.from}|${range.to}|${campaignId}`} fallback={<PageLoading message={LOADING[view]} />}>
+        <TabBody view={view} range={range} campaigns={list} campaignId={chosen ? campaignId : undefined} />
+      </Suspense>
     </>
   )
 }
 
+const LOADING: Record<View, string> = {
+  overview: "Adding up where your ads showed…",
+  map: "Placing each city on the map…",
+  cities: "Checking every city…",
+  targeting: "Reading each campaign's location settings…",
+}
+
+async function TabBody({ view, range, campaigns, campaignId }: { view: View; range: DateRange; campaigns: EditableCampaign[]; campaignId?: string }) {
+  const admin = await isAdmin()
+  const result = await load(async () => {
+    const data = await getLocationData(range, campaignId)
+    const running = campaigns.filter((c) => c.status === "ENABLED")
+    if (view === "overview") {
+      const ids = [...new Set([...running.map((c) => c.id), ...data.byCampaign.map((c) => c.id)])]
+      return { view, data, options: await getLocationOptions(ids), running } as const
+    }
+    if (view === "map") {
+      const avg = cpaOf(sumMetrics(data.rows))
+      return { view, avg, ...(await mapCities(data.rows, data.cityCampaigns)) } as const
+    }
+    const negatives = await getCampaignNegatives({ campaignIds: campaignId ? [campaignId] : running.map((c) => c.id) })
+    if (view === "cities") return { view, data, negatives } as const
+    // Targeting: the chosen campaign, or the running ones and the ones that spent in the period.
+    const spent = new Set(data.byCampaign.filter((c) => c.presence.cost + c.interest.cost > 0).map((c) => c.id))
+    const checked = campaigns.filter((c) => (campaignId ? c.id === campaignId : c.status === "ENABLED" || spent.has(c.id))).slice(0, 60)
+    const converting = new Map(data.rows.map((r) => [r.key, r.metrics.conversions]))
+    return { view, negatives, targeting: await getTargeting(checked, converting) } as const
+  })
+  if (!result.ok) return <ReportProblem problem={result} />
+  const r = result.data
+  switch (r.view) {
+    case "overview":
+      return <Overview data={r.data} options={r.options} running={r.running} range={range} />
+    case "map":
+      return (
+        <Section
+          title="Map"
+          description="Every city where your ads showed in this period. Hover a bubble for its numbers and the campaigns that ran there; click to pin it. Scroll the page normally; use + and − (or pinch) to zoom."
+        >
+          <CityMap cities={r.cities} averageCpa={r.avg} missing={r.missing} />
+        </Section>
+      )
+    case "cities":
+      return <Cities data={r.data} negatives={r.negatives} campaigns={campaigns} admin={admin} />
+    case "targeting":
+      return <Targeting targeting={r.targeting} negatives={r.negatives} admin={admin} />
+  }
+}
+
 // ---- Overview --------------------------------------------------------------------------------
 
-function Overview({ data, targeting, range }: { data: LocationData; targeting: CampaignTargeting[]; range: DateRange }) {
+function Overview({ data, options, running, range }: { data: LocationData; options: Map<string, string>; running: EditableCampaign[]; range: DateRange }) {
   const rows = data.rows.filter((r) => r.metrics.cost > 0 || r.metrics.clicks > 0 || r.metrics.conversions > 0)
   const total = sumMetrics(rows)
   const inside = sumMetrics(rows.filter((r) => r.status === "inside"))
@@ -123,8 +175,8 @@ function Overview({ data, targeting, range }: { data: LocationData; targeting: C
   const avg = cpaOf(total)
   const share = (cost: number) => formatPercent(total.cost ? cost / total.cost : 0, 0)
   const { presence, interest } = data.byKind
-  const option = new Map(targeting.map((t) => [t.id, t.option]))
-  const presenceOnlyRunning = targeting.filter((t) => t.status === "ENABLED" && t.option === "PRESENCE")
+  const option = options
+  const presenceOnlyRunning = running.filter((c) => options.get(c.id) === "PRESENCE")
   const interestCheaper = cpaOf(interest) !== null && cpaOf(presence) !== null && cpaOf(interest)! < cpaOf(presence)!
 
   return (

@@ -150,6 +150,8 @@ export function lastFetchedAt() {
   return lastDataAt
 }
 
+const REQUEST_TIMEOUT_MS = 30_000
+
 // Sends one request to the Google Ads API for the configured account, retrying once with a fresh
 // access token if Google says the token expired. Returns the parsed JSON body.
 async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unknown> {
@@ -168,20 +170,31 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
       headers,
       body: JSON.stringify(payload),
       cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
   }
+  // A request Google leaves hanging is cancelled and tried once more, so one slow answer can't
+  // hold a page for minutes.
+  const sendWithRetry = async () => {
+    try {
+      return await send()
+    } catch (err) {
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return send()
+      throw err
+    }
+  }
 
-  let res = await send()
+  let res = await sendWithRetry()
   if (res.status === 401) {
     // The saved access token may have been revoked early. Get a fresh one and retry once.
     accessToken = null
-    res = await send()
+    res = await sendWithRetry()
   }
   // Google sometimes answers "Internal error" for a report that works a moment later.
   for (const wait of [500, 1500]) {
     if (res.status < 500) break
     await new Promise((r) => setTimeout(r, wait))
-    res = await send()
+    res = await sendWithRetry()
   }
 
   const text = await res.text()

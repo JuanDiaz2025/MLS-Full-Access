@@ -1,8 +1,11 @@
 // Location insights for the Locations page: California regions, California cities that cost a
 // lot and brought nothing, and each campaign's location targeting with what looks wrong.
 
+import { readFile } from "node:fs/promises"
+import path from "node:path"
+
 import { gaql } from "@/lib/google-ads/client"
-import { GEO_RESOURCE, geoNames, rates, sumMetrics, type LocationRow, type Metrics } from "@/lib/google-ads/reports"
+import { GEO_RESOURCE, geoNames, rates, sumMetrics, type CityCampaign, type LocationRow, type Metrics } from "@/lib/google-ads/reports"
 import { serviceAreaStatus } from "@/lib/service-area"
 
 // California regions, by city. Edit to regroup. Cities not listed fall under their county's
@@ -125,6 +128,7 @@ export type CampaignTargeting = {
 }
 
 const UNITS: Record<string, string> = { MILES: "mi", KILOMETERS: "km" }
+const EXCLUDED_NAMED = 12
 
 export async function getTargeting(campaigns: { id: string; name: string; status: string }[], convertingGeos: Map<string, number>): Promise<CampaignTargeting[]> {
   const ids = campaigns.map((c) => c.id).filter((id) => /^\d+$/.test(id))
@@ -149,11 +153,25 @@ export async function getTargeting(campaigns: { id: string; name: string; status
        WHERE campaign.id IN (${ids.join(", ")}) AND campaign_criterion.type IN ('LOCATION', 'PROXIMITY') AND campaign_criterion.status != 'REMOVED'`,
     ),
   ])
-  const geos = [...new Set(criteria.map((c) => c.campaignCriterion.location?.geoTargetConstant).filter((g): g is string => !!g))]
-  const names = await geoNames(geos)
+  // Old campaigns can exclude thousands of places: name only the ones shown (every target, the
+  // first few exclusions, and any exclusion that brought conversions).
+  const shownGeos = new Set<string>()
+  const excludedSeen = new Map<string, number>()
+  for (const c of criteria) {
+    const geo = c.campaignCriterion.location?.geoTargetConstant
+    if (!geo) continue
+    if (!c.campaignCriterion.negative) shownGeos.add(geo)
+    else {
+      const id = String(c.campaign.id)
+      const n = excludedSeen.get(id) ?? 0
+      if (n < EXCLUDED_NAMED || (convertingGeos.get(geo) ?? 0) > 0) shownGeos.add(geo)
+      excludedSeen.set(id, n + 1)
+    }
+  }
+  const names = await geoNames([...shownGeos])
   const place = (geo: string): Place => {
     const n = names.get(geo)
-    return { geo, name: n ? n.canonical.replace(/,United States$/, "").replace(/,/g, ", ") : geo, outside: n ? serviceAreaStatus(n.canonical).status !== "inside" : false }
+    return { geo, name: n ? n.canonical.replace(/,United States$/, "").replace(/,/g, ", ") : "", outside: n ? serviceAreaStatus(n.canonical).status !== "inside" : false }
   }
   const option = new Map(settings.map((s) => [String(s.campaign.id), s.campaign.geoTargetTypeSetting?.positiveGeoTargetType ?? ""]))
 
@@ -180,3 +198,85 @@ export async function getTargeting(campaigns: { id: string; name: string; status
 }
 
 export const cpa = (m: Metrics) => rates(m).costPerConversion
+
+// Each campaign's location option (presence, or presence or interest), for the Overview tab.
+export async function getLocationOptions(ids: string[]): Promise<Map<string, string>> {
+  const valid = ids.filter((id) => /^\d+$/.test(id))
+  if (!valid.length) return new Map()
+  const rows = await gaql<{ campaign: { id?: string | number; geoTargetTypeSetting?: { positiveGeoTargetType?: string } } }>(
+    `SELECT campaign.id, campaign.geo_target_type_setting.positive_geo_target_type FROM campaign WHERE campaign.id IN (${valid.join(", ")})`,
+  )
+  return new Map(rows.map((r) => [String(r.campaign.id), r.campaign.geoTargetTypeSetting?.positiveGeoTargetType ?? ""]))
+}
+
+// ---- Map -------------------------------------------------------------------------------------
+
+// City centers from US ZIP code data (the zipcodes package, BSD license): "city|ST" → [lat, lng].
+const STATES: Record<string, string> = {
+  Alabama: "AL", Alaska: "AK", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO", Connecticut: "CT", Delaware: "DE",
+  "District of Columbia": "DC", Florida: "FL", Georgia: "GA", Hawaii: "HI", Idaho: "ID", Illinois: "IL", Indiana: "IN", Iowa: "IA",
+  Kansas: "KS", Kentucky: "KY", Louisiana: "LA", Maine: "ME", Maryland: "MD", Massachusetts: "MA", Michigan: "MI", Minnesota: "MN",
+  Mississippi: "MS", Missouri: "MO", Montana: "MT", Nebraska: "NE", Nevada: "NV", "New Hampshire": "NH", "New Jersey": "NJ",
+  "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", Ohio: "OH", Oklahoma: "OK", Oregon: "OR",
+  Pennsylvania: "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", Tennessee: "TN", Texas: "TX", Utah: "UT",
+  Vermont: "VT", Virginia: "VA", Washington: "WA", "West Virginia": "WV", Wisconsin: "WI", Wyoming: "WY",
+}
+
+// Read from disk once, when the map is first opened (1 MB, so it isn't bundled or type-checked).
+let coords: Record<string, [number, number]> | null = null
+async function cityCoords() {
+  coords ??= JSON.parse(await readFile(path.join(process.cwd(), "src/lib/places/us-cities.json"), "utf8")) as Record<string, [number, number]>
+  return coords
+}
+
+export type MapCity = {
+  key: string
+  city: string
+  region: string
+  inside: boolean
+  lat: number
+  lng: number
+  cost: number
+  impressions: number
+  clicks: number
+  conversions: number
+  campaigns: { name: string; running: boolean; cost: number; impressions: number; conversions: number }[]
+}
+
+const MAP_CITIES = 2500
+
+// Cities with a known center, for the map: the ones with impressions, most impressions first.
+export async function mapCities(rows: LocationRow[], cityCampaigns: Map<string, CityCampaign[]>): Promise<{ cities: MapCity[]; missing: number }> {
+  const c = await cityCoords()
+  const out: MapCity[] = []
+  let missing = 0
+  for (const r of [...rows].filter((x) => x.metrics.impressions > 0 && x.status !== "unknown").sort((a, b) => b.metrics.impressions - a.metrics.impressions)) {
+    if (out.length >= MAP_CITIES) break
+    const state = STATES[r.region.split(", ").at(-1) ?? ""]
+    const at = state ? c[`${r.city.toLowerCase()}|${state}`] : undefined
+    if (!at) {
+      missing++
+      continue
+    }
+    out.push({
+      key: r.key,
+      city: r.city,
+      region: r.county ? `${r.county} County` : r.region,
+      inside: r.status === "inside",
+      lat: at[0],
+      lng: at[1],
+      cost: r.metrics.cost,
+      impressions: r.metrics.impressions,
+      clicks: r.metrics.clicks,
+      conversions: r.metrics.conversions,
+      campaigns: (cityCampaigns.get(r.key) ?? []).slice(0, 6).map((x) => ({
+        name: x.name,
+        running: x.status === "ENABLED",
+        cost: x.metrics.cost,
+        impressions: x.metrics.impressions,
+        conversions: x.metrics.conversions,
+      })),
+    })
+  }
+  return { cities: out, missing }
+}
