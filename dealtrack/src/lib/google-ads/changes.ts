@@ -479,3 +479,25 @@ export async function pauseCampaigns(campaignIds: string[], { validateOnly = fal
   )
   return summarize(targets.length, skipped, result.failures, (i) => `${running.get(targets[i])}`)
 }
+
+// ---- Turning campaigns on or off (Compliance requests) --------------------------------------
+// Only runs for a request that was checked and approved (see actions/compliance.ts). Sets status
+// to ENABLED or PAUSED and nothing else. Removed and Local Services campaigns are skipped.
+
+export async function setCampaignStatus(campaignIds: string[], status: "ENABLED" | "PAUSED", { validateOnly = false } = {}): Promise<ChangeSummary> {
+  const rows = await gaql<{ campaign: { id?: string | number; name?: string; status?: string; advertisingChannelType?: string } }>(
+    `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type FROM campaign WHERE campaign.status IN ('ENABLED', 'PAUSED')`,
+  )
+  const known = new Map(rows.filter((r) => !NOT_PAUSABLE.has(r.campaign.advertisingChannelType ?? "")).map((r) => [String(r.campaign.id), r.campaign]))
+  const targets = [...new Set(campaignIds)].filter((id) => known.has(id) && known.get(id)!.status !== status)
+  const skipped = campaignIds.length - targets.length
+  if (!targets.length) return { applied: 0, skipped, failures: [] }
+
+  const customer = customerResource()
+  const result = await mutate(
+    "campaigns",
+    targets.map((id) => ({ update: { resourceName: `${customer}/campaigns/${id}`, status }, updateMask: "status" })),
+    { validateOnly },
+  )
+  return summarize(targets.length, skipped, result.failures, (i) => `${known.get(targets[i])?.name ?? targets[i]}`)
+}

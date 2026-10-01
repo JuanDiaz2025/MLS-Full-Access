@@ -6,6 +6,7 @@
 import { refresh } from "next/cache"
 
 import { isAdmin } from "@/lib/auth"
+import { changeKey, isOpen, learningGate, newRequestId } from "@/lib/compliance"
 import { dayOf, formatDay } from "@/lib/date-range"
 import {
   MATCH_TYPES,
@@ -15,7 +16,6 @@ import {
   addNegativeKeywords,
   excludeLocations,
   getEditableCampaigns,
-  pauseCampaigns,
   removeNegatives,
   type ChangeSummary,
   type MatchType,
@@ -23,7 +23,7 @@ import {
 import { GoogleAdsError, MissingKeysError, dryRun } from "@/lib/google-ads/client"
 import { ideaStage, pushedIdeas } from "@/lib/keyword-ideas"
 import { brake, pushedLines, stageOf } from "@/lib/negative-batches"
-import { rememberName } from "@/lib/people"
+import { currentName, rememberName } from "@/lib/people"
 import { readData, updateData } from "@/lib/store"
 
 export type ActionResult = { ok: boolean; message: string; failures?: string[] }
@@ -70,6 +70,57 @@ function campaignIdsFrom(value: unknown): string[] | null {
   return value.every((id) => typeof id === "string" && CAMPAIGN_ID.test(id)) ? (value as string[]) : null
 }
 
+// Compliance: a change to a campaign whose bidding is still learning is held. The first time, an
+// override request is filed on the Compliance page; once it's checked and approved, the same
+// change goes through (once). Returns a result to stop with, or what to do after a good push.
+async function learningHold(
+  key: string,
+  label: string,
+  campaignIds: string[],
+  by: string,
+): Promise<{ stop: ActionResult } | { done: (failures: string[]) => Promise<void> }> {
+  const data = await readData()
+  const gate = await learningGate(data, key, campaignIds)
+  if (gate.ok) {
+    const override = gate.override
+    return {
+      done: async (failures) => {
+        if (!override) return
+        await updateData((d) => {
+          const r = d.changeRequests.find((x) => x.id === override.id)
+          if (r && !r.applied) r.applied = { by, at: new Date().toISOString(), failures, dryRun: dryRun() || undefined }
+        })
+      },
+    }
+  }
+  const names = gate.learning.map((l) => `${l.name} (${l.reason.toLowerCase()})`).join(", ")
+  const open = data.changeRequests.find((r) => r.kind === "learning" && r.change?.key === key && isOpen(r))
+  if (!open) {
+    await updateData((d) => {
+      d.changeRequests.unshift({
+        id: newRequestId(),
+        kind: "learning",
+        campaigns: gate.learning.map((l) => ({ id: l.id, name: l.name })),
+        change: { key, label },
+        learning: gate.learning.map((l) => ({ campaign: l.name, reason: l.reason })),
+        reason: `${label}, while Google's bidding is still learning.`,
+        requested: { by, at: new Date().toISOString() },
+      })
+    })
+    refresh()
+  }
+  return {
+    stop: {
+      ok: false,
+      message: `Held by the Compliance check: ${names} ${gate.learning.length === 1 ? "is" : "are"} still in Google's learning period, and changes now can reset it. ${
+        open ? "An override request is already waiting" : "An override request was added"
+      } on the Compliance page (Monitor → Compliance). Once it's checked and approved, push again. Or wait until learning ends.`,
+    },
+  }
+}
+
+const adminName = async () => (await currentName()) || "An admin"
+
 export async function addNegativeKeywordsAction(input: {
   campaignIds: string[]
   keywords: string[]
@@ -82,7 +133,15 @@ export async function addNegativeKeywordsAction(input: {
     if (!keywords.length || keywords.length > MAX_ITEMS) return { ok: false, message: `Choose 1 to ${MAX_ITEMS} keywords.` }
     if (!MATCH_TYPES.includes(input.matchType as MatchType)) return { ok: false, message: "Choose a match type." }
 
+    const hold = await learningHold(
+      changeKey("negatives", [...campaignIds, ...keywords.map((k) => k.toLowerCase())]),
+      `Add ${keywords.length} negative keyword${keywords.length === 1 ? "" : "s"} (${keywords.slice(0, 3).join(", ")}${keywords.length > 3 ? "…" : ""})`,
+      campaignIds,
+      await adminName(),
+    )
+    if ("stop" in hold) return hold.stop
     const summary = await addNegativeKeywords({ campaignIds, keywords, matchType: input.matchType as MatchType })
+    await hold.done(summary.failures)
     return report(summary, "negative keyword", "Added")
   })
 }
@@ -94,7 +153,15 @@ export async function excludeLocationsAction(input: { campaignIds: string[]; geo
     const geoIds = Array.isArray(input.geoIds) ? input.geoIds.filter((g) => typeof g === "string") : []
     if (!geoIds.length || geoIds.length > MAX_ITEMS) return { ok: false, message: `Choose 1 to ${MAX_ITEMS} locations.` }
 
+    const hold = await learningHold(
+      changeKey("locations", [...campaignIds, ...geoIds]),
+      `Exclude ${geoIds.length} location${geoIds.length === 1 ? "" : "s"}`,
+      campaignIds,
+      await adminName(),
+    )
+    if ("stop" in hold) return hold.stop
     const summary = await excludeLocations({ campaignIds, geoIds, allowInside: input.allowInside === true })
+    await hold.done(summary.failures)
     return report(summary, "location exclusion", "Added")
   })
 }
@@ -106,18 +173,6 @@ export async function removeNegativesAction(resourceNames: string[]): Promise<Ac
 
     const summary = await removeNegatives(names)
     return report(summary, "item", "Removed")
-  })
-}
-
-// Budget pause line: pauses the chosen running campaigns. Turning them back on is done in Google
-// Ads, on purpose: switching ads on and off resets Google's learning.
-export async function pauseCampaignsAction(campaignIds: string[]): Promise<ActionResult> {
-  return guarded(async () => {
-    const ids = campaignIdsFrom(campaignIds)
-    if (!ids) return { ok: false, message: "Choose at least one running campaign." }
-    const summary = await pauseCampaigns(ids)
-    const r = report(summary, "campaign", "Paused")
-    return summary.skipped && !summary.applied ? { ...r, message: "Those campaigns aren't running any more, so nothing was paused." } : r
   })
 }
 
@@ -144,6 +199,8 @@ export async function pushNegativeBatchAction(batchId: string, campaignIds: stri
     }
 
     const lines = pushedLines(batch)
+    const hold = await learningHold(changeKey("negatives-batch", batch.id), `Push the negatives batch for ${batch.from} to ${batch.to}`, ids, name)
+    if ("stop" in hold) return hold.stop
     const summary: ChangeSummary & { attached?: number } = { applied: 0, skipped: 0, failures: [] }
     if (toList) {
       const s = await addToStandardList({ campaignIds: ids, keywords: lines.map((l) => ({ text: l.negative, matchType: l.matchType })) })
@@ -174,6 +231,7 @@ export async function pushNegativeBatchAction(batchId: string, campaignIds: stri
         attached: toList ? summary.attached : undefined,
       }
     })
+    await hold.done(summary.failures)
     refresh()
     if (toList) {
       const n = summary.applied
@@ -203,7 +261,11 @@ export async function pushKeywordBatchAction(batchId: string, paused: boolean, r
     const lines = pushedIdeas(batch)
     if (lines.some((l) => !l.targets.length)) return { ok: false, message: "Every approved keyword needs an ad group." }
     const keywords = lines.flatMap((l) => l.targets.map((t) => ({ adGroupId: t.adGroupId, text: l.text, matchType: l.matchType })))
+    const campaignIds = [...new Set(lines.flatMap((l) => l.targets.map((t) => t.campaignId)).filter(Boolean))]
+    const hold = await learningHold(changeKey("keywords-batch", batch.id), `Add the keyword ideas batch for ${batch.from} to ${batch.to}`, campaignIds, name)
+    if ("stop" in hold) return hold.stop
     const summary = await addKeywords({ keywords, paused: !!paused })
+    await hold.done(summary.failures)
     await updateData((d) => {
       const b = d.keywordBatches.find((x) => x.id === batchId)
       if (!b || b.pushed) return false

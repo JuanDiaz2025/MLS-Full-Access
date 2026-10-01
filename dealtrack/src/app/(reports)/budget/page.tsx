@@ -134,7 +134,7 @@ async function Body({ data, pacing: p }: { data: Data; pacing: Pacing }) {
           {!admin ? (
             <AdminLink />
           ) : pausable && pausable.ok ? (
-            <PausePanel campaigns={pausable.data.map((c) => ({ id: c.id, name: c.name, status: c.status }))} />
+            <PausePanel campaigns={pausable.data.map((c) => ({ id: c.id, name: c.name, status: c.status }))} personName={name} />
           ) : (
             pausable && !pausable.ok && <ReportProblem problem={pausable} />
           )}

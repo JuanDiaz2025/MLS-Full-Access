@@ -166,6 +166,24 @@ export type ManualCheck = { done: boolean; by: string; at: string }
 // aren't treated as an attack. Matched on the network the Fraud page shows (an IP or an IPv6 /64).
 export type KnownNetwork = { network: string; label: string; by: string; at: string }
 
+// The Compliance agent ("the brake"): turning campaigns on or off, and any change to a campaign
+// while Google's bidding is still learning, go through the same steps as a negatives batch:
+// requested, checked, approved, then applied by an admin.
+export type ChangeRequest = {
+  id: string
+  kind: "status" | "learning"
+  campaigns: { id: string; name: string }[]
+  status?: "ENABLED" | "PAUSED" // kind "status": what to set the campaigns to
+  // kind "learning": the held change this request unlocks once approved (used once).
+  change?: { key: string; label: string }
+  learning?: { campaign: string; reason: string }[] // what Google said when the request was made
+  reason: string
+  requested: BatchStep
+  checked?: BatchStep & { ok: boolean }
+  approved?: BatchStep & { ok: boolean }
+  applied?: BatchStep & { failures: string[]; dryRun?: boolean } // status: set in Google Ads; learning: the held change went through
+}
+
 export type Data = {
   version: 1
   budget: BudgetSettings
@@ -175,6 +193,7 @@ export type Data = {
   keywordBatches: KeywordBatch[]
   audit: Record<string, ManualCheck>
   knownNetworks: KnownNetwork[]
+  changeRequests: ChangeRequest[]
 }
 
 export const DEFAULT_ALERTS: AlertSettings = {
@@ -194,6 +213,7 @@ const empty = (): Data => ({
   keywordBatches: [],
   audit: {},
   knownNetworks: [],
+  changeRequests: [],
 })
 
 // Lines saved before an idea could go into several ad groups had one ad group on the line itself.
@@ -227,6 +247,7 @@ export async function readData(): Promise<Data> {
         : [],
       audit: saved.audit && typeof saved.audit === "object" ? saved.audit : {},
       knownNetworks: Array.isArray(saved.knownNetworks) ? saved.knownNetworks : [],
+      changeRequests: Array.isArray(saved.changeRequests) ? saved.changeRequests : [],
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return empty()
