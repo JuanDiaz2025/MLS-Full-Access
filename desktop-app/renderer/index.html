@@ -121,6 +121,10 @@
       dates that were TBD, price cuts, pending status, private remarks — and never touches your Notes.
       <b>Board</b> is a tab the app rebuilds after every scan: today's funnel on top, then A and B leads in
       work order, soonest offer deadline first.</div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin:8px 0 0">
+      <input id="comingSoon" type="checkbox" checked style="width:auto">
+      Also scan <b>Coming Soon</b> listings — homes not on the open market yet
+    </label>
     <div class="row" style="margin-top:8px">
       <label style="display:flex;align-items:center;gap:6px;margin:0">
         Reading time per listing
@@ -350,6 +354,7 @@
     scrollPauseMs: Math.round(Number($('scrollPause').value||0.7) * 1000),
     boardUrl: ($('boardUrl').value||'').trim() || BOARD_URL,
     whenUnsure: $('whenUnsure').value,
+    comingSoon: $('comingSoon').checked,
     runComps: false,   // comping is off; see CLAUDE.md §5
   }); }
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); saveAiFields(); };
@@ -387,6 +392,8 @@
   $('readSeconds').oninput = pushConfig;
   $('scrollPause').oninput = () => { try { localStorage.setItem('fs.scrollPause', $('scrollPause').value); } catch(_) {} pushConfig(); };
   { let v = null; try { v = localStorage.getItem('fs.scrollPause'); } catch(_) {} if (v) $('scrollPause').value = v; }
+  $('comingSoon').onchange = () => { try { localStorage.setItem('fs.comingSoon', $('comingSoon').checked ? '1' : '0'); } catch(_) {} pushConfig(); };
+  { let v = null; try { v = localStorage.getItem('fs.comingSoon'); } catch(_) {} if (v === '0') $('comingSoon').checked = false; }
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
 

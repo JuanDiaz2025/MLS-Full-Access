@@ -555,6 +555,20 @@ reading whatever is displayed; the app skips that listing **without a ledger
 entry**, so the next run retries instead of writing it off. Never read "the
 first address on the page."
 
+**Coming Soon listings are scanned too** (v1.48, Bryan 1 Oct; the section 3
+checkbox, on by default). Each area gets a second search with Status = Coming
+Soon and **no List Date window** — a Coming Soon listing may have no list date
+yet. The rows are tagged and go through the same buy box, review and gate.
+Two rules differ: a Coming Soon listing with ≤4 photos is **not** dropped as
+"exterior-only" (its photos are usually not posted yet) and is not sent to the
+AI photo check until they are; its Why says "Coming Soon". Renovated, fire,
+structural and every other hard exclusion still apply. The single-listing
+lookup (`showGallery`, used by review AND the board refresh) now selects
+**Active + Coming Soon** explicitly — the form defaults to Active, so a Coming
+Soon MLS # came back "not found". The status picker is `selectOnly()`; if the
+MLS has no Coming Soon option the run says so instead of searching the wrong
+status. Not yet seen against the live form — check the first run's log.
+
 **Both reports are scrolled top to bottom before being read** (v1.40,
 `readWholePage()` in `main.js`; the "Scroll pause per screen" setting). The
 facts-only refresh skips the scroll. Private remarks, offer due and the

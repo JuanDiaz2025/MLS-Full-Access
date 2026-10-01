@@ -25,6 +25,7 @@ const cfg = {
   // years old, below-market $/sqft) and because the sheet reviewer rejects
   // anything wrong — with that rejection feeding straight back into the ledger.
   whenUnsure: 'keep',
+  comingSoon: true,    // also scan Coming Soon listings (section 3 checkbox)
   runComps: false,     // OFF for now — qualify on CONDITION first, comp later
   scrollPauseMs: 700,  // pause per screen while scrolling a report — reading slowly
   boardUrl: 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1',   // FlipScout Lead Board
@@ -277,6 +278,20 @@ const selectByLabel = (sel, label) => `(() => {
   const o = [...el.options].find(o => o.text.trim() === ${JSON.stringify(label)} || o.text.includes(${JSON.stringify(label)}));
   if(!o) return false; o.selected = true; el.dispatchEvent(new Event('change',{bubbles:true})); return true;
 })()`;
+// In-page helper: make a multi-select hold EXACTLY the options whose text
+// matches one of `patterns` (regex sources), and fire change. Returns the
+// texts it selected, so the caller can say plainly when the MLS has no such
+// status rather than silently searching the wrong one.
+const selectOnly = (sel, patterns) => `(() => {
+  const el = document.querySelector(${JSON.stringify(sel)}); if(!el) return null;
+  const res = ${JSON.stringify(patterns)}.map(p => new RegExp(p, 'i'));
+  const got = [];
+  [...el.options].forEach(o => { const on = res.some(r => r.test(o.text.trim())); o.selected = on; if (on) got.push(o.text.trim()); });
+  el.dispatchEvent(new Event('change',{bubbles:true}));
+  return got;
+})()`;
+const STATUS_ACTIVE = '^active$';
+const STATUS_COMING_SOON = '^coming[\\s-]*soon';
 const setInput = (sel, val) => `(() => {
   const el = document.querySelector(${JSON.stringify(sel)}); if(!el) return false;
   const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set; set.call(el, ${JSON.stringify(val)});
@@ -327,12 +342,24 @@ ipcMain.handle('check-session', async () => {
 });
 
 // ---------- scan one area ----------
-async function scanArea(area) {
+// opts.comingSoon: search Coming Soon listings instead of Active. They are
+// not on the open market yet, so they can have no List Date — that pass skips
+// the List Date window (Coming Soon volume is small, a county is a few pages).
+async function scanArea(area, opts) {
+  const comingSoon = !!(opts && opts.comingSoon);
   const label = area.city && area.city !== '*' ? area.city : `All ${area.county}`;
   await waitIfPaused();
-  log(`Scanning ${label} (@ $${area.maxk}k)…`);
+  log(comingSoon ? `Scanning ${label} — Coming Soon (@ $${area.maxk}k)…` : `Scanning ${label} (@ $${area.maxk}k)…`);
   await nav(core.SEARCH_URL, 2500);
-  await js(selectByLabel(core.FIELDS.status, 'Active'));
+  if (comingSoon) {
+    const got = await js(selectOnly(core.FIELDS.status, [STATUS_COMING_SOON])).catch(() => null);
+    if (!got || !got.length) {
+      log(`  ⚠ the MLS search has no "Coming Soon" status to pick — Coming Soon not scanned in ${label}`, 'warn');
+      return { city: label, county: area.county, count: '0', rows: [], comingSoonMissing: true };
+    }
+  } else {
+    await js(selectByLabel(core.FIELDS.status, 'Active'));
+  }
   await sleep(300);
   await js(selectByLabel(core.FIELDS.propType, 'Single Family Home'));
   await sleep(300);
@@ -354,7 +381,7 @@ async function scanArea(area) {
   // stays the authoritative test in filterCandidates.
   const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   const to = new Date(), from = new Date(Date.now() - core.LIST_WINDOW_DAYS * 86400000);
-  await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`));
+  if (!comingSoon) await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`));
   await sleep(1600);
   const count = await js(core.JS_MATCH_COUNT).catch(() => '?');
   log(`  ${label}: ${count} matches`);
@@ -412,6 +439,7 @@ async function scanArea(area) {
       log(`  Saved what the page showed to ${base}.json and .png — send both to Claude.`, 'warn');
     } catch (e) { log('  (could not save the page: ' + e.message + ')', 'warn'); }
   }
+  if (comingSoon) all.forEach(r => { r._comingSoon = true; });
   return { city: label, county: area.county, count, rows: all };
 }
 
@@ -421,6 +449,11 @@ async function scanArea(area) {
 async function showGallery(mls, opts) {
   const factsOnly = !!(opts && opts.factsOnly);
   await nav(core.SEARCH_URL, 2200);
+  // Look the MLS # up among Active AND Coming Soon listings. The form's
+  // default status is Active, so a Coming Soon house came back "not found" —
+  // at review and again on every board refresh.
+  await js(selectOnly(core.FIELDS.status, [STATUS_ACTIVE, STATUS_COMING_SOON])).catch(() => null);
+  await sleep(300);
   await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
   await sleep(2600);
@@ -812,6 +845,16 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       send('city', { label, index: ai + 1, total: areas.length, phase: 'scanning' });
 
       const scanned = await scanArea(area);
+      // Coming Soon: a second, small search per area. Same buy box, same
+      // review; the rows are tagged so the rest of the run knows.
+      if (cfg.comingSoon !== false && !control.stopped) {
+        const cs = await scanArea(area, { comingSoon: true });
+        const have = new Set(scanned.rows.map(r => r.mls));
+        const add = cs.rows.filter(r => r.mls && !have.has(r.mls));
+        scanned.rows = scanned.rows.concat(add);
+        runKpi.comingSoon = (runKpi.comingSoon || 0) + add.length;
+        if (!cs.comingSoonMissing) log(`  ${label}: ${add.length} Coming Soon listing(s) added to the scan`, add.length ? 'good' : 'info');
+      }
       byArea[label] = scanned;
       runKpi.scanned += scanned.rows.length;
 
@@ -897,12 +940,20 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           price: gal.listPrice || c._price, origPrice: gal.origPrice,
           ppsfRatio: cityMedians && cityMedians[c._cityKey] ? c._ppsf / cityMedians[c._cityKey] : 0,
           whenUnsure: cfg.whenUnsure,
+          comingSoon: !!c._comingSoon || core.isComingSoon(gal.status),
         });
+        c._comingSoon = !!c._comingSoon || core.isComingSoon(gal.status);
+        if (c._comingSoon) log('  Coming Soon listing — not on the open market yet', 'good');
         if (!gal.gridOk && n) log(`  photo grid did not load — only ${n} carousel photo(s) seen, photo count not used`, 'warn');
         if (gal.privateRemarks) log(`  private remarks read (${gal.privateRemarks.length} chars)`);
         // Only A and B go to the AI: it can only move a lead DOWN, so asking
         // about a C (hard exclusion or low score) costs money and changes nothing.
-        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C') {
+        // A Coming Soon listing with only its first few photos posted cannot be
+        // judged from the pictures yet — the AI would drop it as "insufficient
+        // photos". It stays as the text scored it, and says why.
+        const csTooFew = c._comingSoon && n > 0 && n <= 4;
+        if (csTooFew) q.why += ' + AI photo check waits for the photos to post';
+        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C' && !csTooFew) {
           // AI vision still has the final say on condition when it is on: a
           // DROP from the photos is an auto-pass whatever the text scored.
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
@@ -1529,7 +1580,7 @@ function gateFields(c) {
     bucket: q.bucket || '', bucketLabel: q.label || '', oppScore: q.score != null ? q.score : '',
     why: q.why || '', listedBy: g.listedBy || '',
     offerDue: g.offerDue || '', privateRemarks: g.privateRemarks || '', occupiedBy: g.occupiedBy || '',
-    mlsStatus: g.status || '',
+    mlsStatus: g.status || (c._comingSoon ? 'Coming Soon' : ''),
     agentPhone: g.agentPhone || '', agentEmail: g.agentEmail || '', showing: g.showing || '',
     disclosures: g.disclosures || '',
     remarks: c._remarks || '', redfin: c._redfin || '',
@@ -1697,8 +1748,8 @@ ipcMain.handle('refresh-board', async () => {
         // Either it left the Active search (pending / sold / withdrawn) or
         // Matrix showed another listing. Say so; never guess.
         notFound++;
-        batch.push({ 'MLS #': mls, 'MLS Status': 'Not found in Active search — check' });
-        log('    not found in an Active search — may be pending or off market', 'warn');
+        batch.push({ 'MLS #': mls, 'MLS Status': 'Not found in Active / Coming Soon search — check' });
+        log('    not found among Active or Coming Soon listings — may be pending or off market', 'warn');
       } else {
         const list = core.num(gal.listPrice) || core.num(val(r, 'Purchase Price'));
         const orig = core.num(gal.origPrice);
@@ -1751,7 +1802,7 @@ ipcMain.handle('refresh-board', async () => {
     await flush();
     await rebuildBoard();
     const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · `
-      + `${flagged} moved to C by a red flag · ${notFound} not found in an Active search.`;
+      + `${flagged} moved to C by a red flag · ${notFound} not found among Active or Coming Soon listings.`;
     log(line, 'good');
     return { ok: true, done, scored, notFound };
   } catch (e) {

@@ -40,6 +40,22 @@ const eq = (a, b, m) => {
   eq([bad.agentPhone, bad.agentEmail, bad.redfin], ['', '', ''], 'board lead: junk phone, email and non-Redfin link are dropped');
 }
 
+// ---- Coming Soon listings ----
+{
+  eq([core.isComingSoon('Coming Soon'), core.isComingSoon('COMING-SOON'), core.isComingSoon('Active')], [true, true, false],
+    'Coming Soon status recognised however the MLS spells it');
+  const base = { addr: '1 Test St', remarks: 'Charming home near parks and shopping.', photos: 2, photosReliable: true,
+    price: 800000, dom: '', yearBuilt: 1950, propClass: 'Res. Single Family / Detached', whenUnsure: 'keep' };
+  eq(core.qualify(base).bucket, 'C', 'an Active listing with 2 photos is still an auto-pass');
+  const cs = core.qualify({ ...base, comingSoon: true });
+  eq(cs.bucket, 'B', 'a Coming Soon listing with only its first photos posted is kept for review, not dropped');
+  eq(/Coming Soon/.test(cs.why), true, 'and its Why says Coming Soon');
+  eq(core.qualify({ ...base, comingSoon: true, remarks: 'Fully remodeled, turnkey.' }).bucket, 'C',
+    'a renovated Coming Soon listing is still dropped (Rule #0)');
+  const l = core.boardLead({ mls: 'ML1234567', address: '1 Test St, Oakland 94601', mlsStatus: 'Coming Soon' });
+  eq(l.mlsStatus, 'Coming Soon', 'the board lead carries the Coming Soon status');
+}
+
 // ---- the exact Redfin page, only for the right house ----
 {
   const body = '{}&&{"payload":{"sections":[{"rows":[' +

@@ -410,7 +410,10 @@ function rulesDecide(meta) {
   // Only trust a low count that came off the full photo grid. When the grid
   // fails to load the app falls back to the carousel, which only ever has ~4
   // preloaded — that dropped 844 Brunswick (29 photos) as "exterior-only".
-  if (photos > 0 && photos <= 4 && meta.photosReliable !== false) {
+  // A Coming Soon listing is not on the open market yet and usually has only
+  // its exterior shot up — few photos there is "not posted yet", not "no
+  // interior access". It goes on for a person (or the AI, once photos post).
+  if (photos > 0 && photos <= 4 && meta.photosReliable !== false && !meta.comingSoon) {
     return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access` };
   }
   // Remarks say nothing either way. This engine reads TEXT only — it has not
@@ -496,6 +499,10 @@ function qualify(m) {
   // 513 Carobe, 7160 Thorndale): an estate sale is often a well-kept house.
   if (DISTRESS_KW.test(t)) add(5, `probate / trust / estate — "${hit(DISTRESS_KW)}"`);
   if (ORIGINAL_KW.test(t)) add(10, `original / long-held — "${hit(ORIGINAL_KW)}"`);
+  // Coming Soon: ahead of the open market. Scored like any other listing —
+  // the gate's calibration is untouched — but always said, so nobody misses
+  // that showings may not have started.
+  if (m.comingSoon) signals.push({ pts: 0, what: 'Coming Soon — not on the open market yet; photos and showings may not have started' });
   // The MLS's own "Occupied By" field beats a word in the remarks.
   const occ = String(m.occupiedBy || '');
   const ten = tenantInfo(m, t);   // tenant without "vacant at close" was already a hard drop above
@@ -561,7 +568,7 @@ function qualify(m) {
   }
   // Remarks silent on condition and the reviewer asked for unsure = drop.
   if (r.decision === 'manual' && m.whenUnsure === 'drop' && bucket === 'B' && !top.length) bucket = 'C';
-  const note = signals.filter(x => x.pts === 0 && /tenant now|held at B/.test(x.what)).map(x => x.what);
+  const note = signals.filter(x => x.pts === 0 && /tenant now|held at B|Coming Soon/.test(x.what)).map(x => x.what);
   const why = [...top, ...neg, ...note].join(' + ') || r.reason;
   return { bucket, label: BUCKET_LABEL[bucket], score, decision: bucket === 'C' ? 'drop' : 'keep',
     hard: false, why, signals, needsWork };
@@ -1030,7 +1037,12 @@ function rereviewPlan(ledger, rejectGrid, leadGrid, date, passedNote) {
   return { forget: Object.keys(forget), leads: Object.keys(leads) };
 }
 
+/** Is this MLS status "Coming Soon" (however the MLS spells it)? */
+const COMING_SOON_RE = /coming[\s-]*soon/i;
+const isComingSoon = s => COMING_SOON_RE.test(String(s || ''));
+
 module.exports = {
+  isComingSoon, COMING_SOON_RE,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   boardLead,

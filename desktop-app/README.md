@@ -168,3 +168,8 @@ with its public and private remarks, offer deadline, listing agent (name, phone,
 score, and its exact Redfin page (looked up from this computer). When a run finishes the leads are
 already copied: open the Lead Board, click **Add scan**, paste. The Google Sheet (section 8) is optional.
 Each report is scrolled top to bottom before it is read — "Scroll pause per screen" in section 3.
+
+## Coming Soon listings (v1.48)
+Section 3 → "Also scan Coming Soon listings" (on by default). Each area gets a second, small search for
+Coming Soon homes, reviewed like any other. A Coming Soon home with only its first few photos posted is kept
+for review (B) instead of being dropped, and its Why says "Coming Soon".
