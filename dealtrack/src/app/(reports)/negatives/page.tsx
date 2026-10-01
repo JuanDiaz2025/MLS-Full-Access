@@ -1,15 +1,16 @@
 import type { Metadata } from "next"
 import { Suspense } from "react"
 
-import CampaignCheck from "@/components/campaign-check"
-import { NameProvider } from "@/components/negatives-name"
+import CampaignCheck from "@/components/negatives/campaign-check"
+import { WorkspaceProvider } from "@/components/negatives/context"
+import { TABS, type Tab } from "@/components/negatives/tabs"
+import type { BatchView } from "@/components/negatives/parts"
+import Workspace from "@/components/negatives/workspace"
 import PageLoading from "@/components/page-loading"
-
 import { AdminLink, PageHeader, ReportProblem } from "@/components/report"
-import WeeklyNegatives, { type BatchView } from "@/components/weekly-negatives"
 import { isAdmin } from "@/lib/auth"
-import { dayOf, formatDay, today } from "@/lib/date-range"
 import { checkCampaigns } from "@/lib/campaign-check"
+import { dayOf, formatDay, today } from "@/lib/date-range"
 import { STANDARD_LIST, getEditableCampaigns } from "@/lib/google-ads/changes"
 import { dryRun } from "@/lib/google-ads/client"
 import { load } from "@/lib/load"
@@ -47,41 +48,55 @@ function view(b: NegativeBatch): BatchView {
   }
 }
 
-export default async function NegativesPage() {
-  const [data, campaigns, personName] = await Promise.all([load(() => readData()), load(() => getEditableCampaigns()), currentName()])
+const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
+
+export default async function NegativesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = await searchParams
+  const [data, campaigns, personName, admin] = await Promise.all([
+    load(() => readData()),
+    load(() => getEditableCampaigns()),
+    currentName(),
+    isAdmin(),
+  ])
+  const askedTab = first(params.tab)
+  const tab: Tab = TABS.includes(askedTab as Tab) ? (askedTab as Tab) : "batches"
 
   return (
     <>
       <PageHeader
         title="Weekly negatives"
-        description={`Once a week, last week's wasted searches become one batch of negative keywords (or pick any dates and one campaign, paused ones too, to try it on older campaigns): DealTrack drafts it from the rules (and words that never converted), someone reviews each line, someone approves, an admin pushes the approved lines to Google Ads in one change, and a week later the result is checked. The campaign check below shows which standard negatives each campaign is missing. Anything that would block a search that converted in the last ${LOOKBACK_DAYS} days, or a seller saying "sell", is held back. At most one push every ${BRAKE_DAYS} days. Saved on this computer.`}
+        description="Turn wasted searches into negative keywords: draft a batch, review and approve it, push it to Google Ads, and check the result a week later."
       />
       {!data.ok ? (
         <ReportProblem problem={data} />
       ) : (
-        <NameProvider initial={personName}>
+        <WorkspaceProvider initial={{ name: personName, tab, batchId: first(params.batch) ?? null }}>
           {!campaigns.ok && <ReportProblem problem={campaigns} />}
-          <Body batches={data.data.batches} campaigns={campaigns.ok ? campaigns.data : []} />
-          {/* The check reads a year of search terms and every campaign's negatives, so it streams in. */}
-          <Suspense fallback={<PageLoading message="Checking each campaign's negative keywords…" />}>
-            <Check />
-          </Suspense>
-        </NameProvider>
+          <Body batches={data.data.batches} campaigns={campaigns.ok ? campaigns.data : []} admin={admin} />
+        </WorkspaceProvider>
       )}
     </>
   )
 }
 
-async function Body({ batches, campaigns }: { batches: NegativeBatch[]; campaigns: { id: string; name: string; status: string }[] }) {
+function Body({
+  batches,
+  campaigns,
+  admin,
+}: {
+  batches: NegativeBatch[]
+  campaigns: { id: string; name: string; status: string }[]
+  admin: boolean
+}) {
   const lastWeek = completeWeeks(1)[0]
   const held = brake(batches)
   return (
-    <WeeklyNegatives
+    <Workspace
       batches={[...batches].sort((a, b) => b.drafted.at.localeCompare(a.drafted.at)).map(view)}
       lastWeek={{ from: lastWeek.from, to: lastWeek.to }}
       today={today()}
       campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}
-      admin={await isAdmin()}
+      admin={admin}
       adminLink={<AdminLink />}
       listName={STANDARD_LIST}
       brakeNote={
@@ -90,6 +105,14 @@ async function Body({ batches, campaigns }: { batches: NegativeBatch[]; campaign
           : null
       }
       dryRun={dryRun()}
+      brakeDays={BRAKE_DAYS}
+      lookbackDays={LOOKBACK_DAYS}
+      checkPanel={
+        // The check reads a year of search terms and every campaign's negatives, so it streams in.
+        <Suspense fallback={<PageLoading message="Checking each campaign's negative keywords…" />}>
+          <Check />
+        </Suspense>
+      }
     />
   )
 }

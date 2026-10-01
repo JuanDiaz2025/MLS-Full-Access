@@ -14,7 +14,7 @@ import { MAX_DRAFT_DAYS, batchId, checkDay, draftBatch, measure, stageOf } from 
 import { rememberName } from "@/lib/people"
 import { readData, updateData, type NegativeBatch } from "@/lib/store"
 
-export type StepResult = { ok: boolean; message: string }
+export type StepResult = { ok: boolean; message: string; batchId?: string } // batchId: the batch a draft made
 
 async function person(rawName: unknown): Promise<{ name: string } | StepResult> {
   if (!(await isSignedIn())) return { ok: false, message: "Sign in first." }
@@ -71,6 +71,7 @@ export async function draftNegativeBatch(input: { from: string; to: string; camp
     const where = campaign ? ` in ${campaign.name}` : ""
     return {
       ok: true,
+      batchId: id,
       message: n
         ? `Drafted ${n} negative${n === 1 ? "" : "s"} from ${formatDay(from)} – ${formatDay(to)}${where}. Next: someone reviews each line.`
         : `Nothing to add: no search from ${formatDay(from)} – ${formatDay(to)}${where} matched the rules without converting.`,
@@ -122,8 +123,9 @@ export async function draftStandardBatch(campaignIds: string[], rawName: string)
     const n = draft.items.length
     return {
       ok: true,
+      batchId: id,
       message: n
-        ? `Drafted ${n} standard negative${n === 1 ? "" : "s"} for ${ids.length === 1 ? names.get(ids[0]) : `${ids.length} campaigns`}. It's at the top of the batches: next, someone reviews each line.`
+        ? `Drafted ${n} standard negative${n === 1 ? "" : "s"} for ${ids.length === 1 ? names.get(ids[0]) : `${ids.length} campaigns`}. Next: someone reviews each line.`
         : "Those campaigns already block every standard negative.",
     }
   } catch (e) {
