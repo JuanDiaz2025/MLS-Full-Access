@@ -108,6 +108,56 @@ export type NegativeBatch = {
   checked?: BatchStep & BatchResult
 }
 
+// Keyword ideas: the opposite of the weekly negatives. Searches and phrases worth bidding on,
+// drafted from the account's own history (and Keyword Planner when the developer token allows
+// it), then reviewed, approved, and pushed by an admin like a negatives batch.
+export type IdeaSource = "proven" | "phrase" | "situation" | "planner"
+
+export type KeywordIdea = {
+  text: string
+  matchType: "EXACT" | "PHRASE"
+  source: IdeaSource
+  why: string
+  // Where it would be added. Empty until someone picks an ad group, when nothing suggests one.
+  campaignId: string
+  campaignName: string
+  adGroupId: string
+  adGroupName: string
+  // Evidence from the account's search terms in the period.
+  searches: string[] // the searches it covers, costliest first (up to 5)
+  searchCount: number
+  impressions: number
+  clicks: number
+  cost: number
+  conversions: number
+  // From Keyword Planner, when it's available: California, English, Google Search.
+  volume?: number // average monthly searches
+  lowBid?: number // top-of-page bid range, dollars
+  highBid?: number
+  competition?: string
+  proven: boolean | null // review: worth bidding on (null = not reviewed yet)
+  provenBy?: string
+  approved: boolean | null
+  approvedBy?: string
+}
+
+export type KeywordBatch = {
+  id: string
+  from: string // search terms from…
+  to: string // …to (YYYY-MM-DD)
+  campaignId?: string // ideas from this campaign's searches; unset = all campaigns
+  campaignName?: string
+  sources: IdeaSource[]
+  items: KeywordIdea[]
+  skipped: { text: string; why: string }[] // left out by a safety check
+  notes: string[] // e.g. Keyword Planner wasn't available
+  drafted: BatchStep
+  proven?: BatchStep
+  approved?: BatchStep
+  // paused: the keywords were added paused, to switch on later. dryRun: Google changed nothing.
+  pushed?: BatchStep & { added: number; skipped: number; failures: string[]; paused: boolean; dryRun?: boolean }
+}
+
 // Go-live checks that Google Ads can't show (e.g. after-hours coverage), ticked by a person.
 export type ManualCheck = { done: boolean; by: string; at: string }
 
@@ -117,6 +167,7 @@ export type Data = {
   alerts: AlertSettings
   alertLog: AlertRecord[]
   batches: NegativeBatch[]
+  keywordBatches: KeywordBatch[]
   audit: Record<string, ManualCheck>
 }
 
@@ -134,6 +185,7 @@ const empty = (): Data => ({
   alerts: { ...DEFAULT_ALERTS },
   alertLog: [],
   batches: [],
+  keywordBatches: [],
   audit: {},
 })
 
@@ -150,6 +202,9 @@ export async function readData(): Promise<Data> {
       // Older files may lack fields added later; fill them in so pages can rely on them.
       batches: Array.isArray(saved.batches)
         ? saved.batches.map((b) => ({ ...b, items: b.items ?? [], heldBack: b.heldBack ?? [], alreadyNegative: b.alreadyNegative ?? [] }))
+        : [],
+      keywordBatches: Array.isArray(saved.keywordBatches)
+        ? saved.keywordBatches.map((b) => ({ ...b, items: b.items ?? [], skipped: b.skipped ?? [], notes: b.notes ?? [] }))
         : [],
       audit: saved.audit && typeof saved.audit === "object" ? saved.audit : {},
     }

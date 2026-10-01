@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 
 import { formatConversions, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
 import { DataTable, PageHeader, Pill, ReportProblem, Section, StatusPill, enumLabel } from "@/components/report"
@@ -26,6 +27,9 @@ export default async function KeywordsPage({
         description="The keywords you bid on. Stop: spent without converting. Scale: converting cheaper than your average."
         range={range}
       />
+      <Link href="/keyword-ideas" className="self-start text-sm font-medium text-primary hover:underline">
+        Find new keywords worth adding →
+      </Link>
       {!result.ok ? <ReportProblem problem={result} /> : <Body keywords={result.data} />}
     </>
   )

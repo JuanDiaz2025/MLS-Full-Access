@@ -160,7 +160,10 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
       "content-type": "application/json",
     }
     if (cfg.loginCustomerId) headers["login-customer-id"] = cfg.loginCustomerId
-    return fetch(`${ADS_ENDPOINT}/${API_VERSION}/customers/${cfg.customerId}/${path}`, {
+    // A path is a service under the account ("googleAds:searchStream") or a method on the
+    // account itself (":generateKeywordIdeas").
+    const url = `${ADS_ENDPOINT}/${API_VERSION}/customers/${cfg.customerId}${path.startsWith(":") ? "" : "/"}${path}`
+    return fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
@@ -301,4 +304,18 @@ export async function mutateAll(operations: unknown[], { validateOnly: asked = f
   const validateOnly = asked || dryRun()
   await call(config(), "googleAds:mutate", { mutateOperations: operations, validateOnly })
   if (!validateOnly) cache.clear()
+}
+
+// Keyword Planner ideas (KeywordPlanIdeaService.GenerateKeywordIdeas): related searches with their
+// monthly volume and top-of-page bids. Read-only. Cached like reports, since ideas barely change.
+const ideaCache = ((globalThis as { __dtIdeaCache?: Map<string, { at: number; body: unknown }> }).__dtIdeaCache ??= new Map())
+
+export async function keywordIdeas(payload: Record<string, unknown>): Promise<unknown> {
+  const cfg = config()
+  const key = `${cfg.customerId}\n${JSON.stringify(payload)}`
+  const hit = ideaCache.get(key)
+  if (hit && Date.now() - hit.at < STALE_MS) return hit.body
+  const body = await call(cfg, ":generateKeywordIdeas", payload)
+  ideaCache.set(key, { at: Date.now(), body })
+  return body
 }

@@ -128,7 +128,7 @@ export type SearchTermRow = {
   campaigns: string[]
   adGroups: string[]
   // Where it showed up: each campaign and ad group, with what it cost there.
-  placements: { campaignId: string; campaign: string; adGroupId: string; cost: number; clicks: number }[]
+  placements: { campaignId: string; campaign: string; adGroupId: string; adGroup: string; cost: number; clicks: number; conversions: number }[]
   metrics: Metrics
   rule?: NegativeRule
   suggestion?: string
@@ -170,8 +170,10 @@ export async function getSearchTerms(range: DateRange, campaignId?: string): Pro
       campaignId: String(r.campaign?.id ?? ""),
       campaign: r.campaign?.name ?? "",
       adGroupId: String(r.adGroup?.id ?? ""),
+      adGroup: r.adGroup?.name ?? "",
       cost: m.cost,
       clicks: m.clicks,
+      conversions: m.conversions,
     })
   }
 

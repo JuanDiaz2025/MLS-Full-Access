@@ -36,6 +36,7 @@ export const navGroups = [
       { href: "/search-terms", label: "Search terms" },
       { href: "/negatives", label: "Weekly negatives" },
       { href: "/keywords", label: "Keywords" },
+      { href: "/keyword-ideas", label: "Keyword ideas" },
       { href: "/locations", label: "Locations" },
       { href: "/schedule", label: "Day & hour" },
     ],

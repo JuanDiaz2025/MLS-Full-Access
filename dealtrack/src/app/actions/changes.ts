@@ -10,6 +10,7 @@ import { dayOf, formatDay } from "@/lib/date-range"
 import {
   MATCH_TYPES,
   STANDARD_LIST,
+  addKeywords,
   addToStandardList,
   addNegativeKeywords,
   excludeLocations,
@@ -20,6 +21,7 @@ import {
   type MatchType,
 } from "@/lib/google-ads/changes"
 import { GoogleAdsError, MissingKeysError, dryRun } from "@/lib/google-ads/client"
+import { ideaStage, pushedIdeas } from "@/lib/keyword-ideas"
 import { brake, pushedLines, stageOf } from "@/lib/negative-batches"
 import { rememberName } from "@/lib/people"
 import { readData, updateData } from "@/lib/store"
@@ -186,5 +188,35 @@ export async function pushNegativeBatchAction(batchId: string, campaignIds: stri
       }
     }
     return report(summary, "negative keyword", "Added")
+  })
+}
+
+// Keyword ideas, last step: adds the approved keywords to their ad groups in one change, paused
+// when asked so they can be switched on in Google Ads later.
+export async function pushKeywordBatchAction(batchId: string, paused: boolean, rawName: string): Promise<ActionResult> {
+  return guarded(async () => {
+    const name = await rememberName(rawName)
+    if (!name) return { ok: false, message: "Type your name first, so the batch shows who pushed it." }
+    const batch = (await readData()).keywordBatches.find((b) => b.id === batchId)
+    if (!batch) return { ok: false, message: "That batch doesn't exist any more. Reload the page." }
+    if (ideaStage(batch) !== "ready") return { ok: false, message: batch.pushed ? "This batch was already pushed." : "This batch isn't reviewed and approved yet." }
+    const lines = pushedIdeas(batch)
+    if (lines.some((l) => !l.adGroupId)) return { ok: false, message: "Every approved keyword needs an ad group." }
+    const summary = await addKeywords({ keywords: lines.map((l) => ({ adGroupId: l.adGroupId, text: l.text, matchType: l.matchType })), paused: !!paused })
+    await updateData((d) => {
+      const b = d.keywordBatches.find((x) => x.id === batchId)
+      if (!b || b.pushed) return false
+      b.pushed = {
+        by: name,
+        at: new Date().toISOString(),
+        added: summary.applied,
+        skipped: summary.skipped,
+        failures: summary.failures,
+        paused: !!paused,
+        dryRun: dryRun() || undefined,
+      }
+    })
+    refresh()
+    return report(summary, paused ? "paused keyword" : "keyword", "Added")
   })
 }

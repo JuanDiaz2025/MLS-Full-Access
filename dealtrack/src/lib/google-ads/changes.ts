@@ -265,6 +265,52 @@ export async function addNegativeKeywords(
   return summarize(planned.length, skipped, result.failures, (i) => `"${planned[i]?.text}" in ${campaigns.get(planned[i]?.campaignId)}`)
 }
 
+// Adds keywords to ad groups (Keyword ideas). Each goes in as the given match type, paused when
+// asked so someone switches them on in Google Ads. Ones the ad group already has are skipped.
+export async function addKeywords(
+  input: { keywords: { adGroupId: string; text: string; matchType: MatchType }[]; paused: boolean },
+  { validateOnly = false } = {},
+): Promise<ChangeSummary> {
+  const keywords = input.keywords
+    .map((k) => ({ ...k, text: cleanKeyword(k.text) }))
+    .filter((k): k is { adGroupId: string; text: string; matchType: MatchType } => !!k.text && /^\d+$/.test(k.adGroupId) && MATCH_TYPES.includes(k.matchType))
+  if (!keywords.length) throw new Error("None of those can be added. Each needs an ad group and a keyword of letters, numbers, and spaces.")
+
+  const ids = [...new Set(keywords.map((k) => k.adGroupId))]
+  const [groups, existing] = await Promise.all([
+    gaql<{ adGroup: { id?: string | number; name?: string }; campaign: { name?: string } }>(
+      `SELECT ad_group.id, ad_group.name, campaign.name FROM ad_group
+       WHERE ad_group.id IN (${ids.join(", ")}) AND ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'`,
+    ),
+    gaql<{ adGroup: { id?: string | number }; adGroupCriterion: { keyword?: { text?: string; matchType?: string } } }>(
+      `SELECT ad_group.id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion
+       WHERE ad_group.id IN (${ids.join(", ")}) AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE
+         AND ad_group_criterion.status != 'REMOVED'`,
+    ),
+  ])
+  const names = new Map(groups.map((g) => [String(g.adGroup.id), `${g.campaign.name} › ${g.adGroup.name}`]))
+  const missing = ids.filter((id) => !names.has(id))
+  if (missing.length) throw new Error("One of the chosen ad groups no longer exists or was removed. Reload the page.")
+  const have = new Set(existing.map((e) => `${e.adGroup.id}|${e.adGroupCriterion.keyword?.text?.toLowerCase()}|${e.adGroupCriterion.keyword?.matchType}`))
+
+  const planned = keywords.filter((k) => !have.has(`${k.adGroupId}|${k.text}|${k.matchType}`))
+  const skipped = keywords.length - planned.length
+  if (!planned.length) return { applied: 0, skipped, failures: [] }
+  const customer = customerResource()
+  const result = await mutate(
+    "adGroupCriteria",
+    planned.map((k) => ({
+      create: {
+        adGroup: `${customer}/adGroups/${k.adGroupId}`,
+        status: input.paused ? "PAUSED" : "ENABLED",
+        keyword: { text: k.text, matchType: k.matchType },
+      },
+    })),
+    { validateOnly },
+  )
+  return summarize(planned.length, skipped, result.failures, (i) => `"${planned[i]?.text}" in ${names.get(planned[i]?.adGroupId ?? "")}`)
+}
+
 // The one shared negative keyword list DealTrack keeps (Tools > Shared library > Negative keyword
 // lists). Attached to every campaign it's pushed to, so a campaign turned back on later is
 // already covered.
