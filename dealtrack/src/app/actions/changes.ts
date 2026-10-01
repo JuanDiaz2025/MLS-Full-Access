@@ -87,14 +87,14 @@ export async function addNegativeKeywordsAction(input: {
   })
 }
 
-export async function excludeLocationsAction(input: { campaignIds: string[]; geoIds: string[] }): Promise<ActionResult> {
+export async function excludeLocationsAction(input: { campaignIds: string[]; geoIds: string[]; allowInside?: boolean }): Promise<ActionResult> {
   return guarded(async () => {
     const campaignIds = campaignIdsFrom(input?.campaignIds)
     if (!campaignIds) return { ok: false, message: "Choose at least one campaign." }
     const geoIds = Array.isArray(input.geoIds) ? input.geoIds.filter((g) => typeof g === "string") : []
     if (!geoIds.length || geoIds.length > MAX_ITEMS) return { ok: false, message: `Choose 1 to ${MAX_ITEMS} locations.` }
 
-    const summary = await excludeLocations({ campaignIds, geoIds })
+    const summary = await excludeLocations({ campaignIds, geoIds, allowInside: input.allowInside === true })
     return report(summary, "location exclusion", "Added")
   })
 }

@@ -255,20 +255,74 @@ export async function geoNames(ids: string[]): Promise<Map<string, { name: strin
   return names
 }
 
-export async function getLocations(range: DateRange): Promise<LocationRow[]> {
-  const rows = await gaql<{ segments?: { geoTargetCity?: string }; metrics?: MetricsRow }>(
-    `SELECT segments.geo_target_city, ${METRICS} FROM geographic_view WHERE ${during(range)}`,
+// Long periods are asked for in pieces of this many days: a year of city data in one request
+// makes Google answer "Internal error".
+const CHUNK_DAYS = 90
+
+export function chunkRange(range: DateRange, days = CHUNK_DAYS): DateRange[] {
+  const out: DateRange[] = []
+  for (let from = range.from; from <= range.to; ) {
+    const end = new Date(`${from}T00:00:00Z`)
+    end.setUTCDate(end.getUTCDate() + days - 1)
+    const to = end.toISOString().slice(0, 10) < range.to ? end.toISOString().slice(0, 10) : range.to
+    out.push({ from, to, label: `${from} – ${to}` })
+    const next = new Date(`${to}T00:00:00Z`)
+    next.setUTCDate(next.getUTCDate() + 1)
+    from = next.toISOString().slice(0, 10)
+  }
+  return out
+}
+
+// "Presence": people physically in the targeted places. "Interest": people elsewhere who search
+// about them (e.g. someone in Texas selling a house in San Jose).
+export type LocationKind = "presence" | "interest"
+
+export type CampaignLocationSplit = { id: string; name: string; status: string; presence: Metrics; interest: Metrics }
+
+export type LocationData = {
+  rows: LocationRow[]
+  byKind: Record<LocationKind, Metrics>
+  byCampaign: CampaignLocationSplit[]
+}
+
+const kindOf = (t?: string): LocationKind => (t === "AREA_OF_INTEREST" ? "interest" : "presence")
+
+// Cities, the presence/interest split, and that split per campaign, from one report.
+export async function getLocationData(range: DateRange): Promise<LocationData> {
+  type Row = {
+    segments?: { geoTargetCity?: string }
+    geographicView?: { locationType?: string }
+    campaign?: { id?: Num; name?: string; status?: string }
+    metrics?: MetricsRow
+  }
+  const parts = await Promise.all(
+    chunkRange(range).map((r) =>
+      gaql<Row>(
+        `SELECT segments.geo_target_city, geographic_view.location_type, campaign.id, campaign.name, campaign.status, ${METRICS}
+         FROM geographic_view WHERE ${during(r)}`,
+      ),
+    ),
   )
+  const rows = parts.flat()
 
   const byCity = new Map<string, Metrics>()
+  const byKind: Record<LocationKind, Metrics> = { presence: emptyMetrics(), interest: emptyMetrics() }
+  const campaigns = new Map<string, CampaignLocationSplit>()
   for (const r of rows) {
+    const m = toMetrics(r.metrics)
     const key = r.segments?.geoTargetCity && GEO_RESOURCE.test(r.segments.geoTargetCity) ? r.segments.geoTargetCity : "unknown"
-    byCity.set(key, add(byCity.get(key) ?? emptyMetrics(), toMetrics(r.metrics)))
+    byCity.set(key, add(byCity.get(key) ?? emptyMetrics(), m))
+    const kind = kindOf(r.geographicView?.locationType)
+    add(byKind[kind], m)
+    const id = String(r.campaign?.id ?? "")
+    if (!id) continue
+    const c = campaigns.get(id) ?? { id, name: r.campaign?.name ?? "", status: r.campaign?.status ?? "", presence: emptyMetrics(), interest: emptyMetrics() }
+    add(c[kind], m)
+    campaigns.set(id, c)
   }
 
   const names = await geoNames([...byCity.keys()].filter((k) => k !== "unknown"))
-
-  return [...byCity.entries()]
+  const cityRows: LocationRow[] = [...byCity.entries()]
     .map(([key, metrics]) => {
       const geo = names.get(key)
       if (!geo) return { key, city: "Unknown location", region: "", status: "unknown" as const, metrics }
@@ -287,6 +341,16 @@ export async function getLocations(range: DateRange): Promise<LocationRow[]> {
       }
     })
     .sort((a, b) => b.metrics.cost - a.metrics.cost)
+
+  return {
+    rows: cityRows,
+    byKind,
+    byCampaign: [...campaigns.values()].sort((a, b) => b.presence.cost + b.interest.cost - (a.presence.cost + a.interest.cost)),
+  }
+}
+
+export async function getLocations(range: DateRange): Promise<LocationRow[]> {
+  return (await getLocationData(range)).rows
 }
 
 // ---- Day and hour ---------------------------------------------------------------------------

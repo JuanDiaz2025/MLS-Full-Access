@@ -177,6 +177,12 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
     accessToken = null
     res = await send()
   }
+  // Google sometimes answers "Internal error" for a report that works a moment later.
+  for (const wait of [500, 1500]) {
+    if (res.status < 500) break
+    await new Promise((r) => setTimeout(r, wait))
+    res = await send()
+  }
 
   const text = await res.text()
   let body: unknown

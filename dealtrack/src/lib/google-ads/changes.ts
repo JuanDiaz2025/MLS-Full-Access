@@ -368,8 +368,10 @@ export async function addToStandardList(
   }
 }
 
+// allowInside: the person chose California cities on purpose (the Locations page's expensive
+// cities). Otherwise a place inside the buy area is refused, whatever the page sent.
 export async function excludeLocations(
-  input: { campaignIds: string[]; geoIds: string[] },
+  input: { campaignIds: string[]; geoIds: string[]; allowInside?: boolean },
   { validateOnly = false } = {},
 ): Promise<ChangeSummary> {
   const campaigns = await checkCampaigns(input.campaignIds)
@@ -381,7 +383,7 @@ export async function excludeLocations(
   for (const geo of geoIds) {
     const name = names.get(geo)
     if (!name) throw new Error("Google doesn't recognize one of the chosen locations.")
-    if (serviceAreaStatus(name.canonical).status === "inside") {
+    if (!input.allowInside && serviceAreaStatus(name.canonical).status === "inside") {
       throw new Error(`${name.name} is inside the buy area, so it can't be excluded here.`)
     }
   }

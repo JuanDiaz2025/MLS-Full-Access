@@ -14,14 +14,20 @@ export default function CityExclusionPanel({
   cities,
   campaigns,
   existing,
+  inside = false,
 }: {
   cities: OutsideCity[]
   campaigns: CampaignOption[]
   // "campaignId|geoTargetConstants/…" for locations already excluded.
   existing: string[]
+  // California cities (the expensive ones): nothing is pre-selected, since they're in the buy area.
+  inside?: boolean
 }) {
   const [campaignIds, setCampaignIds] = useState(() => runningIds(campaigns))
-  const [picked, setPicked] = useState(cities.filter((c) => c.cost > 0).map((c) => c.geo))
+  const [picked, setPicked] = useState(
+    // Only cities that cost money and brought nothing: a converting one is the person's call.
+    inside ? [] : cities.filter((c) => c.cost > 0 && c.conversions === 0).map((c) => c.geo),
+  )
   const { ask, ui, busy } = useChange()
 
   const existingSet = new Set(existing)
@@ -30,7 +36,11 @@ export default function CityExclusionPanel({
   const campaignNames = campaigns.filter((c) => campaignIds.includes(c.id)).map((c) => c.name)
 
   if (!cities.length) {
-    return <p className="py-2 text-sm text-muted-foreground">No clicks or spend outside the buy area in this period.</p>
+    return (
+      <p className="py-2 text-sm text-muted-foreground">
+        {inside ? "No California city spent a lot without results in this period." : "No clicks or spend outside the buy area in this period."}
+      </p>
+    )
   }
 
   return (
@@ -39,9 +49,9 @@ export default function CityExclusionPanel({
         <CampaignPicker campaigns={campaigns} selected={campaignIds} onChange={setCampaignIds} idPrefix="geo-campaign" />
       </div>
 
-      <div className="-mx-4 overflow-x-auto sm:-mx-5">
+      <div className="max-h-[50vh] overflow-auto rounded-xl border">
         <table className="w-full min-w-[560px] text-sm">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-card shadow-[0_1px_0_var(--border)]">
             <tr className="border-b text-xs text-muted-foreground">
               <th scope="col" className="w-10 py-2 pl-4 sm:pl-5">
                 <span className="sr-only">Select</span>
@@ -101,13 +111,15 @@ export default function CityExclusionPanel({
                 </>
               ),
               confirmLabel: "Exclude in Google Ads",
-              run: () => excludeLocationsAction({ campaignIds, geoIds: toExclude }),
+              run: () => excludeLocationsAction({ campaignIds, geoIds: toExclude, allowInside: inside }),
             })
           }}
         >
           Exclude {toExclude.length} selected
         </Button>
-        <span className="text-xs text-muted-foreground">Cities in the buy area can&apos;t be excluded from here.</span>
+        <span className="text-xs text-muted-foreground">
+          {inside ? "These are in the buy area: exclude one only if you're sure it isn't worth it." : "Cities in the buy area can't be excluded from here."}
+        </span>
       </div>
 
       {ui}
