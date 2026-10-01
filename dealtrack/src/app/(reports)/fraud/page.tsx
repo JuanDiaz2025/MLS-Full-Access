@@ -24,16 +24,21 @@ import {
 import { JUNK_LABELS, findJunkLeads, type JunkLead } from "@/lib/fraud/leads"
 import {
   CLUSTER_SECONDS,
-  NETWORK_FLAG_LABELS,
+  KIND_LABELS,
   REPEAT_CLICKS,
+  classifyVisits,
   findClusters,
   getAdVisits,
   groupNetworks,
+  type AdVisit,
+  type ClassifiedVisit,
   type Cluster,
   type Network,
+  type VisitKind,
 } from "@/lib/fraud/visitors"
 import { getEditableCampaigns } from "@/lib/google-ads/changes"
-import { getAccount } from "@/lib/google-ads/reports"
+import { getAccount, getCampaignNames } from "@/lib/google-ads/reports"
+import { getRecordings, replayUrl } from "@/lib/posthog"
 import { listLeads } from "@/lib/leads/store"
 import { load, type Loaded } from "@/lib/load"
 import { currentName } from "@/lib/people"
@@ -69,6 +74,8 @@ export default async function FraudPage({ searchParams }: { searchParams: Promis
   const view: View = VIEWS.some((v) => v.id === asked) ? (asked as View) : "overview"
   const campaignId = /^\d+$/.test(first(params.campaign) ?? "") ? first(params.campaign)! : ""
   const day = /^\d{4}-\d{2}-\d{2}$/.test(first(params.day) ?? "") ? first(params.day)! : ""
+  const who = KINDS.some((k) => k.id === first(params.who)) ? (first(params.who) as VisitKind | "all") : "all"
+  const ip = /^[0-9a-f.:/]{3,60}$/i.test(first(params.ip) ?? "") ? first(params.ip)! : ""
   const campaigns = await load(() => getEditableCampaigns())
   const list = campaigns.ok ? campaigns.data : []
   const chosen = list.find((c) => c.id === campaignId)
@@ -113,8 +120,8 @@ export default async function FraudPage({ searchParams }: { searchParams: Promis
           Showing only <span className="font-medium">{chosen.name}</span> ({chosen.status === "ENABLED" ? "running" : "paused"}).
         </p>
       )}
-      <Suspense key={`${view}|${range.from}|${range.to}|${campaignId}|${day}`} fallback={<PageLoading message={LOADING[view]} />}>
-        <TabBody view={view} range={range} campaignId={chosen ? campaignId : undefined} day={day} />
+      <Suspense key={`${view}|${range.from}|${range.to}|${campaignId}|${day}|${who}|${ip}`} fallback={<PageLoading message={LOADING[view]} />}>
+        <TabBody view={view} range={range} campaignId={chosen ? campaignId : undefined} day={day} who={who} ip={ip} />
       </Suspense>
     </>
   )
@@ -128,9 +135,23 @@ const LOADING: Record<View, string> = {
   claim: "Collecting the clicks for a claim…",
 }
 
-async function TabBody({ view, range, campaignId, day }: { view: View; range: DateRange; campaignId?: string; day: string }) {
+async function TabBody({
+  view,
+  range,
+  campaignId,
+  day,
+  who,
+  ip,
+}: {
+  view: View
+  range: DateRange
+  campaignId?: string
+  day: string
+  who: VisitKind | "all"
+  ip: string
+}) {
   if (view === "clicks") return <ClicksTab range={range} campaignId={campaignId} day={day} />
-  if (view === "visitors") return <VisitorsTab range={range} />
+  if (view === "visitors") return <VisitorsTab range={range} who={who} ip={ip} />
   if (view === "leads") return <LeadsTab range={range} />
   if (view === "claim") return <ClaimTab range={range} campaignId={campaignId} />
   return <OverviewTab range={range} campaignId={campaignId} />
@@ -557,104 +578,378 @@ async function DayDetail({ day, campaignId }: { day: FraudDay; campaignId?: stri
 
 // ---- Visitors --------------------------------------------------------------------------------
 
-async function VisitorsTab({ range }: { range: DateRange }) {
-  const [{ visits, networks, known, clusters }, clarity, name] = await Promise.all([
-    networksFor(range),
+const KINDS: { id: VisitKind | "all"; label: string }[] = [
+  { id: "all", label: "All ad visits" },
+  { id: "real", label: KIND_LABELS.real },
+  { id: "suspicious", label: KIND_LABELS.suspicious },
+  { id: "bot", label: "Bots" },
+  { id: "team", label: KIND_LABELS.team },
+]
+const KIND_TONES: Record<VisitKind, "green" | "red" | "amber" | "gray" | "violet"> = {
+  real: "green",
+  suspicious: "red",
+  bot: "amber",
+  team: "violet",
+}
+const VISITS_SHOWN = 50
+const PLACES_SHOWN = 40
+
+const placeOf = (v: AdVisit) => [v.city, v.region, v.country].filter(Boolean).join(", ") || "Unknown"
+const quick = (v: AdVisit) => v.pageviews <= 1 && v.durationS < 10 && !v.submitted
+function duration(seconds: number) {
+  if (seconds < 60) return `${seconds}s`
+  const m = Math.floor(seconds / 60)
+  return m < 60 ? `${m}m ${seconds % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
+type VisitGroup = { key: string; label: string; sub?: string; visits: ClassifiedVisit[] }
+function groupVisits(visits: ClassifiedVisit[], key: (v: ClassifiedVisit) => string, label: (v: ClassifiedVisit) => string = key): VisitGroup[] {
+  const by = new Map<string, VisitGroup>()
+  for (const v of visits) {
+    const k = key(v)
+    const g = by.get(k) ?? { key: k, label: label(v), visits: [] }
+    g.visits.push(v)
+    by.set(k, g)
+  }
+  return [...by.values()].sort((x, y) => y.visits.length - x.visits.length)
+}
+
+// Suspicious and bot visits in a group, as one number with the split on hover.
+function NotReal({ visits }: { visits: ClassifiedVisit[] }) {
+  const sus = visits.filter((v) => v.kind === "suspicious").length
+  const bots = visits.filter((v) => v.kind === "bot").length
+  if (!sus && !bots) return <span className="text-muted-foreground">0</span>
+  return (
+    <span className="font-medium text-destructive" title={`${sus} suspicious, ${bots} bots (${formatPercent((sus + bots) / visits.length, 0)} of visits)`}>
+      {formatNumber(sus + bots)}
+    </span>
+  )
+}
+
+async function VisitorsTab({ range, who, ip }: { range: DateRange; who: VisitKind | "all"; ip: string }) {
+  const [visits, data, clarity, names, name] = await Promise.all([
+    load(() => getAdVisits(range)),
+    readData(),
     load(() => getClarityBySource()),
+    load(() => getCampaignNames()),
     currentName(),
   ])
-  // One visit from another state is common (people selling a California house from elsewhere),
-  // so on its own it isn't listed.
-  const flagged = networks.filter((n) => n.known || n.flags.some((f) => f !== "outside-ca") || n.adClicks >= 2)
-  const shown = flagged.slice(0, NETWORKS_SHOWN)
-  const total = visits.ok ? visits.data.length : 0
+  if (!visits.ok) return <ReportProblem problem={visits} />
+  const known = data.knownNetworks
+  const everyone = classifyVisits(visits.data, known)
+  const counts = Object.fromEntries(KINDS.map((k) => [k.id, k.id === "all" ? everyone.length : everyone.filter((v) => v.kind === k.id).length]))
+  const kindOnly = who === "all" ? everyone : everyone.filter((v) => v.kind === who)
+  const shown = ip ? kindOnly.filter((v) => v.network === ip) : kindOnly
+  const clusters = findClusters(visits.data, known)
+  // gad_campaignid is the Google Ads campaign; IDs that aren't in this account come from ads run
+  // in another account pointing at the same site.
+  const campaignName = (v: AdVisit) => {
+    const id = v.campaignId || (/^\d{8,}$/.test(v.utmCampaign) ? v.utmCampaign : "")
+    if (id) return (names.ok && names.data.get(id)) || `Another account (${id})`
+    return v.utmCampaign && !/^(none|\(not set\))$/i.test(v.utmCampaign) ? v.utmCampaign : "Campaign not tagged"
+  }
+
+  const q = new URLSearchParams(rangeQuery(range).replace(/^\?/, ""))
+  q.set("view", "visitors")
+  const href = (next: { who?: string; ip?: string }) => {
+    const u = new URLSearchParams(q)
+    const w = next.who ?? who
+    if (w !== "all") u.set("who", w)
+    const i = next.ip ?? ip
+    if (i) u.set("ip", i)
+    return `/fraud?${u}`
+  }
+
+  const connections = groupVisits(
+    shown,
+    (v) => v.network || v.ip || "Unknown",
+    (v) => v.network || "Unknown",
+  )
+  const latest = [...shown].sort((x, y) => y.startedAt.localeCompare(x.startedAt)).slice(0, VISITS_SHOWN)
+  const replays = await load(() => getRecordings(latest.map((v) => v.sessionId)))
 
   return (
     <>
-      <Section
-        title="Ad visitors by connection"
-        description={`Every visit that arrived from an ad, from PostHog, grouped by internet connection (an IP address; phones and homes on IPv6 by their /64 network). ${REPEAT_CLICKS} or more ad clicks from one connection is what a competitor or a click farm looks like. Mark your own team's connections so they stop showing up as attacks.`}
-      >
-        {!visits.ok ? (
-          <ReportProblem problem={visits} />
-        ) : (
-          <>
-            <p className="text-sm text-muted-foreground">
-              {formatNumber(total)} ad visits from {formatNumber(networks.length)} connections; {formatNumber(flagged.length)} need a look.
-            </p>
-            <DataTable
-              rows={shown}
-              rowKey={(n) => n.network}
-              empty="No suspicious ad visitors in this period."
-              columns={[
-                {
-                  key: "network",
-                  label: "Connection",
-                  render: (n) => (
-                    <span className="flex flex-col gap-0.5">
-                      <span className="font-mono text-xs break-all">{n.network}</span>
-                      <span className="text-xs text-muted-foreground">{n.place}</span>
-                    </span>
-                  ),
-                },
-                {
-                  key: "flags",
-                  label: "Why",
-                  render: (n) => (
-                    <span className="flex flex-wrap gap-1">
-                      {n.known && <Pill tone="green">Team: {n.known}</Pill>}
-                      {n.flags.map((f) => (
-                        <Pill key={f} tone={n.known ? "gray" : f === "repeat" || f === "bot-agent" ? "red" : "amber"}>
-                          {NETWORK_FLAG_LABELS[f]}
-                        </Pill>
-                      ))}
-                    </span>
-                  ),
-                },
-                { key: "clicks", label: "Ad clicks", align: "right", render: (n) => formatNumber(n.adClicks) },
-                {
-                  key: "when",
-                  label: "When",
-                  render: (n) => (
-                    <span className="text-xs whitespace-nowrap">
-                      {pacificTime(n.first)}
-                      {n.visits.length > 1 && <> – {pacificTime(n.last)}</>}
-                    </span>
-                  ),
-                },
-                {
-                  key: "how",
-                  label: "Device",
-                  render: (n) => (
-                    <span className="text-xs">
-                      {[...new Set(n.visits.map((v) => [v.browser, v.os].filter(Boolean).join(" on ")))].slice(0, 2).join("; ")}
-                    </span>
-                  ),
-                },
-                { key: "forms", label: "Forms", align: "right", render: (n) => formatNumber(n.submitted) },
-                {
-                  key: "mark",
-                  label: "",
-                  render: (n) => (
-                    <NetworkMark network={n.network} known={known.find((k: KnownNetwork) => k.network === n.network)} personName={name} />
-                  ),
-                },
-              ]}
-            />
-            {flagged.length > shown.length && (
-              <p className="text-xs text-muted-foreground">
-                Showing the first {shown.length} of {flagged.length}.
-              </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {KINDS.map((k) => (
+          <Link
+            key={k.id}
+            href={href({ who: k.id, ip: "" })}
+            scroll={false}
+            aria-current={who === k.id ? "true" : undefined}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground",
+              who === k.id && "border-primary bg-primary text-primary-foreground hover:text-primary-foreground",
             )}
-          </>
+          >
+            {k.label} ({formatNumber(counts[k.id] ?? 0)})
+          </Link>
+        ))}
+      </div>
+      <p className="-mt-2 text-xs text-muted-foreground">
+        Only visits that came from Google Ads: a Google click ID or campaign ID on the landing address, or a paid UTM tag. From PostHog, the team
+        included. Bots are automated browsers and Google&apos;s own landing page checks; suspicious means repeat clicks from one connection, clicks in
+        lockstep with other connections, or from outside the US.
+      </p>
+      {ip && (
+        <p className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2 text-sm">
+          Showing only <span className="font-mono text-xs">{ip}</span>
+          <Link href={href({ ip: "" })} scroll={false} className="font-medium text-primary hover:underline">
+            Show everyone
+          </Link>
+        </p>
+      )}
+
+      <KpiGrid
+        items={[
+          {
+            label: "Ad visits",
+            value: formatNumber(shown.length),
+            note: `${formatNumber(new Set(shown.map((v) => v.gclid).filter(Boolean)).size)} with a click ID`,
+          },
+          { label: "Connections", value: formatNumber(connections.length), note: "Different IP addresses / networks" },
+          {
+            label: "Came back from an ad",
+            value: formatNumber(connections.filter((c) => c.visits.length >= 2).length),
+            note: `Connections with 2+ ad visits`,
+            tone: connections.some((c) => c.visits.length >= REPEAT_CLICKS && c.visits.some((v) => v.kind === "suspicious")) ? "bad" : "default",
+          },
+          {
+            label: "Outside California",
+            value: shown.length ? formatPercent(shown.filter((v) => v.region && v.region !== "California").length / shown.length, 0) : "—",
+            note: "Of these visits",
+          },
+          { label: "Sent a form", value: formatNumber(shown.filter((v) => v.submitted).length) },
+          {
+            label: "Left right away",
+            value: shown.length ? formatPercent(shown.filter(quick).length / shown.length, 0) : "—",
+            note: "One page, under 10 seconds",
+          },
+        ]}
+      />
+
+      <Section
+        title="Top IP addresses"
+        description={`Who came from the ads most often, grouped by connection (an IP address; phones and homes on IPv6 by their /64 network). ${REPEAT_CLICKS} or more ad clicks from one connection is what a competitor or a click farm looks like. Mark your own team's connections so they stop counting as attacks.`}
+      >
+        <div className="-mx-4 max-h-[560px] overflow-y-auto px-4 sm:-mx-5 sm:px-5">
+          <DataTable
+            rows={connections.slice(0, NETWORKS_SHOWN)}
+            rowKey={(g) => g.key}
+            empty="No ad visits match."
+            columns={[
+              {
+                key: "ip",
+                label: "Connection",
+                render: (g) => (
+                  <span className="flex flex-col gap-0.5">
+                    <span className="font-mono text-xs break-all">{g.label}</span>
+                    <span className="text-xs text-muted-foreground">{placeOf(g.visits[0])}</span>
+                  </span>
+                ),
+              },
+              {
+                key: "kind",
+                label: "Looks like",
+                render: (g) => {
+                  const v = g.visits.find((x) => x.kind !== "real") ?? g.visits[0]
+                  return (
+                    <span className="flex flex-col gap-0.5">
+                      <span>
+                        <Pill tone={KIND_TONES[v.kind]}>{v.kind === "team" ? `Team: ${v.why[0]}` : KIND_LABELS[v.kind]}</Pill>
+                      </span>
+                      {v.kind !== "team" && v.why.length > 0 && <span className="text-xs text-muted-foreground">{v.why.join(" · ")}</span>}
+                    </span>
+                  )
+                },
+              },
+              { key: "visits", label: "Ad visits", align: "right", render: (g) => formatNumber(g.visits.length) },
+              {
+                key: "campaigns",
+                label: "Campaigns",
+                className: "min-w-40",
+                render: (g) => <span className="text-xs">{[...new Set(g.visits.map(campaignName))].slice(0, 2).join("; ")}</span>,
+              },
+              {
+                key: "when",
+                label: "When",
+                render: (g) => (
+                  <span className="text-xs whitespace-nowrap">
+                    {pacificTime(g.visits[0].startedAt)}
+                    {g.visits.length > 1 && <> – {pacificTime(g.visits[g.visits.length - 1].startedAt)}</>}
+                  </span>
+                ),
+              },
+              {
+                key: "device",
+                label: "Device",
+                render: (g) => (
+                  <span className="text-xs">
+                    {[...new Set(g.visits.map((v) => [v.browser, v.os].filter(Boolean).join(" on ")))].slice(0, 2).join("; ")}
+                  </span>
+                ),
+              },
+              { key: "forms", label: "Forms", align: "right", render: (g) => formatNumber(g.visits.filter((v) => v.submitted).length) },
+              {
+                key: "actions",
+                label: "",
+                render: (g) => (
+                  <span className="flex flex-col items-end gap-1">
+                    {!ip && (
+                      <Link href={href({ ip: g.key })} scroll={false} className="text-xs font-medium whitespace-nowrap text-primary hover:underline">
+                        See visits
+                      </Link>
+                    )}
+                    {g.visits[0].kind !== "bot" && (
+                      <NetworkMark network={g.key} known={known.find((k: KnownNetwork) => k.network === g.key)} personName={name} />
+                    )}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </div>
+        {connections.length > NETWORKS_SHOWN && (
+          <p className="text-xs text-muted-foreground">
+            Showing the top {NETWORKS_SHOWN} of {connections.length}.
+          </p>
         )}
       </Section>
 
-      {visits.ok && <ClusterSection clusters={clusters} />}
+      <div className="grid gap-6">
+        <Section title="By location" description="Where the ad visitors were, from their IP address. The ads target California.">
+          <div className="-mx-4 max-h-[560px] overflow-y-auto px-4 sm:-mx-5 sm:px-5">
+            <DataTable
+              rows={groupVisits(shown, placeOf).slice(0, PLACES_SHOWN)}
+              rowKey={(g) => g.key}
+              empty="No ad visits match."
+              columns={[
+                {
+                  key: "place",
+                  label: "Place",
+                  render: (g) => (
+                    <span className={cn(g.visits[0].region && g.visits[0].region !== "California" && "text-destructive")}>{g.label}</span>
+                  ),
+                },
+                { key: "visits", label: "Visits", align: "right", render: (g) => formatNumber(g.visits.length) },
+                { key: "ips", label: "IPs", align: "right", render: (g) => formatNumber(new Set(g.visits.map((v) => v.network)).size) },
+                { key: "forms", label: "Forms", align: "right", render: (g) => formatNumber(g.visits.filter((v) => v.submitted).length) },
+                { key: "mix", label: "Flagged", align: "right", render: (g) => <NotReal visits={g.visits} /> },
+              ]}
+            />
+          </div>
+        </Section>
+        <Section title="By campaign" description="From the campaign ID Google adds to the ad click, or the utm_campaign tag.">
+          <div className="-mx-4 max-h-[560px] overflow-y-auto px-4 sm:-mx-5 sm:px-5">
+            <DataTable
+              rows={groupVisits(shown, campaignName)}
+              rowKey={(g) => g.key}
+              empty="No ad visits match."
+              columns={[
+                { key: "campaign", label: "Campaign", render: (g) => g.label },
+                { key: "visits", label: "Visits", align: "right", render: (g) => formatNumber(g.visits.length) },
+                { key: "forms", label: "Forms", align: "right", render: (g) => formatNumber(g.visits.filter((v) => v.submitted).length) },
+                {
+                  key: "quick",
+                  label: "Left fast",
+                  align: "right",
+                  render: (g) => formatPercent(g.visits.filter(quick).length / g.visits.length, 0),
+                },
+                { key: "mix", label: "Flagged", align: "right", render: (g) => <NotReal visits={g.visits} /> },
+              ]}
+            />
+          </div>
+        </Section>
+      </div>
+
+      <Section
+        title="Recent ad visits"
+        description={`The latest ${latest.length} visits from the ads, newest first, Los Angeles time. "Watch" opens PostHog's replay; older visits may have none.`}
+      >
+        <div className="-mx-4 max-h-[560px] overflow-y-auto px-4 sm:-mx-5 sm:px-5">
+          <DataTable
+            rows={latest}
+            rowKey={(v) => v.sessionId}
+            empty="No ad visits match."
+            columns={[
+              { key: "when", label: "When", render: (v) => <span className="text-xs whitespace-nowrap">{pacificTime(v.startedAt)}</span> },
+              {
+                key: "kind",
+                label: "Looks like",
+                render: (v) => (
+                  <span className="flex flex-col gap-0.5">
+                    <span>
+                      <Pill tone={KIND_TONES[v.kind]}>{KIND_LABELS[v.kind]}</Pill>
+                    </span>
+                    {v.kind !== "real" && <span className="max-w-48 text-xs text-muted-foreground">{v.why.join(" · ")}</span>}
+                  </span>
+                ),
+              },
+              {
+                key: "ip",
+                label: "IP / place",
+                render: (v) => (
+                  <span className="flex flex-col gap-0.5">
+                    <Link href={href({ ip: v.network })} scroll={false} className="font-mono text-xs break-all text-primary hover:underline">
+                      {v.ip || "—"}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">{placeOf(v)}</span>
+                  </span>
+                ),
+              },
+              {
+                key: "campaign",
+                label: "Campaign / keyword",
+                className: "min-w-40",
+                render: (v) => (
+                  <span className="flex flex-col text-xs">
+                    <span>{campaignName(v)}</span>
+                    {v.keyword && <span className="text-muted-foreground">“{v.keyword}”</span>}
+                  </span>
+                ),
+              },
+              { key: "page", label: "Landed on", render: (v) => <span className="text-xs">{v.entryPage}</span> },
+              { key: "time", label: "Time on site", align: "right", render: (v) => duration(v.durationS) },
+              {
+                key: "device",
+                label: "Device",
+                render: (v) => <span className="text-xs text-muted-foreground">{[v.browser, v.os].filter(Boolean).join(" on ")}</span>,
+              },
+              {
+                key: "result",
+                label: "Result",
+                render: (v) =>
+                  v.submitted ? <Pill tone="green">Sent a form</Pill> : quick(v) ? <Pill tone="red">Left right away</Pill> : <Pill>Browsed</Pill>,
+              },
+              {
+                key: "replay",
+                label: "Replay",
+                render: (v) => {
+                  const seconds = replays.ok ? replays.data.get(v.sessionId) : undefined
+                  return seconds !== undefined ? (
+                    <a
+                      href={replayUrl(v.sessionId)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium whitespace-nowrap text-primary hover:underline"
+                    >
+                      Watch ({duration(Math.round(seconds))})
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )
+                },
+              },
+            ]}
+          />
+        </div>
+      </Section>
+
+      {!ip && who !== "real" && who !== "team" && <ClusterSection clusters={clusters} />}
 
       <Section
         title="Bots (Microsoft Clarity)"
-        description="Sessions Clarity recognised as bots, by where they came from, over the last 3 days (all Clarity's export allows). Clarity leaves bots out of its session counts; a jump from Google is worth a look on the Click patterns tab."
+        description="Sessions Clarity recognised as bots, by where they came from, over the last 3 days (all Clarity's export allows). This is all site traffic, not only ads: Clarity can't tell which bot sessions came from an ad."
       >
         {!clarity.ok ? <ReportProblem problem={clarity} /> : <ClarityTable rows={clarity.data} />}
       </Section>

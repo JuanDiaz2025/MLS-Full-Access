@@ -11,6 +11,9 @@ export type AdVisit = {
   startedAt: string // ISO, UTC
   gclid: string
   campaignId: string
+  utmCampaign: string // campaign name from a utm_campaign tag, when the ad has one
+  keyword: string // utm_term / utm_keyword, if the campaign tags it
+  entryPage: string
   ip: string
   network: string // the IPv4 address, or the IPv6 /64 a home or phone keeps
   city: string
@@ -54,6 +57,20 @@ export const REPEAT_CLICKS = 3
 const between = (r: DateRange) => `timestamp >= toDateTime('${r.from} 00:00:00', 'America/Los_Angeles')
   and timestamp < toDateTime('${r.to} 00:00:00', 'America/Los_Angeles') + interval 1 day`
 
+// A visit from Google Ads: a Google click ID or campaign ID on the landing address, or a Google
+// Ads UTM tag (utm_source=google / google_ads, or utm_medium=cpc / ppc). Paid social isn't counted.
+const AD_URL =
+  "(?i)[?&](gclid|gbraid|wbraid|gad_source|gad_campaignid)=|[?&]utm_source=(google|google_ads|adwords)(&|#|$)|[?&]utm_medium=(cpc|ppc)(&|#|$)"
+
+const param = (url: string, name: string) => {
+  const raw = url.match(new RegExp(`[?&]${name}=([^&#]+)`))?.[1] ?? ""
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, " ")).trim()
+  } catch {
+    return raw
+  }
+}
+
 export async function getAdVisits(range: DateRange): Promise<AdVisit[]> {
   // Everyone on the live site, the team included: someone clicking the ads a hundred times is
   // exactly what this looks for, so heavy visitors aren't left out the way other reports do.
@@ -63,6 +80,7 @@ export async function getAdVisits(range: DateRange): Promise<AdVisit[]> {
         properties.$session_id as session_id,
         min(timestamp) as started_at,
         argMin(properties.$current_url, timestamp) as entry_url,
+        argMin(properties.$pathname, timestamp) as entry_page,
         any(properties.$ip) as ip,
         any(properties.$geoip_city_name) as city,
         any(properties.$geoip_subdivision_1_name) as region,
@@ -79,7 +97,7 @@ export async function getAdVisits(range: DateRange): Promise<AdVisit[]> {
         and properties.$host in ('www.twinhomebuyer.com', 'twinhomebuyer.com')
       group by properties.$session_id
     )
-    where match(entry_url, '[?&](gclid|gbraid|wbraid|gad_source|gad_campaignid)=')
+    where match(entry_url, '${AD_URL}')
     order by started_at
     limit 20000`)
   return rows.map((r) => {
@@ -90,6 +108,9 @@ export async function getAdVisits(range: DateRange): Promise<AdVisit[]> {
       startedAt: String(r.started_at ?? ""),
       gclid: url.match(/[?&](?:gclid|gbraid|wbraid)=([^&#]+)/)?.[1] ?? "",
       campaignId: url.match(/[?&]gad_campaignid=(\d+)/)?.[1] ?? "",
+      utmCampaign: param(url, "utm_campaign"),
+      keyword: param(url, "utm_term") || param(url, "utm_keyword"),
+      entryPage: String(r.entry_page ?? "/"),
       ip,
       network: ip ? networkOf(ip) : "",
       city: String(r.city ?? ""),
@@ -171,4 +192,41 @@ export function findClusters(visits: AdVisit[], known: { network: string }[] = [
     } else i++
   }
   return out.sort((a, b) => b.visits.length - a.visits.length)
+}
+
+// ---- Sorting each visit ------------------------------------------------------------------------
+
+export type VisitKind = "real" | "suspicious" | "bot" | "team"
+
+export const KIND_LABELS: Record<VisitKind, string> = {
+  real: "Looks real",
+  suspicious: "Suspicious",
+  bot: "Bot",
+  team: "Team",
+}
+
+export type ClassifiedVisit = AdVisit & { kind: VisitKind; why: string[] }
+
+// Puts every ad visit in one bucket, with the reasons: the team's own connections, bots
+// (automated browsers and Google's own landing page checks), suspicious (repeat clickers,
+// same-moment bursts, outside the US, gone within seconds), or real.
+export function classifyVisits(visits: AdVisit[], known: { network: string; label: string }[] = []): ClassifiedVisit[] {
+  const labels = new Map(known.map((k) => [k.network, k.label]))
+  const networks = new Map(groupNetworks(visits).map((n) => [n.network, n]))
+  const inCluster = new Set(findClusters(visits).flatMap((c) => c.visits.map((v) => v.sessionId)))
+  return visits.map((v) => {
+    const label = labels.get(v.network)
+    if (label) return { ...v, kind: "team", why: [label] }
+    if (isGoogleIp(v.ip)) return { ...v, kind: "bot", why: ["Google checking the landing page (not billed)"] }
+    if (BOT_AGENT.test(v.userAgent)) return { ...v, kind: "bot", why: ["Automated browser"] }
+    const why: string[] = []
+    const n = networks.get(v.network)
+    if (n?.flags.includes("repeat")) why.push(`${n.adClicks} ad clicks from this connection`)
+    if (inCluster.has(v.sessionId)) why.push("Arrived with other connections at the same moment")
+    if (v.country && v.country !== "US") why.push("Outside the US")
+    if (v.pageviews <= 1 && v.durationS < 3 && !v.submitted) why.push("Gone within 3 seconds")
+    // Leaving fast on its own is common; it only counts alongside something else.
+    const strong = why.filter((w) => w !== "Gone within 3 seconds")
+    return { ...v, kind: strong.length ? "suspicious" : "real", why: strong.length ? why : [] }
+  })
 }

@@ -186,7 +186,9 @@ export function claimText(input: ClaimInput, rows: EvidenceRow[]): string {
       `- ${day(d.date)}: ${d.clicks} billed clicks (a normal day for this account was ${Math.round(d.normalClicks)}), ${usd(d.cost)} charged, ` +
         `${Math.round(d.conversions * 10) / 10} conversions. Google already filtered ${d.invalid} invalid clicks that day.` +
         (top ? ` Most were on the campaign "${top.name}".` : "") +
-        (d.reasons.filter((r) => !r.startsWith("Google filtered")).length ? ` ${d.reasons.filter((r) => !r.startsWith("Google filtered")).join("; ")}.` : ""),
+        (d.reasons.filter((r) => !r.startsWith("Google filtered")).length
+          ? ` ${d.reasons.filter((r) => !r.startsWith("Google filtered")).join("; ")}.`
+          : ""),
     )
   }
   lines.push(
