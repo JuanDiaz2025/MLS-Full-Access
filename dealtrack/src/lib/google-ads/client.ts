@@ -291,3 +291,14 @@ export async function mutate(
     failures,
   }
 }
+
+// Runs operations on several services in one all-or-nothing request (GoogleAdsService.Mutate),
+// e.g. create a shared list, fill it, and attach it to campaigns. A new item can be named with a
+// temporary negative id (sharedSets/-1) so later operations in the same request can point at it.
+// Throws a GoogleAdsError if any operation fails; then nothing is applied.
+export async function mutateAll(operations: unknown[], { validateOnly: asked = false }: { validateOnly?: boolean } = {}) {
+  if (!operations.length) return
+  const validateOnly = asked || dryRun()
+  await call(config(), "googleAds:mutate", { mutateOperations: operations, validateOnly })
+  if (!validateOnly) cache.clear()
+}

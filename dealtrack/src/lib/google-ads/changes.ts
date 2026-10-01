@@ -2,7 +2,7 @@
 // locations, plus removing them again. Each function re-checks its inputs against the live
 // account before sending anything, so a bad request can't touch other settings.
 
-import { customerResource, gaql, mutate } from "@/lib/google-ads/client"
+import { customerResource, gaql, mutate, mutateAll } from "@/lib/google-ads/client"
 import { GEO_RESOURCE, geoNames } from "@/lib/google-ads/reports"
 import { serviceAreaStatus } from "@/lib/service-area"
 
@@ -263,6 +263,63 @@ export async function addNegativeKeywords(
     { validateOnly },
   )
   return summarize(planned.length, skipped, result.failures, (i) => `"${planned[i]?.text}" in ${campaigns.get(planned[i]?.campaignId)}`)
+}
+
+// The one shared negative keyword list DealTrack keeps (Tools > Shared library > Negative keyword
+// lists). Attached to every campaign it's pushed to, so a campaign turned back on later is
+// already covered.
+export const STANDARD_LIST = "DealTrack standard negatives"
+
+export type ListSummary = ChangeSummary & { attached: number; created: boolean }
+
+// Adds keywords to the standard list (creating it the first time) and attaches it to the given
+// campaigns, in one all-or-nothing change. Keywords and attachments already there are skipped.
+export async function addToStandardList(
+  input: { campaignIds: string[]; keywords: { text: string; matchType: MatchType }[] },
+  { validateOnly = false } = {},
+): Promise<ListSummary> {
+  await checkCampaigns(input.campaignIds)
+  const keywords = input.keywords
+    .map((k) => ({ text: cleanKeyword(k.text), matchType: k.matchType }))
+    .filter((k): k is { text: string; matchType: MatchType } => !!k.text && MATCH_TYPES.includes(k.matchType))
+  if (!keywords.length) throw new Error("None of those can be a keyword. Use letters, numbers, and spaces.")
+
+  const customer = customerResource()
+  const [found] = await gaql<{ sharedSet: { id?: string | number } }>(
+    `SELECT shared_set.id FROM shared_set
+     WHERE shared_set.name = '${STANDARD_LIST}' AND shared_set.type = 'NEGATIVE_KEYWORDS' AND shared_set.status = 'ENABLED'`,
+  )
+  const listId = found ? String(found.sharedSet.id) : null
+  const list = `${customer}/sharedSets/${listId ?? "-1"}`
+
+  const [inList, attachedTo] = listId
+    ? await Promise.all([
+        gaql<{ sharedCriterion: { keyword?: { text?: string; matchType?: string } } }>(
+          `SELECT shared_criterion.keyword.text, shared_criterion.keyword.match_type FROM shared_criterion WHERE shared_set.id = ${listId}`,
+        ),
+        gaql<{ campaign: { id?: string | number } }>(
+          `SELECT campaign.id FROM campaign_shared_set WHERE shared_set.id = ${listId} AND campaign_shared_set.status = 'ENABLED'`,
+        ),
+      ])
+    : [[], []]
+  const have = new Set(inList.map((c) => `${c.sharedCriterion.keyword?.text?.toLowerCase()}|${c.sharedCriterion.keyword?.matchType}`))
+  const attached = new Set(attachedTo.map((c) => String(c.campaign.id)))
+
+  const newKeywords = [...new Map(keywords.map((k) => [`${k.text}|${k.matchType}`, k])).entries()].filter(([key]) => !have.has(key)).map(([, k]) => k)
+  const newCampaigns = [...new Set(input.campaignIds)].filter((id) => !attached.has(id))
+  const operations = [
+    ...(listId ? [] : [{ sharedSetOperation: { create: { resourceName: list, name: STANDARD_LIST, type: "NEGATIVE_KEYWORDS" } } }]),
+    ...newKeywords.map((k) => ({ sharedCriterionOperation: { create: { sharedSet: list, keyword: { text: k.text, matchType: k.matchType } } } })),
+    ...newCampaigns.map((id) => ({ campaignSharedSetOperation: { create: { campaign: `${customer}/campaigns/${id}`, sharedSet: list } } })),
+  ]
+  await mutateAll(operations, { validateOnly })
+  return {
+    applied: newKeywords.length,
+    skipped: keywords.length - newKeywords.length,
+    failures: [],
+    attached: newCampaigns.length,
+    created: !listId,
+  }
 }
 
 export async function excludeLocations(

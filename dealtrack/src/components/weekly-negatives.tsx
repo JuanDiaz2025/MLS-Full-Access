@@ -12,12 +12,14 @@ import {
   discardNegativeBatch,
   draftNegativeBatch,
   finishNegativeStep,
+  markAllNegativeLines,
   markNegativeLine,
   reopenNegativeStep,
   type StepResult,
 } from "@/app/actions/negatives"
 import { CampaignPicker, List, runningIds, useChange, type CampaignOption } from "@/components/changes/shared"
 import { formatNumber, formatUsd } from "@/components/dashboard/format"
+import { useName } from "@/components/negatives-name"
 import { Pill, type PillTone } from "@/components/pill"
 import { Button } from "@/components/ui/button"
 import type { Stage } from "@/lib/negative-batches"
@@ -39,9 +41,9 @@ type Props = {
   campaigns: CampaignOption[] // every campaign that isn't removed, running ones first
   admin: boolean
   adminLink: ReactNode
-  personName: string
   brakeNote: string | null // set while a push in the last 7 days blocks the next one
   dryRun: boolean
+  listName: string // the shared list a push can go into
 }
 
 const stageLabel: Record<Stage, { tone: PillTone; label: string }> = {
@@ -69,8 +71,8 @@ function quickPeriods(lastWeek: Props["lastWeek"], today: string) {
   ]
 }
 
-export default function WeeklyNegatives({ batches, lastWeek, today, campaigns, admin, adminLink, personName, brakeNote, dryRun }: Props) {
-  const [name, setName] = useState(personName)
+export default function WeeklyNegatives({ batches, lastWeek, today, campaigns, admin, adminLink, brakeNote, dryRun, listName }: Props) {
+  const { name, setName } = useName()
   const [message, setMessage] = useState<StepResult | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [, startTransition] = useTransition()
@@ -182,6 +184,7 @@ export default function WeeklyNegatives({ batches, lastWeek, today, campaigns, a
           adminLink={adminLink}
           brakeNote={brakeNote}
           dryRun={dryRun}
+          listName={listName}
         />
       ))}
     </div>
@@ -293,6 +296,7 @@ function BatchCard({
   adminLink,
   brakeNote,
   dryRun,
+  listName,
 }: {
   batch: BatchView
   name: string
@@ -303,6 +307,7 @@ function BatchCard({
   adminLink: ReactNode
   brakeNote: string | null
   dryRun: boolean
+  listName: string
 }) {
   const stage = stageLabel[b.stage]
   const proving = b.stage === "proving"
@@ -318,14 +323,24 @@ function BatchCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h2 id={`batch-${b.id}`} className="font-semibold">
-            {b.periodLabel}
-            <span className="font-normal text-muted-foreground"> · {b.campaignName ?? "All campaigns"}</span>
+            {b.kind === "standard" ? "Standard negatives" : b.periodLabel}
+            <span className="font-normal text-muted-foreground">
+              {" · "}
+              {b.kind === "standard" ? (b.forCampaigns?.length === 1 ? b.forCampaigns[0] : `${b.forCampaigns?.length ?? 0} campaigns`) : (b.campaignName ?? "All campaigns")}
+            </span>
           </h2>
           <p className="text-sm text-muted-foreground">
-            {b.items.length
-              ? `${b.items.length} negative keyword${b.items.length === 1 ? "" : "s"} for searches that cost ${formatUsd(cost)} and brought no conversions.`
-              : "No search in this period matched the rules without converting."}
+            {b.kind === "standard"
+              ? b.items.length
+                ? `From the campaign check: ${b.items.length} standard negative${b.items.length === 1 ? "" : "s"} these campaigns don't block yet. Searches they'd have blocked in the last 12 months cost ${formatUsd(cost)}.`
+                : "These campaigns already block every standard negative."
+              : b.items.length
+                ? `${b.items.length} negative keyword${b.items.length === 1 ? "" : "s"} for searches that cost ${formatUsd(cost)} and brought no conversions.`
+                : "No search in this period matched the rules without converting."}
           </p>
+          {b.kind === "standard" && b.forCampaigns && b.forCampaigns.length > 1 && (
+            <p className="text-xs text-muted-foreground">For: {b.forCampaigns.join(", ")}</p>
+          )}
         </div>
         <Pill tone={stage.tone}>{stage.label}</Pill>
       </div>
@@ -354,6 +369,9 @@ function BatchCard({
                     </span>
                   </td>
                   <td className="px-4 py-2.5">
+                    {item.terms.length === 0 && (
+                      <p className="text-xs text-muted-foreground">No searches yet: standard protection for when these campaigns run.</p>
+                    )}
                     <ul className="flex flex-col gap-0.5 text-xs">
                       {item.terms.map((t) => (
                         <li key={t}>{t}</li>
@@ -405,15 +423,37 @@ function BatchCard({
 
       <div className="flex flex-wrap items-center gap-2">
         {proving && (
-          <Button type="button" disabled={busy !== null || openProof > 0} onClick={() => run(k("prove"), () => finishNegativeStep(b.id, "proven", name))}>
-            {busy === k("prove") ? "Saving…" : openProof ? `Review done (${openProof} left)` : "Review done"}
-          </Button>
+          <>
+            <Button type="button" disabled={busy !== null || openProof > 0} onClick={() => run(k("prove"), () => finishNegativeStep(b.id, "proven", name))}>
+              {busy === k("prove") ? "Saving…" : openProof ? `Review done (${openProof} left)` : "Review done"}
+            </Button>
+            {openProof > 1 && (
+              <>
+                <Button type="button" variant="outline" disabled={busy !== null} onClick={() => run(k("all-p1"), () => markAllNegativeLines(b.id, "proven", true, name))}>
+                  The {openProof} left hold up
+                </Button>
+                <Button type="button" variant="outline" disabled={busy !== null} onClick={() => run(k("all-p0"), () => markAllNegativeLines(b.id, "proven", false, name))}>
+                  Drop the {openProof} left
+                </Button>
+              </>
+            )}
+          </>
         )}
         {approving && (
           <>
             <Button type="button" disabled={busy !== null || openApproval > 0} onClick={() => run(k("approve"), () => finishNegativeStep(b.id, "approved", name))}>
               {busy === k("approve") ? "Saving…" : openApproval ? `Approval done (${openApproval} left)` : "Approval done"}
             </Button>
+            {openApproval > 1 && (
+              <>
+                <Button type="button" variant="outline" disabled={busy !== null} onClick={() => run(k("all-a1"), () => markAllNegativeLines(b.id, "approved", true, name))}>
+                  Approve the {openApproval} left
+                </Button>
+                <Button type="button" variant="outline" disabled={busy !== null} onClick={() => run(k("all-a0"), () => markAllNegativeLines(b.id, "approved", false, name))}>
+                  Reject the {openApproval} left
+                </Button>
+              </>
+            )}
             <Button type="button" variant="outline" disabled={busy !== null} onClick={() => run(k("reopen-p"), () => reopenNegativeStep(b.id, "proven", name))}>
               Reopen review
             </Button>
@@ -445,7 +485,17 @@ function BatchCard({
       </div>
 
       {b.stage === "ready" && (
-        <PushPanel batch={b} lines={approvedLines.map((l) => l.negative)} name={name} campaigns={campaigns} admin={admin} adminLink={adminLink} brakeNote={brakeNote} dryRun={dryRun} />
+        <PushPanel
+          batch={b}
+          lines={approvedLines.map((l) => l.negative)}
+          name={name}
+          campaigns={campaigns}
+          admin={admin}
+          adminLink={adminLink}
+          brakeNote={brakeNote}
+          dryRun={dryRun}
+          listName={listName}
+        />
       )}
       {b.pushed && <Pushed b={b} />}
       {b.checked && <Result b={b} />}
@@ -508,6 +558,7 @@ function PushPanel({
   adminLink,
   brakeNote,
   dryRun,
+  listName,
 }: {
   batch: BatchView
   lines: string[]
@@ -517,15 +568,22 @@ function PushPanel({
   adminLink: ReactNode
   brakeNote: string | null
   dryRun: boolean
+  listName: string
 }) {
   // A batch drafted from one campaign goes back to that campaign by default.
-  const [picked, setPicked] = useState(() =>
-    b.campaignId && campaigns.some((c) => c.id === b.campaignId) ? [b.campaignId] : runningIds(campaigns),
-  )
   const approved = b.items.filter((i) => i.proven && i.approved)
   const known = new Set(campaigns.map((c) => c.id))
   const sources = [...new Set(approved.flatMap((i) => i.campaigns?.map((c) => c.id) ?? []))].filter((id) => known.has(id))
   const running = runningIds(campaigns)
+  // A batch from one campaign goes back to it; a standard batch to the campaigns it was drafted for.
+  const [picked, setPicked] = useState(() =>
+    b.kind === "standard" && sources.length
+      ? sources
+      : b.campaignId && known.has(b.campaignId)
+        ? [b.campaignId]
+        : running,
+  )
+  const [toList, setToList] = useState(b.kind === "standard")
   const pick = (ids: string[]) => setPicked([...new Set(ids)])
   const { ask, ui, busy } = useChange()
   const sameName = b.proven?.by && b.approved?.by && b.proven.by.toLowerCase() === b.approved.by.toLowerCase()
@@ -559,19 +617,30 @@ function PushPanel({
             </div>
           </div>
           <CampaignPicker campaigns={campaigns} selected={picked} onChange={setPicked} idPrefix={`push-${b.id}`} />
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={toList} onChange={(e) => setToList(e.target.checked)} className="mt-0.5 size-4" />
+            <span>
+              Put them in the shared list &ldquo;{listName}&rdquo; and attach it to the chosen campaigns, instead of adding them to each campaign
+              <span className="block text-xs text-muted-foreground">
+                One list to keep up: it&apos;s created the first time, and a campaign you attach it to later gets every negative in it.
+              </span>
+            </span>
+          </label>
           <div>
             <Button
               type="button"
               disabled={busy || !picked.length}
               onClick={() =>
                 ask({
-                  title: `Add ${lines.length} negative keyword${lines.length === 1 ? "" : "s"} to ${picked.length} campaign${picked.length === 1 ? "" : "s"}?`,
+                  title: toList
+                    ? `Add ${lines.length} negative keyword${lines.length === 1 ? "" : "s"} to "${listName}" and attach it to ${picked.length} campaign${picked.length === 1 ? "" : "s"}?`
+                    : `Add ${lines.length} negative keyword${lines.length === 1 ? "" : "s"} to ${picked.length} campaign${picked.length === 1 ? "" : "s"}?`,
                   details: <List items={lines.map((l) => `"${l}" (phrase)`)} />,
                   note: dryRun
                     ? "Dry run is on (DEALTRACK_VALIDATE_ONLY=1): Google checks the change and applies nothing."
                     : "This changes your live Google Ads account. Remove a negative later from the Search terms page if it blocks something good.",
                   confirmLabel: "Push to Google Ads",
-                  run: () => pushNegativeBatchAction(b.id, picked, name),
+                  run: () => pushNegativeBatchAction(b.id, picked, name, toList),
                 })
               }
             >
@@ -600,7 +669,8 @@ function Pushed({ b }: { b: BatchView }) {
       {p.dryRun && <p className="text-xs font-medium text-amber-800">Dry run: Google checked this push and changed nothing.</p>}
       <p>
         <span className="font-medium">Pushed by {p.by}</span>
-        {b.times.pushed ? ` on ${b.times.pushed}` : ""} to {p.campaignNames.join(", ")}: {formatNumber(p.added)} added
+        {b.times.pushed ? ` on ${b.times.pushed}` : ""} to {p.list ? `the list "${p.list}", attached to ` : ""}
+        {p.campaignNames.join(", ")}: {formatNumber(p.added)} added
         {p.skipped ? `, ${formatNumber(p.skipped)} already there` : ""}
         {p.failures.length ? `, ${p.failures.length} failed` : ""}.
       </p>

@@ -84,6 +84,9 @@ export type NegativeBatch = {
   to: string // …to (YYYY-MM-DD)
   campaignId?: string // search terms from this one campaign; unset = all campaigns
   campaignName?: string
+  // "standard": drafted by the campaign check from the standard negatives the chosen campaigns miss.
+  kind?: "standard"
+  forCampaigns?: string[] // the campaign check's chosen campaigns (names)
   items: BatchItem[]
   heldBack: HeldBack[]
   alreadyNegative: string[] // existing negatives (as shown in Google Ads) that already block some of the period's searches
@@ -91,7 +94,17 @@ export type NegativeBatch = {
   proven?: BatchStep
   approved?: BatchStep
   // dryRun: pushed while DEALTRACK_VALIDATE_ONLY=1, so Google changed nothing.
-  pushed?: BatchStep & { campaignIds: string[]; campaignNames: string[]; added: number; skipped: number; failures: string[]; dryRun?: boolean }
+  // list: pushed into this shared negative list (attached to the campaigns) instead of each campaign.
+  pushed?: BatchStep & {
+    campaignIds: string[]
+    campaignNames: string[]
+    added: number
+    skipped: number
+    failures: string[]
+    dryRun?: boolean
+    list?: string
+    attached?: number
+  }
   checked?: BatchStep & BatchResult
 }
 

@@ -60,7 +60,7 @@ const idList = (ids: string[]) => [...new Set(ids)].filter((id) => /^\d+$/.test(
 
 // Every negative keyword that applies to these campaigns, whatever their status: on the campaign,
 // on its ad groups, in negative lists attached to it, and in account-wide lists.
-async function existingNegatives(campaignIds: string[]): Promise<ExistingNegative[]> {
+export async function existingNegatives(campaignIds: string[]): Promise<ExistingNegative[]> {
   const ids = idList(campaignIds)
   if (!ids) return []
   type Kw = { text?: string; matchType?: string }
@@ -120,7 +120,7 @@ const shown = (n: ExistingNegative) => (n.matchType === "EXACT" ? `[${n.text}]` 
 // "john" covers "john buys", but [opendoor] only covers the search "opendoor". Returns the
 // searches still getting through (with only the spend that's still open) and the negatives that
 // cover the rest.
-function stillOpen(terms: SearchTermRow[], existing: ExistingNegative[]) {
+export function stillOpen(terms: SearchTermRow[], existing: ExistingNegative[]) {
   // Only negatives whose first word is in the search can block it.
   const byFirstWord = new Map<string, ExistingNegative[]>()
   for (const e of existing) {
@@ -147,7 +147,7 @@ function stillOpen(terms: SearchTermRow[], existing: ExistingNegative[]) {
 }
 
 // The campaigns a line's searches came from, costliest first.
-function campaignsOf(rows: SearchTermRow[]): CampaignShare[] {
+export function campaignsOf(rows: SearchTermRow[]): CampaignShare[] {
   const by = new Map<string, CampaignShare>()
   for (const p of rows.flatMap((r) => r.placements)) {
     const c = by.get(p.campaignId) ?? { id: p.campaignId, name: p.campaign, cost: 0 }
@@ -204,7 +204,7 @@ function wasteWords(week: SearchTermRow[], history: SearchTermRow[], keywordWord
 }
 
 // The keywords each campaign bids on (paused ones too), and every word in them.
-async function keywordsInUse(): Promise<{ byCampaign: Map<string, string[]>; words: Set<string> }> {
+export async function keywordsInUse(): Promise<{ byCampaign: Map<string, string[]>; words: Set<string> }> {
   const rows = await gaql<{ campaign: { id?: Num }; adGroupCriterion: { keyword?: { text?: string } } }>(
     `SELECT campaign.id, ad_group_criterion.keyword.text FROM ad_group_criterion
      WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE AND ad_group_criterion.status != 'REMOVED'

@@ -8,6 +8,7 @@ import { refresh } from "next/cache"
 
 import { isSignedIn } from "@/lib/auth"
 import { addDays, formatDay, today } from "@/lib/date-range"
+import { draftStandard } from "@/lib/campaign-check"
 import { getEditableCampaigns } from "@/lib/google-ads/changes"
 import { MAX_DRAFT_DAYS, batchId, checkDay, draftBatch, measure, stageOf } from "@/lib/negative-batches"
 import { rememberName } from "@/lib/people"
@@ -79,6 +80,57 @@ export async function draftNegativeBatch(input: { from: string; to: string; camp
   }
 }
 
+const MAX_CHECK_CAMPAIGNS = 30
+
+// From the campaign check: one batch of the standard negatives the chosen campaigns don't have
+// yet. It goes through the same review, approval, and admin push as any batch.
+export async function draftStandardBatch(campaignIds: string[], rawName: string): Promise<StepResult> {
+  const who = await person(rawName)
+  if (!("name" in who)) return who
+  const ids = Array.isArray(campaignIds) ? [...new Set(campaignIds)] : []
+  if (!ids.length || ids.length > MAX_CHECK_CAMPAIGNS || !ids.every((id) => typeof id === "string" && /^\d+$/.test(id))) {
+    return { ok: false, message: "Choose at least one campaign." }
+  }
+  try {
+    const names = new Map((await getEditableCampaigns()).map((c) => [c.id, c.name]))
+    if (ids.some((id) => !names.has(id))) return { ok: false, message: "One of those campaigns no longer exists or was removed. Reload the page." }
+    const id = `standard_${today()}_${ids.length === 1 ? `c${ids[0]}` : `${ids.length}`}`
+    const taken = "A standard batch for these campaigns was already drafted today. Discard it first to draft it again."
+    if ((await readData()).batches.some((b) => b.id === id)) return { ok: false, message: taken }
+    const draft = await draftStandard(ids)
+    let exists = false
+    await updateData((d) => {
+      exists = d.batches.some((b) => b.id === id)
+      if (exists) return false
+      d.batches.push({
+        id,
+        kind: "standard",
+        from: draft.from,
+        to: draft.to,
+        campaignId: ids.length === 1 ? ids[0] : undefined,
+        campaignName: ids.length === 1 ? names.get(ids[0]) : undefined,
+        forCampaigns: ids.map((i) => names.get(i)!),
+        items: draft.items,
+        heldBack: draft.heldBack,
+        alreadyNegative: [],
+        drafted: { by: who.name, at: new Date().toISOString() },
+      })
+      d.batches.sort((a, b) => b.drafted.at.localeCompare(a.drafted.at))
+    })
+    if (exists) return { ok: false, message: taken }
+    refresh()
+    const n = draft.items.length
+    return {
+      ok: true,
+      message: n
+        ? `Drafted ${n} standard negative${n === 1 ? "" : "s"} for ${ids.length === 1 ? names.get(ids[0]) : `${ids.length} campaigns`}. It's at the top of the batches: next, someone reviews each line.`
+        : "Those campaigns already block every standard negative.",
+    }
+  } catch (e) {
+    return failed(e)
+  }
+}
+
 export async function markNegativeLine(
   batchId: string,
   index: number,
@@ -109,6 +161,37 @@ export async function markNegativeLine(
     if (problem) return problem
     refresh()
     return { ok: true, message: "Saved." }
+  } catch (e) {
+    return failed(e)
+  }
+}
+
+// Marks every line still without a decision at once, e.g. "Holds up" for a long standard batch.
+export async function markAllNegativeLines(batchId: string, field: "proven" | "approved", value: boolean, rawName: string): Promise<StepResult> {
+  const who = await person(rawName)
+  if (!("name" in who)) return who
+  if ((field !== "proven" && field !== "approved") || typeof value !== "boolean") return { ok: false, message: "Unknown choice." }
+  try {
+    let n = 0
+    const problem = await changeBatch(batchId, (b) => {
+      const stage = stageOf(b)
+      if (field === "proven" && stage !== "proving") return "The review step is closed. Reopen it to change a line."
+      if (field === "approved" && stage !== "approving") return b.proven ? "The approval step is closed. Reopen it to change a line." : "The lines need a review first."
+      for (const item of b.items) {
+        if (field === "proven" && item.proven === null) {
+          item.proven = value
+          item.provenBy = who.name
+          n++
+        } else if (field === "approved" && item.proven && item.approved === null) {
+          item.approved = value
+          item.approvedBy = who.name
+          n++
+        }
+      }
+    })
+    if (problem) return problem
+    refresh()
+    return { ok: true, message: `Marked ${n} line${n === 1 ? "" : "s"}.` }
   } catch (e) {
     return failed(e)
   }

@@ -9,6 +9,8 @@ import { isAdmin } from "@/lib/auth"
 import { dayOf, formatDay } from "@/lib/date-range"
 import {
   MATCH_TYPES,
+  STANDARD_LIST,
+  addToStandardList,
   addNegativeKeywords,
   excludeLocations,
   getEditableCampaigns,
@@ -119,7 +121,9 @@ export async function pauseCampaignsAction(campaignIds: string[]): Promise<Actio
 
 // Weekly negatives, step 4: sends a batch's approved lines to Google Ads in one change. At most
 // one batch a week (the brake), and only after a review and an approval.
-export async function pushNegativeBatchAction(batchId: string, campaignIds: string[], rawName: string): Promise<ActionResult> {
+// With `toList`, the lines go into the shared list "DealTrack standard negatives" (created the first
+// time) and the list is attached to the campaigns, instead of adding them to each campaign.
+export async function pushNegativeBatchAction(batchId: string, campaignIds: string[], rawName: string, toList = false): Promise<ActionResult> {
   return guarded(async () => {
     const name = await rememberName(rawName)
     if (!name) return { ok: false, message: "Type your name first, so the batch shows who pushed it." }
@@ -138,8 +142,12 @@ export async function pushNegativeBatchAction(batchId: string, campaignIds: stri
     }
 
     const lines = pushedLines(batch)
-    const summary: ChangeSummary = { applied: 0, skipped: 0, failures: [] }
-    for (const matchType of ["PHRASE", "EXACT"] as const) {
+    const summary: ChangeSummary & { attached?: number } = { applied: 0, skipped: 0, failures: [] }
+    if (toList) {
+      const s = await addToStandardList({ campaignIds: ids, keywords: lines.map((l) => ({ text: l.negative, matchType: l.matchType })) })
+      Object.assign(summary, s)
+    }
+    for (const matchType of toList ? [] : (["PHRASE", "EXACT"] as const)) {
       const keywords = lines.filter((l) => l.matchType === matchType).map((l) => l.negative)
       if (!keywords.length) continue
       const s = await addNegativeKeywords({ campaignIds: ids, keywords, matchType })
@@ -160,9 +168,23 @@ export async function pushNegativeBatchAction(batchId: string, campaignIds: stri
         skipped: summary.skipped,
         failures: summary.failures,
         dryRun: dryRun() || undefined,
+        list: toList ? STANDARD_LIST : undefined,
+        attached: toList ? summary.attached : undefined,
       }
     })
     refresh()
+    if (toList) {
+      const n = summary.applied
+      const m = summary.attached ?? 0
+      const words = `${n} negative keyword${n === 1 ? "" : "s"} to "${STANDARD_LIST}"${m ? ` and attach it to ${m} more campaign${m === 1 ? "" : "s"}` : ""}`
+      const already = summary.skipped ? ` ${summary.skipped} ${summary.skipped === 1 ? "was" : "were"} already in the list.` : ""
+      return {
+        ok: true,
+        message: dryRun()
+          ? `Dry run (DEALTRACK_VALIDATE_ONLY=1): Google checked the change and applied nothing. It would add ${words}.${already}`
+          : `Added ${words}.${already}`.replace("Added 0 negative keywords to", "Nothing new to add to"),
+      }
+    }
     return report(summary, "negative keyword", "Added")
   })
 }
