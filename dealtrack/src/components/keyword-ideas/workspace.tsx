@@ -181,7 +181,10 @@ export default function KeywordIdeas(props: Props) {
                       <span className="text-sm font-medium">{b.periodLabel}</span>
                       <Pill tone={stage.tone}>{stage.label}</Pill>
                     </span>
-                    <span className="truncate text-xs text-muted-foreground">{b.campaignName ?? "All campaigns"}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {b.campaignName ?? "All campaigns"}
+                      {b.addTo ? ` → ${b.addTo.campaignName}` : ""}
+                    </span>
                     <span className="text-xs text-muted-foreground">
                       {b.items.length} idea{b.items.length === 1 ? "" : "s"} · drafted by {b.drafted.by}
                     </span>
@@ -226,6 +229,8 @@ function NewIdeas({ campaigns, today, name, onDrafted }: Props & { name: string;
   const [from, setFrom] = useState(quick[0].from)
   const [to, setTo] = useState(quick[0].to)
   const [campaignId, setCampaignId] = useState("")
+  const [addMode, setAddMode] = useState<"converted" | "campaign">("converted")
+  const [addTo, setAddTo] = useState(campaigns.find((c) => c.status === "ENABLED")?.id ?? "")
   const [sources, setSources] = useState<IdeaSource[]>(["proven", "phrase", "situation"])
   const [competitors, setCompetitors] = useState(false)
   const [busy, startTransition] = useTransition()
@@ -289,6 +294,49 @@ function NewIdeas({ campaigns, today, name, onDrafted }: Props & { name: string;
         </select>
       </label>
 
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">Add them to</span>
+        <Segmented
+          label="Add them to"
+          value={addMode}
+          onChange={setAddMode}
+          options={[
+            { id: "converted", label: "Where they converted" },
+            { id: "campaign", label: running.length ? "A campaign (e.g. the running one)" : "A campaign" },
+          ]}
+        />
+        {addMode === "campaign" ? (
+          <>
+            <select autoComplete="off" aria-label="Campaign to add them to" value={addTo} onChange={(e) => setAddTo(e.target.value)} className={cn(field, "mt-1")}>
+              {!addTo && <option value="">Choose a campaign</option>}
+              {running.length > 0 && (
+                <optgroup label="Running">
+                  {running.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {others.length > 0 && (
+                <optgroup label="Paused or ended">
+                  {others.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Every idea goes into that campaign&apos;s best-matching ad group, and is checked against that campaign&apos;s own keywords and negatives.
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">Each idea goes into the ad group where its searches converted. Many of those campaigns are paused.</p>
+        )}
+      </div>
+
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-xs font-medium text-muted-foreground">Kinds of ideas</legend>
         {SOURCES.map((s) => (
@@ -319,8 +367,12 @@ function NewIdeas({ campaigns, today, name, onDrafted }: Props & { name: string;
         <Button
           type="button"
           size="lg"
-          disabled={busy || !from || !to || !sources.length}
-          onClick={() => startTransition(async () => onDrafted(await draftKeywordIdeas({ from, to, campaignId, sources, competitors }, name)))}
+          disabled={busy || !from || !to || !sources.length || (addMode === "campaign" && !addTo)}
+          onClick={() =>
+            startTransition(async () =>
+              onDrafted(await draftKeywordIdeas({ from, to, campaignId, addTo: addMode === "campaign" ? addTo : "", sources, competitors }, name)),
+            )
+          }
         >
           {busy ? "Looking through your searches…" : "Draft keyword ideas"}
         </Button>

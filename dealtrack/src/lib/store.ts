@@ -113,16 +113,16 @@ export type NegativeBatch = {
 // it), then reviewed, approved, and pushed by an admin like a negatives batch.
 export type IdeaSource = "proven" | "phrase" | "situation" | "planner"
 
+export type IdeaTarget = { adGroupId: string; adGroupName: string; campaignId: string; campaignName: string }
+
 export type KeywordIdea = {
   text: string
   matchType: "EXACT" | "PHRASE"
   source: IdeaSource
   why: string
-  // Where it would be added. Empty until someone picks an ad group, when nothing suggests one.
-  campaignId: string
-  campaignName: string
-  adGroupId: string
-  adGroupName: string
+  // The ad groups it goes into (one or more). Empty until someone picks one, when nothing suggests
+  // where it belongs.
+  targets: IdeaTarget[]
   // Evidence from the account's search terms in the period.
   searches: string[] // the searches it covers, costliest first (up to 5)
   searchCount: number
@@ -147,6 +147,7 @@ export type KeywordBatch = {
   to: string // …to (YYYY-MM-DD)
   campaignId?: string // ideas from this campaign's searches; unset = all campaigns
   campaignName?: string
+  addTo?: { campaignId: string; campaignName: string } // every idea goes into this campaign; unset = where it converted
   sources: IdeaSource[]
   items: KeywordIdea[]
   skipped: { text: string; why: string }[] // left out by a safety check
@@ -189,6 +190,13 @@ const empty = (): Data => ({
   audit: {},
 })
 
+// Lines saved before an idea could go into several ad groups had one ad group on the line itself.
+function withTargets(i: KeywordIdea & { adGroupId?: string; adGroupName?: string; campaignId?: string; campaignName?: string }): KeywordIdea {
+  if (Array.isArray(i.targets)) return i
+  const { adGroupId, adGroupName, campaignId, campaignName, ...rest } = i
+  return { ...rest, targets: adGroupId ? [{ adGroupId, adGroupName: adGroupName ?? "", campaignId: campaignId ?? "", campaignName: campaignName ?? "" }] : [] }
+}
+
 export async function readData(): Promise<Data> {
   try {
     const saved = JSON.parse(await readFile(FILE, "utf8")) as Partial<Data>
@@ -204,7 +212,12 @@ export async function readData(): Promise<Data> {
         ? saved.batches.map((b) => ({ ...b, items: b.items ?? [], heldBack: b.heldBack ?? [], alreadyNegative: b.alreadyNegative ?? [] }))
         : [],
       keywordBatches: Array.isArray(saved.keywordBatches)
-        ? saved.keywordBatches.map((b) => ({ ...b, items: b.items ?? [], skipped: b.skipped ?? [], notes: b.notes ?? [] }))
+        ? saved.keywordBatches.map((b) => ({
+            ...b,
+            items: (b.items ?? []).map(withTargets),
+            skipped: b.skipped ?? [],
+            notes: b.notes ?? [],
+          }))
         : [],
       audit: saved.audit && typeof saved.audit === "object" ? saved.audit : {},
     }

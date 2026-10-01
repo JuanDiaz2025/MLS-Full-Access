@@ -201,8 +201,9 @@ export async function pushKeywordBatchAction(batchId: string, paused: boolean, r
     if (!batch) return { ok: false, message: "That batch doesn't exist any more. Reload the page." }
     if (ideaStage(batch) !== "ready") return { ok: false, message: batch.pushed ? "This batch was already pushed." : "This batch isn't reviewed and approved yet." }
     const lines = pushedIdeas(batch)
-    if (lines.some((l) => !l.adGroupId)) return { ok: false, message: "Every approved keyword needs an ad group." }
-    const summary = await addKeywords({ keywords: lines.map((l) => ({ adGroupId: l.adGroupId, text: l.text, matchType: l.matchType })), paused: !!paused })
+    if (lines.some((l) => !l.targets.length)) return { ok: false, message: "Every approved keyword needs an ad group." }
+    const keywords = lines.flatMap((l) => l.targets.map((t) => ({ adGroupId: t.adGroupId, text: l.text, matchType: l.matchType })))
+    const summary = await addKeywords({ keywords, paused: !!paused })
     await updateData((d) => {
       const b = d.keywordBatches.find((x) => x.id === batchId)
       if (!b || b.pushed) return false

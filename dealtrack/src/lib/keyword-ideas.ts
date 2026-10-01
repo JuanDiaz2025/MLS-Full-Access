@@ -15,7 +15,7 @@ import { cleanKeyword } from "@/lib/google-ads/changes"
 import { getSearchTerms, type SearchTermRow } from "@/lib/google-ads/reports"
 import { existingNegatives, type ExistingNegative } from "@/lib/negative-batches"
 import { SELLER_INTENT, blocks, matchRule } from "@/lib/negatives"
-import type { IdeaSource, KeywordBatch, KeywordIdea } from "@/lib/store"
+import type { IdeaSource, IdeaTarget, KeywordBatch, KeywordIdea } from "@/lib/store"
 
 export const IDEA_DAYS = 365 // default period: the last 12 months
 const SHOWN = 5
@@ -63,9 +63,12 @@ const SELLER_WORDS = /\b(sell\w*|sold|cash|offers?|buy\w*|buyers?)\b/i
 const BRAND = /\btwin\b/i
 
 export type Ideas = { items: KeywordIdea[]; skipped: { text: string; why: string }[]; notes: string[] }
-export type IdeaScope = { from: string; to: string; campaignId?: string; sources: IdeaSource[]; competitors: boolean }
+// addTo: put every idea into this campaign (its closest ad group) instead of where it converted.
+export type IdeaScope = { from: string; to: string; campaignId?: string; addTo?: string; sources: IdeaSource[]; competitors: boolean }
 
-type AdGroup = { id: string; name: string; campaignId: string; campaignName: string; keywords: string[] }
+export type AdGroup = { id: string; name: string; campaignId: string; campaignName: string; keywords: string[] }
+
+export const toTarget = (g: AdGroup): IdeaTarget => ({ adGroupId: g.id, adGroupName: g.name, campaignId: g.campaignId, campaignName: g.campaignName })
 
 // Every ad group that can take keywords, with its keywords (any status but removed).
 export async function adGroupsWithKeywords(): Promise<AdGroup[]> {
@@ -98,7 +101,7 @@ export async function adGroupsWithKeywords(): Promise<AdGroup[]> {
 const words = (t: string) => t.toLowerCase().split(/\s+/).filter(Boolean)
 
 // The ad group whose keywords share the most words with the idea, within the given campaigns.
-function closestGroup(text: string, groups: AdGroup[]): AdGroup | undefined {
+export function closestGroup(text: string, groups: AdGroup[]): AdGroup | undefined {
   const mine = new Set(words(text))
   let best: { g: AdGroup; score: number } | undefined
   for (const g of groups) {
@@ -109,6 +112,12 @@ function closestGroup(text: string, groups: AdGroup[]): AdGroup | undefined {
     if (shared && (!best || score > best.score)) best = { g, score }
   }
   return best?.g
+}
+
+// The ad group in a campaign that fits a keyword best: most shared words, or the campaign's ad
+// group with the most keywords when none share a word.
+export function groupInCampaign(text: string, campaignGroups: AdGroup[]): AdGroup | undefined {
+  return closestGroup(text, campaignGroups) ?? [...campaignGroups].sort((a, b) => b.keywords.length - a.keywords.length)[0]
 }
 
 // Where the searches an idea covers converted (or cost) the most.
@@ -240,11 +249,17 @@ export async function draftIdeas(scope: IdeaScope): Promise<Ideas> {
     }
   }
 
-  // Where each idea goes: where its searches converted, or the closest ad group in scope.
+  // Where each idea goes: the chosen campaign's closest ad group, or where its searches converted,
+  // or the closest ad group in scope.
+  const addGroups = scope.addTo ? groups.filter((g) => g.campaignId === scope.addTo) : []
+  if (scope.addTo && !addGroups.length) notes.push("That campaign has no ad groups yet, so choose where each keyword goes in its line.")
   const targetCampaigns = new Set<string>()
   for (const c of candidates) {
-    const best = c.rows.length ? bestPlacement(c.rows) : undefined
-    c.group = (best && groupById.get(best.adGroupId)) || closestGroup(c.text, scopeGroups)
+    if (scope.addTo) c.group = groupInCampaign(c.text, addGroups)
+    else {
+      const best = c.rows.length ? bestPlacement(c.rows) : undefined
+      c.group = (best && groupById.get(best.adGroupId)) || closestGroup(c.text, scopeGroups)
+    }
     if (c.group) targetCampaigns.add(c.group.campaignId)
   }
   const negatives = await existingNegatives([...targetCampaigns])
@@ -281,10 +296,7 @@ export async function draftIdeas(scope: IdeaScope): Promise<Ideas> {
       matchType: c.matchType,
       source: c.source,
       why: c.why,
-      campaignId: g?.campaignId ?? "",
-      campaignName: g?.campaignName ?? "",
-      adGroupId: g?.id ?? "",
-      adGroupName: g?.name ?? "",
+      targets: g ? [toTarget(g)] : [],
       ...evidence(c.rows),
       ...(p ?? {}),
       proven: null,

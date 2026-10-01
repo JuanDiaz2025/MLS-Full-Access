@@ -9,7 +9,7 @@ import { refresh } from "next/cache"
 import { isSignedIn } from "@/lib/auth"
 import { addDays, formatDay, today } from "@/lib/date-range"
 import { getEditableCampaigns } from "@/lib/google-ads/changes"
-import { adGroupsWithKeywords, draftIdeas, ideaStage } from "@/lib/keyword-ideas"
+import { adGroupsWithKeywords, draftIdeas, groupInCampaign, ideaStage, toTarget } from "@/lib/keyword-ideas"
 import { rememberName } from "@/lib/people"
 import { readData, updateData, type IdeaSource, type KeywordBatch } from "@/lib/store"
 
@@ -40,7 +40,7 @@ async function changeBatch(batchId: string, edit: (b: KeywordBatch) => string | 
 }
 
 export async function draftKeywordIdeas(
-  input: { from: string; to: string; campaignId: string; sources: string[]; competitors: boolean },
+  input: { from: string; to: string; campaignId: string; addTo: string; sources: string[]; competitors: boolean },
   rawName: string,
 ): Promise<IdeaResult> {
   const who = await person(rawName)
@@ -53,11 +53,14 @@ export async function draftKeywordIdeas(
   const sources = SOURCES.filter((s) => Array.isArray(input.sources) && input.sources.includes(s))
   if (!sources.length) return { ok: false, message: "Choose at least one kind of idea." }
   const campaignId = input.campaignId || undefined
-  if (campaignId && !/^\d+$/.test(campaignId)) return { ok: false, message: "Unknown campaign. Reload the page." }
+  const addTo = input.addTo || undefined
+  if ((campaignId && !/^\d+$/.test(campaignId)) || (addTo && !/^\d+$/.test(addTo))) return { ok: false, message: "Unknown campaign. Reload the page." }
   try {
-    const campaign = campaignId ? (await getEditableCampaigns()).find((c) => c.id === campaignId) : undefined
-    if (campaignId && !campaign) return { ok: false, message: "That campaign no longer exists or was removed. Reload the page." }
-    const draft = await draftIdeas({ from, to, campaignId, sources, competitors: !!input.competitors })
+    const all = await getEditableCampaigns()
+    const campaign = campaignId ? all.find((c) => c.id === campaignId) : undefined
+    const target = addTo ? all.find((c) => c.id === addTo) : undefined
+    if ((campaignId && !campaign) || (addTo && !target)) return { ok: false, message: "That campaign no longer exists or was removed. Reload the page." }
+    const draft = await draftIdeas({ from, to, campaignId, addTo, sources, competitors: !!input.competitors })
     const id = `ideas_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
     await updateData((d) => {
       d.keywordBatches.unshift({
@@ -66,6 +69,7 @@ export async function draftKeywordIdeas(
         to,
         campaignId,
         campaignName: campaign?.name,
+        addTo: target ? { campaignId: target.id, campaignName: target.name } : undefined,
         sources,
         ...draft,
         drafted: { by: who.name, at: new Date().toISOString() },
@@ -101,7 +105,7 @@ export async function markKeywordIdea(batchId: string, index: number, field: "pr
       } else {
         if (stage !== "approving") return b.proven ? "The approval step is closed. Reopen it to change a line." : "The lines need a review first."
         if (!item.proven) return "Only lines that held up in review can be approved."
-        if (value && !item.adGroupId) return "Choose an ad group for this keyword first."
+        if (value && !item.targets.length) return "Choose an ad group for this keyword first."
         item.approved = value
         item.approvedBy = value === null ? undefined : who.name
       }
@@ -131,7 +135,7 @@ export async function markAllKeywordIdeas(batchId: string, field: "proven" | "ap
           item.provenBy = who.name
           n++
         } else if (field === "approved" && item.proven && item.approved === null) {
-          if (value && !item.adGroupId) {
+          if (value && !item.targets.length) {
             noGroup++
             continue
           }
@@ -149,19 +153,24 @@ export async function markAllKeywordIdeas(batchId: string, field: "proven" | "ap
   }
 }
 
-// Change a line's match type or ad group while it's in review or approval.
+// Change a line's match type or the ad groups it goes into, while it's in review or approval.
 export async function editKeywordIdea(
   batchId: string,
   index: number,
-  change: { matchType?: string; adGroupId?: string },
+  change: { matchType?: string; adGroupIds?: string[] },
   rawName: string,
 ): Promise<IdeaResult> {
   const who = await person(rawName)
   if (!("name" in who)) return who
+  if (change.matchType && change.matchType !== "EXACT" && change.matchType !== "PHRASE") return { ok: false, message: "Unknown match type." }
   try {
-    const group = change.adGroupId ? (await adGroupsWithKeywords()).find((g) => g.id === change.adGroupId) : undefined
-    if (change.adGroupId && !group) return { ok: false, message: "That ad group no longer exists. Reload the page." }
-    if (change.matchType && change.matchType !== "EXACT" && change.matchType !== "PHRASE") return { ok: false, message: "Unknown match type." }
+    let targets: ReturnType<typeof toTarget>[] | undefined
+    if (change.adGroupIds) {
+      const ids = [...new Set(change.adGroupIds)].filter((id) => typeof id === "string" && /^\d+$/.test(id))
+      const groups = new Map((await adGroupsWithKeywords()).map((g) => [g.id, g]))
+      if (ids.some((id) => !groups.has(id))) return { ok: false, message: "One of those ad groups no longer exists. Reload the page." }
+      targets = ids.map((id) => toTarget(groups.get(id)!))
+    }
     const problem = await changeBatch(batchId, (b) => {
       const item = b.items[index]
       if (!Number.isInteger(index) || !item) return "That line doesn't exist any more. Reload the page."
@@ -171,16 +180,55 @@ export async function editKeywordIdea(
         return `There's already a ${change.matchType === "EXACT" ? "exact" : "phrase"} line for "${item.text}".`
       }
       if (change.matchType) item.matchType = change.matchType as "EXACT" | "PHRASE"
-      if (group) {
-        item.adGroupId = group.id
-        item.adGroupName = group.name
-        item.campaignId = group.campaignId
-        item.campaignName = group.campaignName
+      if (targets) {
+        item.targets = targets
+        // An approved line with nowhere to go can't stay approved.
+        if (!targets.length && item.approved) {
+          item.approved = null
+          item.approvedBy = undefined
+        }
       }
     })
     if (problem) return problem
     refresh()
     return { ok: true, message: "Saved." }
+  } catch (e) {
+    return failed(e)
+  }
+}
+
+// Puts lines (the chosen ones, or every line) into one campaign: each into that campaign's ad group
+// that fits it best. keep: add it there and keep the line's other ad groups; otherwise replace them.
+export async function assignKeywordIdeas(
+  batchId: string,
+  indexes: number[] | null,
+  campaignId: string,
+  keep: boolean,
+  rawName: string,
+): Promise<IdeaResult> {
+  const who = await person(rawName)
+  if (!("name" in who)) return who
+  if (!/^\d+$/.test(campaignId)) return { ok: false, message: "Choose a campaign." }
+  try {
+    const groups = (await adGroupsWithKeywords()).filter((g) => g.campaignId === campaignId)
+    if (!groups.length) return { ok: false, message: "That campaign has no ad groups yet. Add one in Google Ads first, then reload." }
+    let n = 0
+    const problem = await changeBatch(batchId, (b) => {
+      const stage = ideaStage(b)
+      if (stage !== "proving" && stage !== "approving") return "Lines can only change during review or approval."
+      const chosen = indexes ? new Set(indexes.filter((i) => Number.isInteger(i))) : null
+      b.items.forEach((item, i) => {
+        if (chosen && !chosen.has(i)) return
+        const g = groupInCampaign(item.text, groups)!
+        const target = toTarget(g)
+        item.targets = keep ? [...item.targets.filter((t) => t.campaignId !== campaignId), target] : [target]
+        n++
+      })
+      if (!n) return "Choose at least one line."
+    })
+    if (problem) return problem
+    refresh()
+    return { ok: true, message: `Put ${n} keyword${n === 1 ? "" : "s"} into ${groups[0].campaignName}${keep ? ", keeping their other ad groups" : ""}.` }
   } catch (e) {
     return failed(e)
   }

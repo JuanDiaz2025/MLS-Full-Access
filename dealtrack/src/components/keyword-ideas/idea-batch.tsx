@@ -8,6 +8,7 @@ import { Check, Info } from "lucide-react"
 
 import { pushKeywordBatchAction } from "@/app/actions/changes"
 import {
+  assignKeywordIdeas,
   discardKeywordBatch,
   editKeywordIdea,
   finishKeywordStep,
@@ -17,6 +18,7 @@ import {
   type IdeaResult,
 } from "@/app/actions/keyword-ideas"
 import { List, useChange } from "@/components/changes/shared"
+import AdGroupPicker from "@/components/keyword-ideas/ad-group-picker"
 import { formatNumber, formatUsd } from "@/components/dashboard/format"
 import { Choice, Decision, Segmented } from "@/components/negatives/parts"
 import { Pill, type PillTone } from "@/components/pill"
@@ -68,6 +70,7 @@ export default function IdeaBatch({ batch: b, shared }: { batch: IdeaBatchView; 
   const [kind, setKind] = useState<"all" | IdeaSource>("all")
   const [decided, setDecided] = useState<Decided>("all")
   const [search, setSearch] = useState("")
+  const [chosen, setChosen] = useState<number[]>([])
 
   const run = (key: string, step: () => Promise<IdeaResult>) => {
     setBusy(key)
@@ -85,7 +88,7 @@ export default function IdeaBatch({ batch: b, shared }: { batch: IdeaBatchView; 
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => {
       const d = decision(item)
-      const text = [item.text, item.why, item.campaignName, item.adGroupName, ...item.searches].join(" ").toLowerCase()
+      const text = [item.text, item.why, ...item.targets.flatMap((t) => [t.campaignName, t.adGroupName]), ...item.searches].join(" ").toLowerCase()
       return (
         (kind === "all" || item.source === kind) &&
         (decided === "all" || (decided === "open" ? d === null : decided === "kept" ? d === true : d === false)) &&
@@ -105,6 +108,7 @@ export default function IdeaBatch({ batch: b, shared }: { batch: IdeaBatchView; 
             {b.periodLabel}
             <span className="font-normal text-muted-foreground"> · {b.campaignName ?? "All campaigns"}</span>
           </h2>
+          {b.addTo && <p className="text-sm">For {b.addTo.campaignName}: every idea goes into one of its ad groups.</p>}
           <p className="text-sm text-muted-foreground">
             {b.items.length
               ? `${b.items.length} keyword idea${b.items.length === 1 ? "" : "s"}: ${kinds.map((k) => `${b.items.filter((i) => i.source === k).length} ${SOURCE_SHORT[k].label.toLowerCase()}`).join(", ")}.`
@@ -178,10 +182,27 @@ export default function IdeaBatch({ batch: b, shared }: { batch: IdeaBatchView; 
               ]}
             />
           </div>
+          {editable && <BulkBar b={b} shared={shared} chosen={chosen} setChosen={setChosen} shownCount={rows.length} busy={busy} run={run} />}
           <div className="max-h-[62vh] overflow-auto rounded-xl border">
             <table className="w-full min-w-[900px] border-collapse text-sm">
               <thead className="sticky top-0 z-10 bg-card shadow-[0_1px_0_var(--border)]">
                 <tr className="text-left text-xs text-muted-foreground">
+                  {editable && (
+                    <th scope="col" className="w-8 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        autoComplete="off"
+                        aria-label="Choose every idea shown"
+                        checked={rows.length > 0 && rows.every((r) => chosen.includes(r.index))}
+                        onChange={(e) =>
+                          setChosen((c) =>
+                            e.target.checked ? [...new Set([...c, ...rows.map((r) => r.index)])] : c.filter((i) => !rows.some((r) => r.index === i)),
+                          )
+                        }
+                        className="size-4"
+                      />
+                    </th>
+                  )}
                   <th scope="col" className="px-3 py-2 font-medium">Keyword</th>
                   <th scope="col" className="px-3 py-2 font-medium">Evidence</th>
                   {hasPlanner && <th scope="col" className="px-3 py-2 text-right font-medium">Monthly searches</th>}
@@ -192,11 +213,23 @@ export default function IdeaBatch({ batch: b, shared }: { batch: IdeaBatchView; 
               </thead>
               <tbody>
                 {rows.map(({ item, index }) => (
-                  <Line key={index} b={b} item={item} index={index} editable={editable} hasPlanner={hasPlanner} busy={busy} run={run} shared={shared} />
+                  <Line
+                    key={index}
+                    b={b}
+                    item={item}
+                    index={index}
+                    editable={editable}
+                    hasPlanner={hasPlanner}
+                    busy={busy}
+                    run={run}
+                    shared={shared}
+                    chosen={chosen.includes(index)}
+                    onChoose={(on) => setChosen((c) => (on ? [...c, index] : c.filter((i) => i !== index)))}
+                  />
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={hasPlanner ? 6 : 5} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                    <td colSpan={(hasPlanner ? 6 : 5) + (editable ? 1 : 0)} className="px-3 py-6 text-center text-sm text-muted-foreground">
                       No idea matches.
                     </td>
                   </tr>
@@ -261,7 +294,7 @@ function NextStep({ b, shared, busy, run }: { b: IdeaBatchView; shared: IdeaShar
   const { name } = shared
   const openProof = b.items.filter((i) => i.proven === null).length
   const openApproval = b.items.filter((i) => i.proven && i.approved === null).length
-  const noGroup = b.items.filter((i) => i.proven && i.approved === null && !i.adGroupId).length
+  const noGroup = b.items.filter((i) => i.proven && i.approved === null && !i.targets.length).length
   const off = busy !== null
 
   const box = (tone: "violet" | "gray" | "green", title: string, body: React.ReactNode, actions?: React.ReactNode) => (
@@ -377,7 +410,8 @@ function PushBox({ b, shared, busy, run }: { b: IdeaBatchView; shared: IdeaShare
   const [paused, setPaused] = useState(true)
   const { ask, ui, busy: asking } = useChange()
   const lines = b.items.filter((i) => i.proven && i.approved)
-  const groups = new Set(lines.map((l) => l.adGroupId)).size
+  const groups = new Set(lines.flatMap((l) => l.targets.map((t) => t.adGroupId))).size
+  const additions = lines.reduce((s, l) => s + l.targets.length, 0)
   return (
     <section aria-label="Next step" className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50/60 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -411,8 +445,14 @@ function PushBox({ b, shared, busy, run }: { b: IdeaBatchView; shared: IdeaShare
               disabled={asking}
               onClick={() =>
                 ask({
-                  title: `Add ${lines.length} keyword${lines.length === 1 ? "" : "s"}${paused ? ", paused," : ""} to Google Ads?`,
-                  details: <List items={lines.map((l) => `${l.matchType === "EXACT" ? `[${l.text}]` : `"${l.text}"`} → ${l.campaignName} › ${l.adGroupName}`)} />,
+                  title: `Add ${lines.length} keyword${lines.length === 1 ? "" : "s"}${paused ? ", paused," : ""} to Google Ads${additions > lines.length ? ` (${additions} in all, some into more than one ad group)` : ""}?`,
+                  details: (
+                    <List
+                      items={lines.map(
+                        (l) => `${l.matchType === "EXACT" ? `[${l.text}]` : `"${l.text}"`} → ${l.targets.map((t) => `${t.campaignName} › ${t.adGroupName}`).join("; ")}`,
+                      )}
+                    />
+                  ),
                   note: dryRun
                     ? "Dry run is on (DEALTRACK_VALIDATE_ONLY=1): Google checks the change and applies nothing."
                     : paused
@@ -442,6 +482,8 @@ function Line({
   busy,
   run,
   shared,
+  chosen,
+  onChoose,
 }: {
   b: IdeaBatchView
   item: KeywordIdea
@@ -451,20 +493,21 @@ function Line({
   busy: string | null
   run: (k: string, s: () => Promise<IdeaResult>) => void
   shared: IdeaShared
+  chosen: boolean
+  onChoose: (on: boolean) => void
 }) {
   const { name, adGroups } = shared
   const shown = item.matchType === "EXACT" ? `[${item.text}]` : `"${item.text}"`
   const src = SOURCE_SHORT[item.source]
-  // The line's own ad group, then running campaigns', then the rest of the campaigns in this batch.
-  const batchCampaigns = new Set(b.items.map((i) => i.campaignId))
-  const options = adGroups.filter((g) => g.running || batchCampaigns.has(g.campaignId) || g.id === item.adGroupId)
-  const byCampaign = [...new Map(options.map((g) => [g.campaignId, { name: g.campaignName, running: g.running, groups: options.filter((x) => x.campaignId === g.campaignId) }])).values()].sort(
-    (a, c) => Number(c.running) - Number(a.running) || a.name.localeCompare(c.name),
-  )
   const field = "h-7 rounded-lg border border-input bg-background px-1.5 text-xs disabled:opacity-60"
 
   return (
-    <tr className="border-t border-border/60 align-top">
+    <tr className={cn("border-t border-border/60 align-top", chosen && "bg-primary/5")}>
+      {editable && (
+        <td className="px-3 py-2.5">
+          <input type="checkbox" autoComplete="off" aria-label={`Choose ${item.text}`} checked={chosen} onChange={(e) => onChoose(e.target.checked)} className="mt-0.5 size-4" />
+        </td>
+      )}
       <td className="px-3 py-2.5">
         <span className="flex flex-col items-start gap-1">
           <span className="font-medium">{shown}</span>
@@ -519,31 +562,22 @@ function Line({
       )}
       <td className="px-3 py-2.5 text-xs">
         {editable ? (
-          <select
-            aria-label={`Ad group for ${item.text}`}
-            autoComplete="off"
-            value={item.adGroupId}
+          <AdGroupPicker
+            label={`Ad groups for ${item.text}`}
+            options={adGroups}
+            selected={item.targets.map((t) => t.adGroupId)}
             disabled={busy !== null}
-            onChange={(e) => run(`g${index}`, () => editKeywordIdea(b.id, index, { adGroupId: e.target.value }, name))}
-            className={cn(field, "max-w-56", !item.adGroupId && "border-amber-400")}
-          >
-            {!item.adGroupId && <option value="">Choose an ad group</option>}
-            {byCampaign.map((c) => (
-              <optgroup key={c.name} label={`${c.name}${c.running ? " (running)" : ""}`}>
-                {c.groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+            onDone={(ids) => run(`g${index}`, () => editKeywordIdea(b.id, index, { adGroupIds: ids }, name))}
+          />
         ) : (
-          <span>
-            {item.campaignName} › {item.adGroupName}
-          </span>
+          <ul className="flex flex-col gap-0.5">
+            {item.targets.map((t) => (
+              <li key={t.adGroupId}>
+                {t.campaignName} › {t.adGroupName}
+              </li>
+            ))}
+          </ul>
         )}
-        {editable && item.campaignName && <span className="mt-0.5 block max-w-56 truncate text-[11px] text-muted-foreground">{item.campaignName}</span>}
       </td>
       <td className="px-3 py-2.5">
         {b.stage === "proving" ? (
@@ -567,7 +601,7 @@ function Line({
             value={item.approved}
             yes="Approve"
             no="Reject"
-            disabled={busy !== null || (!item.adGroupId && item.approved === null)}
+            disabled={busy !== null || (!item.targets.length && item.approved === null)}
             busy={busy === `a${index}`}
             onPick={(v) => run(`a${index}`, () => markKeywordIdea(b.id, index, "approved", v, name))}
           />
@@ -578,5 +612,68 @@ function Line({
         )}
       </td>
     </tr>
+  )
+}
+
+// For the chosen lines, or all of them: put them into one campaign, each into its best-fitting ad
+// group there.
+function BulkBar({
+  b,
+  shared,
+  chosen,
+  setChosen,
+  shownCount,
+  busy,
+  run,
+}: {
+  b: IdeaBatchView
+  shared: IdeaShared
+  chosen: number[]
+  setChosen: (c: number[]) => void
+  shownCount: number
+  busy: string | null
+  run: (k: string, s: () => Promise<IdeaResult>) => void
+}) {
+  const campaigns = [...new Map(shared.adGroups.map((g) => [g.campaignId, { id: g.campaignId, name: g.campaignName, running: g.running }])).values()].sort(
+    (a, c) => Number(c.running) - Number(a.running) || a.name.localeCompare(c.name),
+  )
+  const [campaignId, setCampaignId] = useState(b.addTo?.campaignId ?? campaigns.find((c) => c.running)?.id ?? "")
+  const [keep, setKeep] = useState(false)
+  const off = busy !== null || !campaignId
+  const field = "h-8 max-w-72 rounded-lg border border-input bg-background px-2 text-sm"
+  const go = (indexes: number[] | null) =>
+    run("assign", async () => {
+      const r = await assignKeywordIdeas(b.id, indexes, campaignId, keep, shared.name)
+      if (r.ok) setChosen([])
+      return r
+    })
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 px-3 py-2 text-sm">
+      <span className="font-medium">Put into a campaign:</span>
+      <select autoComplete="off" aria-label="Campaign to put the keywords into" value={campaignId} onChange={(e) => setCampaignId(e.target.value)} className={field}>
+        {!campaignId && <option value="">Choose a campaign</option>}
+        {campaigns.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+            {c.running ? " (running)" : ""}
+          </option>
+        ))}
+      </select>
+      <label className="flex items-center gap-1.5 text-xs">
+        <input type="checkbox" autoComplete="off" checked={keep} onChange={(e) => setKeep(e.target.checked)} className="size-3.5" />
+        Keep their other ad groups too
+      </label>
+      <span className="flex flex-wrap gap-1.5 sm:ml-auto">
+        <Button type="button" size="sm" disabled={off || !chosen.length} onClick={() => go(chosen)}>
+          {busy === "assign" ? "Saving…" : `The ${chosen.length} chosen`}
+        </Button>
+        <Button type="button" size="sm" variant="outline" disabled={off} onClick={() => go(null)}>
+          All {b.items.length}
+        </Button>
+      </span>
+      <span className="basis-full text-xs text-muted-foreground">
+        Each keyword goes into that campaign&apos;s ad group whose keywords match it best. Tick lines to choose some{shownCount < b.items.length ? " (the box at the top ticks every line shown)" : ""}, or fine-tune any line under &ldquo;Goes into&rdquo;.
+      </span>
+    </div>
   )
 }
