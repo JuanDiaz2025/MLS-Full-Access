@@ -14,7 +14,7 @@ import { getSeries } from "@/lib/google-ads/overview"
 import { getSearchTerms, type SearchTermRow } from "@/lib/google-ads/reports"
 import { SELLER_INTENT, blocks } from "@/lib/negatives"
 import { BUY_AREA_WORDS } from "@/lib/service-area"
-import type { BatchItem, BatchResult, HeldBack, NegativeBatch } from "@/lib/store"
+import type { BatchItem, BatchResult, CampaignShare, HeldBack, NegativeBatch } from "@/lib/store"
 
 export const LOOKBACK_DAYS = 90 // searches a new negative must not block: ones that converted, or sellers
 export const BRAKE_DAYS = 7 // at most one push per week
@@ -50,31 +50,113 @@ export function batchId({ from, to, campaignId }: Scope) {
   return plainWeek ? from : `${from}_${to}${campaignId ? `_c${campaignId}` : ""}`
 }
 
-// Negatives already on the campaign (any status), or on running campaigns when drafting from all,
-// directly or through their shared lists.
-async function existingNegatives(campaignId?: string): Promise<Set<string>> {
-  const which = campaignId ? `campaign.id = ${campaignId}` : "campaign.status = 'ENABLED'"
-  const [direct, lists] = await Promise.all([
-    gaql<{ campaignCriterion: { keyword?: { text?: string } } }>(
-      `SELECT campaign_criterion.keyword.text FROM campaign_criterion
-       WHERE ${which} AND campaign_criterion.negative = TRUE AND campaign_criterion.type = 'KEYWORD'`,
+type MatchType = "PHRASE" | "EXACT" | "BROAD"
+// A negative already in Google Ads, and where it applies: one ad group, one campaign, or (with
+// neither) the whole account.
+export type ExistingNegative = { text: string; matchType: MatchType; campaignId?: string; adGroupId?: string }
+
+const matchTypeOf = (m?: string): MatchType => (m === "EXACT" ? "EXACT" : m === "BROAD" ? "BROAD" : "PHRASE")
+const idList = (ids: string[]) => [...new Set(ids)].filter((id) => /^\d+$/.test(id)).join(", ")
+
+// Every negative keyword that applies to these campaigns, whatever their status: on the campaign,
+// on its ad groups, in negative lists attached to it, and in account-wide lists.
+async function existingNegatives(campaignIds: string[]): Promise<ExistingNegative[]> {
+  const ids = idList(campaignIds)
+  if (!ids) return []
+  type Kw = { text?: string; matchType?: string }
+  const [direct, adGroups, lists, account] = await Promise.all([
+    gaql<{ campaign: { id?: Num }; campaignCriterion: { keyword?: Kw } }>(
+      `SELECT campaign.id, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type FROM campaign_criterion
+       WHERE campaign.id IN (${ids}) AND campaign_criterion.negative = TRUE AND campaign_criterion.type = 'KEYWORD'
+         AND campaign_criterion.status != 'REMOVED'`,
     ),
-    gaql<{ sharedSet: { id?: Num } }>(
-      `SELECT shared_set.id FROM campaign_shared_set
-       WHERE ${which} AND campaign_shared_set.status = 'ENABLED' AND shared_set.type = 'NEGATIVE_KEYWORDS'`,
+    gaql<{ campaign: { id?: Num }; adGroup: { id?: Num }; adGroupCriterion: { keyword?: Kw } }>(
+      `SELECT campaign.id, ad_group.id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion
+       WHERE campaign.id IN (${ids}) AND ad_group_criterion.negative = TRUE AND ad_group_criterion.type = 'KEYWORD'
+         AND ad_group_criterion.status != 'REMOVED' AND ad_group.status != 'REMOVED'`,
     ),
+    gaql<{ campaign: { id?: Num }; sharedSet: { id?: Num } }>(
+      `SELECT campaign.id, shared_set.id FROM campaign_shared_set
+       WHERE campaign.id IN (${ids}) AND campaign_shared_set.status = 'ENABLED' AND shared_set.type = 'NEGATIVE_KEYWORDS'`,
+    ),
+    // Account-wide negative lists (Tools > Shared library, applied at the account level).
+    gaql<{ customerNegativeCriterion: { negativeKeywordList?: { sharedSet?: string } } }>(
+      `SELECT customer_negative_criterion.negative_keyword_list.shared_set FROM customer_negative_criterion
+       WHERE customer_negative_criterion.type = 'NEGATIVE_KEYWORD_LIST'`,
+    ).catch(() => []),
   ])
-  const ids = [...new Set(lists.map((l) => String(l.sharedSet.id ?? "")).filter((id) => /^\d+$/.test(id)))]
-  const shared = ids.length
-    ? await gaql<{ sharedCriterion: { keyword?: { text?: string } } }>(
-        `SELECT shared_criterion.keyword.text FROM shared_criterion WHERE shared_set.id IN (${ids.join(", ")})`,
+  const accountLists = account.map((a) => a.customerNegativeCriterion.negativeKeywordList?.sharedSet?.split("/").pop() ?? "")
+  const listIds = idList([...lists.map((l) => String(l.sharedSet.id ?? "")), ...accountLists])
+  const shared = listIds
+    ? await gaql<{ sharedSet: { id?: Num }; sharedCriterion: { keyword?: Kw } }>(
+        `SELECT shared_set.id, shared_criterion.keyword.text, shared_criterion.keyword.match_type FROM shared_criterion
+         WHERE shared_set.id IN (${listIds}) AND shared_criterion.type = 'KEYWORD'`,
       )
     : []
-  return new Set(
-    [...direct.map((d) => d.campaignCriterion.keyword?.text), ...shared.map((s) => s.sharedCriterion.keyword?.text)]
-      .filter((t): t is string => !!t)
-      .map((t) => t.toLowerCase().trim()),
-  )
+  const out: ExistingNegative[] = []
+  const push = (kw: Kw | undefined, where: Omit<ExistingNegative, "text" | "matchType">) => {
+    if (kw?.text) out.push({ text: kw.text.toLowerCase().trim(), matchType: matchTypeOf(kw.matchType), ...where })
+  }
+  for (const d of direct) push(d.campaignCriterion.keyword, { campaignId: String(d.campaign.id) })
+  for (const a of adGroups) push(a.adGroupCriterion.keyword, { campaignId: String(a.campaign.id), adGroupId: String(a.adGroup.id) })
+  const accountWide = new Set(accountLists)
+  const listCampaigns = new Map<string, string[]>()
+  for (const l of lists) {
+    const id = String(l.sharedSet.id)
+    listCampaigns.set(id, [...(listCampaigns.get(id) ?? []), String(l.campaign.id)])
+  }
+  for (const c of shared) {
+    const id = String(c.sharedSet.id)
+    if (accountWide.has(id)) push(c.sharedCriterion.keyword, {})
+    for (const campaignId of listCampaigns.get(id) ?? []) push(c.sharedCriterion.keyword, { campaignId })
+  }
+  return out
+}
+
+const shown = (n: ExistingNegative) => (n.matchType === "EXACT" ? `[${n.text}]` : n.matchType === "BROAD" ? n.text : `"${n.text}"`)
+
+// Takes out what existing negatives already block, using Google's matching rules: a search is
+// dropped from each campaign and ad group where a negative there (or account-wide) blocks it, so
+// "john" covers "john buys", but [opendoor] only covers the search "opendoor". Returns the
+// searches still getting through (with only the spend that's still open) and the negatives that
+// cover the rest.
+function stillOpen(terms: SearchTermRow[], existing: ExistingNegative[]) {
+  // Only negatives whose first word is in the search can block it.
+  const byFirstWord = new Map<string, ExistingNegative[]>()
+  for (const e of existing) {
+    const first = e.text.split(/\s+/)[0]
+    byFirstWord.set(first, [...(byFirstWord.get(first) ?? []), e])
+  }
+  const covering = new Set<string>()
+  const open: SearchTermRow[] = []
+  for (const t of terms) {
+    const candidates = [...new Set(t.term.toLowerCase().split(/\s+/))].flatMap((w) => byFirstWord.get(w) ?? [])
+    const placements = t.placements.filter((p) => {
+      const by = candidates.find(
+        (e) => (!e.campaignId || e.campaignId === p.campaignId) && (!e.adGroupId || e.adGroupId === p.adGroupId) && blocks(e.text, e.matchType, t.term),
+      )
+      if (by && (t.metrics.cost > 0 || t.metrics.clicks > 0)) covering.add(shown(by))
+      return !by
+    })
+    if (!placements.length) continue
+    const cost = placements.reduce((s, p) => s + p.cost, 0)
+    const clicks = placements.reduce((s, p) => s + p.clicks, 0)
+    open.push(placements.length === t.placements.length ? t : { ...t, placements, metrics: { ...t.metrics, cost, clicks } })
+  }
+  return { open, covering: [...covering].sort() }
+}
+
+// The campaigns a line's searches came from, costliest first.
+function campaignsOf(rows: SearchTermRow[]): CampaignShare[] {
+  const by = new Map<string, CampaignShare>()
+  for (const p of rows.flatMap((r) => r.placements)) {
+    const c = by.get(p.campaignId) ?? { id: p.campaignId, name: p.campaign, cost: 0 }
+    c.cost += p.cost
+    by.set(p.campaignId, c)
+  }
+  const all = [...by.values()].sort((a, b) => b.cost - a.cost)
+  const paid = all.filter((c) => c.cost >= 0.5)
+  return paid.length ? paid : all
 }
 
 // Words the word-level analysis never suggests: filler, and what every seller search says.
@@ -82,7 +164,7 @@ const COMMON = new Set(
   ("a an the to for in of on at by near me my i we you your our it is are be do does can how what where who why when which with without from and or vs " +
     "house houses home homes property properties ca california usa best top cheap fast quick quickly now today get online local area " +
     "sell sells selling sold sale buy buys buying buyer buyers cash offer offers company companies investor investors estate real " +
-    "someone people anyone condition").split(" "),
+    "someone people anyone condition work works process looking own year years").split(" "),
 )
 const MIN_WORD_SPEND = 50 // a word needs this much spend in the period, across 2+ searches…
 const MAX_WORD_LINES = 10
@@ -121,13 +203,35 @@ function wasteWords(week: SearchTermRow[], history: SearchTermRow[], keywordWord
   return safe.filter(([gram]) => !gram.includes(" ") || !gram.split(" ").some((w) => singles.has(w))).slice(0, MAX_WORD_LINES)
 }
 
-async function keywordWordsInUse(): Promise<Set<string>> {
-  const rows = await gaql<{ adGroupCriterion: { keyword?: { text?: string } } }>(
-    `SELECT ad_group_criterion.keyword.text FROM ad_group_criterion
-     WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE AND ad_group_criterion.status = 'ENABLED'
-       AND ad_group.status = 'ENABLED' AND campaign.status IN ('ENABLED', 'PAUSED')`,
+// The keywords each campaign bids on (paused ones too), and every word in them.
+async function keywordsInUse(): Promise<{ byCampaign: Map<string, string[]>; words: Set<string> }> {
+  const rows = await gaql<{ campaign: { id?: Num }; adGroupCriterion: { keyword?: { text?: string } } }>(
+    `SELECT campaign.id, ad_group_criterion.keyword.text FROM ad_group_criterion
+     WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE AND ad_group_criterion.status != 'REMOVED'
+       AND ad_group.status != 'REMOVED' AND campaign.status IN ('ENABLED', 'PAUSED')`,
   )
-  return new Set(rows.flatMap((r) => (r.adGroupCriterion.keyword?.text ?? "").toLowerCase().split(/\s+/)).filter(Boolean))
+  const byCampaign = new Map<string, string[]>()
+  for (const r of rows) {
+    const text = (r.adGroupCriterion.keyword?.text ?? "").toLowerCase().trim()
+    if (!text) continue
+    const id = String(r.campaign.id)
+    byCampaign.set(id, [...(byCampaign.get(id) ?? []), text])
+  }
+  return { byCampaign, words: new Set([...byCampaign.values()].flat().flatMap((t) => t.split(/\s+/))) }
+}
+
+// A campaign that bids on what a negative blocks wants those searches (a competitor campaign
+// bidding on "john buys", a Santa Rosa campaign on "santa rosa"), so the line leaves it out.
+function outsideOwnKeywords(negative: string, rows: SearchTermRow[], byCampaign: Map<string, string[]>) {
+  const wants = (campaignId: string) => (byCampaign.get(campaignId) ?? []).some((k) => blocks(negative, "PHRASE", k))
+  return rows.flatMap((t) => {
+    const placements = t.placements.filter((p) => !wants(p.campaignId))
+    if (!placements.length) return []
+    if (placements.length === t.placements.length) return [t]
+    const cost = placements.reduce((s, p) => s + p.cost, 0)
+    const clicks = placements.reduce((s, p) => s + p.clicks, 0)
+    return [{ ...t, placements, metrics: { ...t.metrics, cost, clicks } }]
+  })
 }
 
 export type Draft = Pick<NegativeBatch, "items" | "heldBack" | "alreadyNegative">
@@ -143,12 +247,14 @@ async function lookback(to: string): Promise<SearchTermRow[]> {
 }
 
 export async function draftBatch(scope: Scope): Promise<Draft> {
-  const [terms, history, existing, keywordWords] = await Promise.all([
+  const [allTerms, history, keywords] = await Promise.all([
     getSearchTerms(range(scope.from, scope.to), scope.campaignId),
     lookback(scope.to),
-    existingNegatives(scope.campaignId),
-    keywordWordsInUse(),
+    keywordsInUse(),
   ])
+  // Checked against the negatives of the campaigns these searches actually came from.
+  const existing = await existingNegatives(allTerms.flatMap((t) => t.placements.map((p) => p.campaignId)))
+  const { open: terms, covering } = stillOpen(allTerms, existing)
 
   // One line per suggested negative, from searches that cost money and brought nothing.
   const groups = new Map<string, { why: string; evenForSellers: boolean; rows: SearchTermRow[] }>()
@@ -162,12 +268,7 @@ export async function draftBatch(scope: Scope): Promise<Draft> {
 
   const items: BatchItem[] = []
   const heldBack: HeldBack[] = []
-  const alreadyNegative: string[] = []
   for (const [negative, g] of groups) {
-    if (existing.has(negative)) {
-      alreadyNegative.push(negative)
-      continue
-    }
     // Never block a search that converted, or (except for competitors and cities) one that says "sell".
     const risky = history.filter(
       (t) => blocks(negative, "PHRASE", t.term) && (t.metrics.conversions > 0 || (!g.evenForSellers && SELLER_INTENT.test(t.term))),
@@ -176,13 +277,15 @@ export async function draftBatch(scope: Scope): Promise<Draft> {
       heldBack.push({ negative, why: g.why, converting: risky.sort((a, b) => b.metrics.conversions - a.metrics.conversions).slice(0, TERMS_SHOWN).map((t) => t.term) })
       continue
     }
-    const rows = [...g.rows].sort((a, b) => b.metrics.cost - a.metrics.cost)
+    const rows = outsideOwnKeywords(negative, g.rows, keywords.byCampaign).sort((a, b) => b.metrics.cost - a.metrics.cost)
+    if (!rows.some((r) => r.metrics.cost > 0 || r.metrics.clicks > 0)) continue
     items.push({
       negative,
       matchType: "PHRASE",
       why: g.why,
       terms: rows.slice(0, TERMS_SHOWN).map((r) => r.term),
       termCount: rows.length,
+      campaigns: campaignsOf(rows),
       clicks: rows.reduce((s, r) => s + r.metrics.clicks, 0),
       cost: rows.reduce((s, r) => s + r.metrics.cost, 0),
       conversions: 0,
@@ -190,8 +293,8 @@ export async function draftBatch(scope: Scope): Promise<Draft> {
       approved: null,
     })
   }
-  for (const [word, g] of wasteWords(terms, history, keywordWords)) {
-    if (existing.has(word) || items.some((i) => i.negative === word)) continue
+  for (const [word, g] of wasteWords(terms, history, keywords.words)) {
+    if (items.some((i) => i.negative === word)) continue
     const rows = [...g.terms].sort((a, b) => b.metrics.cost - a.metrics.cost)
     items.push({
       negative: word,
@@ -199,6 +302,7 @@ export async function draftBatch(scope: Scope): Promise<Draft> {
       why: "Word in searches that never converted in 90 days (check it's not something sellers say)",
       terms: rows.slice(0, TERMS_SHOWN).map((r) => r.term),
       termCount: rows.length,
+      campaigns: campaignsOf(rows),
       clicks: g.clicks,
       cost: g.cost,
       conversions: 0,
@@ -207,7 +311,7 @@ export async function draftBatch(scope: Scope): Promise<Draft> {
     })
   }
   items.sort((a, b) => b.cost - a.cost || b.clicks - a.clicks)
-  return { items, heldBack, alreadyNegative: alreadyNegative.sort() }
+  return { items, heldBack, alreadyNegative: covering }
 }
 
 export const pushedLines = (b: NegativeBatch) => b.items.filter((i) => i.proven && i.approved)

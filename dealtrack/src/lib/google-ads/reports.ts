@@ -127,6 +127,8 @@ export type SearchTermRow = {
   status: string
   campaigns: string[]
   adGroups: string[]
+  // Where it showed up: each campaign and ad group, with what it cost there.
+  placements: { campaignId: string; campaign: string; adGroupId: string; cost: number; clicks: number }[]
   metrics: Metrics
   rule?: NegativeRule
   suggestion?: string
@@ -137,11 +139,11 @@ export async function getSearchTerms(range: DateRange, campaignId?: string): Pro
   const oneCampaign = campaignId && /^\d+$/.test(campaignId) ? ` AND campaign.id = ${campaignId}` : ""
   const rows = await gaql<{
     searchTermView: { searchTerm?: string; status?: string }
-    campaign?: { name?: string }
-    adGroup?: { name?: string }
+    campaign?: { id?: Num; name?: string }
+    adGroup?: { id?: Num; name?: string }
     metrics?: MetricsRow
   }>(
-    `SELECT search_term_view.search_term, search_term_view.status, campaign.name, ad_group.name, ${METRICS}
+    `SELECT search_term_view.search_term, search_term_view.status, campaign.id, campaign.name, ad_group.id, ad_group.name, ${METRICS}
      FROM search_term_view
      WHERE ${during(range)}${oneCampaign}
      ORDER BY metrics.cost_micros DESC
@@ -156,13 +158,21 @@ export async function getSearchTerms(range: DateRange, campaignId?: string): Pro
     const key = term.toLowerCase()
     let row = byTerm.get(key)
     if (!row) {
-      row = { term, status: r.searchTermView.status ?? "NONE", campaigns: [], adGroups: [], metrics: emptyMetrics() }
+      row = { term, status: r.searchTermView.status ?? "NONE", campaigns: [], adGroups: [], placements: [], metrics: emptyMetrics() }
       byTerm.set(key, row)
     }
     if (r.searchTermView.status?.includes("EXCLUDED")) row.status = r.searchTermView.status
     if (r.campaign?.name && !row.campaigns.includes(r.campaign.name)) row.campaigns.push(r.campaign.name)
     if (r.adGroup?.name && !row.adGroups.includes(r.adGroup.name)) row.adGroups.push(r.adGroup.name)
-    add(row.metrics, toMetrics(r.metrics))
+    const m = toMetrics(r.metrics)
+    add(row.metrics, m)
+    row.placements.push({
+      campaignId: String(r.campaign?.id ?? ""),
+      campaign: r.campaign?.name ?? "",
+      adGroupId: String(r.adGroup?.id ?? ""),
+      cost: m.cost,
+      clicks: m.clicks,
+    })
   }
 
   return [...byTerm.values()]

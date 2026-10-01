@@ -51,7 +51,8 @@ export type BatchItem = {
   matchType: "PHRASE" | "EXACT"
   why: string
   terms: string[] // search terms it blocks (the 5 costliest)
-  termCount: number // how many of last week's searches it blocks
+  termCount: number // how many of the period's searches it blocks
+  campaigns?: CampaignShare[] // where those searches came from, costliest first
   clicks: number
   cost: number
   conversions: number
@@ -60,6 +61,8 @@ export type BatchItem = {
   approved: boolean | null // approval: approve or reject (null = not reviewed yet)
   approvedBy?: string
 }
+
+export type CampaignShare = { id: string; name: string; cost: number }
 
 // A suggestion left out of the batch because it would also block searches that converted.
 export type HeldBack = { negative: string; why: string; converting: string[] }
@@ -83,7 +86,7 @@ export type NegativeBatch = {
   campaignName?: string
   items: BatchItem[]
   heldBack: HeldBack[]
-  alreadyNegative: string[] // suggestions skipped because the campaign(s) already block them
+  alreadyNegative: string[] // existing negatives (as shown in Google Ads) that already block some of the period's searches
   drafted: BatchStep
   proven?: BatchStep
   approved?: BatchStep

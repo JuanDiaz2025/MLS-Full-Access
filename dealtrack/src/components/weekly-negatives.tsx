@@ -362,6 +362,7 @@ function BatchCard({
                     {item.termCount > item.terms.length && (
                       <span className="text-[11px] text-muted-foreground">and {formatNumber(item.termCount - item.terms.length)} more</span>
                     )}
+                    {item.campaigns && item.campaigns.length > 0 && <CameFrom shares={item.campaigns} campaigns={campaigns} />}
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{formatNumber(item.clicks)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{formatUsd(item.cost)}</td>
@@ -467,12 +468,34 @@ function BatchCard({
           )}
           {b.alreadyNegative.length > 0 && (
             <p className="text-xs text-muted-foreground">
-              Already blocked by {b.campaignName ? "this campaign" : "running campaigns"}: {b.alreadyNegative.join(", ")}.
+              Left out because negatives already in Google Ads block them: {b.alreadyNegative.slice(0, COVERING_SHOWN).join(", ")}
+              {b.alreadyNegative.length > COVERING_SHOWN ? ` and ${b.alreadyNegative.length - COVERING_SHOWN} more` : ""}.
             </p>
           )}
         </div>
       )}
     </section>
+  )
+}
+
+const SHOWN_CAMPAIGNS = 3
+const COVERING_SHOWN = 12
+
+// Under each line: the campaigns its searches came from, so you know where it belongs.
+function CameFrom({ shares, campaigns }: { shares: NonNullable<BatchView["items"][number]["campaigns"]>; campaigns: CampaignOption[] }) {
+  const status = new Map(campaigns.map((c) => [c.id, c.status]))
+  return (
+    <p className="mt-1.5 text-[11px] text-muted-foreground">
+      <span className="font-medium text-foreground">From: </span>
+      {shares.slice(0, SHOWN_CAMPAIGNS).map((c, i) => (
+        <span key={c.id}>
+          {i > 0 && "; "}
+          {c.name} ({formatUsd(c.cost)}
+          {status.get(c.id) === "ENABLED" ? ", running" : ""})
+        </span>
+      ))}
+      {shares.length > SHOWN_CAMPAIGNS && ` and ${shares.length - SHOWN_CAMPAIGNS} more`}
+    </p>
   )
 }
 
@@ -499,6 +522,11 @@ function PushPanel({
   const [picked, setPicked] = useState(() =>
     b.campaignId && campaigns.some((c) => c.id === b.campaignId) ? [b.campaignId] : runningIds(campaigns),
   )
+  const approved = b.items.filter((i) => i.proven && i.approved)
+  const known = new Set(campaigns.map((c) => c.id))
+  const sources = [...new Set(approved.flatMap((i) => i.campaigns?.map((c) => c.id) ?? []))].filter((id) => known.has(id))
+  const running = runningIds(campaigns)
+  const pick = (ids: string[]) => setPicked([...new Set(ids)])
   const { ask, ui, busy } = useChange()
   const sameName = b.proven?.by && b.approved?.by && b.proven.by.toLowerCase() === b.approved.by.toLowerCase()
 
@@ -517,6 +545,19 @@ function PushPanel({
         </div>
       ) : (
         <>
+          <div className="flex flex-col gap-1.5 text-sm">
+            <p className="text-xs text-muted-foreground">
+              Competitor names and cities outside the buy area are wrong for every campaign, so they belong on all the campaigns you run, and on any
+              you turn back on. A word line belongs where its searches came from (shown under each line).
+            </p>
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              <PickButton label={`Running campaigns (${running.length})`} onClick={() => pick(running)} />
+              {sources.length > 0 && <PickButton label={`Where these searches came from (${sources.length})`} onClick={() => pick(sources)} />}
+              {sources.length > 0 && running.length > 0 && (
+                <PickButton label={`Both (${new Set([...running, ...sources]).size})`} onClick={() => pick([...running, ...sources])} />
+              )}
+            </div>
+          </div>
           <CampaignPicker campaigns={campaigns} selected={picked} onChange={setPicked} idPrefix={`push-${b.id}`} />
           <div>
             <Button
@@ -541,6 +582,14 @@ function PushPanel({
       )}
       {ui}
     </div>
+  )
+}
+
+function PickButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="rounded-full border bg-background px-2.5 py-0.5 font-medium hover:bg-muted">
+      {label}
+    </button>
   )
 }
 
