@@ -300,7 +300,7 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     'staged + a finish + priced above the area is C');
   eq(Q({ remarks: 'Charming 1904 home with granite counters in the kitchen.' }).bucket, 'B',
     'one updated finish alone is not an auto-pass (844 Brunswick)');
-  eq(Q({ remarks: 'Nice home.', privateRemarks: 'Probate sale, cash only, sold as-is.' }).score >= 70, true,
+  eq(Q({ remarks: 'Nice home.', privateRemarks: 'Probate sale, cash only, fixer, sold as-is.' }).score >= 70, true,
     'private remarks count toward the score');
   eq(Q({ addr: '21 College Terrace', remarks: 'Beautifully renovated.' }).bucket, 'A', 'a confirmed deal is always A');
   eq(Q({ remarks: 'Lovely home.', photos: 4, photosReliable: true }).bucket, 'C', '4 photos off the full grid is C');
@@ -486,6 +486,15 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     eq(core.aiVerdict({ decision: 'KEEP', era: 'original', wear: 'some' }, '').decision, 'keep', 'original 1950s-80s finishes with wear stay (4361 Margery)');
     eq(core.aiVerdict({ decision: 'KEEP', era: 'original', wear: 'none' }, 'AS IS SALE condition.').decision, 'drop',
       'boilerplate "as is" does not overrule photos that show no wear');
+  }
+
+  {
+    const core = require('./scan-core');
+    const q = core.qualify({ photos: 20, photosReliable: true, privateRemarks: 'Property sold as-is. Lockbox on door.', occupiedBy: 'Vacant',
+      yearBuilt: 1918, dom: 25, price: 699000, origPrice: 760000, ppsf: 0, ppsfRatio: 0.6 });
+    eq(q.bucket, 'B', 'a boilerplate "as-is" alone is held at B (1542 Buena Vista, 36173 Cedar)');
+    eq(core.qualify({ photos: 20, photosReliable: true, privateRemarks: 'Sold as-is, needs work throughout.', occupiedBy: 'Vacant',
+      yearBuilt: 1918, price: 699000, origPrice: 760000, ppsfRatio: 0.6 }).bucket, 'A', 'as-is plus real needs-work wording can still be A');
   }
 
   // 18. Re-review a past scan (v1.46): a teammate scanned with an old version.

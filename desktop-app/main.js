@@ -777,6 +777,12 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     const s = await js(core.JS_TITLE).catch(() => '');
     if (!/Dashboard|Matrix/i.test(s)) { log('Not logged in — sign in first.', 'error'); return { ok: false }; }
     started = true;
+    // Seth, 1 Oct: a 204-lead East Bay scan ran with the photo check off (1 of
+    // 204 had an AI verdict) and refurbished houses with "as-is" boilerplate
+    // landed in A. Say it loudly at the start, not silently.
+    if (!(cfg.useAI && cfg.apiKey)) {
+      log('⚠ AI PHOTO CHECK IS OFF — no API key / "Use AI" not ticked in section 2. Leads will be judged on the remarks only, so refurbished houses WILL get through. Stop now and add the key unless that is intended.', 'error');
+    }
 
     // Pull the reviewer's rejections down first, so anything she deleted is
     // treated as already-checked and never resurfaces.

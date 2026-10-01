@@ -543,10 +543,21 @@ function qualify(m) {
   // never a buy (6138 Oakdale, 2825 Hillcrest). Price, $/sqft and vacancy say
   // it is cheap, not that it needs work: those wait in B for the photos.
   const needsWork = saysNeedsWork(t);
+  // "Sold as-is" is legal boilerplate on refurbished houses too (1542 Buena
+  // Vista, 36173 Cedar — Seth, 1 Oct): on its own it is not evidence of work
+  // to do, so it cannot carry a lead to A. It still scores; the photos decide.
+  // "First time on the market in 50 years" / "original condition" is evidence
+  // too — that is what kept 347 Faxon an A.
+  const noAsIs = t.replace(/\bas[- ]is\b/gi, '');
+  const needsWorkBeyondAsIs = saysNeedsWork(noAsIs) || ORIGINAL_KW.test(noAsIs);
   if (bucket === 'A' && !needsWork) {
     bucket = 'B';
     score = Math.min(score, BUCKET_A - 1);
     signals.push({ pts: 0, what: 'remarks never say it needs work — held at B for the photos' });
+  } else if (bucket === 'A' && !needsWorkBeyondAsIs) {
+    bucket = 'B';
+    score = Math.min(score, BUCKET_A - 1);
+    signals.push({ pts: 0, what: 'only a boilerplate "as-is" — held at B for the photos' });
   }
   // Remarks silent on condition and the reviewer asked for unsure = drop.
   if (r.decision === 'manual' && m.whenUnsure === 'drop' && bucket === 'B' && !top.length) bucket = 'C';
