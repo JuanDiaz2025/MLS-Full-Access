@@ -1,6 +1,7 @@
 // The chat's tools. All of them only read: Google Ads through GAQL SELECT queries on DealTrack's
 // connection (the search endpoint can't change an account), the website leads, and DealTrack's
 // own saved records (alerts, budget lines, weekly negatives).
+import { PAGES, PAGE_GUIDE, pageData, type PageName } from "@/lib/assistant/pages"
 import { addDays, dayOf, today } from "@/lib/date-range"
 import { getClickPatterns } from "@/lib/fraud/clicks"
 import { findJunkLeads } from "@/lib/fraud/leads"
@@ -19,6 +20,22 @@ export type ToolSpec = {
 }
 
 export const toolSpecs: ToolSpec[] = [
+  {
+    name: "dealtrack_page",
+    description:
+      "Read what one of DealTrack's own pages shows, already worked out: the same findings the team sees on that page. " +
+      "Prefer it over raw queries when the question matches a page. Pages: " +
+      PAGE_GUIDE,
+    parameters: {
+      type: "object",
+      properties: {
+        page: { type: "string", enum: [...PAGES], description: "Which page." },
+        days: { type: "integer", description: "How many days back, from 1 to 365 (ignored by budget, audit, negatives and keyword_ideas). Default 30." },
+      },
+      required: ["page", "days"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "google_ads_query",
     description:
@@ -213,6 +230,12 @@ export async function runTool(name: string, input: unknown): Promise<{ content: 
     if (name === "list_leads") {
       const days = Math.min(Math.max(Math.round(Number((input as { days?: unknown }).days) || 30), 1), 365)
       return { content: asResult(await recentLeads(days)) }
+    }
+    if (name === "dealtrack_page") {
+      const { page, days } = input as { page?: unknown; days?: unknown }
+      if (typeof page !== "string" || !(PAGES as readonly string[]).includes(page)) return { content: `page must be one of: ${PAGES.join(", ")}.`, isError: true }
+      const d = Math.min(Math.max(Math.round(Number(days) || 30), 1), 365)
+      return { content: asResult([await pageData(page as PageName, d)]).slice(0, MAX_CHARS) }
     }
     if (name === "fraud_check") {
       const days = Math.min(Math.max(Math.round(Number((input as { days?: unknown }).days) || 30), 1), 365)
