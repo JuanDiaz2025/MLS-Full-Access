@@ -282,7 +282,7 @@ function StatusCards({
       href: "/negatives",
       title: "Weekly negatives",
       value: !current && !open.length ? "Draft last week's batch" : stage ? text[stage] : "Up to date",
-      note: next ? `Week of ${formatDate(next.from)}: ${next.items.length} line${next.items.length === 1 ? "" : "s"}` : `Search terms from ${formatDate(lastWeek.from)} – ${formatDate(lastWeek.to)}`,
+      note: next ? `${formatDate(next.from)} – ${formatDate(next.to)}${next.campaignName ? ` (${next.campaignName})` : ""}: ${next.items.length} line${next.items.length === 1 ? "" : "s"}` : `Search terms from ${formatDate(lastWeek.from)} – ${formatDate(lastWeek.to)}`,
       pill: stage === "ready" ? { tone: "amber", label: "Action" } : stage === "proving" || stage === "approving" ? { tone: "violet", label: "In review" } : undefined,
     })
   }

@@ -7,14 +7,13 @@
 import { refresh } from "next/cache"
 
 import { isSignedIn } from "@/lib/auth"
-import { formatDay, today } from "@/lib/date-range"
-import { checkDay, completeWeeks, draftWeek, measure, stageOf } from "@/lib/negative-batches"
+import { addDays, formatDay, today } from "@/lib/date-range"
+import { getEditableCampaigns } from "@/lib/google-ads/changes"
+import { MAX_DRAFT_DAYS, batchId, checkDay, draftBatch, measure, stageOf } from "@/lib/negative-batches"
 import { rememberName } from "@/lib/people"
 import { readData, updateData, type NegativeBatch } from "@/lib/store"
 
 export type StepResult = { ok: boolean; message: string }
-
-const DRAFT_WEEKS = 8
 
 async function person(rawName: unknown): Promise<{ name: string } | StepResult> {
   if (!(await isSignedIn())) return { ok: false, message: "Sign in first." }
@@ -36,29 +35,44 @@ async function changeBatch(batchId: string, edit: (b: NegativeBatch, all: Negati
   return error ? { ok: false, message: error } : null
 }
 
-export async function draftNegativeBatch(weekId: string, rawName: string): Promise<StepResult> {
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+const isDay = (v: unknown): v is string => typeof v === "string" && ISO_DATE.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))
+
+// Drafts a batch from the search terms between two dates, from one campaign ("" = all campaigns).
+// Any campaign works, paused or ended ones too, so old campaigns can be tried out.
+export async function draftNegativeBatch(input: { from: string; to: string; campaignId: string }, rawName: string): Promise<StepResult> {
   const who = await person(rawName)
   if (!("name" in who)) return who
-  const week = completeWeeks(DRAFT_WEEKS).find((w) => w.id === weekId)
-  if (!week) return { ok: false, message: "Choose one of the last 8 complete weeks." }
+  const { from, to } = input
+  if (!isDay(from) || !isDay(to)) return { ok: false, message: "Choose a start and an end date." }
+  if (from > to) return { ok: false, message: "The start date has to come before the end date." }
+  if (to > today()) return { ok: false, message: "The end date can't be in the future." }
+  if (to > addDays(from, MAX_DRAFT_DAYS - 1)) return { ok: false, message: `Choose ${MAX_DRAFT_DAYS} days or fewer.` }
+  const campaignId = input.campaignId || undefined
+  if (campaignId && !/^\d+$/.test(campaignId)) return { ok: false, message: "Unknown campaign. Reload the page." }
   try {
-    if ((await readData()).batches.some((b) => b.id === week.id)) return { ok: false, message: "That week already has a batch." }
-    const draft = await draftWeek(week)
+    const campaign = campaignId ? (await getEditableCampaigns()).find((c) => c.id === campaignId) : undefined
+    if (campaignId && !campaign) return { ok: false, message: "That campaign no longer exists or was removed. Reload the page." }
+    const id = batchId({ from, to, campaignId })
+    const taken = "There's already a batch for these dates and campaign. Discard it first to draft it again."
+    if ((await readData()).batches.some((b) => b.id === id)) return { ok: false, message: taken }
+    const draft = await draftBatch({ from, to, campaignId })
     let exists = false
     await updateData((d) => {
-      exists = d.batches.some((b) => b.id === week.id)
+      exists = d.batches.some((b) => b.id === id)
       if (exists) return false
-      d.batches.push({ id: week.id, from: week.from, to: week.to, ...draft, drafted: { by: who.name, at: new Date().toISOString() } })
-      d.batches.sort((a, b) => b.id.localeCompare(a.id))
+      d.batches.push({ id, from, to, campaignId, campaignName: campaign?.name, ...draft, drafted: { by: who.name, at: new Date().toISOString() } })
+      d.batches.sort((a, b) => b.from.localeCompare(a.from) || b.id.localeCompare(a.id))
     })
-    if (exists) return { ok: false, message: "Someone else just drafted that week." }
+    if (exists) return { ok: false, message: taken }
     refresh()
     const n = draft.items.length
+    const where = campaign ? ` in ${campaign.name}` : ""
     return {
       ok: true,
       message: n
-        ? `Drafted ${n} negative${n === 1 ? "" : "s"} from ${formatDay(week.from)} – ${formatDay(week.to)}. Next: someone reviews each line.`
-        : "Nothing to add this week: no search matched the rules without converting.",
+        ? `Drafted ${n} negative${n === 1 ? "" : "s"} from ${formatDay(from)} – ${formatDay(to)}${where}. Next: someone reviews each line.`
+        : `Nothing to add: no search from ${formatDay(from)} – ${formatDay(to)}${where} matched the rules without converting.`,
     }
   } catch (e) {
     return failed(e)

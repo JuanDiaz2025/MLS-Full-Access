@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils"
 
 export type BatchView = NegativeBatch & {
   stage: Stage
-  weekLabel: string
+  periodLabel: string
   times: Partial<Record<"drafted" | "proven" | "approved" | "pushed" | "checked", string>> // formatted
   checkDayLabel: string | null
   checkReady: boolean
@@ -34,8 +34,9 @@ export type BatchView = NegativeBatch & {
 
 type Props = {
   batches: BatchView[]
-  weeks: { id: string; label: string }[] // complete weeks with no batch yet, newest first
-  campaigns: CampaignOption[]
+  lastWeek: { from: string; to: string } // the default period: the last complete Monday–Sunday week
+  today: string
+  campaigns: CampaignOption[] // every campaign that isn't removed, running ones first
   admin: boolean
   adminLink: ReactNode
   personName: string
@@ -53,14 +54,33 @@ const stageLabel: Record<Stage, { tone: PillTone; label: string }> = {
   checked: { tone: "green", label: "Result checked" },
 }
 
-export default function WeeklyNegatives({ batches, weeks, campaigns, admin, adminLink, personName, brakeNote, dryRun }: Props) {
+// Shortcuts for the period; "Bateman" is the agency's run (see lib/date-range.ts).
+function quickPeriods(lastWeek: Props["lastWeek"], today: string) {
+  const back = (days: number) => {
+    const d = new Date(`${today}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - days)
+    return d.toISOString().slice(0, 10)
+  }
+  return [
+    { label: "Last week", from: lastWeek.from, to: lastWeek.to },
+    { label: "Last 30 days", from: back(29), to: today },
+    { label: "Last 90 days", from: back(89), to: today },
+    { label: "Bateman (Jun 5 – Jul 23)", from: "2026-06-05", to: "2026-07-23" },
+  ]
+}
+
+export default function WeeklyNegatives({ batches, lastWeek, today, campaigns, admin, adminLink, personName, brakeNote, dryRun }: Props) {
   const [name, setName] = useState(personName)
   const [message, setMessage] = useState<StepResult | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [, startTransition] = useTransition()
-  const [week, setWeek] = useState(weeks[0]?.id ?? "")
-  // After a draft, that week drops out of the list; fall back to the newest week left.
-  const selected = weeks.some((w) => w.id === week) ? week : (weeks[0]?.id ?? "")
+  const [from, setFrom] = useState(lastWeek.from)
+  const [to, setTo] = useState(lastWeek.to)
+  const [campaignId, setCampaignId] = useState("")
+  const quick = quickPeriods(lastWeek, today)
+  const running = campaigns.filter((c) => c.status === "ENABLED")
+  const others = campaigns.filter((c) => c.status !== "ENABLED")
+  const field = "h-9 rounded-lg border border-input bg-background px-2 text-sm"
 
   // Runs one step; `key` marks which button shows "Saving…".
   const run = (key: string, step: () => Promise<StepResult>) => {
@@ -83,25 +103,65 @@ export default function WeeklyNegatives({ batches, weeks, campaigns, admin, admi
             className="h-9 w-48 rounded-lg border border-input bg-background px-2"
           />
         </label>
-        {weeks.length > 0 ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-xs font-medium text-muted-foreground">Search terms from</span>
-              <select value={selected} onChange={(e) => setWeek(e.target.value)} className="h-9 rounded-lg border border-input bg-background px-2 text-sm">
-                {weeks.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.label}
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-xs font-medium text-muted-foreground">Campaign</span>
+          <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} className={cn(field, "max-w-72")}>
+            <option value="">All campaigns</option>
+            {running.length > 0 && (
+              <optgroup label="Running">
+                {running.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
                   </option>
                 ))}
-              </select>
-            </label>
-            <Button type="button" disabled={busy !== null || !selected} onClick={() => run("draft", () => draftNegativeBatch(selected, name))}>
-              {busy === "draft" ? "Drafting…" : "Draft batch"}
-            </Button>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Every recent week has a batch. The next one can be drafted on Monday.</p>
-        )}
+              </optgroup>
+            )}
+            {others.length > 0 && (
+              <optgroup label="Paused or ended">
+                {others.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </label>
+        <div className="flex flex-col gap-1 text-sm">
+          <span className="text-xs font-medium text-muted-foreground">Search terms from</span>
+          <span className="flex items-center gap-1.5">
+            <input type="date" aria-label="From" value={from} max={to || today} onChange={(e) => setFrom(e.target.value)} className={field} />
+            <span className="text-muted-foreground">to</span>
+            <input type="date" aria-label="To" value={to} min={from} max={today} onChange={(e) => setTo(e.target.value)} className={field} />
+          </span>
+        </div>
+        <Button
+          type="button"
+          disabled={busy !== null || !from || !to}
+          onClick={() => run("draft", () => draftNegativeBatch({ from, to, campaignId }, name))}
+        >
+          {busy === "draft" ? "Drafting…" : "Draft batch"}
+        </Button>
+        <div className="flex basis-full flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground">Quick pick:</span>
+          {quick.map((q) => (
+            <button
+              key={q.label}
+              type="button"
+              aria-pressed={q.from === from && q.to === to}
+              onClick={() => {
+                setFrom(q.from)
+                setTo(q.to)
+              }}
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 font-medium",
+                q.from === from && q.to === to ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted",
+              )}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
         {message && (
           <p role="status" className={cn("basis-full text-sm", message.ok ? "text-emerald-700" : "text-destructive")}>
             {message.message}
@@ -109,7 +169,7 @@ export default function WeeklyNegatives({ batches, weeks, campaigns, admin, admi
         )}
       </div>
 
-      {batches.length === 0 && <p className="text-sm text-muted-foreground">No batches yet. Draft last week&apos;s above to start.</p>}
+      {batches.length === 0 && <p className="text-sm text-muted-foreground">No batches yet. Draft last week&apos;s above to start, or pick older dates and a paused campaign to try it out.</p>}
       {batches.map((b) => (
         <BatchCard
           key={b.id}
@@ -258,12 +318,13 @@ function BatchCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h2 id={`batch-${b.id}`} className="font-semibold">
-            Week of {b.weekLabel}
+            {b.periodLabel}
+            <span className="font-normal text-muted-foreground"> · {b.campaignName ?? "All campaigns"}</span>
           </h2>
           <p className="text-sm text-muted-foreground">
             {b.items.length
               ? `${b.items.length} negative keyword${b.items.length === 1 ? "" : "s"} for searches that cost ${formatUsd(cost)} and brought no conversions.`
-              : "No search matched the rules without converting."}
+              : "No search in this period matched the rules without converting."}
           </p>
         </div>
         <Pill tone={stage.tone}>{stage.label}</Pill>
@@ -405,7 +466,9 @@ function BatchCard({
             </details>
           )}
           {b.alreadyNegative.length > 0 && (
-            <p className="text-xs text-muted-foreground">Already blocked by running campaigns: {b.alreadyNegative.join(", ")}.</p>
+            <p className="text-xs text-muted-foreground">
+              Already blocked by {b.campaignName ? "this campaign" : "running campaigns"}: {b.alreadyNegative.join(", ")}.
+            </p>
           )}
         </div>
       )}
@@ -432,7 +495,10 @@ function PushPanel({
   brakeNote: string | null
   dryRun: boolean
 }) {
-  const [picked, setPicked] = useState(() => runningIds(campaigns))
+  // A batch drafted from one campaign goes back to that campaign by default.
+  const [picked, setPicked] = useState(() =>
+    b.campaignId && campaigns.some((c) => c.id === b.campaignId) ? [b.campaignId] : runningIds(campaigns),
+  )
   const { ask, ui, busy } = useChange()
   const sameName = b.proven?.by && b.approved?.by && b.proven.by.toLowerCase() === b.approved.by.toLowerCase()
 

@@ -132,7 +132,9 @@ export type SearchTermRow = {
   suggestion?: string
 }
 
-export async function getSearchTerms(range: DateRange): Promise<SearchTermRow[]> {
+// `campaignId` narrows it to one campaign (running, paused or ended).
+export async function getSearchTerms(range: DateRange, campaignId?: string): Promise<SearchTermRow[]> {
+  const oneCampaign = campaignId && /^\d+$/.test(campaignId) ? ` AND campaign.id = ${campaignId}` : ""
   const rows = await gaql<{
     searchTermView: { searchTerm?: string; status?: string }
     campaign?: { name?: string }
@@ -141,7 +143,7 @@ export async function getSearchTerms(range: DateRange): Promise<SearchTermRow[]>
   }>(
     `SELECT search_term_view.search_term, search_term_view.status, campaign.name, ad_group.name, ${METRICS}
      FROM search_term_view
-     WHERE ${during(range)}
+     WHERE ${during(range)}${oneCampaign}
      ORDER BY metrics.cost_micros DESC
      LIMIT 5000`,
   )

@@ -76,12 +76,14 @@ export type BatchResult = {
 }
 
 export type NegativeBatch = {
-  id: string // Monday of the search terms' week, YYYY-MM-DD
+  id: string // see batchId() in lib/negative-batches.ts: the Monday for a plain all-campaigns week
   from: string // search terms from…
   to: string // …to (YYYY-MM-DD)
+  campaignId?: string // search terms from this one campaign; unset = all campaigns
+  campaignName?: string
   items: BatchItem[]
   heldBack: HeldBack[]
-  alreadyNegative: string[] // suggestions skipped because running campaigns already block them
+  alreadyNegative: string[] // suggestions skipped because the campaign(s) already block them
   drafted: BatchStep
   proven?: BatchStep
   approved?: BatchStep

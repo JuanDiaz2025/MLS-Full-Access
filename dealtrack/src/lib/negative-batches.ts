@@ -1,5 +1,5 @@
 // The weekly negative keyword routine, in five steps:
-//   1. Draft: last week's search terms that match a rule in negatives.ts and brought no
+//   1. Draft: a period's search terms (last week by default; any dates, one campaign or all) that match a rule in negatives.ts and brought no
 //      conversions, grouped into one line per negative keyword, with the evidence.
 //   2. Review: each line's evidence holds up, or it's dropped.
 //   3. Approve: each reviewed line is approved or rejected.
@@ -19,6 +19,7 @@ import type { BatchItem, BatchResult, HeldBack, NegativeBatch } from "@/lib/stor
 export const LOOKBACK_DAYS = 90 // searches a new negative must not block: ones that converted, or sellers
 export const BRAKE_DAYS = 7 // at most one push per week
 export const TERMS_SHOWN = 5
+export const MAX_DRAFT_DAYS = 366
 
 type Num = string | number | undefined
 
@@ -39,16 +40,28 @@ export function completeWeeks(n: number): Week[] {
 
 const range = (from: string, to: string): DateRange => ({ from, to, label: `${from} – ${to}` })
 
-// Negatives already on running campaigns, directly or through their shared lists.
-async function existingNegatives(): Promise<Set<string>> {
+// What a batch drafts from: search terms between two dates, from one campaign or all of them.
+export type Scope = { from: string; to: string; campaignId?: string }
+
+// A plain all-campaigns Monday–Sunday week keeps the Monday as its id (what the Overview looks
+// for); any other period or a single campaign gets its own id, so each can have one batch.
+export function batchId({ from, to, campaignId }: Scope) {
+  const plainWeek = !campaignId && mondayOf(from) === from && addDays(from, 6) === to
+  return plainWeek ? from : `${from}_${to}${campaignId ? `_c${campaignId}` : ""}`
+}
+
+// Negatives already on the campaign (any status), or on running campaigns when drafting from all,
+// directly or through their shared lists.
+async function existingNegatives(campaignId?: string): Promise<Set<string>> {
+  const which = campaignId ? `campaign.id = ${campaignId}` : "campaign.status = 'ENABLED'"
   const [direct, lists] = await Promise.all([
     gaql<{ campaignCriterion: { keyword?: { text?: string } } }>(
       `SELECT campaign_criterion.keyword.text FROM campaign_criterion
-       WHERE campaign.status = 'ENABLED' AND campaign_criterion.negative = TRUE AND campaign_criterion.type = 'KEYWORD'`,
+       WHERE ${which} AND campaign_criterion.negative = TRUE AND campaign_criterion.type = 'KEYWORD'`,
     ),
     gaql<{ sharedSet: { id?: Num } }>(
       `SELECT shared_set.id FROM campaign_shared_set
-       WHERE campaign.status = 'ENABLED' AND campaign_shared_set.status = 'ENABLED' AND shared_set.type = 'NEGATIVE_KEYWORDS'`,
+       WHERE ${which} AND campaign_shared_set.status = 'ENABLED' AND shared_set.type = 'NEGATIVE_KEYWORDS'`,
     ),
   ])
   const ids = [...new Set(lists.map((l) => String(l.sharedSet.id ?? "")).filter((id) => /^\d+$/.test(id)))]
@@ -71,7 +84,7 @@ const COMMON = new Set(
     "sell sells selling sold sale buy buys buying buyer buyers cash offer offers company companies investor investors estate real " +
     "someone people anyone condition").split(" "),
 )
-const MIN_WORD_SPEND = 50 // a word needs this much spend last week, across 2+ searches…
+const MIN_WORD_SPEND = 50 // a word needs this much spend in the period, across 2+ searches…
 const MAX_WORD_LINES = 10
 
 // Words (and two-word phrases) in last week's searches that cost money and never converted in the
@@ -119,11 +132,21 @@ async function keywordWordsInUse(): Promise<Set<string>> {
 
 export type Draft = Pick<NegativeBatch, "items" | "heldBack" | "alreadyNegative">
 
-export async function draftWeek(week: Week): Promise<Draft> {
+// The searches a new negative must not block, from every campaign: the 90 days up to the end of
+// the period, and the last 90 days (the same window when the period is recent).
+async function lookback(to: string): Promise<SearchTermRow[]> {
+  const recent = addDays(today(), -(LOOKBACK_DAYS - 1))
+  const before = addDays(to, -(LOOKBACK_DAYS - 1))
+  if (to >= recent) return getSearchTerms(range(before < recent ? before : recent, today()))
+  const [then, now] = await Promise.all([getSearchTerms(range(before, to)), getSearchTerms(range(recent, today()))])
+  return [...then, ...now]
+}
+
+export async function draftBatch(scope: Scope): Promise<Draft> {
   const [terms, history, existing, keywordWords] = await Promise.all([
-    getSearchTerms(range(week.from, week.to)),
-    getSearchTerms(range(addDays(today(), -(LOOKBACK_DAYS - 1)), today())),
-    existingNegatives(),
+    getSearchTerms(range(scope.from, scope.to), scope.campaignId),
+    lookback(scope.to),
+    existingNegatives(scope.campaignId),
     keywordWordsInUse(),
   ])
 
