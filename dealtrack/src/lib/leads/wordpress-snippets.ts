@@ -1,7 +1,7 @@
 // What to add to WordPress so each form sends where the visitor came from.
 
 // Contact Form 7 hidden fields; the tracking snippet fills them in.
-export const CF7_HIDDEN_FIELDS = [
+export const TRACKING_FIELDS = [
   "utm_source",
   "utm_medium",
   "utm_campaign",
@@ -13,8 +13,8 @@ export const CF7_HIDDEN_FIELDS = [
   "landing_page",
   "referrer",
 ]
-  .map((name) => `[hidden ${name}]`)
-  .join("\n")
+
+export const CF7_HIDDEN_FIELDS = TRACKING_FIELDS.map((name) => `[hidden ${name}]`).join("\n")
 
 // Remembers the UTM tags and ad click id from the address the visitor arrived on (the latest
 // visit with tags wins), plus the landing page and referring site, and puts them into any form

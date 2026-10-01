@@ -274,6 +274,19 @@ function fetchRows(cfg: AdsConfig, key: string, query: string): Promise<unknown[
   return request
 }
 
+// The same query, always asked of Google (and saved for the cached reports). For things that
+// just changed, like a conversion action DealTrack created a moment ago.
+export function gaqlFresh<Row>(query: string): Promise<Row[]> {
+  const cfg = config()
+  return fetchRows(cfg, `${cfg.customerId}\n${query}`, query) as Promise<Row[]>
+}
+
+// The configured account and its sign-in keys, for the offline conversions (lib/conversions).
+export function adsAccountConfig() {
+  const cfg = config()
+  return { customerId: cfg.customerId, loginCustomerId: cfg.loginCustomerId, clientId: cfg.clientId, clientSecret: cfg.clientSecret, refreshToken: cfg.refreshToken }
+}
+
 // ---- Changes --------------------------------------------------------------------------------
 // Everything below writes to the Google Ads account. Only the server actions in
 // src/app/actions/changes.ts call it, after checking that an admin confirmed the change.
@@ -356,6 +369,12 @@ export async function mutateAll(operations: unknown[], { validateOnly: asked = f
 // Keyword Planner ideas (KeywordPlanIdeaService.GenerateKeywordIdeas): related searches with their
 // monthly volume and top-of-page bids. Read-only. Cached like reports, since ideas barely change.
 const ideaCache = ((globalThis as { __dtIdeaCache?: Map<string, { at: number; body: unknown }> }).__dtIdeaCache ??= new Map())
+
+// A POST to the account for a method without its own helper, e.g. ":uploadConversionAdjustments"
+// (taking back an offline conversion). Not cached.
+export async function adsPost<T>(path: string, payload: unknown): Promise<T> {
+  return (await call(config(), path, payload)) as T
+}
 
 export async function keywordIdeas(payload: Record<string, unknown>): Promise<unknown> {
   const cfg = config()

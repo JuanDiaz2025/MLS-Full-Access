@@ -3,13 +3,23 @@
 import { useEffect, useRef, useState } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Check, CircleCheck, Copy, Download, LoaderCircle, LogIn, MessageSquareText, SendHorizontal, Settings, X } from "lucide-react"
+import { Check, CircleCheck, Copy, Download, History, LoaderCircle, LogIn, MessageSquareText, Plus, SendHorizontal, Settings, Trash2, X } from "lucide-react"
 
 import { ASK_EVENT } from "@/components/assistant/ask-button"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 type Message = { role: "user" | "assistant"; content: string }
+type ChatSummary = { id: string; title: string; updatedAt: string; pending: boolean }
+type SavedChat = { id: string; messages: Message[]; pendingSince?: string }
+
+const ago = (iso: string) => {
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60_000)
+  if (mins < 1) return "just now"
+  if (mins < 60) return `${mins} min ago`
+  if (mins < 24 * 60) return `${Math.round(mins / 60)} h ago`
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
 
 const suggestions = [
   "What's wrong with our ads right now, and what should we fix first?",
@@ -162,26 +172,144 @@ export default function Assistant({ enabled, context, onClose }: AssistantProps)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  const [chatId, setChatId] = useState<string | undefined>(undefined)
+  const [chats, setChats] = useState<ChatSummary[]>([])
+  const [showHistory, setShowHistory] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Set once the person asks something or starts a new chat, so the saved chat loading on
+  // page open doesn't replace what they just did.
+  const touched = useRef(false)
+  // Changes whenever another chat is shown, so a reply only lands in the chat it belongs to.
+  const view = useRef(0)
+  const scrollDown = () => requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "nearest" }))
+
+  const refreshList = () =>
+    fetch("/api/chat/history")
+      .then((r) => (r.ok ? r.json() : { chats: [] }))
+      .then((b: { chats?: ChatSummary[] }) => {
+        setChats(b.chats ?? [])
+        return b.chats ?? []
+      })
+      .catch(() => [] as ChatSummary[])
+
+  // Opens a saved chat. If it's still being answered (e.g. the page was refreshed while Claude
+  // was working), keep checking until the reply is saved.
+  async function openChat(id: string, auto = false) {
+    if (poll.current) clearInterval(poll.current)
+    const load = () =>
+      fetch(`/api/chat/history?id=${id}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((b: { chat?: SavedChat } | null) => b?.chat ?? null)
+        .catch(() => null)
+    const chat = await load()
+    // Opened by itself on page load, but the person already started something: leave it be.
+    if (!chat || (auto && touched.current)) return
+    const mine = ++view.current
+    setChatId(chat.id)
+    setError(null)
+    setErrorCode(null)
+    setShowHistory(false)
+    setPending(Boolean(chat.pendingSince))
+    show(chat)
+    if (chat.pendingSince) {
+      poll.current = setInterval(async () => {
+        if (view.current !== mine) return clearInterval(poll.current!)
+        const fresh = await load()
+        if (view.current !== mine) return
+        if (!fresh) {
+          // The question failed and its chat was removed: put the question back.
+          clearInterval(poll.current!)
+          setPending(false)
+          setMessages(chat.messages.slice(0, -1))
+          setInput(chat.messages.at(-1)?.content ?? "")
+          setError("That answer didn't come through. Your question is back in the box: press Send to ask again.")
+          return
+        }
+        if (!fresh.pendingSince) {
+          clearInterval(poll.current!)
+          setPending(false)
+          if (!show(fresh) && fresh.messages.length <= chat.messages.length - 1) {
+            setInput(chat.messages.at(-1)?.content ?? "")
+            setError("That answer didn't come through. Your question is back in the box: press Send to ask again.")
+          }
+        }
+      }, 3000)
+    }
+  }
+
+  // Shows a saved chat. A question left without an answer (the app was closed while it was being
+  // answered) goes back into the box to send again. Returns whether that happened.
+  function show(chat: SavedChat) {
+    const last = chat.messages.at(-1)
+    const cutOff = !chat.pendingSince && last?.role === "user"
+    setMessages(cutOff ? chat.messages.slice(0, -1) : chat.messages)
+    if (cutOff) {
+      setInput(last!.content)
+      setError("The answer to your last question didn't come through. It's back in the box: press Send to ask again.")
+    }
+    scrollDown()
+    return cutOff
+  }
+
+  function newChat() {
+    touched.current = true
+    view.current++
+    if (poll.current) clearInterval(poll.current)
+    setChatId(undefined)
+    setMessages([])
+    setPending(false)
+    setError(null)
+    setErrorCode(null)
+    setShowHistory(false)
+  }
+
+  async function removeChat(id: string) {
+    await fetch(`/api/chat/history?id=${id}`, { method: "DELETE" }).catch(() => null)
+    if (id === chatId) newChat()
+    refreshList()
+  }
+
+  // Pick up where you left off: the latest conversation opens when the page loads.
+  useEffect(() => {
+    if (!enabled) return
+    let cancelled = false
+    refreshList().then((list) => {
+      if (!cancelled && !touched.current && list[0]) openChat(list[0].id, true)
+    })
+    return () => {
+      cancelled = true
+      if (poll.current) clearInterval(poll.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled])
 
   async function ask(question: string) {
     const text = question.trim()
     if (!text || pending || !enabled) return
+    touched.current = true
     const next: Message[] = [...messages, { role: "user", content: text }]
     setMessages(next)
     setInput("")
     setError(null)
     setErrorCode(null)
     setPending(true)
+    const mine = view.current
     requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }))
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // The server takes the last 40 messages at most.
-        body: JSON.stringify({ messages: next.slice(-40), context }),
+        // The server saves the conversation (up to 200 messages) and answers from the last 40.
+        body: JSON.stringify({ messages: next.slice(-200), context, chatId }),
       })
       const body = await res.json().catch(() => ({}))
+      // Another chat was opened meanwhile: this reply is saved in its own chat (Past chats).
+      if (view.current !== mine) {
+        refreshList()
+        return
+      }
+      if (typeof body.chatId === "string" && res.ok) setChatId(body.chatId)
       if (!res.ok || typeof body.reply !== "string") {
         setError(body.error ?? "Something went wrong. Please try again.")
         setErrorCode(typeof body.code === "string" ? body.code : null)
@@ -190,12 +318,14 @@ export default function Assistant({ enabled, context, onClose }: AssistantProps)
         return
       }
       setMessages([...next, { role: "assistant", content: body.reply }])
+      refreshList()
     } catch {
+      if (view.current !== mine) return
       setError("Couldn't reach the app. Is it still running?")
       setMessages(messages)
       setInput(text)
     } finally {
-      setPending(false)
+      if (view.current === mine) setPending(false)
       requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }))
     }
   }
@@ -230,6 +360,51 @@ export default function Assistant({ enabled, context, onClose }: AssistantProps)
           </Button>
         )}
       </div>
+      {enabled && (
+        <div className="flex gap-2 px-5 pt-3">
+          <Button type="button" variant="outline" size="sm" onClick={newChat} disabled={!messages.length && !chatId}>
+            <Plus data-icon="inline-start" />
+            New chat
+          </Button>
+          <Button
+            type="button"
+            variant={showHistory ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => {
+              if (!showHistory) refreshList()
+              setShowHistory(!showHistory)
+            }}
+            aria-expanded={showHistory}
+          >
+            <History data-icon="inline-start" />
+            Past chats{chats.length ? ` (${chats.length})` : ""}
+          </Button>
+        </div>
+      )}
+      {enabled && showHistory && (
+        <div className="mx-5 mt-3 max-h-64 overflow-y-auto rounded-xl border">
+          {chats.length ? (
+            <ul className="divide-y">
+              {chats.map((c) => (
+                <li key={c.id} className={cn("flex items-center gap-2 px-3 py-2", c.id === chatId && "bg-primary/5")}>
+                  <button type="button" onClick={() => openChat(c.id)} className="min-w-0 flex-1 text-left">
+                    <span className="block truncate text-sm font-medium">{c.title}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {ago(c.updatedAt)}
+                      {c.pending ? " · still answering…" : ""}
+                    </span>
+                  </button>
+                  <Button type="button" variant="ghost" size="icon" aria-label={`Delete "${c.title}"`} onClick={() => removeChat(c.id)}>
+                    <Trash2 />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="p-3 text-sm text-muted-foreground">No saved chats yet. Your conversations are saved here as you go.</p>
+          )}
+        </div>
+      )}
 
       {!enabled ? (
         <div className="m-5 flex gap-2 rounded-xl bg-muted p-4 text-sm">

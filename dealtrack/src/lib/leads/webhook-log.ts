@@ -5,7 +5,7 @@ import { jsonFileStore } from "@/lib/json-file-store"
 export type WebhookAttempt = {
   at: string
   ok: boolean
-  // "lead", "test", "wrong-key" or "no-contact".
+  // "lead", "test", "wrong-key", "no-contact" or "unrecognized" (kept, but no name, phone or email found).
   result: string
   // The field names the form sent (never their values), to fix field-name mismatches.
   fields?: string[]

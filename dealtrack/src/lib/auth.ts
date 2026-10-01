@@ -6,7 +6,7 @@
 // Without an admin email or password, nobody can make changes. Signing in sets a signed cookie for
 // 30 days. With no sign-in set up at all, the reports are open in local development (never in
 // production, and never while go-online.bat has put DealTrack on a public address).
-import { createHmac, timingSafeEqual } from "node:crypto"
+import { createHash, createHmac, timingSafeEqual } from "node:crypto"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { cookies } from "next/headers"
@@ -73,6 +73,9 @@ export function openWithoutPassword() {
 function secret() {
   return process.env.SESSION_SECRET || `dealtrack:${process.env.APP_PASSWORD ?? ""}:${process.env.ADMIN_PASSWORD ?? ""}`
 }
+
+// A 32-byte key from the same secret, for encrypting saved tokens (lib/conversions/google.ts).
+export const secretKey = () => createHash("sha256").update(`token-key:${secret()}`).digest()
 
 function sign(value: string) {
   return createHmac("sha256", secret()).update(value).digest("base64url")

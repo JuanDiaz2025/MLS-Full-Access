@@ -13,7 +13,7 @@ export const trackingAliases: Record<keyof LeadTracking, string[]> = {
   fbclid: ["fbclid"],
   msclkid: ["msclkid"],
   landingPage: ["landingpage", "landingpageurl", "pageurl", "url", "sourceurl", "posturl", "page", "formpage"],
-  referrer: ["referrer", "referer", "httpreferer", "referringsite"],
+  referrer: ["referrer", "referer", "httpreferer", "referringsite", "referrerurl"],
 }
 
 const fromUrl: [keyof LeadTracking, string[]][] = [

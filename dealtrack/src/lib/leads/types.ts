@@ -42,6 +42,59 @@ export type LeadTracking = {
   referrer?: string
 }
 
+// Where a lead stands with the team. "interested" and "closed" are sent back to Google Ads as
+// offline conversions, so Google learns which clicks bring real sellers.
+export const leadStatuses = [
+  { id: "new", label: "New" },
+  { id: "interested", label: "Interested" },
+  { id: "appointment", label: "Appointment" },
+  { id: "offer", label: "Offer made" },
+  { id: "closed", label: "Closed deal" },
+  { id: "not_interested", label: "Not interested" },
+] as const
+export type LeadStatus = (typeof leadStatuses)[number]["id"]
+
+// The two moments Google Ads hears about.
+// "invalid" reports a lead you don't want more of to a reporting-only (secondary) action: Google
+// never bids for it, but its reports show which campaigns and keywords bring junk.
+export type ConversionKind = "interested" | "closed" | "invalid"
+export const conversionKinds: ConversionKind[] = ["interested", "closed", "invalid"]
+export type ConversionUpload = {
+  state: "pending" | "sent" | "failed" | "skipped"
+  // When the lead reached this stage (the conversion's time in Google Ads).
+  at: string
+  tries?: number
+  lastTry?: string
+  error?: string
+  // How Google can match it: the ad click id, or the lead's email/phone (enhanced conversions).
+  matchedBy?: string
+  // Held back until a set-up step is done: a Google permission, or the Data Manager API turned on.
+  waitingFor?: "permission" | "api"
+  // The value sent with it (1 when not set), and the Google Ads rule that queued it, if one did.
+  value?: number
+  rule?: string
+  // What it was sent as: the id Google knows it by and the conversion action it went to, so it
+  // can be taken back later.
+  transactionId?: string
+  action?: string
+  // Google's id for the upload, and what Google decided once it had checked it.
+  requestId?: string
+  google?: { status: "processing" | "accepted" | "rejected"; reason?: string; checkedAt: string }
+  // Taking it back from Google Ads (a retraction), when the lead turned out Not interested.
+  retraction?: { state: "pending" | "sent" | "failed"; at: string; tries?: number; lastTry?: string; error?: string }
+}
+
+// How good a lead looks the moment it arrives, scored by the app (scoring.ts).
+export type LeadGrade = "hot" | "warm" | "cold" | "junk"
+export type LeadScore = {
+  value: number // 0-100
+  grade: LeadGrade
+  // Why, in plain words: "+25 Real phone number", "-30 Message has links (often spam)"...
+  reasons: string[]
+  // Couldn't be scored (its fields weren't recognized): never given a status automatically.
+  unscored?: boolean
+}
+
 export type Lead = {
   id: string
   // Set for leads from a QR code form. Website leads have `source` instead.
@@ -55,4 +108,16 @@ export type Lead = {
   propertyAddress?: string
   notes?: string
   tracking?: LeadTracking
+  // Set for leads picked up from the WordPress Lead Saver plugin ("wp:<site>:<id>"), so none is added twice.
+  inboxId?: string
+  status?: LeadStatus
+  statusChangedAt?: string
+  // "auto" when the app set the status from the lead's score; anything you set yourself wins.
+  statusBy?: "auto" | "you"
+  // Set when an old lead rule set the status (rules now only decide what Google Ads hears).
+  statusRule?: string
+  // A Google Ads rule said not to send this lead (setting a status yourself still sends it).
+  googleBlockedBy?: string
+  score?: LeadScore
+  conversions?: Partial<Record<ConversionKind, ConversionUpload>>
 }

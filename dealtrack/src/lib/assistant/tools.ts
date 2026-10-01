@@ -60,7 +60,8 @@ export const toolSpecs: ToolSpec[] = [
     name: "list_leads",
     description:
       "List the leads collected in the last N days, newest first, from the WordPress website's forms. " +
-      "Each lead has a date, name, phone, email, property address, notes, the form, its channel (Google Ads, Facebook, organic search...) and tracking (UTM tags, Google click ID, landing page). " +
+      "Each lead has a date, name, phone, email, property address, notes, the form, its channel (Google Ads, Facebook, organic search...), tracking (UTM tags, Google click ID, landing page), " +
+      "its score (0-100, graded hot/warm/cold/junk, with the reasons), the team's status (new, interested, appointment, offer, closed, not_interested), and what was sent back to Google Ads as an offline conversion. " +
       "These are separate from Google Ads conversions.",
     parameters: {
       type: "object",
@@ -120,6 +121,11 @@ export async function recentLeads(days: number) {
       notes: l.notes,
       source: leadSource(l, placements),
       channel: leadChannel(l),
+      score: l.score && { value: l.score.value, grade: l.score.grade, reasons: l.score.reasons },
+      status: l.status ?? "new",
+      sentToGoogleAds: l.conversions
+        ? Object.fromEntries(Object.entries(l.conversions).map(([kind, c]) => [kind, c?.retraction ? `taken back (${c.retraction.state})` : (c?.google?.status ?? c?.state)]))
+        : undefined,
       tracking: l.tracking,
     }))
 }
@@ -214,7 +220,7 @@ export async function fraudCheck(days: number) {
     junkLeads: Array.isArray(leads)
       ? findJunkLeads(leads, (l) => dayOf(l.createdAt) >= range.from)
           .slice(0, 20)
-          .map((j) => ({ date: j.lead.createdAt, name: j.lead.name, reasons: j.reasons.map((r) => r.detail) }))
+          .map((j) => ({ date: j.lead.createdAt, name: j.lead.name, reasons: j.reasons, googleAds: j.google }))
       : leads,
     note: "Server access logs (exact IP, time and browser of every click) can be added on the Fraud page's Refund claim tab; Google Ads itself never shows click IP addresses.",
   }

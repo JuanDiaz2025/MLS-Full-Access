@@ -11,7 +11,13 @@ import { cn } from "@/lib/utils"
 // second row shows that group's pages.
 export const navGroups = [
   { label: "Overview", links: [{ href: "/overview", label: "Overview" }] },
-  { label: "Leads", links: [{ href: "/leads", label: "Leads & calls" }] },
+  {
+    label: "Leads",
+    links: [
+      { href: "/leads", label: "Leads & calls" },
+      { href: "/leads/automation", label: "Lead automation" },
+    ],
+  },
   {
     label: "Monitor",
     links: [

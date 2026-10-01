@@ -1,7 +1,8 @@
 import { cookies } from "next/headers"
 import { NextResponse, type NextRequest } from "next/server"
 
-import { SESSION_COOKIE, SESSION_DAYS, newSessionToken, roleForEmail } from "@/lib/auth"
+import { SESSION_COOKIE, SESSION_DAYS, isAdmin, newSessionToken, roleForEmail } from "@/lib/auth"
+import { finishConnect, isConnectCallback } from "@/lib/conversions/connect"
 import { finishSignIn } from "@/lib/google-signin"
 import { NAME_COOKIE, cleanName } from "@/lib/people"
 
@@ -10,6 +11,11 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams
   const back = (path: string) => NextResponse.redirect(new URL(path, request.url))
   const login = (error: string, next = "/overview") => back(`/login?error=${error}&next=${encodeURIComponent(next)}`)
+  // "Connect Google for conversions" comes back here too (lib/conversions/connect.ts).
+  if (await isConnectCallback(params.get("state"))) {
+    const done = params.get("error") || !(await isAdmin()) ? "cancelled" : await finishConnect(request.url, params.get("state"), params.get("code"))
+    return back(`/leads/automation?connect=${done}`)
+  }
   if (params.get("error")) return login("cancelled")
 
   const result = await finishSignIn(request.url, params.get("state"), params.get("code"))

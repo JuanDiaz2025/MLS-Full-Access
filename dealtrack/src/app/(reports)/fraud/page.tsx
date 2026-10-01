@@ -21,7 +21,7 @@ import {
   type ClickPatterns,
   type FraudDay,
 } from "@/lib/fraud/clicks"
-import { JUNK_LABELS, findJunkLeads, type JunkLead } from "@/lib/fraud/leads"
+import { findJunkLeads, mainReason, type JunkLead } from "@/lib/fraud/leads"
 import {
   CLUSTER_SECONDS,
   KIND_LABELS,
@@ -246,7 +246,7 @@ async function OverviewTab({ range, campaignId }: { range: DateRange; campaignId
     findings.push({
       tone: "amber",
       title: `${junk.data.length} form ${junk.data.length === 1 ? "lead looks" : "leads look"} like junk`,
-      detail: "Junk leads counted as conversions teach Google to find more of the same. Check them and mark them in the CRM.",
+      detail: "Graded Junk by the lead scoring. The default rule reports them to Google as invalid leads (reporting only), so bidding doesn't learn from them.",
       href: link("leads"),
     })
   }
@@ -1020,19 +1020,29 @@ async function LeadsTab({ range }: { range: DateRange }) {
   const junk = await junkFor(range)
   if (!junk.ok) return <ReportProblem problem={junk} />
   const counts = new Map<string, number>()
-  for (const j of junk.data) for (const r of j.reasons) counts.set(r.reason, (counts.get(r.reason) ?? 0) + 1)
+  for (const j of junk.data) counts.set(mainReason(j), (counts.get(mainReason(j)) ?? 0) + 1)
   const shown = junk.data.slice(0, LEADS_SHOWN)
 
   return (
     <Section
       title="Junk form leads"
-      description="Website form leads with signs of junk: a fake phone number, a made-up name, a throwaway email, the same person again, several forms from one ad click, or a competitor's wording. If they count as conversions in Google Ads, they teach its bidding to find more of the same, so mark them invalid in the CRM. Form leads come from the website webhook (Leads & calls page)."
+      description={
+        <>
+          Form leads the lead scoring graded Junk when they arrived: tests and fake names, advertising instead of a seller, or no real phone
+          or email. The default lead rule reports junk to Google Ads as an invalid lead (reporting only), so Google never bids for more like
+          it. Scores and rules live on the{" "}
+          <Link href="/leads/automation" className="font-medium text-primary hover:underline">
+            Leads page&apos;s automation
+          </Link>
+          .
+        </>
+      }
     >
       {counts.size > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {[...counts].map(([reason, n]) => (
             <Pill key={reason} tone="amber">
-              {JUNK_LABELS[reason as keyof typeof JUNK_LABELS]}: {n}
+              {reason}: {n}
             </Pill>
           ))}
         </div>
@@ -1059,10 +1069,8 @@ async function LeadsTab({ range }: { range: DateRange }) {
             label: "Why",
             render: (j) => (
               <ul className="flex flex-col gap-0.5 text-xs">
-                {j.reasons.map((r) => (
-                  <li key={r.reason}>
-                    <span className="font-medium">{JUNK_LABELS[r.reason]}:</span> {r.detail}
-                  </li>
+                {j.reasons.slice(0, 4).map((r) => (
+                  <li key={r}>{r}</li>
                 ))}
               </ul>
             ),
@@ -1072,6 +1080,7 @@ async function LeadsTab({ range }: { range: DateRange }) {
             label: "From",
             render: (j) => <span className="text-xs">{j.lead.tracking?.gclid ? "Google Ads" : j.lead.source || "Website"}</span>,
           },
+          { key: "google", label: "Google Ads", render: (j) => <span className="text-xs">{j.google}</span> },
         ]}
       />
       {junk.data.length > shown.length && (

@@ -76,7 +76,7 @@ const aliases = {
   lastName: ["lastname", "lname", "last", "surname", "familyname"],
   phone: ["phone", "phonenumber", "tel", "telephone", "mobile", "cell", "cellphone", "yourphone", "yourtel", "bestphone"],
   email: ["email", "emailaddress", "youremail", "mail", "eml"],
-  address: ["propertyaddress", "address", "streetaddress", "street", "address1", "addressline1", "youraddress", "propertylocation", "location"],
+  address: ["propertyaddress", "address", "streetaddress", "street", "address1", "addressline1", "youraddress", "propertylocation", "location", "selectedgoogleaddress"],
   city: ["city", "town"],
   state: ["state", "province", "region"],
   zip: ["zip", "zipcode", "postalcode", "postcode"],
@@ -85,7 +85,7 @@ const aliases = {
 } as const
 
 // Plugin bookkeeping that isn't worth keeping in the notes.
-const skip = new Set(["formid", "formname", "formtitle", "form", "postid", "referer", "referrer", "remoteip", "useragent", "date", "time", "pageurl", "pagetitle", "sourceurl", "submittedon", "entryid", "id", "nonce", "action", "gdpr", "acceptance", "consent", "recaptcha", "grecaptcharesponse", "honeypot"])
+const skip = new Set(["formid", "formname", "formtitle", "form", "postid", "referer", "referrer", "remoteip", "useragent", "date", "time", "pageurl", "pagetitle", "sourceurl", "fullurl", "submittedpage", "vxwidth", "vxheight", "vxurl", "selectedgoogleaddress", "submittedon", "entryid", "id", "nonce", "action", "gdpr", "acceptance", "consent", "recaptcha", "grecaptcharesponse", "honeypot"])
 
 // Flattens nested payloads into label → value pairs. A field sent as { id|name|label, value }
 // (Elementor with advanced data, many webhook plugins) is keyed by its label or id.
@@ -135,12 +135,39 @@ function unbracket(payload: unknown): unknown {
   return out
 }
 
+// Some sites already run their own attribution script that sends thb_lt_* (last touch) and
+// thb_ft_* (first touch) fields. Use them where the usual names are empty, and keep the rest of
+// them out of the notes.
+const THB_TRACKING: [string, string][] = [
+  ["utm_source", "source"], ["utm_medium", "medium"], ["utm_campaign", "campaign"], ["utm_term", "term"],
+  ["utm_content", "content"], ["gclid", "gclid"], ["gbraid", "gbraid"], ["wbraid", "wbraid"], ["fbclid", "fbclid"],
+  ["msclkid", "msclkid"], ["landing_page", "landing"], ["referrer", "referrer"],
+]
+
+function withSiteTracking(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload
+  const fields = payload as Record<string, unknown>
+  if (!Object.keys(fields).some((k) => k.startsWith("thb_"))) return payload
+  const out: Record<string, unknown> = Object.fromEntries(Object.entries(fields).filter(([k]) => !k.startsWith("thb_")))
+  const filled = (v: unknown) => typeof v === "string" && v.trim() !== ""
+  for (const [name, suffix] of THB_TRACKING) {
+    if (filled(out[name])) continue
+    const value = [fields[`thb_lt_${suffix}`], fields[`thb_ft_${suffix}`]].find(filled)
+    if (value) out[name] = value
+  }
+  return out
+}
+
 export function parseWebsiteLead(payload: unknown): WebsiteLead | null {
-  const pairs = flatten(unbracket(payload))
+  const pairs = flatten(unbracket(withSiteTracking(payload)))
   const used = new Set<number>()
   const take = (names: readonly string[]) => {
     for (const alias of names) {
-      const i = pairs.findIndex(([k], index) => !used.has(index) && norm(k.split(".").pop() ?? k) === alias)
+      // Contact Form 7's default names end in a number (email-123, tel-456): match those too.
+      const i = pairs.findIndex(([k], index) => {
+        const n = norm(k.split(".").pop() ?? k)
+        return !used.has(index) && (n === alias || n.replace(/\d+$/, "") === alias)
+      })
       if (i >= 0) {
         used.add(i)
         return pairs[i][1].slice(0, 500)
