@@ -177,7 +177,7 @@ export function StatusPill({ status }: { status: string }) {
 // Shown to viewers where admins get change buttons.
 export async function AdminLink() {
   if (!changesEnabled()) {
-    return <span className="text-xs text-muted-foreground">Set ADMIN_PASSWORD to make changes from here.</span>
+    return <span className="text-xs text-muted-foreground">Set ADMIN_PASSWORD or ADMIN_EMAILS to make changes from here.</span>
   }
   const path = (await headers()).get("x-pathname") ?? "/overview"
   return (

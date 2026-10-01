@@ -4,6 +4,8 @@ import { redirect } from "next/navigation"
 
 import AppHeader from "@/components/app-header"
 import NavProgress from "@/components/nav-progress"
+import AssistantLauncher from "@/components/assistant/assistant-launcher"
+import { assistantProvider } from "@/lib/assistant/shared"
 import { changesEnabled, isAdmin, isSignedIn, openWithoutPassword } from "@/lib/auth"
 
 // Every report page sits behind the team password.
@@ -29,7 +31,10 @@ export default async function ReportsLayout({ children }: { children: React.Reac
           putting it online.
         </p>
       )}
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:py-8">{children}</main>
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 pb-24 sm:px-6 lg:py-8">{children}</main>
+      <div className="print:hidden">
+        <AssistantLauncher enabled={assistantProvider() !== null} />
+      </div>
     </div>
   )
 }

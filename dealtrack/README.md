@@ -2,9 +2,13 @@
 
 Google Ads results for Twin Home Buyer, built from the AdPilot hackathon app.
 
-It reports on one Google Ads account. The pages are grouped the way the work goes:
+It reports on one Google Ads account and collects the website's leads. The leads, calls, chat and Google sign-in came over from One Marketing Command Center. The pages are grouped the way the work goes:
 
 **Overview.** Spend, leads, cost per lead, clicks, click-through rate, and search impression share, each with its change against the period before and a sparkline; a chart that compares any two metrics (`?m1=cost&m2=leads`); status cards for open alerts, this month's pacing, the weekly negatives, and the go-live audit; and what needs attention.
+
+**Leads.** Every lead from the website forms as it arrives (WordPress sends it by webhook): a searchable spreadsheet with the channel worked out from the UTM tags and Google click ID (Google Ads, Facebook, organic search, direct mail...), landing page, referrer and form, plus **Export CSV**. Below it, phone calls from Google Ads (answered or missed, length, area code, campaign), and the WordPress setup: the webhook address, the Contact Form 7 hidden fields, and a tracking snippet. The page refreshes itself every few seconds. Missed ad calls also raise an alert.
+
+**Ask about your ads.** The button in the corner of every page opens a chat. Ask a question or for a report ("what went wrong last week?", "build a report for September") and it looks up the Google Ads account, the website leads, and DealTrack's own records (alerts, budget lines, weekly negatives) to answer, with tables you can copy or download. It only reads; it can't change anything. It runs on an OpenAI key, an Anthropic key, or the Claude Code app signed in with a Claude account (see Settings).
 
 **Monitor**
 
@@ -42,13 +46,31 @@ Most pages have date presets (including the Bateman period, Jun 5 – Jul 23, 20
 
 ## Saved data
 
-DealTrack keeps its own records in one file on the computer running it: `.data/dealtrack.json` in this folder (git ignores it). It holds the budget and alert lines, the alert history, the weekly negative batches with every step's name and time, and the go-live audit ticks. Set `DEALTRACK_DATA_DIR` to keep it somewhere else.
+DealTrack keeps its own records in the `.data` folder on the computer running it (git ignores it). Set `DEALTRACK_DATA_DIR` to keep it somewhere else.
+
+- `dealtrack.json`: the budget and alert lines, the alert history, the weekly negative batches with every step's name and time, and the go-live audit ticks.
+- `leads.json`: the website leads (same format as One Marketing Command Center: copy its `.data/leads.json` here to bring its leads over).
+- `webhook-secret`: the key WordPress sends with each lead (unless `LEADS_WEBHOOK_SECRET` is set). `webhook-log.json`: the last few webhook calls, for troubleshooting.
+- `public-url`: the public address while `go-online.bat` runs.
 
 - It's per computer. If two people each run DealTrack on their own laptop, each has their own history. Run it on one computer (or copy the file) to share one record.
 - Back it up like any other file. Deleting it resets the settings and history; Google Ads isn't affected.
 - It needs a disk to write to. On hosting without one (Vercel, for example), the reports work but saving shows an error.
 - Checks run when someone opens the app, not on a schedule: alerts are evaluated when the Alerts page or the Overview opens.
 - Steps that need a name (budget lines, audit ticks, proving, approving, pushing) use the name typed in the "Your name" field. It's remembered in that browser for a year.
+
+## Signing in
+
+- **Continue with Google:** set `ALLOWED_EMAILS` (addresses or whole domains, like `@twinhomebuyer.com`) and, for admins, `ADMIN_EMAILS`. It uses the Google Ads web client (or `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`); add `http://localhost:3000/api/auth/google/callback` to that client's **Authorized redirect URIs** in Google Cloud (and `https://your-address/api/auth/google/callback` once it's online). Google sign-in stays off until `ALLOWED_EMAILS` is set, so no other Google account can get in. People signed in with Google get their name filled in automatically. Taking an email off the list signs that person out.
+- **Passwords:** `APP_PASSWORD` to view and `ADMIN_PASSWORD` for changes still work, alongside Google or instead of it.
+- With no sign-in set up, the reports are open on your own computer only: never in production, and never while `go-online.bat` has DealTrack on a public address.
+
+## Website leads from WordPress
+
+1. Open **Leads** and expand **Website leads (WordPress)**. Copy the webhook address.
+2. In WordPress, paste it into the form's webhook setting, method **POST** (Contact Form 7: the free **CF7 to Webhook** plugin; Elementor: Actions After Submit → Webhook; WPForms and Gravity Forms: their webhook add-on). Sending the key as an `X-Webhook-Secret` header instead of `?key=` in the address keeps it out of logs, where the plugin allows it.
+3. Name the fields name, phone, email, property address and message (most forms already do). Add the hidden fields and tracking snippet shown on the page so each lead carries its UTM tags and Google click ID.
+4. WordPress has to reach DealTrack: put it online, or double-click `go-online.bat` (a free Cloudflare tunnel; leads arrive only while it and DealTrack run, and the address changes each time).
 
 ## Making changes (admins only)
 
@@ -111,6 +133,13 @@ All settings are environment variables. On your computer they go in `.env.local`
 | `POSTHOG_API_KEY`, `POSTHOG_PROJECT_ID`, `POSTHOG_HOST` | Behavior, Alerts. PostHog → Settings → Personal API keys → "Read-only access", limited to the project (Twin Home Buyer: `421236`, host `https://us.posthog.com`) |
 | `CLARITY_API_TOKEN` | Alerts. Clarity → Settings → Data export. Allows ~10 calls a day, so results are cached 3 hours |
 | `PAGESPEED_API_KEY` | Landing pages, Go-live audit. Google Cloud → enable PageSpeed Insights API → Credentials → Create API key |
+| `ALLOWED_EMAILS` | Google sign-in: who may view, e.g. `@twinhomebuyer.com,partner@gmail.com` |
+| `ADMIN_EMAILS` | Google sign-in: who may also make changes, e.g. `seth@twinhomebuyer.com` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional. A separate Google client for sign-in; defaults to the Google Ads client |
+| `SITE_URL` | Once online: its address, for the Google sign-in redirect and the webhook address |
+| `LEADS_WEBHOOK_SECRET` | Optional. The key WordPress sends; one is created in `.data` if empty |
+| `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | The chat. platform.openai.com → API keys, or console.anthropic.com → API keys. Billed per question (a few cents) |
+| `ASSISTANT_PROVIDER` | Optional. `claude-code` uses the Claude Code app on this computer signed in with a Claude account, no key (double-click `setup-claude.bat` or click **Sign in with Claude** in the chat). With both keys, OpenAI answers unless this says `anthropic` |
 | `DEALTRACK_DATA_DIR` | Optional. Where the saved data goes (default: `.data` in this folder) |
 | `DEALTRACK_WARMUP` | Optional. `0` stops the startup warm-up (see Speed) |
 | `DEALTRACK_VALIDATE_ONLY` | Optional. `1` turns on dry-run mode: Google checks every change and applies nothing |
@@ -138,4 +167,5 @@ If a value is missing, the page that needs it says which one; the other pages ke
 
 - Sign in with Google (one login per person) instead of a shared password and a typed name.
 - If more than one computer runs DealTrack, move the saved data to a shared database so everyone sees one history.
-- Host it online so alerts can run on a schedule and send email or Slack, instead of only when the app is open.
+- Host it online so alerts can run on a schedule and send email or Slack, instead of only when the app is open, and so WordPress can send leads without the tunnel.
+- The chat sends what it looks up (ad numbers, and lead names and contact details when asked about leads) to the AI provider chosen above.

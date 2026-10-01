@@ -27,7 +27,7 @@ function money(form: FormData, field: string, label: string): number | null | st
 const signedName = (form: FormData) => rememberName(form.get("name"))
 
 export async function saveBudgetSettings(_prev: FormState, form: FormData): Promise<FormState> {
-  if (!(await isAdmin())) return { ok: false, message: "Only admins can change the budget. Sign in with the admin password." }
+  if (!(await isAdmin())) return { ok: false, message: "Only admins can change the budget. Sign in as an admin." }
   const name = await signedName(form)
   if (!name) return { ok: false, message: "Type your name, so everyone can see who set the budget." }
 
@@ -53,7 +53,7 @@ export async function saveBudgetSettings(_prev: FormState, form: FormData): Prom
 }
 
 export async function saveAlertSettings(_prev: FormState, form: FormData): Promise<FormState> {
-  if (!(await isAdmin())) return { ok: false, message: "Only admins can change alert rules. Sign in with the admin password." }
+  if (!(await isAdmin())) return { ok: false, message: "Only admins can change alert rules. Sign in as an admin." }
   const name = await signedName(form)
   if (!name) return { ok: false, message: "Type your name, so everyone can see who changed the rules." }
 

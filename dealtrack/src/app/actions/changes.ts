@@ -48,7 +48,7 @@ function report(summary: ChangeSummary, noun: string, verb: string): ActionResul
 
 async function guarded(run: () => Promise<ActionResult>): Promise<ActionResult> {
   if (!(await isAdmin())) {
-    return { ok: false, message: "Only admins can change Google Ads. Sign in with the admin password first." }
+    return { ok: false, message: "Only admins can change Google Ads. Sign in as an admin first." }
   }
   try {
     return await run()

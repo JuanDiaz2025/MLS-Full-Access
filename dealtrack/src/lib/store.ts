@@ -10,7 +10,8 @@ import path from "node:path"
 
 import { ServiceError } from "@/lib/services"
 
-const DIR = process.env.DEALTRACK_DATA_DIR || path.join(process.cwd(), ".data")
+export const DATA_DIR = process.env.DEALTRACK_DATA_DIR || path.join(process.cwd(), ".data")
+const DIR = DATA_DIR
 const FILE = path.join(DIR, "dealtrack.json")
 
 export type Money = number | null

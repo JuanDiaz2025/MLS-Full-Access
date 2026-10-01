@@ -43,3 +43,6 @@ next-env.d.ts
 
 # local survey data (demo store)
 /.data/
+
+# cloudflared, downloaded by go-online.bat
+/.tools/

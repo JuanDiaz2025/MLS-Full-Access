@@ -9,6 +9,7 @@
 import { formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
 import { getPacing } from "@/lib/budget"
 import { addDays, formatDay, today } from "@/lib/date-range"
+import { getCalls } from "@/lib/google-ads/calls"
 import { gaql } from "@/lib/google-ads/client"
 import { getSeries, type Bucket } from "@/lib/google-ads/overview"
 import { load, type Problem } from "@/lib/load"
@@ -257,12 +258,34 @@ function adRules(): RuleGroup {
   }
 }
 
+// Missed calls from the ads in the last 7 days: each one may be a seller who didn't get through.
+function callRules(): RuleGroup {
+  return {
+    prefix: "calls:",
+    run: async () => {
+      const calls = await getCalls(7)
+      const missed = calls.filter((c) => c.missed)
+      if (!missed.length) return []
+      const campaigns = [...new Set(missed.map((c) => c.campaign).filter(Boolean))]
+      return [
+        {
+          key: "calls:missed",
+          severity: missed.length >= 3 ? "high" : "medium",
+          title: `${plural(missed.length, "call")} from the ads went unanswered in the last 7 days`,
+          detail: `Out of ${plural(calls.length, "call")}${campaigns.length ? `, from ${campaigns.slice(0, 3).join(", ")}` : ""}. Call them back (Google Ads → Campaigns → Insights and reports → Call details), and make sure ads only run when someone can answer.`,
+          href: "/leads#calls",
+        },
+      ]
+    },
+  }
+}
+
 // The Google Ads rules. The Alerts page adds its website and landing page checks on top.
 export function googleAdsRules(data: Data): RuleGroup[] {
   const end = today()
   let series: Promise<Bucket[]> | null = null
   const days = () => (series ??= getSeries({ from: addDays(end, -34), to: end, label: "Last 35 days" }, "day"))
-  return [budgetRules(data), ...dailyRules(data, days), adRules()]
+  return [budgetRules(data), ...dailyRules(data, days), adRules(), callRules()]
 }
 
 // ---- History --------------------------------------------------------------------------------
