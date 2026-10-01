@@ -5,7 +5,10 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import { gaql } from "@/lib/google-ads/client"
-import { GEO_RESOURCE, geoNames, rates, sumMetrics, type CityCampaign, type LocationRow, type Metrics } from "@/lib/google-ads/reports"
+import type { GeometryCollection, Topology } from "topojson-specification"
+import { feature } from "topojson-client"
+
+import { GEO_RESOURCE, geoNames, rates, sumMetrics, type CityCampaign, type LocationRow, type Metrics, type PlaceLevel } from "@/lib/google-ads/reports"
 import { serviceAreaStatus } from "@/lib/service-area"
 
 // California regions, by city. Edit to regroup. Cities not listed fall under their county's
@@ -76,6 +79,9 @@ const byCounty = new Map(REGIONS.flatMap((r) => r.counties.map((c) => [c.toLower
 
 export function regionOf(row: LocationRow): string | null {
   if (row.status !== "inside") return null
+  // A county row ("San Mateo County") goes by its county; a city by its name, then its county.
+  const asCounty = / County$/.test(row.city) ? row.city.replace(/ County$/, "").toLowerCase() : undefined
+  if (asCounty) return byCounty.get(asCounty) ?? OTHER_CALIFORNIA
   return byCity.get(row.city.toLowerCase()) ?? (row.county ? byCounty.get(row.county.toLowerCase()) : undefined) ?? OTHER_CALIFORNIA
 }
 
@@ -231,6 +237,8 @@ async function cityCoords() {
 
 export type MapCity = {
   key: string
+  // County outlines, for the map's area view (county level only).
+  geometry?: GeoJSON.Geometry
   city: string
   region: string
   inside: boolean
@@ -245,21 +253,67 @@ export type MapCity = {
 
 const MAP_CITIES = 2500
 
-// Cities with a known center, for the map: the ones with impressions, most impressions first.
-export async function mapCities(rows: LocationRow[], cityCampaigns: Map<string, CityCampaign[]>): Promise<{ cities: MapCity[]; missing: number }> {
-  const c = await cityCoords()
+// County outlines from us-atlas (US Census boundaries, ISC license), by "name|state FIPS".
+const STATE_FIPS: Record<string, string> = {
+  AL: "01", AK: "02", AZ: "04", AR: "05", CA: "06", CO: "08", CT: "09", DE: "10", DC: "11", FL: "12", GA: "13", HI: "15", ID: "16",
+  IL: "17", IN: "18", IA: "19", KS: "20", KY: "21", LA: "22", ME: "23", MD: "24", MA: "25", MI: "26", MN: "27", MS: "28", MO: "29",
+  MT: "30", NE: "31", NV: "32", NH: "33", NJ: "34", NM: "35", NY: "36", NC: "37", ND: "38", OH: "39", OK: "40", OR: "41", PA: "42",
+  RI: "44", SC: "45", SD: "46", TN: "47", TX: "48", UT: "49", VT: "50", VA: "51", WA: "53", WV: "54", WI: "55", WY: "56",
+}
+let countyShapes: Map<string, GeoJSON.Geometry> | null = null
+async function counties() {
+  if (countyShapes) return countyShapes
+  const topology = JSON.parse(await readFile(path.join(process.cwd(), "node_modules/us-atlas/counties-10m.json"), "utf8")) as Topology
+  const fc = feature(topology, topology.objects.counties as GeometryCollection<{ name: string }>) as GeoJSON.FeatureCollection<GeoJSON.Geometry, { name: string }>
+  countyShapes = new Map(fc.features.map((f) => [`${f.properties.name.toLowerCase()}|${String(f.id).slice(0, 2)}`, roundCoords(f.geometry)]))
+  return countyShapes
+}
+
+// Three decimals (about 100 m) is plenty for shading a county and keeps the page small.
+function roundCoords(g: GeoJSON.Geometry): GeoJSON.Geometry {
+  const r = (c: number[]) => [Math.round(c[0] * 1000) / 1000, Math.round(c[1] * 1000) / 1000]
+  if (g.type === "Polygon") return { type: "Polygon", coordinates: g.coordinates.map((ring) => ring.map(r)) }
+  if (g.type === "MultiPolygon") return { type: "MultiPolygon", coordinates: g.coordinates.map((p) => p.map((ring) => ring.map(r))) }
+  return g
+}
+
+// The middle of a shape's box: good enough to put a county's bubble.
+function center(g: GeoJSON.Geometry): [number, number] {
+  const pts = g.type === "Polygon" ? g.coordinates.flat() : g.type === "MultiPolygon" ? g.coordinates.flat(2) : []
+  const lngs = pts.map((p) => p[0])
+  const lats = pts.map((p) => p[1])
+  return [(Math.min(...lats) + Math.max(...lats)) / 2, (Math.min(...lngs) + Math.max(...lngs)) / 2]
+}
+
+const COUNTY_SUFFIX = / (County|Parish|Borough|Census Area|Municipality|City and Borough)$/
+
+// Places with a known spot, for the map: the ones with impressions, most impressions first.
+// Cities get a point; counties get their outline (and its middle, for bubbles).
+export async function mapCities(
+  rows: LocationRow[],
+  cityCampaigns: Map<string, CityCampaign[]>,
+  level: PlaceLevel = "city",
+): Promise<{ cities: MapCity[]; missing: number }> {
+  const c = level === "city" ? await cityCoords() : {}
+  const shapes = level === "county" ? await counties() : new Map<string, GeoJSON.Geometry>()
   const out: MapCity[] = []
   let missing = 0
   for (const r of [...rows].filter((x) => x.metrics.impressions > 0 && x.status !== "unknown").sort((a, b) => b.metrics.impressions - a.metrics.impressions)) {
     if (out.length >= MAP_CITIES) break
     const state = STATES[r.region.split(", ").at(-1) ?? ""]
-    const at = state ? c[`${r.city.toLowerCase()}|${state}`] : undefined
+    let at: [number, number] | undefined
+    let geometry: GeoJSON.Geometry | undefined
+    if (level === "county") {
+      geometry = state ? shapes.get(`${r.city.replace(COUNTY_SUFFIX, "").toLowerCase()}|${STATE_FIPS[state]}`) : undefined
+      at = geometry ? center(geometry) : undefined
+    } else at = state ? c[`${r.city.toLowerCase()}|${state}`] : undefined
     if (!at) {
       missing++
       continue
     }
     out.push({
       key: r.key,
+      geometry,
       city: r.city,
       region: r.county ? `${r.county} County` : r.region,
       inside: r.status === "inside",
@@ -279,4 +333,57 @@ export async function mapCities(rows: LocationRow[], cityCampaigns: Map<string, 
     })
   }
   return { cities: out, missing }
+}
+
+// ---- Targeted locations ----------------------------------------------------------------------
+
+// Performance by each campaign's targeted location: what Google Ads shows on its Locations tab.
+// It answers "how did this target do", not "where were the people" (that's the rest of the page).
+export type TargetedRow = {
+  key: string
+  place: string // "San Francisco County, California" or "8 mi around 37.95, -121.29"
+  campaign: string
+  running: boolean
+  metrics: Metrics
+}
+
+export async function getTargetedLocations(range: { from: string; to: string }, campaignId?: string): Promise<TargetedRow[]> {
+  const oneCampaign = campaignId && /^\d+$/.test(campaignId) ? ` AND campaign.id = ${campaignId}` : ""
+  const rows = await gaql<{
+    campaign: { id?: string | number; name?: string; status?: string }
+    campaignCriterion: {
+      criterionId?: string | number
+      type?: string
+      location?: { geoTargetConstant?: string }
+      proximity?: { radius?: number; radiusUnits?: string; geoPoint?: { latitudeInMicroDegrees?: number; longitudeInMicroDegrees?: number }; address?: { cityName?: string } }
+    }
+    metrics?: { costMicros?: string | number; clicks?: string | number; impressions?: string | number; conversions?: string | number }
+  }>(
+    `SELECT campaign.id, campaign.name, campaign.status, campaign_criterion.criterion_id, campaign_criterion.type,
+       campaign_criterion.location.geo_target_constant, campaign_criterion.proximity.radius, campaign_criterion.proximity.radius_units,
+       campaign_criterion.proximity.geo_point.latitude_in_micro_degrees, campaign_criterion.proximity.geo_point.longitude_in_micro_degrees,
+       campaign_criterion.proximity.address.city_name,
+       metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions
+     FROM location_view WHERE segments.date BETWEEN '${range.from}' AND '${range.to}'${oneCampaign}`,
+  )
+  const names = await geoNames(rows.map((r) => r.campaignCriterion.location?.geoTargetConstant ?? "").filter(Boolean))
+  const by = new Map<string, TargetedRow>()
+  for (const r of rows) {
+    const key = `${r.campaign.id}|${r.campaignCriterion.criterionId}`
+    const geo = r.campaignCriterion.location?.geoTargetConstant
+    const p = r.campaignCriterion.proximity
+    const place = geo
+      ? (names.get(geo)?.canonical ?? geo).replace(/,United States$/, "").replace(/,/g, ", ")
+      : `${p?.radius ?? "?"} ${UNITS[p?.radiusUnits ?? ""] ?? ""} around ${
+          p?.address?.cityName ||
+          (p?.geoPoint ? `${((p.geoPoint.latitudeInMicroDegrees ?? 0) / 1e6).toFixed(2)}, ${((p.geoPoint.longitudeInMicroDegrees ?? 0) / 1e6).toFixed(2)}` : "a point")
+        }`
+    const row = by.get(key) ?? { key, place, campaign: r.campaign.name ?? "", running: r.campaign.status === "ENABLED", metrics: { cost: 0, clicks: 0, impressions: 0, conversions: 0 } }
+    row.metrics.cost += Number(r.metrics?.costMicros ?? 0) / 1e6
+    row.metrics.clicks += Number(r.metrics?.clicks ?? 0)
+    row.metrics.impressions += Number(r.metrics?.impressions ?? 0)
+    row.metrics.conversions += Number(r.metrics?.conversions ?? 0)
+    by.set(key, row)
+  }
+  return [...by.values()].sort((a, b) => b.metrics.conversions - a.metrics.conversions || b.metrics.cost - a.metrics.cost)
 }

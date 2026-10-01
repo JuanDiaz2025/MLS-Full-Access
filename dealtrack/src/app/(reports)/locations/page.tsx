@@ -8,21 +8,24 @@ import NegativesList from "@/components/changes/negatives-list"
 import { formatConversions, formatNumber, formatPercent, formatUsd } from "@/components/dashboard/format"
 import CityMap from "@/components/locations/city-map"
 import PageLoading from "@/components/page-loading"
+import ParamSwitch from "@/components/param-switch"
 import { AdminLink, DataTable, KpiGrid, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
 import { isAdmin } from "@/lib/auth"
 import { parseRange, rangeQuery, type DateRange } from "@/lib/date-range"
 import { getCampaignNegatives, getEditableCampaigns, type CampaignNegative, type EditableCampaign } from "@/lib/google-ads/changes"
-import { getLocationData, rates, sumMetrics, type LocationData, type LocationRow, type Metrics } from "@/lib/google-ads/reports"
+import { getLocationData, rates, sumMetrics, type LocationData, type LocationRow, type Metrics, type PlaceLevel } from "@/lib/google-ads/reports"
 import { load } from "@/lib/load"
 import {
   EXPENSIVE_CPA_TIMES,
   EXPENSIVE_MIN_SPEND,
   expensiveCities,
   getLocationOptions,
+  getTargetedLocations,
   getTargeting,
   mapCities,
   regions,
   type CampaignTargeting,
+  type TargetedRow,
   type Region,
 } from "@/lib/locations"
 import { cn } from "@/lib/utils"
@@ -41,6 +44,7 @@ type View = (typeof VIEWS)[number]["id"]
 const CITIES_SHOWN = 150
 const OUTSIDE_SHOWN = 60
 const CAMPAIGNS_SHOWN = 8
+const TARGETED_SHOWN = 100
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
 const cpaOf = (m: Metrics) => rates(m).costPerConversion
@@ -65,6 +69,7 @@ export default async function LocationsPage({ searchParams }: { searchParams: Pr
   const asked = first(params.view)
   const view: View = VIEWS.some((v) => v.id === asked) ? (asked as View) : "overview"
   const campaignId = /^\d+$/.test(first(params.campaign) ?? "") ? first(params.campaign)! : ""
+  const level: PlaceLevel = first(params.level) === "county" ? "county" : "city"
   const campaigns = await load(() => getEditableCampaigns())
   const list = campaigns.ok ? campaigns.data : []
   const chosen = list.find((c) => c.id === campaignId)
@@ -82,6 +87,7 @@ export default async function LocationsPage({ searchParams }: { searchParams: Pr
             const q = new URLSearchParams(rangeQuery(range).replace(/^\?/, ""))
             if (v.id !== "overview") q.set("view", v.id)
             if (campaignId) q.set("campaign", campaignId)
+            if (level === "county") q.set("level", "county")
             const href = `/locations${q.size ? `?${q}` : ""}`
             return (
               <Link
@@ -98,7 +104,16 @@ export default async function LocationsPage({ searchParams }: { searchParams: Pr
             )
           })}
         </nav>
-        <div className="pb-1.5">
+        <div className="flex flex-wrap items-center gap-3 pb-1.5">
+          <ParamSwitch<PlaceLevel>
+            param="level"
+            label="Places"
+            value={level}
+            options={[
+              { id: "city", label: "Cities" },
+              { id: "county", label: "Counties" },
+            ]}
+          />
           <CampaignFilter campaigns={list.map((c) => ({ id: c.id, name: c.name, status: c.status }))} value={chosen ? campaignId : ""} />
         </div>
       </div>
@@ -109,8 +124,8 @@ export default async function LocationsPage({ searchParams }: { searchParams: Pr
         </p>
       )}
       {/* Each tab loads only what it shows, while the header and tabs are already on screen. */}
-      <Suspense key={`${view}|${range.from}|${range.to}|${campaignId}`} fallback={<PageLoading message={LOADING[view]} />}>
-        <TabBody view={view} range={range} campaigns={list} campaignId={chosen ? campaignId : undefined} />
+      <Suspense key={`${view}|${range.from}|${range.to}|${campaignId}|${level}`} fallback={<PageLoading message={LOADING[view]} />}>
+        <TabBody view={view} range={range} campaigns={list} campaignId={chosen ? campaignId : undefined} level={level} />
       </Suspense>
     </>
   )
@@ -123,10 +138,22 @@ const LOADING: Record<View, string> = {
   targeting: "Reading each campaign's location settings…",
 }
 
-async function TabBody({ view, range, campaigns, campaignId }: { view: View; range: DateRange; campaigns: EditableCampaign[]; campaignId?: string }) {
+async function TabBody({
+  view,
+  range,
+  campaigns,
+  campaignId,
+  level,
+}: {
+  view: View
+  range: DateRange
+  campaigns: EditableCampaign[]
+  campaignId?: string
+  level: PlaceLevel
+}) {
   const admin = await isAdmin()
   const result = await load(async () => {
-    const data = await getLocationData(range, campaignId)
+    const data = await getLocationData(range, campaignId, level)
     const running = campaigns.filter((c) => c.status === "ENABLED")
     if (view === "overview") {
       const ids = [...new Set([...running.map((c) => c.id), ...data.byCampaign.map((c) => c.id)])]
@@ -134,7 +161,7 @@ async function TabBody({ view, range, campaigns, campaignId }: { view: View; ran
     }
     if (view === "map") {
       const avg = cpaOf(sumMetrics(data.rows))
-      return { view, avg, ...(await mapCities(data.rows, data.cityCampaigns)) } as const
+      return { view, avg, ...(await mapCities(data.rows, data.cityCampaigns, level)) } as const
     }
     const negatives = await getCampaignNegatives({ campaignIds: campaignId ? [campaignId] : running.map((c) => c.id) })
     if (view === "cities") return { view, data, negatives } as const
@@ -142,7 +169,8 @@ async function TabBody({ view, range, campaigns, campaignId }: { view: View; ran
     const spent = new Set(data.byCampaign.filter((c) => c.presence.cost + c.interest.cost > 0).map((c) => c.id))
     const checked = campaigns.filter((c) => (campaignId ? c.id === campaignId : c.status === "ENABLED" || spent.has(c.id))).slice(0, 60)
     const converting = new Map(data.rows.map((r) => [r.key, r.metrics.conversions]))
-    return { view, negatives, targeting: await getTargeting(checked, converting) } as const
+    const [targeting, targeted] = await Promise.all([getTargeting(checked, converting), getTargetedLocations(range, campaignId)])
+    return { view, negatives, targeting, targeted } as const
   })
   if (!result.ok) return <ReportProblem problem={result} />
   const r = result.data
@@ -153,15 +181,15 @@ async function TabBody({ view, range, campaigns, campaignId }: { view: View; ran
       return (
         <Section
           title="Map"
-          description="Every city where your ads showed in this period. Hover a bubble for its numbers and the campaigns that ran there; click to pin it. Scroll the page normally; use + and − (or pinch) to zoom."
+          description={`Every ${level === "county" ? "county" : "city"} where your ads showed in this period, by where people were. Hover ${level === "county" ? "an area or bubble" : "a bubble"} for its numbers and the campaigns that ran there; click to pin it. Use + and − (or pinch) to zoom.`}
         >
-          <CityMap cities={r.cities} averageCpa={r.avg} missing={r.missing} />
+          <CityMap cities={r.cities} averageCpa={r.avg} missing={r.missing} level={level} />
         </Section>
       )
     case "cities":
-      return <Cities data={r.data} negatives={r.negatives} campaigns={campaigns} admin={admin} />
+      return <Cities data={r.data} negatives={r.negatives} campaigns={campaigns} admin={admin} level={level} />
     case "targeting":
-      return <Targeting targeting={r.targeting} negatives={r.negatives} admin={admin} />
+      return <Targeting targeting={r.targeting} targeted={r.targeted} negatives={r.negatives} admin={admin} />
   }
 }
 
@@ -204,7 +232,7 @@ function Overview({ data, options, running, range }: { data: LocationData; optio
           },
           { label: "Average cost / conversion", value: money(avg) },
           {
-            label: "Cities with spend or clicks",
+            label: "Places with spend or clicks",
             value: formatNumber(rows.length),
           },
         ]}
@@ -379,12 +407,16 @@ function Cities({
   negatives,
   campaigns,
   admin,
+  level,
 }: {
   data: LocationData
   negatives: CampaignNegative[]
   campaigns: EditableCampaign[]
   admin: boolean
+  level: PlaceLevel
 }) {
+  const Places = level === "county" ? "Counties" : "Cities"
+  const places = Places.toLowerCase()
   const rows = data.rows.filter((r) => r.metrics.cost > 0 || r.metrics.clicks > 0 || r.metrics.conversions > 0)
   const hidden = data.rows.length - rows.length
   const avg = cpaOf(sumMetrics(rows))
@@ -406,7 +438,7 @@ function Cities({
   return (
     <>
       <Section
-        title={`Expensive cities in California (${expensive.length})`}
+        title={`Expensive ${places} in California (${expensive.length})`}
         description={`California cities with at least ${formatUsd(EXPENSIVE_MIN_SPEND)} spent and no conversions, or a cost per conversion ${EXPENSIVE_CPA_TIMES}× your average (${money(avg)}) or more. They're in the buy area, so nothing is chosen for you: exclude one, lower its bid in Google Ads, or leave it.`}
         actions={!admin && <AdminLink />}
       >
@@ -418,7 +450,7 @@ function Cities({
       </Section>
 
       <Section
-        title={`Cities outside California (${formatNumber(outsideAll.length)})`}
+        title={`${Places} outside California (${formatNumber(outsideAll.length)})`}
         description={`Ads shouldn't reach people here. Cities that spent without converting are pre-selected; ones that converted are highlighted and left for you to decide.${outsideAll.length > OUTSIDE_SHOWN ? ` Showing the ${OUTSIDE_SHOWN} costliest; the other ${formatNumber(outsideAll.length - OUTSIDE_SHOWN)} spent ${formatUsd(outsideRest.cost)} in all. For those, targeting only California (Targeting tab) works better than excluding cities one by one.` : ""}`}
         actions={!admin && <AdminLink />}
       >
@@ -432,8 +464,8 @@ function Cities({
       </Section>
 
       <Section
-        title="By city"
-        description={`The ${rows.length > CITIES_SHOWN ? `${CITIES_SHOWN} costliest of ${formatNumber(rows.length)} cities` : `${rows.length} cities`} with spend, clicks, or conversions${rows.length > CITIES_SHOWN ? `; the rest spent ${formatUsd(rest.cost)} for ${formatConversions(rest.conversions)} conversions` : ""}${hidden ? `. ${formatNumber(hidden)} with only impressions are left out` : ""}.`}
+        title={level === "county" ? "By county" : "By city"}
+        description={`The ${rows.length > CITIES_SHOWN ? `${CITIES_SHOWN} costliest of ${formatNumber(rows.length)} ${places}` : `${rows.length} ${places}`} with spend, clicks, or conversions${rows.length > CITIES_SHOWN ? `; the rest spent ${formatUsd(rest.cost)} for ${formatConversions(rest.conversions)} conversions` : ""}${hidden ? `. ${formatNumber(hidden)} with only impressions are left out` : ""}.`}
       >
         <div className="max-h-[65vh] overflow-y-auto rounded-xl border">
           <DataTable<LocationRow>
@@ -443,7 +475,7 @@ function Cities({
             columns={[
               {
                 key: "city",
-                label: "City",
+                label: level === "county" ? "County" : "City",
                 render: (r) => (
                   <div className="flex flex-col gap-0.5">
                     <span className="font-medium">{r.city}</span>
@@ -462,6 +494,12 @@ function Cities({
                   ) : (
                     <Pill>Unknown</Pill>
                   ),
+              },
+              {
+                key: "impr",
+                label: "Impressions",
+                align: "right",
+                render: (r) => formatNumber(r.metrics.impressions),
               },
               {
                 key: "cost",
@@ -497,12 +535,60 @@ function Cities({
 
 // ---- Targeting -------------------------------------------------------------------------------
 
-function Targeting({ targeting, negatives, admin }: { targeting: CampaignTargeting[]; negatives: CampaignNegative[]; admin: boolean }) {
+function Targeting({
+  targeting,
+  targeted,
+  negatives,
+  admin,
+}: {
+  targeting: CampaignTargeting[]
+  targeted: TargetedRow[]
+  negatives: CampaignNegative[]
+  admin: boolean
+}) {
   const running = targeting.filter((t) => t.status === "ENABLED")
   const paused = targeting.filter((t) => t.status !== "ENABLED")
   const exclusions = negatives.filter((n) => n.kind === "location")
+  const shownTargeted = targeted.filter((t) => t.metrics.impressions > 0).slice(0, TARGETED_SHOWN)
+  const totalTargeted = sumMetrics(targeted)
   return (
     <>
+      <Section
+        title="By targeted location"
+        description={`What Google Ads shows on its Locations tab: how each place a campaign targets did. "San Francisco County" here means the campaigns targeting it, not the people who were there; the other tabs show where people were. Both add up to the same totals (${formatUsd(totalTargeted.cost)}, ${formatConversions(totalTargeted.conversions)} conversions in this period).`}
+      >
+        <div className="max-h-[55vh] overflow-y-auto rounded-xl border">
+          <DataTable<TargetedRow>
+            rows={shownTargeted}
+            rowKey={(t) => t.key}
+            columns={[
+              {
+                key: "place",
+                label: "Targeted location",
+                render: (t) => <span className="font-medium">{t.place}</span>,
+              },
+              {
+                key: "campaign",
+                label: "Campaign",
+                render: (t) => (
+                  <span className="flex flex-col gap-0.5">
+                    <span>{t.campaign}</span>
+                    <span className="text-xs text-muted-foreground">{t.running ? "Running" : "Paused"}</span>
+                  </span>
+                ),
+              },
+              { key: "impr", label: "Impressions", align: "right", render: (t) => formatNumber(t.metrics.impressions) },
+              { key: "clicks", label: "Clicks", align: "right", render: (t) => formatNumber(t.metrics.clicks) },
+              { key: "cost", label: "Spend", align: "right", render: (t) => formatUsd(t.metrics.cost) },
+              { key: "conv", label: "Conversions", align: "right", render: (t) => formatConversions(t.metrics.conversions) },
+              { key: "cpa", label: "Cost / conv.", align: "right", render: (t) => money(cpaOf(t.metrics)) },
+            ]}
+          />
+        </div>
+        {targeted.length > shownTargeted.length && (
+          <p className="text-xs text-muted-foreground">Showing the top {shownTargeted.length} of {formatNumber(targeted.length)} targeted locations, most conversions first.</p>
+        )}
+      </Section>
       <Section
         title="Running campaigns"
         description="Where each campaign shows ads, where it doesn't, and its location setting, with anything that looks wrong."

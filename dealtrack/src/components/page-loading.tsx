@@ -5,7 +5,7 @@ export default function PageLoading({ message = "Getting the latest numbers from
   return (
     <div className="flex flex-col gap-6" aria-busy="true" role="status" aria-live="polite">
       <div className="flex items-center gap-3">
-        <span className="size-8 shrink-0 animate-spin rounded-full border-[3px] border-primary/20 border-t-primary motion-reduce:animate-none" aria-hidden />
+        <span className="size-8 shrink-0 animate-spin rounded-full border-[3px] border-primary/20 border-t-primary motion-reduce:[animation-duration:2.4s]" aria-hidden />
         <div className="flex flex-col">
           <p className="font-medium">Loading…</p>
           <p className="text-sm text-muted-foreground">{message}</p>

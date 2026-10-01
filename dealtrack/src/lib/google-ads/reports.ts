@@ -300,12 +300,16 @@ export type LocationData = {
 
 const kindOf = (t?: string): LocationKind => (t === "AREA_OF_INTEREST" ? "interest" : "presence")
 
-// Cities, the presence/interest split, that split per campaign, and the campaigns in each city,
-// from one report. campaignId narrows it to one campaign.
-export async function getLocationData(range: DateRange, campaignId?: string): Promise<LocationData> {
+export type PlaceLevel = "city" | "county"
+
+// Cities (or counties), the presence/interest split, that split per campaign, and the campaigns in
+// each place, from one report. campaignId narrows it to one campaign. By county, Google also
+// counts people it can place in a county but not a city, so counties add up a little higher.
+export async function getLocationData(range: DateRange, campaignId?: string, level: PlaceLevel = "city"): Promise<LocationData> {
+  const segment = level === "county" ? "segments.geo_target_county" : "segments.geo_target_city"
   const oneCampaign = campaignId && /^\d+$/.test(campaignId) ? ` AND campaign.id = ${campaignId}` : ""
   type Row = {
-    segments?: { geoTargetCity?: string }
+    segments?: { geoTargetCity?: string; geoTargetCounty?: string }
     geographicView?: { locationType?: string }
     campaign?: { id?: Num; name?: string; status?: string }
     metrics?: MetricsRow
@@ -313,7 +317,7 @@ export async function getLocationData(range: DateRange, campaignId?: string): Pr
   const parts = await Promise.all(
     chunkRange(range).map((r) =>
       gaql<Row>(
-        `SELECT segments.geo_target_city, geographic_view.location_type, campaign.id, campaign.name, campaign.status, ${METRICS}
+        `SELECT ${segment}, geographic_view.location_type, campaign.id, campaign.name, campaign.status, ${METRICS}
          FROM geographic_view WHERE ${during(r)}${oneCampaign}`,
       ),
     ),
@@ -326,7 +330,8 @@ export async function getLocationData(range: DateRange, campaignId?: string): Pr
   const perCity = new Map<string, Map<string, CityCampaign>>()
   for (const r of rows) {
     const m = toMetrics(r.metrics)
-    const key = r.segments?.geoTargetCity && GEO_RESOURCE.test(r.segments.geoTargetCity) ? r.segments.geoTargetCity : "unknown"
+    const place = level === "county" ? r.segments?.geoTargetCounty : r.segments?.geoTargetCity
+    const key = place && GEO_RESOURCE.test(place) ? place : "unknown"
     byCity.set(key, add(byCity.get(key) ?? emptyMetrics(), m))
     const kind = kindOf(r.geographicView?.locationType)
     add(byKind[kind], m)

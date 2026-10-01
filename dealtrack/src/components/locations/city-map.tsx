@@ -7,7 +7,7 @@
 import "leaflet/dist/leaflet.css"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { CircleMarker, Map as LeafletMap } from "leaflet"
+import type { CircleMarker, GeoJSON as GeoJSONLayer, LayerGroup, Map as LeafletMap } from "leaflet"
 
 import { formatConversions, formatNumber, formatUsd } from "@/components/dashboard/format"
 import { Segmented } from "@/components/negatives/parts"
@@ -70,22 +70,43 @@ function details(c: MapCity) {
   </div>`
 }
 
-export default function CityMap({ cities, averageCpa, missing }: { cities: MapCity[]; averageCpa: number | null; missing: number }) {
+type Mode = "areas" | "bubbles"
+
+export default function CityMap({
+  cities,
+  averageCpa,
+  missing,
+  level,
+}: {
+  cities: MapCity[]
+  averageCpa: number | null
+  missing: number
+  level: "city" | "county"
+}) {
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<LeafletMap | null>(null)
   const markers = useRef<Map<string, CircleMarker>>(new Map())
+  const shapes = useRef<Map<string, GeoJSONLayer>>(new Map())
+  const layers = useRef<{ bubbles?: LayerGroup; areas?: LayerGroup }>({})
   const [ready, setReady] = useState(false)
   const [metric, setMetric] = useState<Metric>("impressions")
+  const hasAreas = cities.some((c) => c.geometry)
+  const [mode, setMode] = useState<Mode>(hasAreas ? "areas" : "bubbles")
+  const shown: Mode = hasAreas ? mode : "bubbles"
+  const noun = level === "county" ? "county" : "city"
   const [query, setQuery] = useState("")
   const [notFound, setNotFound] = useState(false)
 
   const max = useMemo(() => Math.max(1, ...cities.map((c) => c[metric])), [cities, metric])
   const radius = (c: MapCity) => (c[metric] > 0 ? 4 + 22 * Math.sqrt(c[metric] / max) : 3)
+  // Areas: darker for more of the chosen metric.
+  const shade = (c: MapCity) => (c[metric] > 0 ? 0.18 + 0.6 * Math.sqrt(c[metric] / max) : 0.08)
 
   // Create the map once.
   useEffect(() => {
     let cancelled = false
     const made = markers.current
+    const madeShapes = shapes.current
     ;(async () => {
       const L = (await import("leaflet")).default
       if (cancelled || !box.current || map.current) return
@@ -97,6 +118,21 @@ export default function CityMap({ cities, averageCpa, missing }: { cities: MapCi
         className: "dt-map-tiles",
       }).addTo(m)
       m.fitBounds(CALIFORNIA)
+      const bubbles = L.layerGroup()
+      const areas = L.layerGroup()
+      // County outlines, shaded by the chosen metric and colored by cost per conversion.
+      for (const c of cities) {
+        if (!c.geometry) continue
+        const color = colorOf(c, averageCpa)
+        const shape = L.geoJSON(c.geometry, {
+          style: { color: c.inside ? "#475569" : "#7f1d1d", weight: c.inside ? 0.8 : 1.6, fillColor: color, fillOpacity: 0.3 },
+        })
+        shape.bindTooltip(details(c), { direction: "top", sticky: true, opacity: 1 }).bindPopup(details(c))
+        shape.on("mouseover", () => shape.setStyle({ weight: 2.5 }))
+        shape.on("mouseout", () => shape.setStyle({ weight: c.inside ? 0.8 : 1.6 }))
+        shape.addTo(areas)
+        madeShapes.set(c.key, shape)
+      }
       // Biggest first, so small bubbles stay on top and can be hovered.
       for (const c of [...cities].sort((a, b) => b.impressions - a.impressions)) {
         const color = colorOf(c, averageCpa)
@@ -109,9 +145,10 @@ export default function CityMap({ cities, averageCpa, missing }: { cities: MapCi
         })
           .bindTooltip(details(c), { direction: "top", sticky: true, opacity: 1 })
           .bindPopup(details(c))
-          .addTo(m)
+          .addTo(bubbles)
         made.set(c.key, marker)
       }
+      layers.current = { bubbles, areas }
       map.current = m
       // The box may still be settling into the page; measure again, then frame California.
       requestAnimationFrame(() => {
@@ -125,21 +162,41 @@ export default function CityMap({ cities, averageCpa, missing }: { cities: MapCi
       map.current?.remove()
       map.current = null
       made.clear()
+      madeShapes.clear()
     }
   }, [cities, averageCpa])
 
-  // Resize bubbles when the metric changes.
+  // Show the chosen layer.
+  useEffect(() => {
+    const m = map.current
+    const { bubbles, areas } = layers.current
+    if (!ready || !m || !bubbles || !areas) return
+    const [on, off] = shown === "areas" ? [areas, bubbles] : [bubbles, areas]
+    off.remove()
+    on.addTo(m)
+  }, [ready, shown])
+
+  // Resize bubbles and reshade areas when the metric changes.
   useEffect(() => {
     if (!ready) return
-    for (const c of cities) markers.current.get(c.key)?.setRadius(radius(c))
+    for (const c of cities) {
+      markers.current.get(c.key)?.setRadius(radius(c))
+      shapes.current.get(c.key)?.setStyle({ fillOpacity: shade(c) })
+    }
     // radius depends on metric and max, which the deps cover
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, metric, max, cities])
 
   const flyTo = (c: MapCity) => {
     if (!map.current) return
-    map.current.flyTo([c.lat, c.lng], Math.max(map.current.getZoom(), 10), { duration: 0.6 })
-    window.setTimeout(() => markers.current.get(c.key)?.openPopup(), 650)
+    const shape = shown === "areas" ? shapes.current.get(c.key) : undefined
+    if (shape) {
+      map.current.flyToBounds(shape.getBounds(), { maxZoom: 10, duration: 0.6 })
+      window.setTimeout(() => shape.openPopup(shape.getBounds().getCenter()), 650)
+    } else {
+      map.current.flyTo([c.lat, c.lng], Math.max(map.current.getZoom(), level === "county" ? 8 : 10), { duration: 0.6 })
+      window.setTimeout(() => markers.current.get(c.key)?.openPopup(), 650)
+    }
   }
   const search = (text: string) => {
     const t = text.trim().toLowerCase()
@@ -155,8 +212,8 @@ export default function CityMap({ cities, averageCpa, missing }: { cities: MapCi
   const total = cities.reduce((s, c) => s + c.impressions, 0)
   const top = (f: (c: MapCity) => number) => [...cities].sort((a, b) => f(b) - f(a))[0]
   const facts: { label: string; value: string; city?: MapCity }[] = [
-    { label: "Cities on the map", value: formatNumber(cities.length) },
-    { label: "Average impressions per city", value: formatNumber(Math.round(cities.length ? total / cities.length : 0)) },
+    { label: level === "county" ? "Counties on the map" : "Cities on the map", value: formatNumber(cities.length) },
+    { label: `Average impressions per ${noun}`, value: formatNumber(Math.round(cities.length ? total / cities.length : 0)) },
     { label: "Most impressions", value: top((c) => c.impressions) ? `${formatNumber(top((c) => c.impressions).impressions)}` : "—", city: top((c) => c.impressions) },
     { label: "Most spend", value: top((c) => c.cost)?.cost ? formatUsd(top((c) => c.cost).cost) : "—", city: top((c) => c.cost)?.cost ? top((c) => c.cost) : undefined },
     {
@@ -171,8 +228,9 @@ export default function CityMap({ cities, averageCpa, missing }: { cities: MapCi
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Bubble size:</span>
-        <Segmented<Metric> label="Bubble size" value={metric} onChange={setMetric} options={METRICS} />
+        {hasAreas && <Segmented<Mode> label="Show as" value={shown} onChange={setMode} options={[{ id: "areas", label: "Shaded areas" }, { id: "bubbles", label: "Bubbles" }]} />}
+        <span className="text-xs font-medium text-muted-foreground">{shown === "areas" ? "Shade by:" : "Bubble size:"}</span>
+        <Segmented<Metric> label={shown === "areas" ? "Shade by" : "Bubble size"} value={metric} onChange={setMetric} options={METRICS} />
         <form
           className="flex w-full items-center gap-1.5 sm:ml-auto sm:w-auto"
           onSubmit={(e) => {
@@ -183,8 +241,8 @@ export default function CityMap({ cities, averageCpa, missing }: { cities: MapCi
           <input
             type="search"
             list="map-cities"
-            aria-label="Find a city on the map"
-            placeholder="Find a city, e.g. Oakland"
+            aria-label={`Find a ${noun} on the map`}
+            placeholder={level === "county" ? "Find a county, e.g. Alameda" : "Find a city, e.g. Oakland"}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value)
@@ -204,7 +262,10 @@ export default function CityMap({ cities, averageCpa, missing }: { cities: MapCi
           </button>
         </form>
       </div>
-      {notFound && <p className="text-xs text-destructive">No city by that name on the map for this period.</p>}
+      {notFound && <p className="text-xs text-destructive">No {noun} by that name on the map for this period.</p>}
+      {!hasAreas && (
+        <p className="text-xs text-muted-foreground">Shaded areas are drawn by county: switch the place level to Counties at the top to see them.</p>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_15rem]">
         <div className="relative overflow-hidden rounded-xl border">
