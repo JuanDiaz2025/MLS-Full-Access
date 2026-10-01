@@ -1588,10 +1588,11 @@ button.lnk-edit{background:none; border:0; padding:0; cursor:pointer; font:inher
     var inScope = ar ? base.filter(function(l){ return inArea(l, ar); }) : base;
     $("presets").innerHTML = '<span class="lbl">Show</span>' + keys.map(function(k){
       var n = inScope.filter(PRESETS[k].test).length;
-      return '<button type="button" data-preset="' + k + '" aria-pressed="' + (preset === k) + '" title="' + esc(PRESETS[k].hint) + '">' +
+      return '<button type="button" data-preset="' + k + '" aria-pressed="' + (preset === k && !$("statusFilter").value) + '" title="' + esc(PRESETS[k].hint) + '">' +
         esc(PRESETS[k].label) + '<span class="n">' + n + '</span></button>';
     }).join("") + '<button type="button" data-preset="" aria-pressed="' + (!preset) + '">Everything</button>' +
-      '<span class="hint">' + (preset ? esc(PRESETS[preset].hint) : 'every lead on the chosen pull date') + '</span>';
+      '<span class="hint">' + ($("statusFilter").value ? 'Team status “' + esc($("statusFilter").value) + '” — showing every lead with it, whatever the Show view'
+        : preset ? esc(PRESETS[preset].hint) : 'every lead on the chosen pull date') + '</span>';
   }
   document.addEventListener("click", function(ev){
     var b = ev.target.closest("button[data-preset]"); if (!b) return;
@@ -1607,8 +1608,10 @@ button.lnk-edit{background:none; border:0; padding:0; cursor:pointer; font:inher
     var q = $("q").value.trim().toLowerCase();
     var st = $("statusFilter").value, area = $("areaFilter").value;
     return base.filter(function(l){
+      // A Team status pick looks at EVERY lead: "Offer Sent" inside "Work now"
+      // (A leads only) hid 631 Head St, a B lead with an offer out (Seth, 1 Oct).
       if (st && statusOf(l) !== st) return false;
-      if (preset && !presetMatch(preset, l)) return false;
+      if (preset && !st && !presetMatch(preset, l)) return false;
       if (area && !inArea(l, area)) return false;
       if (!q) return true;
       return (l.addr + " " + l.mls + " " + (l.note || "") + " " + (l.remarks || "") + " " +
