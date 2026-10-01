@@ -1,5 +1,5 @@
 // The campaign check: for each campaign, which of the standard negatives (every rule's negatives
-// in negatives.ts: competitors, cities outside the buy area, agents, renters…) it doesn't block
+// in negatives.ts: competitors, places outside California, agents, renters…) it doesn't block
 // yet, and how much it spent in the last 12 months on rule-matched searches nothing blocks. The
 // missing ones can become a normal weekly-negatives batch (review, approve, admin push).
 
@@ -16,7 +16,7 @@ const MAX_CAMPAIGNS = 30 // running ones, then the paused ones with the most sea
 
 export const GROUP_LABELS: Record<string, string> = {
   competitor: "Competitors",
-  "out-of-area": "Cities outside the buy area",
+  "out-of-area": "Places outside California",
   agent: "Agents & listing services",
   buyer: "Home buyers",
   renter: "Renters",

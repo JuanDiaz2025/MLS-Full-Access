@@ -95,8 +95,8 @@ export default function Workspace(props: Props) {
               ))}
             </ol>
             <p className="mt-3 text-xs text-muted-foreground">
-              Never blocked: a search that converted in the last {lookbackDays} days, or a seller saying &ldquo;sell&rdquo; (competitor names and cities
-              outside the buy area aside). At most one push every {brakeDays} days, so Google&apos;s learning stays steady. Batches are saved on this computer.
+              Never blocked: a search that converted in the last {lookbackDays} days, or a seller saying &ldquo;sell&rdquo; (competitor names and places
+              outside California aside). At most one push every {brakeDays} days, so Google&apos;s learning stays steady. Batches are saved on this computer.
             </p>
           </div>
         </details>

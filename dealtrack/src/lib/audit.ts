@@ -186,7 +186,7 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
         : outsideTargets.length
           ? `${plural(outsideTargets.length, "target")} reach past the buy area: ${outsideTargets.slice(0, 8).map((p) => p.name).join(", ")}${outsideTargets.length > 8 ? "…" : ""}.`
           : `All ${plural(targetIds.length, "location target")} are in the buy area.`,
-      fix: outsideTargets.length ? "Target only the buy-area cities (SF through San Jose, plus Oakland, San Leandro, Hayward)." : undefined,
+      fix: outsideTargets.length ? "Target only places in California, the buy area." : undefined,
     },
   ]
 

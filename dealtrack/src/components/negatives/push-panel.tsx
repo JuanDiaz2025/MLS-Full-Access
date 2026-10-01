@@ -44,7 +44,7 @@ export default function PushPanel({ batch: b, shared }: { batch: BatchView; shar
       {sameName && <p className="text-xs text-amber-900">The same person reviewed and approved this batch. A second person usually approves.</p>}
       <div className="flex flex-col gap-1.5">
         <p className="text-xs text-muted-foreground">
-          Competitor names and cities outside the buy area belong on every campaign you run, and on any you turn back on. A word line belongs where its
+          Competitor names and places outside California belong on every campaign you run, and on any you turn back on. A word line belongs where its
           searches came from (under each line).
         </p>
         <div className="flex flex-wrap gap-1.5 text-xs">

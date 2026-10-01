@@ -36,7 +36,7 @@ export default async function LocationsPage({
     <>
       <PageHeader
         title="Locations"
-        description="Where the people who saw and clicked your ads were, by city. Anything outside the buy area (SF through San Jose, plus Oakland, San Leandro, and Hayward) is flagged, since that's not where you buy."
+        description="Where the people who saw and clicked your ads were, by city. Anything outside the buy area (anywhere outside California) is flagged, since that's not where you buy."
         range={range}
       />
       {!result.ok ? <ReportProblem problem={result} /> : <Body {...result.data} admin={admin} />}

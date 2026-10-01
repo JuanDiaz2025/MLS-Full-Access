@@ -139,7 +139,7 @@ export default function NewBatch({
               From the campaign check
             </h2>
             <p className="text-sm text-muted-foreground">
-              The standard negatives a campaign is missing: competitors, cities outside the buy area, agents, renters, loans and more. Best before you
+              The standard negatives a campaign is missing: competitors, places outside California, agents, renters, loans and more. Best before you
               turn a paused campaign back on.
             </p>
           </div>

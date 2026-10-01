@@ -12,6 +12,21 @@ export type NegativeRule = {
   evenForSellers?: boolean
 }
 
+// Places outside California: other states' big cities and the states themselves. Anywhere in
+// California is in the buy area (lib/service-area.ts), so no California place belongs here.
+const OUT_OF_STATE = [
+  "las vegas", "reno", "nevada", "phoenix", "scottsdale", "tucson", "arizona", "portland", "oregon",
+  "seattle", "tacoma", "spokane", "boise", "idaho", "salt lake city", "utah", "denver", "colorado springs", "colorado",
+  "albuquerque", "new mexico", "texas", "houston", "dallas", "fort worth", "austin", "san antonio", "el paso",
+  "oklahoma city", "oklahoma", "kansas city", "st louis", "missouri", "chicago", "illinois", "indianapolis", "indiana",
+  "des moines", "iowa", "minneapolis", "minnesota", "milwaukee", "wisconsin", "detroit", "michigan", "columbus",
+  "cleveland", "cincinnati", "ohio", "nashville", "memphis", "tennessee", "atlanta", "georgia", "charlotte", "raleigh",
+  "north carolina", "south carolina", "jacksonville", "orlando", "tampa", "miami", "florida", "new orleans", "louisiana",
+  "birmingham", "alabama", "louisville", "kentucky", "virginia", "baltimore", "maryland", "philadelphia", "pittsburgh",
+  "pennsylvania", "new jersey", "new york", "brooklyn", "boston", "massachusetts", "connecticut", "honolulu", "hawaii",
+  "alaska", "vancouver", "canada", "mexico", "tijuana",
+]
+
 export const negativeRules: NegativeRule[] = [
   {
     id: "agent",
@@ -72,15 +87,13 @@ export const negativeRules: NegativeRule[] = [
   },
   {
     id: "out-of-area",
-    reason: "A city outside the buy area",
+    reason: "A place outside California",
     evenForSellers: true,
-    negatives: [
-      "stockton", "fresno", "sacramento", "modesto", "merced", "visalia", "bakersfield", "tracy",
-      "manteca", "lodi", "turlock", "los angeles", "san diego", "reno", "santa rosa", "petaluma", "vallejo",
-      "fairfield", "vacaville", "berkeley", "san lorenzo", "castro valley", "concord", "antioch",
-    ],
-    pattern:
-      /\b(stockton|fresno|sacramento|modesto|merced|visalia|bakersfield|tracy|manteca|lodi|turlock|los angeles|san diego|reno|santa rosa|petaluma|vallejo|fairfield|vacaville|berkeley|san lorenzo|castro valley|concord|antioch)\b/i,
+    negatives: OUT_OF_STATE,
+    pattern: new RegExp(
+      `\\b(${OUT_OF_STATE.map((p) => p.replace(/ /g, "\\s+")).join("|")})\\b`,
+      "i",
+    ),
   },
 ]
 
