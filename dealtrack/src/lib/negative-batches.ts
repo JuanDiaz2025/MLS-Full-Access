@@ -16,7 +16,7 @@ import { SELLER_INTENT, blocks } from "@/lib/negatives"
 import { BUY_AREA_WORDS } from "@/lib/service-area"
 import type { BatchItem, BatchResult, CampaignShare, HeldBack, NegativeBatch } from "@/lib/store"
 
-export const LOOKBACK_DAYS = 90 // searches a new negative must not block: ones that converted, or sellers
+export const LOOKBACK_DAYS = 365 // searches a new negative must not block: ones that converted, or sellers
 export const BRAKE_DAYS = 7 // at most one push per week
 export const TERMS_SHOWN = 5
 export const MAX_DRAFT_DAYS = 366
@@ -170,7 +170,7 @@ const MIN_WORD_SPEND = 50 // a word needs this much spend in the period, across 
 const MAX_WORD_LINES = 10
 
 // Words (and two-word phrases) in last week's searches that cost money and never converted in the
-// last 90 days, and aren't a buy-area place, a keyword we bid on, or seller language: Optmyzr's
+// last 12 months, and aren't a buy-area place, a keyword we bid on, or seller language: Optmyzr's
 // n-gram waste analysis. "sell my timeshare" makes "timeshare" a candidate. These need a
 // review like every other line.
 function wasteWords(week: SearchTermRow[], history: SearchTermRow[], keywordWords: Set<string>) {
@@ -236,8 +236,8 @@ function outsideOwnKeywords(negative: string, rows: SearchTermRow[], byCampaign:
 
 export type Draft = Pick<NegativeBatch, "items" | "heldBack" | "alreadyNegative">
 
-// The searches a new negative must not block, from every campaign: the 90 days up to the end of
-// the period, and the last 90 days (the same window when the period is recent).
+// The searches a new negative must not block, from every campaign: the 12 months up to the end
+// of the period, and the last 12 months (one window when the period is recent).
 async function lookback(to: string): Promise<SearchTermRow[]> {
   const recent = addDays(today(), -(LOOKBACK_DAYS - 1))
   const before = addDays(to, -(LOOKBACK_DAYS - 1))
@@ -301,7 +301,7 @@ export async function draftBatch(scope: Scope): Promise<Draft> {
     items.push({
       negative: word,
       matchType: "PHRASE",
-      why: "Word in searches that never converted in 90 days (check it's not something sellers say)",
+      why: "Word in searches that never converted in 12 months (check it's not something sellers say)",
       terms: rows.slice(0, TERMS_SHOWN).map((r) => r.term),
       termCount: rows.length,
       campaigns: campaignsOf(rows),
