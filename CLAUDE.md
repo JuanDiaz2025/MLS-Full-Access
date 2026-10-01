@@ -585,6 +585,16 @@ to the clipboard when a run ends, and added on the board with **Add scan**. An
 artifact's shared data can only be written from the page, hence the paste.
 The field names are the board's `scanLead()` names; change both together.
 
+**Listing-type label (v1.49).** Every board lead carries `mlsStatus` from
+`core.listingLabel()`, never blank: **Active** (green), **Coming Soon** (blue,
+solid ring), **Private Listing** (grey, dashed ring), Pending/Contingent
+(orange), Sold/Withdrawn/Expired (red) — the colours in the Team Guide doc,
+drawn by the board's `mlsStatusHTML()`. Private = a Private / Office Exclusive
+status, or "private listing" / "office exclusive" / "pocket listing" / "off-MLS"
+in the remarks (whole phrases — "private remarks", "private yard" are not).
+The Coming Soon pass also ticks a Private / Office Exclusive status when the
+search form offers one.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

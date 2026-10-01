@@ -292,6 +292,9 @@ const selectOnly = (sel, patterns) => `(() => {
 })()`;
 const STATUS_ACTIVE = '^active$';
 const STATUS_COMING_SOON = '^coming[\\s-]*soon';
+// Picked up by the not-on-the-market pass when the form offers it; skipped
+// silently when it doesn't (selectOnly only ticks options that exist).
+const STATUS_PRIVATE = '^(?:private|office[\\s-]*exclusive)';
 const setInput = (sel, val) => `(() => {
   const el = document.querySelector(${JSON.stringify(sel)}); if(!el) return false;
   const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set; set.call(el, ${JSON.stringify(val)});
@@ -352,11 +355,12 @@ async function scanArea(area, opts) {
   log(comingSoon ? `Scanning ${label} — Coming Soon (@ $${area.maxk}k)…` : `Scanning ${label} (@ $${area.maxk}k)…`);
   await nav(core.SEARCH_URL, 2500);
   if (comingSoon) {
-    const got = await js(selectOnly(core.FIELDS.status, [STATUS_COMING_SOON])).catch(() => null);
+    const got = await js(selectOnly(core.FIELDS.status, [STATUS_COMING_SOON, STATUS_PRIVATE])).catch(() => null);
     if (!got || !got.length) {
       log(`  ⚠ the MLS search has no "Coming Soon" status to pick — Coming Soon not scanned in ${label}`, 'warn');
       return { city: label, county: area.county, count: '0', rows: [], comingSoonMissing: true };
     }
+    log(`  statuses searched: ${got.join(', ')}`);
   } else {
     await js(selectByLabel(core.FIELDS.status, 'Active'));
   }
@@ -452,7 +456,7 @@ async function showGallery(mls, opts) {
   // Look the MLS # up among Active AND Coming Soon listings. The form's
   // default status is Active, so a Coming Soon house came back "not found" —
   // at review and again on every board refresh.
-  await js(selectOnly(core.FIELDS.status, [STATUS_ACTIVE, STATUS_COMING_SOON])).catch(() => null);
+  await js(selectOnly(core.FIELDS.status, [STATUS_ACTIVE, STATUS_COMING_SOON, STATUS_PRIVATE])).catch(() => null);
   await sleep(300);
   await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
@@ -944,6 +948,8 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         });
         c._comingSoon = !!c._comingSoon || core.isComingSoon(gal.status);
         if (c._comingSoon) log('  Coming Soon listing — not on the open market yet', 'good');
+        if (core.isPrivateListing(gal.status) || core.isPrivateListing(gal.privateRemarks) || core.isPrivateListing(gal.remarks))
+          log('  Private Listing — office exclusive, not on the open market', 'good');
         if (!gal.gridOk && n) log(`  photo grid did not load — only ${n} carousel photo(s) seen, photo count not used`, 'warn');
         if (gal.privateRemarks) log(`  private remarks read (${gal.privateRemarks.length} chars)`);
         // Only A and B go to the AI: it can only move a lead DOWN, so asking
@@ -1580,7 +1586,8 @@ function gateFields(c) {
     bucket: q.bucket || '', bucketLabel: q.label || '', oppScore: q.score != null ? q.score : '',
     why: q.why || '', listedBy: g.listedBy || '',
     offerDue: g.offerDue || '', privateRemarks: g.privateRemarks || '', occupiedBy: g.occupiedBy || '',
-    mlsStatus: g.status || (c._comingSoon ? 'Coming Soon' : ''),
+    mlsStatus: core.listingLabel({ status: g.status, comingSoon: c._comingSoon,
+      remarks: c._remarks || g.remarks, privateRemarks: g.privateRemarks }),
     agentPhone: g.agentPhone || '', agentEmail: g.agentEmail || '', showing: g.showing || '',
     disclosures: g.disclosures || '',
     remarks: c._remarks || '', redfin: c._redfin || '',

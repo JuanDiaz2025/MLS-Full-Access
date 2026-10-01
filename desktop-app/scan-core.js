@@ -1041,8 +1041,27 @@ function rereviewPlan(ledger, rejectGrid, leadGrid, date, passedNote) {
 const COMING_SOON_RE = /coming[\s-]*soon/i;
 const isComingSoon = s => COMING_SOON_RE.test(String(s || ''));
 
+// A private / office-exclusive listing is never on the open market. The MLS
+// marks it in the status on some boards, and agents say it in the remarks on
+// the rest. Whole phrases only: "private remarks", "private yard" and "private
+// showing" are not a private listing.
+const PRIVATE_LISTING_RE = /\b(?:private[\s-]*listing|office[\s-]*exclusive|pocket[\s-]*listing|off[\s-]*mls)\b/i;
+const isPrivateListing = s => PRIVATE_LISTING_RE.test(String(s || ''));
+
+/** The listing-type label the Lead Board colours (Team Guide: Active green,
+ *  Coming Soon blue with a ring, Private Listing grey with a dashed ring;
+ *  Pending/Contingent orange, Sold/Withdrawn/Expired red). Never blank for a
+ *  listing found in a search, so every lead on the board carries a chip. */
+function listingLabel({ status, comingSoon, remarks, privateRemarks } = {}) {
+  const st = String(status || '').trim();
+  if (/sold|withdrawn|expired|cancel|off.?market|closed|pending|contingent|under contract/i.test(st)) return st;
+  if (/^private|office[\s-]*exclusive/i.test(st) || isPrivateListing(st) || isPrivateListing(privateRemarks) || isPrivateListing(remarks)) return 'Private Listing';
+  if (comingSoon || isComingSoon(st)) return 'Coming Soon';
+  return st || 'Active';
+}
+
 module.exports = {
-  isComingSoon, COMING_SOON_RE,
+  isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   boardLead,

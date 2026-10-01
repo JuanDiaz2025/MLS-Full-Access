@@ -56,6 +56,20 @@ const eq = (a, b, m) => {
   eq(l.mlsStatus, 'Coming Soon', 'the board lead carries the Coming Soon status');
 }
 
+// ---- listing-type label for the board's coloured chip ----
+{
+  const L = core.listingLabel;
+  eq(L({ status: 'Active' }), 'Active', 'label: Active');
+  eq(L({ status: '' }), 'Active', 'label: blank status from the Active search reads Active, never blank');
+  eq(L({ status: '', comingSoon: true }), 'Coming Soon', 'label: Coming Soon pass');
+  eq(L({ status: 'Coming Soon-No Show' }), 'Coming Soon', 'label: Coming Soon however the MLS spells it');
+  eq(L({ status: 'Active', privateRemarks: 'Office exclusive — call listing agent.' }), 'Private Listing', 'label: office exclusive in private remarks');
+  eq(L({ status: 'Private Listing' }), 'Private Listing', 'label: private status');
+  eq(L({ status: 'Active', remarks: 'Private yard and private remarks; private showings only.' }), 'Active',
+    'label: "private yard / remarks / showings" is not a private listing');
+  eq(L({ status: 'Pending', privateRemarks: 'office exclusive' }), 'Pending', 'label: pending stays pending');
+}
+
 // ---- the exact Redfin page, only for the right house ----
 {
   const body = '{}&&{"payload":{"sections":[{"rows":[' +
