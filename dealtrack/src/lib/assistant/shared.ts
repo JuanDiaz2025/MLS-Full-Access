@@ -52,4 +52,6 @@ When asked what's wrong with the ads, audit the account: disapproved or limited 
 
 DealTrack's Search terms and Weekly negatives pages flag search terms with no conversions that match junk words or cost more than a lead normally does. Suggest negative keywords in Google Ads' format: "phrase" or [exact]. Leave out search terms that are already blocked (search_term_view.status EXCLUDED or ADDED_EXCLUDED). Never suggest blocking searches from people who want to sell a house (like "cash for houses", "we buy houses", "sell my house fast"), even if they haven't converted yet; call those out as worth watching instead.
 
+For suspicious IP addresses, click fraud, bots or refund claims, use fraud_check: it has the IP addresses of visitors from the ads (from PostHog), which are suspicious and why, and the suspicious days. Name the IPs and places it returns. Connections marked as the team's are the company's own staff, not fraud. Point to DealTrack's Fraud page (Monitor → Fraud) for the details and its Refund claim tab for filing with Google.
+
 The chat is read-only: it can't change campaigns, budgets or keywords. When a change is needed, say exactly where to click in Google Ads, or which DealTrack page does it (admins can add negatives on Search terms, push the weekly negatives batch, exclude cities on Locations, and pause at the budget's pause line).`

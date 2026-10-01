@@ -14,7 +14,7 @@ import { buildSnapshot } from "@/lib/assistant/snapshot"
 import { DATA_DIR } from "@/lib/store"
 
 const TIMEOUT_MS = 4 * 60_000
-const TOOLS = ["mcp__dealtrack__google_ads_query", "mcp__dealtrack__list_leads", "mcp__dealtrack__dealtrack_status"]
+const TOOLS = ["mcp__dealtrack__google_ads_query", "mcp__dealtrack__list_leads", "mcp__dealtrack__dealtrack_status", "mcp__dealtrack__fraud_check"]
 
 const NOT_INSTALLED = "The chat needs Claude on this computer. Click Sign in with Claude below: it sets it up and signs you in with your Claude account."
 const NOT_SIGNED_IN = "Claude isn't signed in on this computer yet. Click Sign in with Claude below and sign in with your Claude account."
@@ -210,7 +210,7 @@ export async function askClaudeCode({ turns, situation }: AskInput): Promise<str
       const system = path.join(dir, "system.txt")
       await writeFile(
         system,
-        `${INSTRUCTIONS}\n\n${situation}\n\nUse the google_ads_query, list_leads and dealtrack_status tools for real numbers. Answer in Markdown.\n\nIf the google_ads_query and list_leads tools are not available to you, reply with exactly ${NO_TOOLS} and nothing else.`,
+        `${INSTRUCTIONS}\n\n${situation}\n\nUse the google_ads_query, list_leads, dealtrack_status and fraud_check tools for real numbers. Answer in Markdown.\n\nIf the google_ads_query and list_leads tools are not available to you, reply with exactly ${NO_TOOLS} and nothing else.`,
       )
       const debug = path.join(dir, "claude-debug.log")
       const text = await runClaude(
