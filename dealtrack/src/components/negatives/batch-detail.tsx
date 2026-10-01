@@ -33,6 +33,7 @@ export default function BatchDetail({ batch: b, shared }: { batch: BatchView; sh
   const [busy, setBusy] = useState<string | null>(null)
   const [, startTransition] = useTransition()
   const [filter, setFilter] = useState<Filter>("all")
+  const [search, setSearch] = useState("")
 
   const run = (key: string, step: () => Promise<StepResult>) => {
     setBusy(key)
@@ -49,11 +50,17 @@ export default function BatchDetail({ batch: b, shared }: { batch: BatchView; sh
 
   // The step a line is in decides what "open", "kept" and "dropped" mean.
   const decision = (i: BatchItem) => (approving || b.approved ? (i.proven ? i.approved : false) : i.proven)
+  // Search matches the negative, the searches it blocks, the reason, or a campaign name.
+  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const matches = (i: BatchItem) => {
+    const text = [i.negative, i.why, ...i.terms, ...(i.campaigns ?? []).map((c) => c.name)].join(" ").toLowerCase()
+    return words.every((w) => text.includes(w))
+  }
   const rows = b.items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => {
       const d = decision(item)
-      return filter === "all" || (filter === "open" ? d === null : filter === "kept" ? d === true : d === false)
+      return (filter === "all" || (filter === "open" ? d === null : filter === "kept" ? d === true : d === false)) && matches(item)
     })
   const count = (f: Filter) => b.items.filter((i) => (f === "open" ? decision(i) === null : f === "kept" ? decision(i) === true : decision(i) === false)).length
 
@@ -101,8 +108,24 @@ export default function BatchDetail({ batch: b, shared }: { batch: BatchView; sh
 
       {b.items.length > 0 && (
         <section aria-label="Lines" className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">Lines</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-medium">
+              Lines
+              {words.length > 0 && (
+                <span className="font-normal text-muted-foreground">
+                  {" "}
+                  · {rows.length} of {b.items.length} match
+                </span>
+              )}
+            </h3>
+            <input
+              type="search"
+              aria-label="Search lines"
+              placeholder="Search keywords, searches, campaigns"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm sm:w-64 lg:ml-auto"
+            />
             <Segmented<Filter>
               label="Show lines"
               value={filter}
@@ -134,7 +157,7 @@ export default function BatchDetail({ batch: b, shared }: { batch: BatchView; sh
                 {rows.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-3 py-6 text-center text-sm text-muted-foreground">
-                      No lines here.
+                      {words.length ? `No line matches “${search.trim()}”.` : "No lines here."}
                     </td>
                   </tr>
                 )}
