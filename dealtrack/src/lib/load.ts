@@ -1,6 +1,6 @@
 import { unstable_rethrow } from "next/navigation"
 
-import { GoogleAdsError, MissingKeysError } from "@/lib/google-ads/client"
+import { GoogleAdsError, GoogleAdsTimeoutError, MissingKeysError } from "@/lib/google-ads/client"
 import { MissingSettingsError, ServiceError } from "@/lib/services"
 
 // `service` names who is missing a setting or returned the error (Google Ads when omitted).
@@ -18,6 +18,13 @@ export async function load<T>(fn: () => Promise<T>): Promise<Loaded<T>> {
     // Let Next.js's own signals (redirects, dynamic rendering) through.
     unstable_rethrow(err)
     if (err instanceof MissingKeysError) return { ok: false, kind: "missing", keys: err.keys }
+    if (err instanceof GoogleAdsTimeoutError) {
+      return {
+        ok: false,
+        kind: "error",
+        message: "Google Ads took too long to answer (it tried twice). This is usually Google being slow for a moment: reload the page in a minute.",
+      }
+    }
     if (err instanceof GoogleAdsError) return { ok: false, kind: "error", message: err.message, detail: err.detail }
     if (err instanceof MissingSettingsError) return { ok: false, kind: "missing", keys: err.keys, service: err.service }
     if (err instanceof ServiceError) {

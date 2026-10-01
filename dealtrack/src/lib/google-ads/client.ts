@@ -82,6 +82,7 @@ async function getAccessToken(cfg: AdsConfig): Promise<string> {
       grant_type: "refresh_token",
     }),
     cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
   })
   const body = (await res.json().catch(() => ({}))) as {
     access_token?: string
@@ -150,7 +151,19 @@ export function lastFetchedAt() {
   return lastDataAt
 }
 
-const REQUEST_TIMEOUT_MS = 30_000
+// How long one try may take, reading the whole answer included. Google is sometimes slow for a
+// while; a try that runs out is made once more before the page gives up.
+const REQUEST_TIMEOUT_MS = 45_000
+
+// Thrown when Google didn't answer in time, twice.
+export class GoogleAdsTimeoutError extends Error {
+  constructor() {
+    super("Google Ads took too long to answer.")
+    this.name = "GoogleAdsTimeoutError"
+  }
+}
+
+const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")
 
 // Sends one request to the Google Ads API for the configured account, retrying once with a fresh
 // access token if Google says the token expired. Returns the parsed JSON body.
@@ -165,13 +178,15 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
     // A path is a service under the account ("googleAds:searchStream") or a method on the
     // account itself (":generateKeywordIdeas").
     const url = `${ADS_ENDPOINT}/${API_VERSION}/customers/${cfg.customerId}${path.startsWith(":") ? "" : "/"}${path}`
-    return fetch(url, {
+    const res = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
       cache: "no-store",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
+    // Read the answer inside the same time limit: a slow answer counts as a slow try.
+    return { status: res.status, ok: res.ok, text: await res.text() }
   }
   // A request Google leaves hanging is cancelled and tried once more, so one slow answer can't
   // hold a page for minutes.
@@ -179,8 +194,12 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
     try {
       return await send()
     } catch (err) {
-      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return send()
-      throw err
+      if (!timedOut(err)) throw err
+      try {
+        return await send()
+      } catch (again) {
+        throw timedOut(again) ? new GoogleAdsTimeoutError() : again
+      }
     }
   }
 
@@ -197,7 +216,7 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
     res = await sendWithRetry()
   }
 
-  const text = await res.text()
+  const text = res.text
   let body: unknown
   try {
     body = JSON.parse(text)
@@ -225,7 +244,16 @@ export async function gaql<Row>(query: string): Promise<Row[]> {
     lastDataAt = hit.at
     return hit.rows as Row[]
   }
-  return (await fetchRows(cfg, key, query)) as Row[]
+  try {
+    return (await fetchRows(cfg, key, query)) as Row[]
+  } catch (err) {
+    // Google didn't answer in time: an older copy beats an error page.
+    if (hit && err instanceof GoogleAdsTimeoutError) {
+      lastDataAt = hit.at
+      return hit.rows as Row[]
+    }
+    throw err
+  }
 }
 
 // One request per query at a time: pages that ask for the same report at once share it.
