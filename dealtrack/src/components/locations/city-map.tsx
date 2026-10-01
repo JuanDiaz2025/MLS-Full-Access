@@ -76,18 +76,22 @@ export default function CityMap({
   cities,
   averageCpa,
   missing,
+  abroad,
   level,
 }: {
   cities: MapCity[]
   averageCpa: number | null
   missing: number
+  abroad: { places: number; impressions: number; cost: number }
   level: "city" | "county"
 }) {
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<LeafletMap | null>(null)
   const markers = useRef<Map<string, CircleMarker>>(new Map())
   const shapes = useRef<Map<string, GeoJSONLayer>>(new Map())
+  // bubbles: every place; areas: outlines, plus bubbles for places without one (outside California).
   const layers = useRef<{ bubbles?: LayerGroup; areas?: LayerGroup }>({})
+  const extra = useRef<Map<string, CircleMarker>>(new Map())
   const [ready, setReady] = useState(false)
   const [metric, setMetric] = useState<Metric>("impressions")
   const hasAreas = cities.some((c) => c.geometry)
@@ -107,6 +111,7 @@ export default function CityMap({
     let cancelled = false
     const made = markers.current
     const madeShapes = shapes.current
+    const madeExtra = extra.current
     ;(async () => {
       const L = (await import("leaflet")).default
       if (cancelled || !box.current || map.current) return
@@ -147,6 +152,13 @@ export default function CityMap({
           .bindPopup(details(c))
           .addTo(bubbles)
         made.set(c.key, marker)
+        if (!c.geometry) {
+          const twin = L.circleMarker([c.lat, c.lng], { radius: 4, color: c.inside ? color : "#7f1d1d", weight: c.inside ? 1 : 2, fillColor: color, fillOpacity: 0.55 })
+            .bindTooltip(details(c), { direction: "top", sticky: true, opacity: 1 })
+            .bindPopup(details(c))
+            .addTo(areas)
+          madeExtra.set(c.key, twin)
+        }
       }
       layers.current = { bubbles, areas }
       map.current = m
@@ -163,6 +175,7 @@ export default function CityMap({
       map.current = null
       made.clear()
       madeShapes.clear()
+      madeExtra.clear()
     }
   }, [cities, averageCpa])
 
@@ -181,6 +194,7 @@ export default function CityMap({
     if (!ready) return
     for (const c of cities) {
       markers.current.get(c.key)?.setRadius(radius(c))
+      extra.current.get(c.key)?.setRadius(radius(c))
       shapes.current.get(c.key)?.setStyle({ fillOpacity: shade(c) })
     }
     // radius depends on metric and max, which the deps cover
@@ -195,7 +209,7 @@ export default function CityMap({
       window.setTimeout(() => shape.openPopup(shape.getBounds().getCenter()), 650)
     } else {
       map.current.flyTo([c.lat, c.lng], Math.max(map.current.getZoom(), level === "county" ? 8 : 10), { duration: 0.6 })
-      window.setTimeout(() => markers.current.get(c.key)?.openPopup(), 650)
+      window.setTimeout(() => (shown === "areas" ? extra.current.get(c.key) : markers.current.get(c.key))?.openPopup(), 650)
     }
   }
   const search = (text: string) => {
@@ -263,8 +277,8 @@ export default function CityMap({
         </form>
       </div>
       {notFound && <p className="text-xs text-destructive">No {noun} by that name on the map for this period.</p>}
-      {!hasAreas && (
-        <p className="text-xs text-muted-foreground">Shaded areas are drawn by county: switch the place level to Counties at the top to see them.</p>
+      {shown === "areas" && level === "city" && (
+        <p className="text-xs text-muted-foreground">California cities and towns are shaded by their boundaries; places outside California show as bubbles.</p>
       )}
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_15rem]">
@@ -322,7 +336,15 @@ export default function CityMap({
           Dark ring: outside California
         </li>
       </ul>
-      {missing > 0 && <p className="text-xs text-muted-foreground">{formatNumber(missing)} smaller places Google names aren&apos;t on the map (no known center).</p>}
+      {abroad.places > 0 && (
+        <p className="text-xs text-amber-900">
+          Ads also showed outside the US: {formatNumber(abroad.places)} places, {formatNumber(abroad.impressions)} impressions, {formatUsd(abroad.cost)} spent. They aren&apos;t on
+          this map; see the {level === "county" ? "By county" : "By city"} table on the Cities tab.
+        </p>
+      )}
+      {missing > 0 && (
+        <p className="text-xs text-muted-foreground">{formatNumber(missing)} small US places have no known center, so they aren&apos;t on the map.</p>
+      )}
     </div>
   )
 }

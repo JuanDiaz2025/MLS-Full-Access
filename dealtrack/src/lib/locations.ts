@@ -217,7 +217,8 @@ export async function getLocationOptions(ids: string[]): Promise<Map<string, str
 
 // ---- Map -------------------------------------------------------------------------------------
 
-// City centers from US ZIP code data (the zipcodes package, BSD license): "city|ST" → [lat, lng].
+// Place centers, "city|ST" → [lat, lng]: US ZIP code data (the zipcodes package, BSD license),
+// which follows where people live, filled in with the Census Gazetteer's places (public domain).
 const STATES: Record<string, string> = {
   Alabama: "AL", Alaska: "AK", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO", Connecticut: "CT", Delaware: "DE",
   "District of Columbia": "DC", Florida: "FL", Georgia: "GA", Hawaii: "HI", Idaho: "ID", Illinois: "IL", Indiana: "IN", Iowa: "IA",
@@ -260,6 +261,15 @@ const STATE_FIPS: Record<string, string> = {
   MT: "30", NE: "31", NV: "32", NH: "33", NJ: "34", NM: "35", NY: "36", NC: "37", ND: "38", OH: "39", OK: "40", OR: "41", PA: "42",
   RI: "44", SC: "45", SD: "46", TN: "47", TX: "48", UT: "49", VT: "50", VA: "51", WA: "53", WV: "54", WI: "55", WY: "56",
 }
+// California city and town outlines: Census cartographic boundaries (public domain), simplified.
+let cityShapes: Map<string, GeoJSON.Geometry> | null = null
+async function californiaCities() {
+  if (cityShapes) return cityShapes
+  const fc = JSON.parse(await readFile(path.join(process.cwd(), "src/lib/places/ca-places.json"), "utf8")) as GeoJSON.FeatureCollection<GeoJSON.Geometry, { NAME: string }>
+  cityShapes = new Map(fc.features.map((f) => [f.properties.NAME.toLowerCase(), f.geometry]))
+  return cityShapes
+}
+
 let countyShapes: Map<string, GeoJSON.Geometry> | null = null
 async function counties() {
   if (countyShapes) return countyShapes
@@ -293,11 +303,12 @@ export async function mapCities(
   rows: LocationRow[],
   cityCampaigns: Map<string, CityCampaign[]>,
   level: PlaceLevel = "city",
-): Promise<{ cities: MapCity[]; missing: number }> {
+): Promise<{ cities: MapCity[]; missing: number; abroad: { places: number; impressions: number; cost: number } }> {
   const c = level === "city" ? await cityCoords() : {}
-  const shapes = level === "county" ? await counties() : new Map<string, GeoJSON.Geometry>()
+  const shapes = level === "county" ? await counties() : await californiaCities()
   const out: MapCity[] = []
   let missing = 0
+  const abroad = { places: 0, impressions: 0, cost: 0 }
   for (const r of [...rows].filter((x) => x.metrics.impressions > 0 && x.status !== "unknown").sort((a, b) => b.metrics.impressions - a.metrics.impressions)) {
     if (out.length >= MAP_CITIES) break
     const state = STATES[r.region.split(", ").at(-1) ?? ""]
@@ -306,9 +317,17 @@ export async function mapCities(
     if (level === "county") {
       geometry = state ? shapes.get(`${r.city.replace(COUNTY_SUFFIX, "").toLowerCase()}|${STATE_FIPS[state]}`) : undefined
       at = geometry ? center(geometry) : undefined
-    } else at = state ? c[`${r.city.toLowerCase()}|${state}`] : undefined
+    } else {
+      geometry = state === "CA" ? shapes.get(r.city.toLowerCase()) : undefined
+      at = (state ? c[`${r.city.toLowerCase()}|${state}`] : undefined) ?? (geometry ? center(geometry) : undefined)
+    }
     if (!at) {
-      missing++
+      // Outside the US there's no spot to put it; say how much went there instead.
+      if (!state && !r.region.endsWith("United States")) {
+        abroad.places++
+        abroad.impressions += r.metrics.impressions
+        abroad.cost += r.metrics.cost
+      } else missing++
       continue
     }
     out.push({
@@ -332,7 +351,7 @@ export async function mapCities(
       })),
     })
   }
-  return { cities: out, missing }
+  return { cities: out, missing, abroad }
 }
 
 // ---- Targeted locations ----------------------------------------------------------------------

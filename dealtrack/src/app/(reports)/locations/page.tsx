@@ -181,9 +181,9 @@ async function TabBody({
       return (
         <Section
           title="Map"
-          description={`Every ${level === "county" ? "county" : "city"} where your ads showed in this period, by where people were. Hover ${level === "county" ? "an area or bubble" : "a bubble"} for its numbers and the campaigns that ran there; click to pin it. Use + and − (or pinch) to zoom.`}
+          description={`Every ${level === "county" ? "county" : "city"} where your ads showed in this period, by where people were. Hover an area or bubble for its numbers and the campaigns that ran there; click to pin it. Use + and − (or pinch) to zoom.`}
         >
-          <CityMap cities={r.cities} averageCpa={r.avg} missing={r.missing} level={level} />
+          <CityMap cities={r.cities} averageCpa={r.avg} missing={r.missing} abroad={r.abroad} level={level} />
         </Section>
       )
     case "cities":
