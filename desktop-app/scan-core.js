@@ -410,7 +410,9 @@ function rulesDecide(meta) {
   // Only trust a low count that came off the full photo grid. When the grid
   // fails to load the app falls back to the carousel, which only ever has ~4
   // preloaded — that dropped 844 Brunswick (29 photos) as "exterior-only".
-  if (photos > 0 && photos <= 4 && meta.photosReliable !== false) {
+  // A Coming Soon listing often has only the front photo so far — that is
+  // not "no interior access", it is early. Held for the photos instead.
+  if (photos > 0 && photos <= 4 && meta.photosReliable !== false && !meta.comingSoon) {
     return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access` };
   }
   // Remarks say nothing either way. This engine reads TEXT only — it has not
@@ -461,6 +463,10 @@ const NEWER_BUILD = 1975;
 
 /** Do the remarks say this house needs work (or is a distressed sale)?
  *  Nothing reaches A without it — see the 28 Sep calibration above. */
+/** "Coming Soon" / "Incoming" — listed but not yet open to showings. */
+const COMING_SOON_RE = /coming\s*soon|incoming/i;
+function isComingSoon(status) { return COMING_SOON_RE.test(String(status || '')); }
+
 function saysNeedsWork(t) {
   t = String(t || '');
   return NEEDS_WORK_KW.test(t) || FIXER_KW.test(t) || COSMETIC_KW.test(t) || DISTRESSED_SALE_KW.test(t);
@@ -561,7 +567,8 @@ function qualify(m) {
   }
   // Remarks silent on condition and the reviewer asked for unsure = drop.
   if (r.decision === 'manual' && m.whenUnsure === 'drop' && bucket === 'B' && !top.length) bucket = 'C';
-  const note = signals.filter(x => x.pts === 0 && /tenant now|held at B/.test(x.what)).map(x => x.what);
+  if (m.comingSoon) signals.push({ pts: 0, what: 'COMING SOON — call the agent before it goes live; photos may be incomplete' });
+  const note = signals.filter(x => x.pts === 0 && /tenant now|held at B|COMING SOON/.test(x.what)).map(x => x.what);
   const why = [...top, ...neg, ...note].join(' + ') || r.reason;
   return { bucket, label: BUCKET_LABEL[bucket], score, decision: bucket === 'C' ? 'drop' : 'keep',
     hard: false, why, signals, needsWork };
@@ -1031,6 +1038,7 @@ function rereviewPlan(ledger, rejectGrid, leadGrid, date, passedNote) {
 }
 
 module.exports = {
+  COMING_SOON_RE, isComingSoon,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   boardLead,

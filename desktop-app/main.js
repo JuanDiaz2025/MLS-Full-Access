@@ -327,13 +327,29 @@ ipcMain.handle('check-session', async () => {
 });
 
 // ---------- scan one area ----------
-async function scanArea(area) {
+async function scanArea(area, opts) {
   const label = area.city && area.city !== '*' ? area.city : `All ${area.county}`;
   await waitIfPaused();
   log(`Scanning ${label} (@ $${area.maxk}k)…`);
   await nav(core.SEARCH_URL, 2500);
   await js(selectByLabel(core.FIELDS.status, 'Active'));
   await sleep(300);
+  // Section 3's "Include Coming Soon / Incoming": pick every status option
+  // with that wording too. The exact label differs between MLS setups, so
+  // match by pattern and say in the log what was picked (or what exists).
+  if (opts && opts.comingSoon) {
+    const got = await js(`(() => {
+      const el = document.querySelector(${JSON.stringify(core.FIELDS.status)}); if (!el) return {picked: [], all: []};
+      const re = ${core.COMING_SOON_RE.toString()};
+      const picked = [];
+      [...el.options].forEach(o => { if (re.test(o.text)) { o.selected = true; picked.push(o.text.trim()); } });
+      el.dispatchEvent(new Event('change', {bubbles: true}));
+      return {picked, all: [...el.options].map(o => o.text.trim())};
+    })()`).catch(() => ({ picked: [], all: [] }));
+    if (got.picked.length) log(`  also searching: ${got.picked.join(', ')}`);
+    else log(`  "Coming Soon" is not a status in this MLS search — statuses available: ${got.all.join(', ')}. Tell Claude which one to use.`, 'warn');
+    await sleep(300);
+  }
   await js(selectByLabel(core.FIELDS.propType, 'Single Family Home'));
   await sleep(300);
   await js(selectByLabel(core.FIELDS.county, area.county));
@@ -811,7 +827,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       log(`━━━ ${label}  (area ${ai + 1} of ${areas.length}) ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'scanning' });
 
-      const scanned = await scanArea(area);
+      const scanned = await scanArea(area, { comingSoon: !!(opts && opts.comingSoon) });
       byArea[label] = scanned;
       runKpi.scanned += scanned.rows.length;
 
@@ -892,7 +908,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const q = core.qualify({
           addr: c.addr, remarks: gal.remarks, privateRemarks: gal.privateRemarks,
           condition: gal.condition, occupiedBy: gal.occupiedBy, propClass: gal.propClass,
-          photos: n, photosReliable: gal.gridOk,
+          photos: n, photosReliable: gal.gridOk, comingSoon: core.isComingSoon(gal.status),
           dom: domOf(c), yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
           price: gal.listPrice || c._price, origPrice: gal.origPrice,
           ppsfRatio: cityMedians && cityMedians[c._cityKey] ? c._ppsf / cityMedians[c._cityKey] : 0,
@@ -911,6 +927,12 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             aiFailStreak++;
             log(`  ${v.reason} — kept the text rules' verdict`, 'warn');
             if (aiFailStreak >= 3) log('AI vision failed 3 times in a row — turned off for the rest of this run. Check the key and model in section 2 (Test key).', 'error');
+          } else if (v.decision !== 'keep' && core.isComingSoon(gal.status) && /insufficient|no kitchen|no photos|few photos/i.test(v.reason)) {
+            // Not enough photos YET on a Coming Soon listing: keep it at B and
+            // let the team look when the full gallery is up.
+            aiFailStreak = 0;
+            if (q.bucket === 'A') { q.bucket = 'B'; q.label = core.BUCKET_LABEL.B; q.score = Math.min(q.score, 69); }
+            q.why = q.why + ' + AI (vision): not enough photos yet — check again when it goes active';
           } else if (v.decision !== 'keep') {
             aiFailStreak = 0;
             Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop',

@@ -107,6 +107,10 @@
       <button id="areaNone" class="ghost">None</button>
       <button id="areaSF" class="ghost">San Francisco only</button>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin:0 0 10px;cursor:pointer">
+      <input type="checkbox" id="comingSoon" style="width:auto"> Also include <b>Coming Soon / Incoming</b> listings
+      <span style="color:var(--muted);font-size:12px">(not open to showings yet — marked "COMING SOON" on the lead; few photos are not a drop)</span>
+    </label>
     <div class="row">
       <button id="start" class="primary" disabled>▶ Start scan</button>
       <button id="pause" disabled>⏸ Pause</button>
@@ -315,6 +319,8 @@
     saveAreas();
   })();
   const setAreas = fn => { AREAS.forEach(a => { $('area'+a.i).checked = fn(a); }); saveAreas(); };
+  try { $('comingSoon').checked = localStorage.getItem('fs.comingSoon') === '1'; } catch (e) {}
+  $('comingSoon').onchange = () => { try { localStorage.setItem('fs.comingSoon', $('comingSoon').checked ? '1' : '0'); } catch (e) {} };
   $('areaAll').onclick  = () => setAreas(() => true);
   $('areaNone').onclick = () => setAreas(() => false);
   $('areaSF').onclick   = () => setAreas(a => /san francisco/i.test(a.label));
@@ -325,7 +331,7 @@
     setScanButtons(true);
     $('reportCard').style.display='none';
     $('finished').style.display='none';
-    await window.fs.startScan({ areaIndexes });
+    await window.fs.startScan({ areaIndexes, comingSoon: $('comingSoon').checked });
     setScanButtons(false);
   };
   $('refreshBoard').onclick = async () => {

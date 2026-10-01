@@ -765,6 +765,15 @@ drops are still pulled into every computer's ledger (verdict `scan-dropped`) so
 a second computer does not redo the first one's work. Tested in
 `test-google-sheets.js` §18.
 
+**v1.48 — "Also include Coming Soon / Incoming" checkbox** (section 3, Seth,
+1 Oct; remembered between runs). The search adds every Status option matching
+`core.COMING_SOON_RE` (`coming soon|incoming`) next to Active and logs what it
+picked — or, if none matches, logs every status the MLS offers so the label can
+be fixed. Such a lead gets "COMING SOON — call the agent…" in its Why; few photos
+is not a drop for it (neither the ≤4-photo rule nor an AI "insufficient photos"
+verdict — it is held at B to look at once the gallery is up). The exact Matrix
+label is **unverified** until the first live run.
+
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope
 `spreadsheets` only) and pastes the spreadsheet URL; as each city finishes, the
