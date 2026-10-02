@@ -58,9 +58,10 @@ export async function saveAlertSettings(_prev: FormState, form: FormData): Promi
   if (!name) return { ok: false, message: "Type your name, so everyone can see who changed the rules." }
 
   const maxCostPerLead = money(form, "maxCostPerLead", "The cost per lead limit")
+  const clickCostAlert = money(form, "clickCostAlert", "The expensive click line")
   const noLeadSpend = money(form, "noLeadSpend", "The spend with no leads")
   const monthNoLeadSpend = money(form, "monthNoLeadSpend", "The monthly spend with nothing back")
-  for (const v of [maxCostPerLead, noLeadSpend, monthNoLeadSpend]) if (typeof v === "string") return { ok: false, message: v }
+  for (const v of [maxCostPerLead, clickCostAlert, noLeadSpend, monthNoLeadSpend]) if (typeof v === "string") return { ok: false, message: v }
   const noLeadDays = Number(form.get("noLeadDays"))
   if (!Number.isInteger(noLeadDays) || noLeadDays < 1 || noLeadDays > 30) return { ok: false, message: "Days with no leads must be 1 to 30." }
   const invalidPct = Number(String(form.get("invalidClickRate") ?? "").replace("%", ""))
@@ -69,6 +70,7 @@ export async function saveAlertSettings(_prev: FormState, form: FormData): Promi
   await updateData((d) => {
     d.alerts = {
       maxCostPerLead: maxCostPerLead as number | null,
+      clickCostAlert: clickCostAlert as number | null,
       noLeadDays,
       noLeadSpend: (noLeadSpend as number | null) ?? 0,
       monthNoLeadSpend: (monthNoLeadSpend as number | null) ?? 0,

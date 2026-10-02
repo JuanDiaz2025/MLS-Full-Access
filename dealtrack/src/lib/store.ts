@@ -27,6 +27,7 @@ export type BudgetSettings = {
 
 export type AlertSettings = {
   maxCostPerLead: Money // alert when the last 14 days' cost per lead is above this
+  clickCostAlert: Money // alert the same day when one click costs more than this
   noLeadDays: number // alert after this many days of spend with no leads…
   noLeadSpend: number // …once at least this much was spent in them
   monthNoLeadSpend: number // this much in a month with nothing back
@@ -213,6 +214,7 @@ export type Data = {
 
 export const DEFAULT_ALERTS: AlertSettings = {
   maxCostPerLead: null,
+  clickCostAlert: 200,
   noLeadDays: 3,
   noLeadSpend: 1000,
   monthNoLeadSpend: 20000,

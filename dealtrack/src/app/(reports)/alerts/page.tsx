@@ -142,7 +142,7 @@ export default async function AlertsPage() {
     <>
       <PageHeader
         title="Alerts"
-        description="Checked each time this page or the Overview opens: budget lines, leads, daily jumps, disapproved ads, invalid clicks, broken landing pages, and tracking. Every alert goes into a history saved on this computer, with when it started and when it cleared."
+        description="Checked each time this page or the Overview opens: budget lines, leads, daily jumps, disapproved ads, invalid clicks, broken landing pages, and tracking. Today's spend (over budget, expensive clicks, running far ahead of normal) is also checked every 15 minutes while DealTrack is running. Every alert goes into a history saved on this computer, with when it started and when it cleared."
       />
       {problems.map((p, i) => (
         <ReportProblem key={i} problem={p} />
@@ -261,6 +261,7 @@ function Rules({ settings: s, admin, personName }: { settings: AlertSettings; ad
     `${formatUsd(s.monthNoLeadSpend)} or more spent in a month with no leads.`,
     `${formatUsd(s.noLeadSpend)} or more spent over the last ${s.noLeadDays} ${s.noLeadDays === 1 ? "day" : "days"} with no leads.`,
     s.maxCostPerLead ? `Cost per lead over the last 14 days above ${formatUsd(s.maxCostPerLead)}.` : "Cost per lead limit: off until a limit is set.",
+    s.clickCostAlert ? `Today: one click costing more than ${formatUsd(s.clickCostAlert)}, spend over a campaign's daily budget, or far ahead of normal for the time of day (every 15 minutes).` : "Expensive click alert: off until a line is set.",
     "Yesterday's spend, clicks, or cost per click far above the 28 days before it, or ads that spent nothing after a week of spending.",
     "Disapproved ads in running campaigns, and ads pointing at pages that don't load.",
     `More than ${formatPercent(s.invalidClickRate, 0)} of the last 30 days' clicks invalid.`,
@@ -286,6 +287,7 @@ function Rules({ settings: s, admin, personName }: { settings: AlertSettings; ad
           personName={personName}
           fields={[
             { name: "maxCostPerLead", label: "Cost per lead limit", prefix: "$", value: s.maxCostPerLead?.toString() ?? "", placeholder: "Off", hint: "Last 14 days. Leave empty to turn off." },
+            { name: "clickCostAlert", label: "Alert when one click costs more than", prefix: "$", value: s.clickCostAlert?.toString() ?? "", placeholder: "Off", hint: "Checked today, every 15 minutes. Leave empty to turn off." },
             { name: "noLeadDays", label: "Days with no leads", value: String(s.noLeadDays), hint: "How many days in a row…" },
             { name: "noLeadSpend", label: "…while spending at least", prefix: "$", value: String(s.noLeadSpend) },
             { name: "monthNoLeadSpend", label: "Monthly spend with nothing back", prefix: "$", value: String(s.monthNoLeadSpend), hint: "Default: $20,000." },

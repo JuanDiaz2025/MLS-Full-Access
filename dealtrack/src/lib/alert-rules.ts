@@ -1,5 +1,5 @@
-// Alert rules, checked whenever the Alerts page or the Overview opens (DealTrack only runs while
-// someone has it open, so there's no background schedule). Each check updates the alert history
+// Alert rules, checked whenever the Alerts page or the Overview opens. Today's spend (todayRules)
+// is also checked every 15 minutes while the DealTrack server runs (see instrumentation.ts). Each check updates the alert history
 // saved on this computer: a new alert gets a first-seen time, one that is still there gets its
 // last-seen time bumped, and one that went away is marked resolved.
 //
@@ -96,6 +96,109 @@ function budgetRules(data: Data): RuleGroup {
           detail: `Spending ${formatUsd(p.avgDaily7)}/day over the last 7 days; about ${formatUsd(p.neededDaily ?? 0)}/day lands on budget.`,
           href: "/budget",
         })
+      }
+      return out
+    },
+  }
+}
+
+// ---- Today, as it happens ---------------------------------------------------------------------
+// Google reports clicks and spend within about 15–30 minutes (officially up to 3 hours), so these
+// only look at things a part of a day can't fake: a campaign already over its daily budget, a
+// single expensive click, and spend far ahead of what a normal day had spent by the same hour.
+
+const pastDays: Record<string, Promise<{ segments: { date?: string; hour?: number }; metrics?: { costMicros?: string | number } }[]>> = {}
+const hourName = (h: number) => (h === 0 ? "midnight" : h < 12 ? `${h} AM` : h === 12 ? "noon" : `${h - 12} PM`)
+
+// `day` is today; another date replays the checks on a past day (used for testing).
+export function todayRules(data: Data, day = today()): RuleGroup {
+  return {
+    prefix: "today:",
+    run: async () => {
+      const out: Fired[] = []
+      type HourRow = {
+        campaign?: { id?: string | number; name?: string }
+        campaignBudget?: { amountMicros?: string | number }
+        segments: { date?: string; hour?: number }
+        metrics?: { costMicros?: string | number; clicks?: string | number }
+      }
+      const usd = (m: string | number | undefined) => Number(m ?? 0) / 1_000_000
+      // One query per check (Explorer API access allows 2,880 operations a day). The 14 days
+      // before don't change during the day, so they're fetched once a day.
+      const [hours, past] = await Promise.all([
+        gaql<HourRow>(
+          `SELECT campaign.id, campaign.name, campaign_budget.amount_micros, segments.hour, metrics.clicks, metrics.cost_micros
+           FROM campaign WHERE segments.date = '${day}' AND metrics.cost_micros > 0`,
+        ),
+        (pastDays[day] ??= gaql<HourRow>(
+          `SELECT segments.date, segments.hour, metrics.cost_micros FROM customer
+           WHERE segments.date BETWEEN '${addDays(day, -14)}' AND '${addDays(day, -1)}' AND metrics.cost_micros > 0`,
+        ).catch((e) => {
+          delete pastDays[day]
+          throw e
+        })),
+      ])
+      const byCampaign = new Map<string, { name: string; budget: number; spent: number }>()
+      for (const h of hours) {
+        const id = String(h.campaign?.id ?? "")
+        const c = byCampaign.get(id) ?? { name: h.campaign?.name ?? "(no name)", budget: usd(h.campaignBudget?.amountMicros), spent: 0 }
+        c.spent += usd(h.metrics?.costMicros)
+        byCampaign.set(id, c)
+      }
+      const campaigns = [...byCampaign.entries()].map(([id, c]) => ({ id, ...c }))
+
+      // A campaign already over its daily budget (Google may spend up to 2× on a busy day).
+      for (const { id, name, budget, spent } of campaigns) {
+        if (!budget || spent <= budget) continue
+        out.push({
+          key: `today:over-budget:${id}:${day}`,
+          severity: spent >= budget * 1.5 ? "high" : "medium",
+          title: `${name} has spent ${formatUsd(spent)} today on a ${formatUsd(budget)}/day budget`,
+          detail: "Google can spend up to twice the daily budget on a busy day, and never more than about 30.4 days' worth in a month (it credits anything over). Check the clicks behind it on the Fraud page if this is unusual.",
+          href: "/fraud?view=clicks",
+        })
+      }
+
+      // One expensive click: an hour with a single click that cost more than the line.
+      const line = data.alerts.clickCostAlert
+      if (line) {
+        for (const h of hours) {
+          const clicks = Number(h.metrics?.clicks ?? 0)
+          const cost = usd(h.metrics?.costMicros)
+          if (!clicks || cost / clicks <= line) continue
+          const hour = Number(h.segments.hour ?? 0)
+          out.push({
+            key: `today:expensive-click:${h.campaign?.name}:${day}:${hour}`,
+            severity: cost / clicks >= line * 2 ? "high" : "medium",
+            title:
+              clicks === 1
+                ? `One click cost ${formatUsd(cost)} on ${h.campaign?.name} (around ${hourName(hour)})`
+                : `${plural(clicks, "click")} averaged ${formatUsd(cost / clicks)} each on ${h.campaign?.name} (around ${hourName(hour)})`,
+            detail: `Over your ${formatUsd(line)} line. To cap single clicks, set a maximum CPC bid limit in the campaign's bid strategy in Google Ads.`,
+            href: "/fraud?view=clicks",
+          })
+        }
+      }
+
+      // Spend far ahead of a normal day by this hour (yesterday and before, same hours).
+      const lastHour = Math.max(-1, ...hours.map((h) => Number(h.segments.hour ?? -1)))
+      const spentToday = campaigns.reduce((s, c) => s + c.spent, 0)
+      if (lastHour >= 0 && spentToday >= 100) {
+        const byDay = new Map<string, number>()
+        for (const r of past) {
+          if (Number(r.segments.hour ?? 99) > lastHour) continue
+          byDay.set(r.segments.date ?? "", (byDay.get(r.segments.date ?? "") ?? 0) + usd(r.metrics?.costMicros))
+        }
+        const normal = median([...byDay.values()].filter((v) => v > 0))
+        if (byDay.size >= 7 && normal > 0 && spentToday >= normal * 3) {
+          out.push({
+            key: `today:pace:${day}`,
+            severity: "medium",
+            title: `${formatUsd(spentToday)} spent by ${hourName(lastHour + 1)} today, about ${Math.round(spentToday / normal)}× a normal day by then`,
+            detail: `A normal day had spent about ${formatUsd(normal)} by this time (last 14 days). Check for a budget change, a new campaign, or a burst of expensive clicks.`,
+            href: "/overview?range=7d&m1=cost&m2=clicks",
+          })
+        }
       }
       return out
     },
@@ -286,7 +389,7 @@ export function googleAdsRules(data: Data): RuleGroup[] {
   const end = today()
   let series: Promise<Bucket[]> | null = null
   const days = () => (series ??= getSeries({ from: addDays(end, -34), to: end, label: "Last 35 days" }, "day"))
-  return [budgetRules(data), ...dailyRules(data, days), adRules(), callRules(), ...fraudRules(data)]
+  return [budgetRules(data), todayRules(data), ...dailyRules(data, days), adRules(), callRules(), ...fraudRules(data)]
 }
 
 // ---- History --------------------------------------------------------------------------------
