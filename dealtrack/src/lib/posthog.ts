@@ -2,6 +2,7 @@
 // Needs a personal API key with read-only access to the one project.
 
 import type { DateRange } from "@/lib/date-range"
+import { jsonFileStore } from "@/lib/json-file-store"
 import { MINUTE, ServiceError, cached, settings } from "@/lib/services"
 
 const SERVICE = "PostHog"
@@ -204,5 +205,68 @@ export async function getRecordings(sessionIds: string[]): Promise<Map<string, n
     if (!res.ok) throw new ServiceError(SERVICE, "PostHog couldn't list session recordings.", (await res.text()).slice(0, 200))
     const body = (await res.json()) as { results?: { id: string; recording_duration?: number }[] }
     return new Map((body.results ?? []).map((r) => [r.id, r.recording_duration ?? 0]))
+  })
+}
+
+// ---- JavaScript errors (PostHog error tracking) ----------------------------------------------
+
+const errorTrackingSeen = jsonFileStore<{ since?: number }>("posthog-error-tracking.json", () => ({}))
+
+export type ErrorTracking = {
+  enabled: boolean // "Exception autocapture" is on in PostHog (Settings → Error tracking)
+  // When DealTrack first saw it on, and whether PostHog has a full 3 days of errors since then.
+  // Until it does, its numbers would look better than they are, so Clarity's are used.
+  since: number | null
+  ready: boolean
+  sessions: number
+  errorSessions: number
+  pct: number | null // share of visits with at least one JavaScript error, last 3 days
+  top: { message: string; sessions: number }[]
+}
+
+// Whether PostHog records JavaScript errors, and if so how many visits hit one in the last 3 days
+// on the live site. Replaces Clarity's script-error number once it's turned on (Clarity's API
+// allows about 10 requests a day; PostHog has no such limit).
+export function getErrorTracking(): Promise<ErrorTracking> {
+  const cfg = settings(SERVICE, KEYS)
+  const host = (process.env.POSTHOG_HOST || "https://us.posthog.com").replace(/\/$/, "")
+  return cached("posthog:error-tracking", 30 * MINUTE, async () => {
+    const res = await fetch(`${host}/api/projects/${cfg.POSTHOG_PROJECT_ID}/`, {
+      headers: { authorization: `Bearer ${cfg.POSTHOG_API_KEY}` },
+      cache: "no-store",
+    })
+    const project = (await res.json().catch(() => ({}))) as { autocapture_exceptions_opt_in?: boolean | null }
+    const off = { enabled: false, since: null, ready: false, sessions: 0, errorSessions: 0, pct: null, top: [] }
+    if (!res.ok || !project.autocapture_exceptions_opt_in) return off
+    const seen = await errorTrackingSeen.update((d) => (d.since ??= Date.now()))
+    const ready = Date.now() - seen >= 3 * 24 * 60 * MINUTE
+    const live = `timestamp > now() - interval 3 day and properties.$host in ('www.twinhomebuyer.com', 'twinhomebuyer.com')`
+    const [counts] = await hogql(
+      `select countDistinct(properties.$session_id) as sessions, countDistinctIf(properties.$session_id, event = '$exception') as errors from events where ${live}`,
+    )
+    const top = await hogql(
+      `select coalesce(properties.$exception_message, toString(properties.$exception_values), toString(properties.$exception_types)) as message,
+         countDistinct(properties.$session_id) as sessions
+       from events where ${live} and event = '$exception' group by message order by sessions desc limit 3`,
+    ).catch(() => [])
+    const sessions = Number(counts?.sessions ?? 0)
+    const errorSessions = Number(counts?.errors ?? 0)
+    const clean = (m: string) => {
+      try {
+        const v = JSON.parse(m)
+        return Array.isArray(v) ? String(v[0] ?? "") : m
+      } catch {
+        return m
+      }
+    }
+    return {
+      enabled: true,
+      since: seen,
+      ready,
+      sessions,
+      errorSessions,
+      pct: sessions ? (errorSessions / sessions) * 100 : null,
+      top: top.map((t) => ({ message: clean(String(t.message ?? "")).slice(0, 160) || "Unknown error", sessions: Number(t.sessions ?? 0) })),
+    }
   })
 }

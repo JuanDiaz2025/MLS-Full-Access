@@ -13,6 +13,7 @@ import {
   brokenDestinations,
   clarityIssues,
   internalTraffic,
+  posthogErrorIssues,
   siteOutliers,
   softConversions,
   type HealthIssue,
@@ -24,7 +25,7 @@ import { addDays, today, type DateRange } from "@/lib/date-range"
 import { getAdDestinations, getConversionActions, getWeekly } from "@/lib/google-ads/reports"
 import { load, type Loaded, type Problem } from "@/lib/load"
 import { currentName } from "@/lib/people"
-import { getSiteWeeks } from "@/lib/posthog"
+import { getErrorTracking, getSiteWeeks } from "@/lib/posthog"
 import { readData, type AlertRecord, type AlertSettings } from "@/lib/store"
 
 export const metadata: Metadata = { title: "Alerts · DealTrack" }
@@ -61,14 +62,21 @@ export default async function AlertsPage() {
   const lastWeek = addDays(lastSunday, -6)
   const range: DateRange = { from: addDays(lastSunday, -7 * WEEKS + 1), to: lastSunday, label: `Last ${WEEKS} weeks` }
 
-  const [data, destinations, conversions, weekly, clarity, siteWeeks] = await Promise.all([
+  const [data, destinations, conversions, weekly, clarity, siteWeeks, errors] = await Promise.all([
     load(() => readData()),
     load(() => getAdDestinations().then(brokenDestinations)),
     load(() => getConversionActions(range)),
     load(() => getWeekly(range)),
     load(() => getClarity()),
     load(() => getSiteWeeks(WEEKS)),
+    load(() => getErrorTracking()),
   ])
+  // JavaScript errors come from PostHog once its error tracking is on; Clarity's number until then.
+  const posthogErrors = errors.ok && errors.data.enabled && errors.data.ready
+  const posthogFrom =
+    errors.ok && errors.data.since && !errors.data.ready
+      ? new Date(errors.data.since + 3 * 86_400_000).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" })
+      : ""
   if (!data.ok) {
     return (
       <>
@@ -100,7 +108,8 @@ export default async function AlertsPage() {
   const healthIssues: HealthIssue[] = [
     ...(destinations.ok ? destinations.data : []),
     ...(conversions.ok ? softConversions(conversions.data) : []),
-    ...(clarity.ok ? clarityIssues(clarity.data) : []),
+    ...(clarity.ok ? clarityIssues(clarity.data, { posthogErrors, posthogFrom }) : []),
+    ...(errors.ok ? posthogErrorIssues(errors.data) : []),
     ...(siteWeeks.ok ? internalTraffic(siteWeeks.data) : []),
   ]
   const items = new Map(healthIssues.filter((i) => i.items).map((i) => [i.key, i.items!]))
@@ -110,14 +119,15 @@ export default async function AlertsPage() {
       ...googleAdsRules(data.data),
       fromLoaded("health:broken", destinations, (d) => d.map(asFired)),
       fromLoaded("health:soft-conversions", conversions, (c) => softConversions(c).map(asFired)),
-      fromLoaded("health:clarity:", clarity, (c) => clarityIssues(c).map(asFired)),
+      fromLoaded("health:clarity:", clarity, (c) => clarityIssues(c, { posthogErrors, posthogFrom }).map(asFired)),
+      fromLoaded("health:posthog:", errors, (e) => posthogErrorIssues(e).map(asFired)),
       fromLoaded("health:internal-traffic", siteWeeks, (w) => internalTraffic(w).map(asFired)),
       fromLoaded("weekly:ads:", weekly, () => weekAlerts(adsWeeks, "ads")),
       fromLoaded("weekly:site:", siteWeeks, () => weekAlerts(siteFound, "site")),
     ]),
   )
 
-  const loadProblems = [destinations, conversions, weekly, clarity, siteWeeks].filter((r) => !r.ok) as Problem[]
+  const loadProblems = [destinations, conversions, weekly, clarity, siteWeeks, errors].filter((r) => !r.ok) as Problem[]
   // The same missing key or error can come from several sources; show it once.
   const problemId = (p: Problem) => (p.kind === "missing" ? `missing:${p.service ?? ""}` : `error:${p.message}`)
   const problems = [...loadProblems, ...(checked.ok ? checked.data.problems : [checked as Problem])].filter(

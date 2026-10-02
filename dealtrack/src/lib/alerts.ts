@@ -4,7 +4,7 @@
 import type { ClaritySnapshot } from "@/lib/clarity"
 import { isLeadConversion, type AdDestination, type ConversionActionRow, type WeekPoint } from "@/lib/google-ads/reports"
 import { checkPage } from "@/lib/pagespeed"
-import type { SiteWeek } from "@/lib/posthog"
+import type { ErrorTracking, SiteWeek } from "@/lib/posthog"
 
 export const BASELINE_WEEKS = 8
 export const Z_ALERT = 3
@@ -132,14 +132,19 @@ export function softConversions(actions: ConversionActionRow[]): HealthIssue[] {
   ]
 }
 
-export function clarityIssues(c: ClaritySnapshot): HealthIssue[] {
+// `posthogErrors`: PostHog records JavaScript errors itself, so Clarity's number isn't used.
+export function clarityIssues(c: ClaritySnapshot, { posthogErrors = false, posthogFrom = "" } = {}): HealthIssue[] {
   const issues: HealthIssue[] = []
-  if (c.scriptErrorPct !== null && c.scriptErrorPct > 10) {
+  if (!posthogErrors && c.scriptErrorPct !== null && c.scriptErrorPct > 10) {
     issues.push({
       key: "health:clarity:script-errors",
       severity: "high",
       title: `${Math.round(c.scriptErrorPct)}% of visits hit a JavaScript error`,
-      detail: "Script errors can stop forms from submitting and tracking from firing. Last 3 days, from Microsoft Clarity.",
+      detail:
+        "Script errors can stop forms from submitting and tracking from firing. Last 3 days, from Microsoft Clarity. " +
+        (posthogFrom
+          ? `PostHog error tracking is on and takes over on ${posthogFrom}, once it has 3 days of errors (with which errors they are).`
+          : "Turn on exception autocapture in PostHog (Settings → Error tracking) to see which errors, without Clarity's daily limit."),
     })
   }
   if (c.sessions && c.botSessions > c.sessions) {
@@ -151,6 +156,19 @@ export function clarityIssues(c: ClaritySnapshot): HealthIssue[] {
     })
   }
   return issues
+}
+
+export function posthogErrorIssues(e: ErrorTracking): HealthIssue[] {
+  if (!e.enabled || !e.ready || e.pct === null || e.pct <= 10) return []
+  const top = e.top.length ? ` Most common: ${e.top.map((t) => `“${t.message}” (${t.sessions} visits)`).join("; ")}.` : ""
+  return [
+    {
+      key: "health:posthog:script-errors",
+      severity: "high",
+      title: `${Math.round(e.pct)}% of visits hit a JavaScript error`,
+      detail: `${e.errorSessions} of ${e.sessions} visits in the last 3 days, from PostHog error tracking. Script errors can stop forms from submitting and tracking from firing.${top}`,
+    },
+  ]
 }
 
 export function internalTraffic(weeks: SiteWeek[]): HealthIssue[] {

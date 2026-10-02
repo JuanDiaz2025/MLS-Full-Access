@@ -1,7 +1,31 @@
 // Microsoft Clarity "live insights" export. The API only covers the last 1–3 days and allows
-// about 10 requests a day per project, so results are cached for 3 hours.
+// about 10 requests a day per project. Each answer is saved to .data/clarity-cache.json and reused
+// for 6 hours, restarts included, so the two reports below ask at most 8 times a day. If Clarity
+// says the day's limit is used up, the last saved answer (up to 3 days old) is shown instead.
 
-import { HOUR, ServiceError, cached, settings } from "@/lib/services"
+import { jsonFileStore } from "@/lib/json-file-store"
+import { HOUR, MINUTE, ServiceError, cached, settings } from "@/lib/services"
+
+const SAVE_FOR = 6 * HOUR
+const FALL_BACK_FOR = 72 * HOUR
+const saved = jsonFileStore<Record<string, { at: number; value: unknown }>>("clarity-cache.json", () => ({}))
+
+async function throughDisk<T>(key: string, ask: () => Promise<T>): Promise<T> {
+  const hit = (await saved.read().catch(() => ({}) as Record<string, { at: number; value: unknown }>))[key]
+  if (hit && Date.now() - hit.at < SAVE_FOR) return hit.value as T
+  try {
+    const value = await ask()
+    await saved
+      .update((d) => {
+        d[key] = { at: Date.now(), value }
+      })
+      .catch(() => {})
+    return value
+  } catch (error) {
+    if (hit && Date.now() - hit.at < FALL_BACK_FOR) return hit.value as T
+    throw error
+  }
+}
 
 const SERVICE = "Microsoft Clarity"
 
@@ -25,10 +49,8 @@ const pct = (m: Metric | undefined) => {
 
 export function getClarity(): Promise<ClaritySnapshot> {
   const { CLARITY_API_TOKEN } = settings(SERVICE, ["CLARITY_API_TOKEN"] as const)
-  return cached(
-    "clarity:3d",
-    3 * HOUR,
-    async () => {
+  return cached("clarity:3d", 30 * MINUTE, () =>
+    throughDisk("3d", async () => {
       const res = await fetch("https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=3", {
         headers: { authorization: `Bearer ${CLARITY_API_TOKEN}` },
         cache: "no-store",
@@ -57,21 +79,17 @@ export function getClarity(): Promise<ClaritySnapshot> {
         avgScrollDepth: scroll === undefined || scroll === null ? null : Number(scroll),
         fetchedAt: Date.now(),
       }
-    },
-    { staleMs: 24 * HOUR },
+    }),
   )
 }
 
 export type ClaritySource = { source: string; sessions: number; botSessions: number; users: number }
 
-// Sessions and bot sessions per traffic source, last 3 days. Cached for 6 hours so the Fraud
-// page and the Alerts page together stay well under Clarity's daily limit.
+// Sessions and bot sessions per traffic source, last 3 days (saved like the snapshot above).
 export function getClarityBySource(): Promise<ClaritySource[]> {
   const { CLARITY_API_TOKEN } = settings(SERVICE, ["CLARITY_API_TOKEN"] as const)
-  return cached(
-    "clarity:3d:source",
-    6 * HOUR,
-    async () => {
+  return cached("clarity:3d:source", 30 * MINUTE, () =>
+    throughDisk("3d:source", async () => {
       const res = await fetch("https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=3&dimension1=Source", {
         headers: { authorization: `Bearer ${CLARITY_API_TOKEN}` },
         cache: "no-store",
@@ -92,7 +110,6 @@ export function getClarityBySource(): Promise<ClaritySource[]> {
           users: Number(t.distinctUserCount ?? 0),
         }))
         .sort((a, b) => b.sessions + b.botSessions - (a.sessions + a.botSessions))
-    },
-    { staleMs: 24 * HOUR },
+    }),
   )
 }
