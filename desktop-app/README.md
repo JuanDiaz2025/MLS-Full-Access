@@ -182,3 +182,6 @@ rules (renovated still drops; the AI photo check runs on Redfin's photos when it
 Lead Board file and the sheet with their own Redfin link and a coloured Coming Soon / Private Listing label.
 Homes an MLS scan already checked are skipped. If an area reads 0 homes, the page is saved under
 `grid-debug/redfin-*` in the app's data folder — send those two files.
+**v1.51:** each Redfin home is opened one at a time and scrolled down to its **Listed by** section; the listing
+agent's name, brokerage, phone and email are read from that section only (never Redfin's own "Contact agent"
+card) and go to the sheet's Listing Agent / Agent Phone / Agent Email columns and to the Lead Board.

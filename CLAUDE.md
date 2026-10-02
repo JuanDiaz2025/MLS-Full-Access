@@ -615,6 +615,19 @@ id is the MLS # when Redfin shows one, else `RF<homeId>`. Zero cards read →
 the page text + screenshot go to `<userData>/grid-debug/redfin-*` — ask for
 those before guessing at Redfin's layout. **Not yet run against live Redfin.**
 
+**Listing agent off Redfin (v1.51, Bryan 2 Oct: "open it 1 by 1, access
+contact agent by scrolling down").** After each home page is scrolled and
+read, `JS_REDFIN_AGENT` clicks only the safe "Show more / See all" toggles,
+scrolls the **"Listed by"** block into view, pauses, and widens from that line
+to its block — never into the page's **"Contact agent"** card, which is
+Redfin's own agent (its buttons are never clicked; `BAD` regex). Its text +
+tel:/mailto: links → `core.parseRedfinAgent` → name, brokerage, phone
+`(415) 555-0142`, email (never @redfin.com), DRE. They fill `Listing Agent ·
+Agent Phone · Agent Email` on the sheet and the board lead; a run ends with the
+sheet's Board tab rebuilt and the leads on the clipboard for **Add scan** (the
+board's **↻ Refresh from sheet** also picks them up). Checked in Chromium on a
+mock page with a decoy Redfin phone; not yet on live Redfin.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

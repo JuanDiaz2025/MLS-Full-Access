@@ -1223,6 +1223,39 @@ const JS_REDFIN_CARDS = `(() => {
   return out;
 })()`;
 
+// The listing agent's block on a Redfin home page ("Listed by …"), read the
+// way a person would: open the "Show more" toggles, scroll the block into view,
+// pause, then take its text and its tel:/mailto: links. Only that block — the
+// "Contact agent" card at the top is Redfin's own agent, never the listing
+// agent, and its buttons are never clicked.
+const JS_REDFIN_AGENT = pause => `(async () => {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const SAFE = /^(show more|see more|read more|show all|see all|more agent info|show (?:agent|contact|phone)[\\w ]*|view (?:agent|contact)[\\w ]*)$/i;
+  const BAD = /contact agent|request|tour|ask a question|schedule|message|start an offer|get pre/i;
+  for (const b of [...document.querySelectorAll('button, a[role="button"], span[role="button"]')]) {
+    const t = (b.innerText || '').trim();
+    if (t.length < 40 && SAFE.test(t) && !BAD.test(t)) { try { b.click(); await wait(300); } catch (_) {} }
+  }
+  const all = [...document.querySelectorAll('div, section, p, span')];
+  const hit = all.filter(el => /\\b(listed by|listing agent|listing provided courtesy of|listing courtesy of)\\b/i.test(el.innerText || '')
+      && (el.innerText || '').length < 1500)
+    .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length)[0];
+  if (!hit) return { text: '', tels: [], mails: [] };
+  hit.scrollIntoView({ block: 'center' }); await wait(${Math.max(600, pause * 2)});
+  // Widen from the "Listed by" line to its block — never so far that it takes
+  // in the "Contact agent" card or the rest of the page.
+  let box = hit;
+  for (let i = 0; i < 4; i++) {
+    const up = box.parentElement;
+    if (!up || up === document.body || (up.innerText || '').length > 1500 || BAD.test(up.innerText || '')) break;
+    box = up;
+  }
+  const links = sel => [...box.querySelectorAll(sel)].map(a => a.getAttribute('href') || '');
+  return { text: (box.innerText || '').slice(0, 1500),
+    tels: links('a[href^="tel:"]').map(h => h.slice(4)),
+    mails: links('a[href^="mailto:"]').map(h => h.slice(7).split('?')[0]) };
+})()`;
+
 /** Photos for the AI without going through a page: fetched here and shrunk
  *  with nativeImage, so a CDN's CORS rules cannot stop it. */
 async function collectPhotosDirect(urls, max) {
@@ -1310,6 +1343,10 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         const text = await readWholePage(rfJs);
         const html = await rfJs('document.documentElement.innerHTML').catch(() => '');
         const h = core.parseRedfinHome(text);
+        const ag = core.parseRedfinAgent(await rfJs(JS_REDFIN_AGENT(Number(cfg.scrollPauseMs) || 700)).catch(() => null));
+        log(ag.name || ag.phone || ag.email
+          ? `  listing agent: ${[ag.name, ag.brokerage, ag.phone, ag.email].filter(Boolean).join(' · ')}`
+          : '  listing agent contact not shown on Redfin — call the brokerage', ag.phone || ag.email ? 'good' : 'info');
         if (isSeen(h.mls)) { log(`  already checked as ${h.mls} by an MLS scan — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
         const urls = core.redfinPhotoUrls(html);
         const city = (c.addr.split(',')[1] || area.county).trim();
@@ -1344,9 +1381,9 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
             arv: 0, arvBasis: 'not comped yet', recommendation: 'Needs Comps', flipQuality: '', score: '',
             risks: 'Found on Redfin (' + c.badge + ') — confirm on the MLS',
             bucket: q.bucket, bucketLabel: q.label, oppScore: q.score, why: q.why,
-            listedBy: h.agent, offerDue: offer, privateRemarks: '', occupiedBy: '',
+            listedBy: [ag.name || h.agent, ag.brokerage].filter(Boolean).join(', '), offerDue: offer, privateRemarks: '', occupiedBy: '',
             mlsStatus: core.redfinLabel(c.badge), remarks: h.remarks, redfin: c.url,
-            agentPhone: '', agentEmail: '', showing: '', disclosures: '', priceCut: '',
+            agentPhone: ag.phone, agentEmail: ag.email, showing: '', disclosures: '', priceCut: '',
             link: c.url, surface: true, needsComps: true,
           });
         } else {
@@ -1381,13 +1418,15 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
     try { if (rfWin && !rfWin.isDestroyed()) rfWin.close(); } catch (_) {}
     rfWin = null;
     const day = recordKpi(runKpi);
+    if (googleReady() && googleCfg().autoSync) await rebuildBoard(day).catch(() => {});
     const line = `Redfin scan ${control.stopped ? 'STOPPED' : 'COMPLETE'} — ${runKpi.scanned} Coming Soon / Early Access found · `
       + `${runKpi.reviewed} reviewed → ${runKpi.bucketA} A · ${runKpi.bucketB} B · ${runKpi.bucketC} C.`;
     log(line, 'good');
     const board = boardStatus();
     if (board.count) {
       try { clipboard.writeText(fs.readFileSync(board.file, 'utf8'));
-        log(`Today's ${board.count} lead(s) are copied — open the Lead Board, click "Add scan", and paste.`, 'good'); } catch (_) {}
+        log(`Today's ${board.count} lead(s) are copied — open the Lead Board, click "Add scan", and paste`
+          + (googleReady() ? ' (or press "↻ Refresh from sheet" on the board — the sheet already has them).' : '.'), 'good'); } catch (_) {}
     }
     send('board', board);
     send('kpi', { today: day, history: kpiReport() });

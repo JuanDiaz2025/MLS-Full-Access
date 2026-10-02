@@ -117,6 +117,22 @@ const eq = (a, b, m) => {
     'https://www.redfin.com/CA/San-Francisco/21-College-Ter-94112/home/809328'], 'Redfin: board lead keeps one address and its Redfin page');
 }
 
+// ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
+{
+  const A = core.parseRedfinAgent;
+  eq(A({ text: 'Listed by Karyn Kambur • DRE #01234567 • Coldwell Banker Realty • (415) 555-0142 • karyn@cb.com' }),
+    { name: 'Karyn Kambur', brokerage: 'Coldwell Banker Realty', phone: '(415) 555-0142', email: 'karyn@cb.com', dre: '01234567' },
+    'Redfin agent: name, brokerage, phone, email from the block text');
+  eq(A({ text: 'Listed by Jane Doe • Compass', tels: ['+1-650-555-0199'], mails: ['jane@compass.com'] }).phone, '(650) 555-0199',
+    'Redfin agent: tel: link wins and is formatted');
+  eq(A({ text: 'Listed by Jane Doe • Compass' }), { name: 'Jane Doe', brokerage: 'Compass', phone: '', email: '', dre: '' },
+    'Redfin agent: no phone shown is blank, not guessed');
+  eq(A({ text: 'Listed by Jane Doe • Compass • questions? help@redfin.com' }).email, '', 'Redfin agent: a redfin.com address is never the listing agent');
+  eq(A(null).name, '', 'Redfin agent: nothing read is nothing');
+  const src = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  eq(/BAD = \/contact agent/.test(src), true, 'Redfin agent: the "Contact agent" button is never clicked');
+}
+
 // ---- the page-reading snippets must reach the page with their backslashes ----
 {
   const src = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');

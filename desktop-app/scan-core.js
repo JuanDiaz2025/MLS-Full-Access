@@ -1168,6 +1168,27 @@ function redfinLabel(badge) {
   return 'Coming Soon';
 }
 
+/** The listing agent off a Redfin home page's "Listed by" block: name,
+ *  brokerage, phone and email. A phone or email outside the block is never
+ *  used — the page's own contact card belongs to a Redfin agent. */
+function parseRedfinAgent(blk) {
+  const b = blk || {};
+  const t = String(b.text || '').replace(/\s+/g, ' ').trim();
+  const fmt = p => { const d = String(p || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, ''); return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : ''; };
+  const after = t.replace(/^[\s\S]*?\b(?:listed by|listing agent:?|listing (?:provided )?courtesy of)\s*/i, '');
+  const raw = String(b.text || '').replace(/^[\s\S]*?\b(?:listed by|listing agent:?|listing (?:provided )?courtesy of)\s*/i, '');
+  const parts = raw.split(/\s*[•·|\n]\s*|\s+-\s+/)
+    .map(x => x.replace(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b|[^\s@]+@[^\s@]+/g, '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const name = (parts[0] || '').replace(/\s*(?:DRE|CalDRE|Lic)[\s\S]*$/i, '').replace(/[,(].*$/, '').trim();
+  const brokerage = (parts.slice(1).find(x => !/DRE|#|\d{3}.*\d{4}|@|^contact/i.test(x)) || '').replace(/[,(].*$/, '').trim();
+  const phone = (b.tels || []).map(fmt).find(Boolean)
+    || fmt((after.match(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b/) || [])[0]);
+  const email = ((b.mails || []).concat(after.match(/[^\s@<>"'(),;:]{1,64}@[^\s@<>"'(),;:]{1,190}\.[A-Za-z]{2,}/g) || []))
+    .map(x => String(x).trim()).find(x => /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(x) && !/redfin\.com$/i.test(x)) || '';
+  return { name: /^[A-Za-z][A-Za-z .,'-]{1,60}$/.test(name) ? name : '', brokerage: brokerage.slice(0, 80),
+    phone, email, dre: (t.match(/DRE\s*#?\s*(\d{6,9})/i) || [])[1] || '' };
+}
+
 /** Big-photo URLs anywhere in a Redfin page's HTML, in order, deduplicated. */
 function redfinPhotoUrls(html) {
   const seen = new Set(), out = [];
@@ -1179,7 +1200,7 @@ function redfinPhotoUrls(html) {
 
 module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
-  redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl,
+  redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
