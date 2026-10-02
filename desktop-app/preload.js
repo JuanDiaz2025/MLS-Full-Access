@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('fs', {
   buybox: () => ipcRenderer.invoke('buybox'),
   startScan: (cfg) => ipcRenderer.invoke('start-scan', cfg),
   redfinScan: (cfg) => ipcRenderer.invoke('redfin-scan', cfg),
+  redfinSignIn: () => ipcRenderer.invoke('redfin-signin'),
   pause: () => ipcRenderer.send('pause'),
   resume: () => ipcRenderer.send('resume'),
   stop: () => ipcRenderer.send('stop'),

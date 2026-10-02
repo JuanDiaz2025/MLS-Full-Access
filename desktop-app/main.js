@@ -1211,12 +1211,11 @@ const JS_REDFIN_CARDS = `(() => {
   document.querySelectorAll('a[href*="/home/"]').forEach(a => {
     const href = a.href.split(/[?#]/)[0];
     if (!/\\/home\\/\\d+$/.test(href) || seen.has(href)) return;
+    // Widen to the whole card (photo + badge + facts): the largest box that
+    // still holds links to this one home only.
     let el = a;
-    for (let i = 0; i < 8 && el.parentElement; i++) {
-      el = el.parentElement;
-      const t = el.innerText || '';
-      if (/\\$[\\d,]{5,}/.test(t) && /beds?|sq\\s*ft/i.test(t)) break;
-    }
+    const only = node => new Set([...node.querySelectorAll('a[href*="/home/"]')].map(x => x.href.split(/[?#]/)[0])).size <= 1;
+    while (el.parentElement && el.parentElement !== document.body && only(el.parentElement)) el = el.parentElement;
     seen.add(href);
     out.push({ href, text: (el.innerText || '').slice(0, 800) });
   });
@@ -1275,6 +1274,49 @@ async function collectPhotosDirect(urls, max) {
   return out;
 }
 
+/** Open the home's photo viewer and step through EVERY photo with the arrow
+ *  key, pausing on each, so each one actually loads (Rule #2 — never judge
+ *  from the cover). Returns every photo URL the page showed along the way. */
+async function viewRedfinPhotos(pause) {
+  const wc = ensureRedfinWindow().webContents;
+  const grab = () => rfJs(`[...document.images].map(i => i.currentSrc || i.src).filter(u => /cdn-redfin\\.com\\/photo\\//.test(u))`).catch(() => []);
+  await rfJs('window.scrollTo(0, 0)').catch(() => {});
+  const opened = await rfJs(`(() => {
+    const imgs = [...document.images].filter(i => /cdn-redfin\\.com\\/photo\\//.test(i.currentSrc || i.src));
+    const big = imgs.sort((a, b) => (b.clientWidth * b.clientHeight) - (a.clientWidth * a.clientHeight))[0];
+    if (!big) return false;
+    (big.closest('button, a, [role="button"]') || big).click();
+    return true;
+  })()`).catch(() => false);
+  if (!opened) return await grab();
+  await sleep(2000);
+  const all = new Set(await grab());
+  let still = 0;
+  for (let n = 0; n < 80 && still < 3; n++) {
+    if (control.stopped) break;
+    wc.sendInputEvent({ type: 'keyDown', keyCode: 'Right' });
+    wc.sendInputEvent({ type: 'keyUp', keyCode: 'Right' });
+    await sleep(Math.max(500, pause));
+    const before = all.size;
+    (await grab()).forEach(u => all.add(u));
+    still = all.size === before ? still + 1 : 0;
+  }
+  wc.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+  wc.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+  await sleep(500);
+  return [...all];
+}
+
+// Early Access homes are shown in full only to signed-in Redfin users. The
+// Redfin window keeps its own cookies (persist:redfin), so one sign-in lasts.
+ipcMain.handle('redfin-signin', async () => {
+  const w = ensureRedfinWindow();
+  await w.loadURL('https://www.redfin.com/login').catch(() => {});
+  w.show(); w.focus();
+  log('Redfin window opened — sign in there (optional; it lets the scan see Early Access homes). Then press 🏠 Scan Redfin.', 'good');
+  return { ok: true };
+});
+
 async function redfinCounty(county) {
   const path_ = await rfJs(`fetch('/stingray/do/location-autocomplete?v=2&al=1&location=' + encodeURIComponent(${JSON.stringify(county + ' County, CA')}))
     .then(r => r.text()).catch(() => '')`).catch(() => '');
@@ -1293,6 +1335,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   let found = 0;
   try {
     log('━━━ Redfin — Coming Soon & Early Access (no MLS sign-in) ━━━', 'good');
+    if (!(cfg.useAI && cfg.apiKey)) log('⚠ AI PHOTO CHECK IS OFF — every photo will be opened and looked through, but nothing judges them. Add the key in section 2 and tick "Use AI" to have renovated houses dropped from the photos.', 'error');
     await rfNav('https://www.redfin.com/', 4000);
     // The ledger knows every MLS # the MLS scans have checked; Redfin shows the
     // same numbers, sometimes without the board's prefix — match on digits too.
@@ -1306,19 +1349,43 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
       send('city', { label: 'Redfin · ' + label, index: ai + 1, total: areas.length, phase: 'scanning' });
       const cpath = await redfinCounty(area.county);
       if (!cpath) { log(`  ${label}: Redfin did not return the county page — skipped`, 'warn'); continue; }
-      // --- page through the search, keeping only the not-on-the-market cards ---
+      // --- the county's homes for sale, from Redfin's own data first ---
       const early = [], ids = new Set();
-      let cardsSeen = 0, page = 1;
-      for (; page <= MAX_PAGES; page++) {
-        if (await stopRequested()) break;
-        await rfNav(core.redfinSearchUrl(cpath, area.maxk, page), 4500);
-        const raw = await rfJs(JS_REDFIN_CARDS).catch(() => []);
-        const cards = (raw || []).map(core.redfinCard).filter(c => c && !ids.has(c.homeId));
-        if (!cards.length) break;
-        cards.forEach(c => { ids.add(c.homeId); if (c.early) early.push(c); });
-        cardsSeen += cards.length;
+      let cardsSeen = 0, source = '';
+      const regionId = core.redfinRegionId(cpath);
+      await rfNav(core.redfinSearchUrl(cpath, area.maxk, 1), 4500);   // the search page, as a person would open it
+      for (const csv of [false, true]) {
+        if (cardsSeen || !regionId) break;
+        for (const market of ['sanfrancisco', '']) {
+          if (cardsSeen) break;
+          for (let page = 1; page <= 10; page++) {
+            if (await stopRequested()) break;
+            const body = await rfJs(`fetch(${JSON.stringify(core.redfinGisUrl({ regionId, maxk: area.maxk, page, csv, market }))}, { credentials: 'include' })
+              .then(r => r.ok ? r.text() : '').catch(() => '')`).catch(() => '');
+            const homes = (csv ? core.redfinCsvHomes(body) : core.redfinGisHomes(body)) || [];
+            const add = homes.filter(h => !ids.has(h.homeId));
+            add.forEach(h => { ids.add(h.homeId); if (h.early) early.push(h); });
+            cardsSeen += add.length;
+            if (homes.length < 350 || !add.length) break;
+          }
+          if (cardsSeen) source = csv ? 'Redfin download data' : 'Redfin search data';
+        }
       }
-      if (page > MAX_PAGES) log(`  ⚠ ${label}: stopped at ${MAX_PAGES} pages of Redfin results — some homes not looked at`, 'warn');
+      // --- fallback: the cards on the search pages ---
+      if (!cardsSeen) {
+        let page = 1;
+        for (; page <= MAX_PAGES; page++) {
+          if (await stopRequested()) break;
+          if (page > 1) await rfNav(core.redfinSearchUrl(cpath, area.maxk, page), 4500);
+          const raw = await rfJs(JS_REDFIN_CARDS).catch(() => []);
+          const cards = (raw || []).map(core.redfinCard).filter(c => c && !ids.has(c.homeId));
+          if (!cards.length) break;
+          cards.forEach(c => { ids.add(c.homeId); if (c.early) early.push(c); });
+          cardsSeen += cards.length;
+        }
+        if (page > MAX_PAGES) log(`  ⚠ ${label}: stopped at ${MAX_PAGES} pages of Redfin results — some homes not looked at`, 'warn');
+        if (cardsSeen) source = 'Redfin search cards';
+      }
       if (!cardsSeen) {
         const dir = path.join(app.getPath('userData'), 'grid-debug');
         try {
@@ -1330,6 +1397,9 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         } catch (_) { log(`  ${label}: read 0 homes off Redfin`, 'error'); }
         continue;
       }
+      log(`  ${label}: read ${cardsSeen} houses for sale from ${source}`);
+      if (!early.length) log(`  ${label}: none of them is Coming Soon / Early Access on Redfin right now`
+        + ' (Early Access homes only show when signed in to Redfin — use "Sign in to Redfin" in section 3)', 'warn');
       runKpi.scanned += early.length;
       const fresh = early.filter(c => !seen['RF' + c.homeId]);
       log(`${label}: ${cardsSeen} houses on Redfin → ${early.length} Coming Soon / Early Access → ${fresh.length} new`, 'good');
@@ -1338,17 +1408,29 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
       for (let i = 0; i < fresh.length; i++) {
         if (await stopRequested()) break;
         const c = fresh[i];
-        log(`[Redfin ${area.county}] ${i + 1}/${fresh.length}: ${c.addr || c.url} — ${c.badge}`);
+        log(`[Redfin ${area.county}] opening ${i + 1}/${fresh.length}: ${c.addr || c.url} — ${c.badge}`, 'good');
+        send('review', { i: i + 1, total: fresh.length, city: area.county, mls: 'RF' + c.homeId, addr: c.addr,
+          price: c.price, sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: 0,
+          remarks: c.remarks || '', details: {}, verdict: 'reviewing', why: 'Reading the Redfin page' });
         await rfNav(c.url, 4000);
         const text = await readWholePage(rfJs);
         const html = await rfJs('document.documentElement.innerHTML').catch(() => '');
         const h = core.parseRedfinHome(text);
+        // Fill what the page did not say from Redfin's data for the home.
+        if (!h.remarks && c.remarks) h.remarks = c.remarks;
+        if (!h.year && c.year) h.year = c.year;
+        if (h.dom === '' && c.dom !== '' && c.dom != null) h.dom = c.dom;
+        if (!h.mls && c.mls) h.mls = c.mls;
+        if (/sign in|join or sign/i.test(text.slice(0, 3000)) && !h.remarks) log('  this Early Access home is only shown in full when signed in to Redfin', 'warn');
+        // EVERY photo, one by one, in Redfin's own viewer (Rule #2).
+        const seenPhotos = await viewRedfinPhotos(Number(cfg.scrollPauseMs) || 700);
+        const urls = core.redfinPhotoUrls(seenPhotos.join(' ') + ' ' + html);
+        log(`  looked through ${urls.length} photo(s)`, urls.length > 4 ? 'good' : 'warn');
         const ag = core.parseRedfinAgent(await rfJs(JS_REDFIN_AGENT(Number(cfg.scrollPauseMs) || 700)).catch(() => null));
         log(ag.name || ag.phone || ag.email
           ? `  listing agent: ${[ag.name, ag.brokerage, ag.phone, ag.email].filter(Boolean).join(' · ')}`
           : '  listing agent contact not shown on Redfin — call the brokerage', ag.phone || ag.email ? 'good' : 'info');
         if (isSeen(h.mls)) { log(`  already checked as ${h.mls} by an MLS scan — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
-        const urls = core.redfinPhotoUrls(html);
         const city = (c.addr.split(',')[1] || area.county).trim();
         const q = core.qualify({
           addr: c.addr, remarks: h.remarks, propClass: h.propClass,
@@ -1356,6 +1438,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           price: c.price, whenUnsure: cfg.whenUnsure, comingSoon: true,
         });
         q.why = 'Redfin ' + c.badge + ' · ' + q.why;
+        if (!(cfg.useAI && cfg.apiKey)) q.why += ' + photos viewed but not judged (AI photo check off)';
         const tooFew = urls.length <= 4;
         if (tooFew) q.why += ' + photos not posted on Redfin yet — check them before offering';
         if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !q.hard && q.bucket !== 'C' && !tooFew) {
@@ -1371,6 +1454,9 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         runKpi.reviewed++; runKpi['bucket' + q.bucket]++;
         const id = h.mls || ('RF' + c.homeId);
         log(`  ${q.label} · score ${q.score} — ${q.why}`, q.decision === 'keep' ? 'good' : 'info');
+        send('review', { i: i + 1, total: fresh.length, city: area.county, mls: id, addr: c.addr, price: c.price, sqft: c.sqft,
+          ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: urls.length, remarks: h.remarks || '', details: {},
+          verdict: q.decision, why: `${q.label} · score ${q.score} — ${q.why}` });
         if (q.decision === 'keep') {
           runKpi.kept++;
           const offer = core.offerDue(h.remarks);

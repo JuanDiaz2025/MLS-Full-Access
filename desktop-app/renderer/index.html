@@ -115,11 +115,14 @@
     </div>
     <div class="row" style="margin-top:8px">
       <button id="redfinScan">🏠 Scan Redfin — Coming Soon &amp; Early Access</button>
+      <button id="redfinSignIn" class="ghost">Sign in to Redfin (for Early Access)</button>
     </div>
     <div class="hint"><b>No MLS sign-in needed.</b> Opens redfin.com, goes through each ticked area (houses under
       the area's price cap, newest first) and picks out the homes badged <b>Coming Soon</b> / <b>Early Access</b> /
       private exclusive. Each one's page is read and judged by the same rules — renovated still drops — and the
-      leads go to the Lead Board with their own Redfin link.</div>
+      leads go to the Lead Board with their own Redfin link. Every home is opened one at a time: the page is scrolled,
+      <b>every photo</b> is stepped through in Redfin's viewer, and the listing agent's contact is read.
+      <b>Early Access</b> homes only show in full when you are signed in to Redfin — sign in once with the button.</div>
     <div class="row" style="margin-top:8px">
       <button id="refreshBoard" disabled>↻ Refresh leads on the board</button>
       <button id="rebuildBoard" class="ghost">▦ Update Board tab</button>
@@ -347,6 +350,7 @@
     await window.fs.redfinScan({ areaIndexes });
     setScanButtons(false); $('redfinScan').disabled = false;
   };
+  $('redfinSignIn').onclick = () => window.fs.redfinSignIn();
   $('refreshBoard').onclick = async () => {
     setScanButtons(true);
     $('finished').style.display='none';

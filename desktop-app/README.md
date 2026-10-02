@@ -185,3 +185,7 @@ Homes an MLS scan already checked are skipped. If an area reads 0 homes, the pag
 **v1.51:** each Redfin home is opened one at a time and scrolled down to its **Listed by** section; the listing
 agent's name, brokerage, phone and email are read from that section only (never Redfin's own "Contact agent"
 card) and go to the sheet's Listing Agent / Agent Phone / Agent Email columns and to the Lead Board.
+**v1.52:** the county's homes now come from Redfin's own search data (status + badges such as "Early Access
+Redfin Coming Soon"), not from guessing at the page. Each Coming Soon / Early Access home is opened one at a
+time: the page is scrolled, every photo is stepped through in Redfin's photo viewer, the listing agent is read,
+then it is judged. **Sign in to Redfin** (section 3) once to let the scan see Early Access homes.

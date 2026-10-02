@@ -1155,7 +1155,7 @@ function redfinMlsId(raw, source) {
   const id = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!id) return '';
   if (/^[A-Z]{2,4}\d{5,}$/.test(id)) return id;
-  if (/^\d{9}$/.test(id) && /san francisco/i.test(source || '')) return 'SF' + id;
+  if (/^\d{9}$/.test(id) && (/san francisco/i.test(source || '') || /^42\d{7}$/.test(id))) return 'SF' + id;
   return id;
 }
 
@@ -1189,18 +1189,99 @@ function parseRedfinAgent(blk) {
     phone, email, dre: (t.match(/DRE\s*#?\s*(\d{6,9})/i) || [])[1] || '' };
 }
 
-/** Big-photo URLs anywhere in a Redfin page's HTML, in order, deduplicated. */
+/** Listing-photo URLs anywhere in a Redfin page (HTML, or the srcs seen while
+ *  stepping through the gallery), in order, one per photo: the same photo is
+ *  served in several sizes, so it is keyed on its file name and the big
+ *  version wins. */
 function redfinPhotoUrls(html) {
-  const seen = new Set(), out = [];
-  const re = /https:\/\/ssl\.cdn-redfin\.com\/photo\/[^"'\s)\\]+?\/bigphoto\/[^"'\s)\\]+?\.(?:jpg|jpeg|webp)/gi;
+  const re = /https:\/\/ssl\.cdn-redfin\.com\/photo\/\d+\/[a-z0-9]+\/[^"'\s)\\<>]+?\.(?:jpg|jpeg|webp)/gi;
+  const key = u => u.split('/').pop().replace(/^gen[A-Za-z]+\./, '').replace(/\.(?:jpe?g|webp)$/i, '');
+  const best = new Map();
   let m;
-  while ((m = re.exec(String(html || '')))) { if (!seen.has(m[0])) { seen.add(m[0]); out.push(m[0]); } }
-  return out;
+  while ((m = re.exec(String(html || '')))) {
+    const u = m[0], k = key(u), had = best.get(k);
+    if (!had) best.set(k, u);
+    else if (/\/bigphoto\//.test(u) && !/\/bigphoto\//.test(had)) best.set(k, u);
+  }
+  return [...best.values()];
+}
+
+// ---- Redfin's own listing data (v1.52) ----
+// The search page's cards gave nothing on the first live run, so the county is
+// read from the data Redfin's search page itself loads: /stingray/api/gis
+// (JSON, with each home's MLS status and its "sashes" — the COMING SOON /
+// EARLY ACCESS REDFIN COMING SOON badges) and /stingray/api/gis-csv (its
+// "Download all" file, with a STATUS column) as the fallback. region_type 5 =
+// county, uipt 1 = house, status 9 = for sale incl. coming soon.
+
+const redfinRegionId = p => (String(p || '').match(/^\/county\/(\d+)\//) || [])[1] || '';
+
+function redfinGisUrl({ regionId, maxk, page, csv, market }) {
+  return '/stingray/api/' + (csv ? 'gis-csv' : 'gis') + '?al=1&include_nearby_homes=false'
+    + (market ? '&market=' + market : '') + '&max_price=' + (maxk * 1000) + '&num_homes=350'
+    + '&ord=days-on-redfin-asc&page_number=' + (page || 1) + '&region_id=' + regionId
+    + '&region_type=5&sf=1,2,3,5,6,7&status=9&uipt=1&v=8';
+}
+
+const rv = x => (x && typeof x === 'object' && 'value' in x ? x.value : x);
+const rnum = x => { const n = Number(String(rv(x) == null ? '' : rv(x)).replace(/[$,]/g, '')); return isFinite(n) ? n : 0; };
+
+function redfinHome(o) {
+  const url = /^https?:/.test(o.url || '') ? o.url : 'https://www.redfin.com' + (o.url || '');
+  const id = (url.match(/\/home\/(\d+)/) || [])[1] || String(o.propertyId || '');
+  if (!id) return null;
+  const parts = [o.status, o.mlsStatus].concat(o.sashes || []).map(x => typeof x === 'string' ? x : x && (x.sashTypeName || x.sashText || x.text || '')).filter(Boolean);
+  const status = parts.join(' · ');
+  // The whole badge, early-access ones first: "Early Access Redfin Coming Soon".
+  const badge = parts.filter(x => REDFIN_EARLY_RE.test(x)).sort((a, b) => /early/i.test(b) - /early/i.test(a))[0] || '';
+  const street = String(rv(o.streetLine) || o.address || '').trim();
+  const addr = street && o.city ? `${street}, ${o.city}, ${o.state || 'CA'} ${o.zip || ''}`.trim() : redfinAddrFromUrl(url);
+  return { homeId: id, url: url.replace(/[?#].*$/, ''), addr, badge, status, early: !!badge,
+    early_access: /early[\s-]*access/i.test(status),
+    price: rnum(o.price), beds: rnum(o.beds), baths: rnum(o.baths), sqft: rnum(o.sqFt || o.sqft),
+    year: rnum(o.yearBuilt), dom: rv(o.dom) == null || rv(o.dom) === '' ? '' : rnum(o.dom),
+    mls: redfinMlsId(rv(o.mlsId), o.source || ''), remarks: String(o.listingRemarks || '').trim() };
+}
+
+/** /stingray/api/gis → homes. */
+function redfinGisHomes(body) {
+  let j;
+  try { j = JSON.parse(String(body || '').replace(/^\{\}&&/, '')); } catch (_) { return null; }
+  const homes = (j.payload && (j.payload.homes || (j.payload.searchResults && j.payload.searchResults.homes))) || j.homes;
+  if (!Array.isArray(homes)) return null;
+  return homes.map(h => redfinHome(h.homeData || h)).filter(Boolean);
+}
+
+/** /stingray/api/gis-csv → homes. */
+function redfinCsvHomes(text) {
+  const rows = [];
+  let row = [], cell = '', q = false;
+  const t = String(text || '');
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (q) { if (ch === '"') { if (t[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && t[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  const head = (rows.shift() || []).map(h => h.trim().toUpperCase());
+  if (!head.includes('ADDRESS') || !head.includes('STATUS')) return null;
+  const col = name => head.findIndex(h => h === name || h.startsWith(name + ' '));
+  const get = (r, n) => { const i = col(n); return i >= 0 ? (r[i] || '').trim() : ''; };
+  return rows.filter(r => r.length > 3 && get(r, 'ADDRESS')).map(r => redfinHome({
+    url: get(r, 'URL'), streetLine: get(r, 'ADDRESS'), city: get(r, 'CITY'), state: get(r, 'STATE OR PROVINCE'),
+    zip: get(r, 'ZIP OR POSTAL CODE'), price: get(r, 'PRICE'), beds: get(r, 'BEDS'), baths: get(r, 'BATHS'),
+    sqFt: get(r, 'SQUARE FEET'), yearBuilt: get(r, 'YEAR BUILT'), dom: get(r, 'DAYS ON MARKET'),
+    mlsStatus: get(r, 'STATUS'), mlsId: get(r, 'MLS#'), source: get(r, 'SOURCE'),
+  })).filter(Boolean);
 }
 
 module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
+  redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,

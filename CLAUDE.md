@@ -628,6 +628,24 @@ sheet's Board tab rebuilt and the leads on the clipboard for **Add scan** (the
 board's **↻ Refresh from sheet** also picks them up). Checked in Chromium on a
 mock page with a decoy Redfin phone; not yet on live Redfin.
 
+**v1.52 — first live Redfin run found nothing** (Bryan 2 Oct: "you're just
+filtering the county, not opening them 1 by 1, not checking any image"). The
+search-card badge never matched, so no home was opened. Now the county comes
+from **Redfin's own data**, fetched inside the Redfin window after the search
+page loads: `/stingray/api/gis` JSON (`core.redfinGisHomes` — `mlsStatus` +
+`sashes[].sashTypeName`, e.g. "Early Access Redfin Coming Soon"), then the
+`gis-csv` download (`core.redfinCsvHomes`, STATUS column), then the cards
+(`JS_REDFIN_CARDS`, now widened to the whole card so the photo's badge is
+inside). `region_type=5` county · `uipt=1` house · `status=9` · `max_price` ·
+350/page; `market=sanfrancisco` tried first, then none. Each home is then
+opened ONE BY ONE: page scrolled, **every photo stepped through in Redfin's
+viewer** (`viewRedfinPhotos`: click the biggest photo, ArrowRight until no new
+photo, Escape; `redfinPhotoUrls` dedupes sizes), agent read, then judged. With
+no AI key the log says loudly that photos were viewed but not judged.
+**Early Access homes need a Redfin sign-in** — section 3's "Sign in to Redfin"
+opens redfin.com/login in the scan's own window (cookies persist). SF county is
+region 340. Mock-tested in Chromium; still not run against live Redfin.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

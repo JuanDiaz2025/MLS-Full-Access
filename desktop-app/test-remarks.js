@@ -117,6 +117,32 @@ const eq = (a, b, m) => {
     'https://www.redfin.com/CA/San-Francisco/21-College-Ter-94112/home/809328'], 'Redfin: board lead keeps one address and its Redfin page');
 }
 
+// ---- Redfin's own listing data (gis JSON + the download CSV) ----
+{
+  const body = '{}&&' + JSON.stringify({ payload: { homes: [
+    { url: '/CA/San-Francisco/21-College-Ter-94112/home/809328', streetLine: { value: '21 College Ter' }, city: 'San Francisco', state: 'CA',
+      zip: '94112', price: { value: 995000 }, beds: 3, baths: 2, sqFt: { value: 2185 }, yearBuilt: { value: 1914 }, dom: { value: 2 },
+      mlsId: { value: '426150277' }, mlsStatus: 'Coming Soon', sashes: [{ sashTypeName: 'Early Access Redfin Coming Soon' }], listingRemarks: 'Bring your imagination.' },
+    { url: '/CA/Oakland/1-A-St-94601/home/5', streetLine: { value: '1 A St' }, city: 'Oakland', state: 'CA', zip: '94601', mlsStatus: 'Active', sashes: [{ sashTypeName: 'New' }] }] } });
+  const g = core.redfinGisHomes(body);
+  eq(g.map(h => [h.addr, h.early, h.badge, h.mls, h.price, h.year]),
+    [['21 College Ter, San Francisco, CA 94112', true, 'Early Access Redfin Coming Soon', 'SF426150277', 995000, 1914],
+     ['1 A St, Oakland, CA 94601', false, '', '', 0, 0]], 'Redfin data: full address, Early Access badge, SF MLS #; Active is not kept');
+  eq(core.redfinLabel(g[0].badge), 'Coming Soon · Early Access', 'Redfin data: Early Access label for the board');
+  eq(core.redfinGisHomes('<html>blocked</html>'), null, 'Redfin data: a blocked reply is not "no homes"');
+  const csv = 'SALE TYPE,ADDRESS,CITY,STATE OR PROVINCE,ZIP OR POSTAL CODE,PRICE,BEDS,BATHS,SQUARE FEET,YEAR BUILT,DAYS ON MARKET,STATUS,URL (SEE https://www.redfin.com/buy-a-home/comparative-market-analysis FOR INFO ON PRICING),SOURCE,MLS#\n'
+    + 'MLS Listing,"21 College Ter",San Francisco,CA,94112,995000,3,2,2185,1914,2,Coming Soon,https://www.redfin.com/CA/San-Francisco/21-College-Ter-94112/home/809328,San Francisco MLS,426150277\n'
+    + 'MLS Listing,"1 A St, Unit 2",Oakland,CA,94601,700000,2,1,900,1950,5,Active,https://www.redfin.com/CA/Oakland/1-A-St-94601/home/5,bridgeMLS,41100000\n';
+  eq(core.redfinCsvHomes(csv).map(h => [h.addr, h.early]), [['21 College Ter, San Francisco, CA 94112', true], ['1 A St, Unit 2, Oakland, CA 94601', false]],
+    'Redfin download: STATUS column, quoted commas');
+  eq(core.redfinRegionId('/county/340/CA/San-Francisco-County'), '340', 'Redfin: county region id');
+  eq(/region_id=340&region_type=5&sf=1,2,3,5,6,7&status=9&uipt=1/.test(core.redfinGisUrl({ regionId: 340, maxk: 1500, page: 1 })) &&
+    /max_price=1500000/.test(core.redfinGisUrl({ regionId: 340, maxk: 1500, page: 1 })), true, 'Redfin data URL: county, houses, for sale, under the cap');
+  eq(core.redfinPhotoUrls('https://ssl.cdn-redfin.com/photo/1/mbphotov3/277/genMid.426150277_1_0.jpg https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_1_0.jpg https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_2_0.jpg'),
+    ['https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_1_0.jpg', 'https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_2_0.jpg'],
+    'Redfin photos: one per photo, the big size wins');
+}
+
 // ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
 {
   const A = core.parseRedfinAgent;
