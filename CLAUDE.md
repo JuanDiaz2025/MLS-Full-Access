@@ -338,7 +338,7 @@ what binds every analysis (see also `docs/investigation-playbook.md` for the
 headless-scrape workflow):
 
 - **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.5M max** (Bryan, 2 Oct — was $2.0M);
-  ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
+  **ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
   data floor only guards against garbled prices).
   **Areas = THE WHOLE BAY AREA, all nine counties, every city** (Bryan, 1 Aug):
   San Francisco · San Mateo · Santa Clara · Alameda · Contra Costa · Marin ·
