@@ -676,6 +676,16 @@ same backstop: `JS_SCRAPE_GRID` now reads the **Class** column and
 cap / $3M even if the search ignored those boxes. Confirmed deals are never
 dropped. The area caps are unchanged — $3M is a ceiling, not a new cap.
 
+**v1.55 — Redfin Coming Soon / Early Access: FIXERS ONLY (Bryan 2 Oct).** A
+Redfin find that passes the buy box and the rules is kept only when
+`core.redfinFixerGate()` sees it is a fixer: the description says it needs
+work (`saysNeedsWork` — as-is, fixer, original condition, "bring your",
+cosmetic remodel, distressed sale) **or** the AI photo check kept it (which
+already means wear was seen). A home whose description says nothing about its
+condition — or has none yet — and no AI check → C "not a fixer". Turn the AI
+check on so a quiet description with a worn interior is not lost. Confirmed
+deals are never dropped. The MLS scan's own Coming Soon pass is unchanged.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

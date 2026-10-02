@@ -170,6 +170,17 @@ const eq = (a, b, m) => {
     [['SF1'], ['SF2: $1,700k is over the $1.5M cap', 'SF3: not a single-family home — Condominium']], 'MLS grid: same backstop — over the cap or not single-family is dropped');
 }
 
+// ---- Redfin Coming Soon / Early Access: fixers only ----
+{
+  const F = core.redfinFixerGate;
+  eq(F({ addr: '1 A St', remarks: 'Sold as-is. Original condition, bring your contractor.' }), '', 'fixers only: as-is / original wording keeps it');
+  eq(F({ addr: '1 A St', remarks: 'Great bones, ready for your cosmetic remodel.' }), '', 'fixers only: cosmetic remodel wording keeps it');
+  eq(/not a fixer/.test(F({ addr: '1 A St', remarks: 'Charming home near parks and shopping.' })), true, 'fixers only: a description that never says it needs work is dropped');
+  eq(/not a fixer/.test(F({ addr: '1 A St', remarks: '' })), true, 'fixers only: no description and no AI check is dropped');
+  eq(F({ addr: '1 A St', remarks: 'Charming home.', aiKept: true }), '', 'fixers only: the AI seeing wear in the photos keeps it');
+  eq(F({ addr: '21 College Terrace, San Francisco, CA 94112', remarks: '' }), '', 'fixers only: a confirmed deal is never dropped');
+}
+
 // ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
 {
   const A = core.parseRedfinAgent;

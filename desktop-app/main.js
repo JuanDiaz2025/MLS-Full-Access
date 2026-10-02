@@ -1485,6 +1485,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         if (!(cfg.useAI && cfg.apiKey)) q.why += ' + photos viewed but not judged (AI photo check off)';
         const tooFew = urls.length <= 4;
         if (tooFew) q.why += ' + photos not posted on Redfin yet — check them before offering';
+        let aiKept = false;
         if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !q.hard && q.bucket !== 'C' && !tooFew) {
           const b64 = await collectPhotosDirect(urls, 20);
           const v = await autoDecide({ addr: c.addr, _cityKey: city, _sqft: c.sqft, _price: c.price,
@@ -1493,8 +1494,13 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           else if (v.decision !== 'keep') {
             aiFailStreak = 0;
             Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop', score: Math.min(q.score, 15), why: 'AI (vision): ' + v.reason });
-          } else { aiFailStreak = 0; q.why += ' + AI (vision) keep: ' + v.reason; }
+          } else { aiFailStreak = 0; aiKept = true; q.why += ' + AI (vision) keep: ' + v.reason; }
         }
+        // Fixers only (Bryan, 2 Oct: "on early access make sure only fixer").
+        // A Coming Soon / Early Access home stays only if its description says
+        // it needs work, or the AI saw the wear in its photos.
+        const notFixer = q.decision === 'keep' ? core.redfinFixerGate({ addr: c.addr, remarks: h.remarks, aiKept }) : '';
+        if (notFixer) Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop', score: Math.min(q.score, 30), why: q.why + ' — ' + notFixer });
         runKpi.reviewed++; runKpi['bucket' + q.bucket]++;
         const id = h.mls || ('RF' + c.homeId);
         log(`  ${q.label} · score ${q.score} — ${q.why}`, q.decision === 'keep' ? 'good' : 'info');

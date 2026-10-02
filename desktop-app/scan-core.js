@@ -1283,6 +1283,19 @@ function redfinBuyBox(h, area, phase) {
   return '';
 }
 
+/** Fixers only, for a Redfin Coming Soon / Early Access home: kept when its
+ *  description says it needs work (as-is, fixer, original condition, "bring
+ *  your", cosmetic remodel, probate auction…) or when the AI saw wear in the
+ *  photos. A home that says nothing about its condition is not shown as a
+ *  fixer. Returns '' to keep, else the reason it is not one. */
+function redfinFixerGate({ addr, remarks, aiKept } = {}) {
+  if (isConfirmed(addr)) return '';
+  if (saysNeedsWork(remarks) || aiKept) return '';
+  return String(remarks || '').trim()
+    ? 'not a fixer — the description never says it needs work, and no AI photo check saw wear'
+    : 'not a fixer — no description yet, and no AI photo check saw wear';
+}
+
 /** /stingray/api/gis → homes. */
 function redfinGisHomes(body) {
   let j;
@@ -1321,7 +1334,7 @@ function redfinCsvHomes(text) {
 module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
-  redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING,
+  redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
