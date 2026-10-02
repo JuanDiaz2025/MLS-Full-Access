@@ -182,6 +182,22 @@ const eq = (a, b, m) => {
   eq(F({ addr: '21 College Terrace, San Francisco, CA 94112', remarks: '' }), '', 'fixers only: a confirmed deal is never dropped');
 }
 
+// ---- Coming Soon / Early Access memory: a first look without photos is rechecked ----
+{
+  const V = core.comingSoonVerdict, S = core.ledgerSkips;
+  const first = V({ prev: null, today: '2026-10-02', provisional: true, decision: 'drop' });
+  eq([first.verdict, first.recheck_after, first.rechecks, first.last_verdict], ['recheck', '2026-10-04', 1, 'dropped'],
+    'memory: a Coming Soon judged without photos is a recheck in 2 days, not a final drop');
+  eq([S(first, '2026-10-03'), S(first, '2026-10-04')], [true, false], 'memory: skipped until its recheck day, then opened again');
+  eq(V({ prev: first, today: '2026-10-04', provisional: false, decision: 'keep' }).verdict, 'kept', 'memory: once the photos decide it, the verdict is final');
+  let e = null; for (let i = 0; i < core.RECHECK_MAX; i++) e = V({ prev: e, today: '2026-10-02', provisional: true, decision: 'drop' });
+  eq(e.verdict, 'recheck', 'memory: still rechecking on the last allowed look');
+  eq(V({ prev: e, today: '2026-10-20', provisional: true, decision: 'drop' }).verdict, 'dropped', 'memory: after ~2 weeks of rechecks the last verdict stands');
+  eq([S({ verdict: 'kept' }, '2030-01-01'), S({ verdict: 'dropped' }, '2030-01-01'), S(undefined, '2026-10-02')], [true, true, false],
+    'memory: every other ledger entry is skipped for good, an unseen listing is not');
+  eq(V({ prev: null, today: '2026-10-02', provisional: false, decision: 'drop' }).verdict, 'dropped', 'memory: a photo verdict is final first time');
+}
+
 // ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
 {
   const A = core.parseRedfinAgent;

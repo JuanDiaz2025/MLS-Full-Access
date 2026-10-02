@@ -205,9 +205,10 @@ function ledgerRecord(mls, verdict, extra) {
   if (!mls) return;
   const e = loadLedger();
   const d = todayKey();
-  e[String(mls).trim().toUpperCase()] = Object.assign(
-    { first_seen: (e[mls] && e[mls].first_seen) || d }, extra || {},
-    { last_seen: d, verdict: verdict || 'checked' });
+  const k = String(mls).trim().toUpperCase();
+  const prev = e[k] || {};
+  e[k] = Object.assign({ first_seen: prev.first_seen || d }, extra || {}, { last_seen: d, verdict: verdict || 'checked' });
+  if (e[k].verdict !== 'recheck') delete e[k].recheck_after;
   saveLedger(e);
 }
 /** Bulk-mark, one write instead of N. */
@@ -300,6 +301,27 @@ const setInput = (sel, val) => `(() => {
   const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set; set.call(el, ${JSON.stringify(val)});
   el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); el.blur(); return true;
 })()`;
+
+/** A Coming Soon / Early Access home whose wait is over: say so, and put its
+ *  sheet id on the re-review list so the sheet re-judges it IN PLACE. */
+function markRecheck(ledgerKey, sheetId) {
+  const e = loadLedger()[String(ledgerKey).trim().toUpperCase()];
+  if (!e || e.verdict !== 'recheck') return false;
+  const rr = loadRereview();
+  rr.mls[String(sheetId || ledgerKey).trim().toUpperCase()] = true;
+  if (!rr.date) rr.date = 'Coming Soon recheck';
+  saveRereview(rr);
+  return true;
+}
+
+/** Record a Coming Soon / Early Access verdict: final once photos decided it,
+ *  a 'recheck' while they could not. */
+function recordComingSoon(ledgerKey, { provisional, decision, extra }) {
+  const prev = loadLedger()[String(ledgerKey).trim().toUpperCase()];
+  const v = core.comingSoonVerdict({ prev, today: todayKey(), provisional, decision });
+  ledgerRecord(ledgerKey, v.verdict, Object.assign({}, extra || {}, v));
+  if (v.verdict === 'recheck') log(`  first look only (photos not checked yet) — will open it again on ${v.recheck_after} (recheck ${v.rechecks} of ${core.RECHECK_MAX})`);
+}
 
 async function waitIfPaused() {
   while (control.paused && !control.stopped) { await sleep(400); }
@@ -883,7 +905,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       if (filterRejects.length) log(`[${label}] ${filterRejects.length} failed the buy-box filter — all logged with the reason`);
 
       const seen = loadLedger();
-      const fresh = cityCands.filter(c => !seen[String(c.mls || '').trim().toUpperCase()]);
+      const fresh = cityCands.filter(c => !core.ledgerSkips(seen[String(c.mls || '').trim().toUpperCase()], todayKey()));
       const skipped = cityCands.length - fresh.length;
       runKpi.skippedAlreadyChecked += skipped;
 
@@ -915,6 +937,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         if (await stopRequested()) break;   // save what was read, then stop
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
+        if (markRecheck(c.mls, c.mls)) log('  Coming Soon recheck — opened again now that its photos may be up', 'good');
         const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false }));
         // Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT
         // listing on screen. Judging that would put another property's photos,
@@ -961,6 +984,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         // photos". It stays as the text scored it, and says why.
         const csTooFew = c._comingSoon && n > 0 && n <= 4;
         if (csTooFew) q.why += ' + AI photo check waits for the photos to post';
+        let aiJudged = false;   // a photo verdict was reached (makes a Coming Soon verdict final)
         if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C' && !csTooFew) {
           // AI vision still has the final say on condition when it is on: a
           // DROP from the photos is an auto-pass whatever the text scored.
@@ -971,11 +995,11 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             log(`  ${v.reason} — kept the text rules' verdict`, 'warn');
             if (aiFailStreak >= 3) log('AI vision failed 3 times in a row — turned off for the rest of this run. Check the key and model in section 2 (Test key).', 'error');
           } else if (v.decision !== 'keep') {
-            aiFailStreak = 0;
+            aiFailStreak = 0; aiJudged = true;
             Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop',
               score: Math.min(q.score, 15), why: 'AI (vision): ' + v.reason });
           } else {
-            aiFailStreak = 0;
+            aiFailStreak = 0; aiJudged = true;
             q.why = q.why + ' + AI (vision) keep: ' + v.reason;
           }
         }
@@ -1016,7 +1040,12 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         }
         // Record as we go, not at the end — a crash or Stop mid-run must not
         // cost us the listings already judged.
-        ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: cityOf(c) });
+        // A Coming Soon listing judged before its photos could be checked is a
+        // first look only: it is opened again in a couple of days. A remarks
+        // hard exclusion (renovated, fire, tenant, structural) is final.
+        if (c._comingSoon) recordComingSoon(c.mls, { decision, extra: { addr: c.addr, city: cityOf(c) },
+          provisional: !aiJudged && !q.hard && !core.isConfirmed(c.addr) });
+        else ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: cityOf(c) });
       }
 
       // --- comps: OFF by default for now ---
@@ -1441,13 +1470,14 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         if (why) { rejects.push(rejectRow(c, why, 'Buy-box filter')); log(`  skip ${c.addr} — ${why}`); }
         else inBox.push(c);
       });
-      const fresh = inBox.filter(c => !seen['RF' + c.homeId]);
+      const fresh = inBox.filter(c => !core.ledgerSkips(seen['RF' + c.homeId], todayKey()));
       log(`${label}: ${cardsSeen} houses on Redfin → ${early.length} Coming Soon / Early Access → ${inBox.length} single-family under the cap → ${fresh.length} new`, 'good');
       // --- read each one's own page, judge it like an MLS listing ---
       for (let i = 0; i < fresh.length; i++) {
         if (await stopRequested()) break;
         const c = fresh[i];
         log(`[Redfin ${area.county}] opening ${i + 1}/${fresh.length}: ${c.addr || c.url} — ${c.badge}`, 'good');
+        if (markRecheck('RF' + c.homeId, c.mls || ('RF' + c.homeId))) log('  recheck — opened again now that its photos may be up', 'good');
         send('review', { i: i + 1, total: fresh.length, city: area.county, mls: 'RF' + c.homeId, addr: c.addr,
           price: c.price, sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: 0,
           remarks: c.remarks || '', details: {}, verdict: 'reviewing', why: 'Reading the Redfin page' });
@@ -1547,7 +1577,10 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
             sqft: c.sqft, dom: h.dom, reason: `Auto-pass (score ${q.score}): ${q.why}`, score: q.score, why: q.why,
             stage: 'Redfin review', link: c.url });
         }
-        ledgerRecord('RF' + c.homeId, q.decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city, mls: h.mls });
+        // No photo verdict (photos not posted, AI off or unable) = a first look
+        // only; it is opened again in a couple of days.
+        recordComingSoon('RF' + c.homeId, { decision: q.decision, extra: { addr: c.addr, city, mls: h.mls },
+          provisional: !aiKept && !q.hard && !core.isConfirmed(c.addr) });
       }
       found += kept.length;
       if (kept.length || rejects.length) {

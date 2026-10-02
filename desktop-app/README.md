@@ -189,3 +189,7 @@ card) and go to the sheet's Listing Agent / Agent Phone / Agent Email columns an
 Redfin Coming Soon"), not from guessing at the page. Each Coming Soon / Early Access home is opened one at a
 time: the page is scrolled, every photo is stepped through in Redfin's photo viewer, the listing agent is read,
 then it is judged. **Sign in to Redfin** (section 3) once to let the scan see Early Access homes.
+**v1.57:** Coming Soon / Early Access homes are often seen before their photos go up. A verdict made without a
+photo check is now a first look only: the home is opened again 2 days later (up to 7 times, about two weeks), so a
+quiet listing whose worn interior is posted later is not lost, and one kept on its first few photos gets its
+photo check. Photo verdicts, renovated/fire/tenant/structural wording and buy-box drops are final straight away.

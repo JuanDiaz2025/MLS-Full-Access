@@ -1296,6 +1296,35 @@ function redfinFixerGate({ addr, remarks, aiKept } = {}) {
     : 'not a fixer — no description yet, and no AI photo check saw wear';
 }
 
+// ---- Coming Soon / Early Access: a first look is provisional (v1.57) ----
+// A Coming Soon home is usually seen before its photos and full description
+// are posted. Judged then, it was written into the seen-ledger for good: a
+// quiet one dropped as "not a fixer" never came back once its photos went up,
+// and one kept on its first three photos never had the AI look at the rest.
+// A verdict reached WITHOUT a photo check is now a 'recheck' entry: skipped
+// for RECHECK_DAYS, then opened again, at most RECHECK_MAX times (~2 weeks),
+// after which the last verdict stands.
+const RECHECK_DAYS = 2, RECHECK_MAX = 7;
+const addDays = (day, n) => { const d = new Date(String(day) + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+/** Should a scan skip this ledger entry today? Everything is skipped except a
+ *  'recheck' whose wait is over. */
+function ledgerSkips(entry, today) {
+  if (!entry) return false;
+  if (entry.verdict !== 'recheck') return true;
+  return String(today || '') < String(entry.recheck_after || '');
+}
+
+/** The ledger verdict for a Coming Soon / Early Access home just judged.
+ *  `provisional` = no photo check decided it (too few photos posted, or no AI
+ *  verdict). Returns the fields to store. */
+function comingSoonVerdict({ prev, today, provisional, decision }) {
+  const done = decision === 'keep' ? 'kept' : 'dropped';
+  const n = ((prev && prev.rechecks) || 0) + 1;
+  if (!provisional || n > RECHECK_MAX) return { verdict: done, rechecks: n - 1, final_on: today };
+  return { verdict: 'recheck', last_verdict: done, rechecks: n, recheck_after: addDays(today, RECHECK_DAYS) };
+}
+
 /** /stingray/api/gis → homes. */
 function redfinGisHomes(body) {
   let j;
@@ -1335,6 +1364,7 @@ module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
+  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,

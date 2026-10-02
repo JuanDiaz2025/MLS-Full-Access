@@ -568,6 +568,9 @@ lookup (`showGallery`, used by review AND the board refresh) now selects
 Soon MLS # came back "not found". The status picker is `selectOnly()`; if the
 MLS has no Coming Soon option the run says so instead of searching the wrong
 status. Not yet seen against the live form — check the first run's log.
+Since v1.57 a Coming Soon listing judged without an AI photo verdict is a
+**first look only** — rechecked every 2 days up to 7 times (see the CURRENT
+behaviour block below).
 
 **Both reports are scrolled top to bottom before being read** (v1.40,
 `readWholePage()` in `main.js`; the "Scroll pause per screen" setting). The
@@ -595,6 +598,48 @@ in the remarks (whole phrases — "private remarks", "private yard" are not).
 The Coming Soon pass also ticks a Private / Office Exclusive status when the
 search form offers one.
 
+### Coming Soon & Early Access — CURRENT behaviour (v1.57, read this first)
+
+The version notes below are history; where they disagree, this block wins.
+
+- **Two sources.** (1) the MLS scan's own Coming Soon pass (Status = Coming
+  Soon, needs the MLS sign-in); (2) **🏠 Scan Redfin** in section 3 — no MLS
+  sign-in, drives a visible Redfin window on the user's PC (Redfin 403s cloud
+  servers). "Early Access" is Redfin's label ("Early Access Redfin/Compass
+  Coming Soon") and those homes show in full only to a signed-in Redfin user —
+  **Sign in to Redfin** once (cookies persist in `persist:redfin`).
+- **Same buy box as the MLS scan, enforced by the app** (`core.redfinBuyBox`,
+  MLS grid backstop in `filterCandidates`): single-family only · San Mateo
+  **≤ $2.5M**, every other county ≤ $1.5M · **never over $3M** · 25+ years old
+  when the year is known. Search filters are never trusted.
+- **Per Redfin home, in this order:** buy box from Redfin's data → open the
+  page, scroll it, buy box again (true type/year) → skip if an MLS scan already
+  checked its MLS # → **PHOTOS FIRST**: every photo stepped through in Redfin's
+  viewer and sent to the AI; a not-a-fixer photo verdict drops it here → read
+  the listing agent ("Listed by" block only, never the Contact-agent card) →
+  text rules (`qualify`, Rule #0 still drops "remodeled/turnkey") → **fixers
+  only** (`redfinFixerGate`: AI saw wear, or with no AI verdict the description
+  must say it needs work).
+- **Memory (seen-ledger).** Ledger key `RF<homeId>` for Redfin, the MLS # for
+  the MLS pass. **A verdict reached without a photo check is a first look
+  only** (`core.comingSoonVerdict`): verdict `recheck`, opened again after
+  `RECHECK_DAYS` = 2, at most `RECHECK_MAX` = 7 times (~2 weeks), then the last
+  verdict stands. A photo verdict, a buy-box/type drop, a remarks hard
+  exclusion (renovated, fire, tenant, structural) and a confirmed deal are final
+  at once. `core.ledgerSkips()` is the only skip test; every other verdict is
+  skipped for good. A recheck that comes round is put on the re-review list
+  (`markRecheck`), so a lead already on the sheet that now fails moves to C in
+  place. Live-tested in the real app twice over (mock Redfin): first run marks
+  the two photo-less verdicts `recheck`, a run after their date opens exactly
+  those two and skips the final ones.
+- **Output.** Leads (full address, Coming Soon / Coming Soon · Early Access /
+  Private Listing label, agent name/phone/email, the house's own Redfin URL)
+  go to the sheet and to the Lead Board file; a run that finds leads opens the
+  board with them on the clipboard for **Add scan**. Every Redfin answer is in
+  `<userData>/redfin-last-run.txt`; zero homes read → `grid-debug/redfin-*`.
+- **Not yet run against live Redfin** — the first real run's log and
+  `redfin-last-run.txt` are what to ask for if it finds nothing.
+
 **Redfin Coming Soon / Early Access scan (v1.50, Bryan 2 Oct — no MLS
 sign-in).** Section 3's **🏠 Scan Redfin** button drives a visible Redfin
 window (`persist:redfin`) from the user's PC — Redfin 403s cloud servers, so it
@@ -607,13 +652,13 @@ exclusive (`REDFIN_EARLY_RE`; a description saying "coming soon" does not
 count). Each kept card's page is scrolled and read (`core.parseRedfinHome`:
 About this home, Built in, Listed by, days on Redfin, Source … #MLS — an SFAR
 number gets its `SF` prefix), judged by `qualify()` with `comingSoon:true`, and
-its Redfin photos (`redfinPhotoUrls`, fetched via `net.fetch` + nativeImage)
-go to the AI check when it is on. Ledger keys `RF<homeId>`; a house whose MLS #
+its Redfin photos (`redfinPhotoUrls`, now fetched through the Redfin window's session + nativeImage)
+go to the AI check (photos-first since v1.56). Ledger keys `RF<homeId>`; a house whose MLS #
 an MLS scan already checked is skipped. Leads carry `mlsStatus` Coming Soon /
 Coming Soon · Early Access / Private Listing and the card's own Redfin URL; MLS
 id is the MLS # when Redfin shows one, else `RF<homeId>`. Zero cards read →
 the page text + screenshot go to `<userData>/grid-debug/redfin-*` — ask for
-those before guessing at Redfin's layout. **Not yet run against live Redfin.**
+those before guessing at Redfin's layout. **Not yet run against live Redfin.** *(History: badge-on-card selection was replaced by Redfin's own data in v1.52.)*
 
 **Listing agent off Redfin (v1.51, Bryan 2 Oct: "open it 1 by 1, access
 contact agent by scrolling down").** After each home page is scrolled and
