@@ -5,6 +5,7 @@ import { notFound } from "next/navigation"
 import { ArrowLeft, ExternalLink, Phone } from "lucide-react"
 
 import AdFixer from "@/components/campaigns/ad-fixer"
+import { AdChangeDetails } from "@/components/compliance/ad-diff"
 import AdPreview, { shownText } from "@/components/campaigns/ad-preview"
 import CampaignSwitcher from "@/components/campaigns/campaign-switcher"
 import NegativeKeywordPanel from "@/components/changes/negative-keyword-panel"
@@ -16,7 +17,7 @@ import MetricPicker from "@/components/metric-picker"
 import { AdminLink, PageHeader, Pill, ReportProblem, Section, StatusPill, enumLabel } from "@/components/report"
 import { assistantProvider } from "@/lib/assistant/shared"
 import { isAdmin } from "@/lib/auth"
-import { isOpen, requestStage, requestTitle } from "@/lib/compliance-rules"
+import { isOpen, outcomeLabel, requestStage, requestTitle } from "@/lib/compliance-rules"
 import { addDays, formatDay, parseRange, rangeQuery, today, type DateRange } from "@/lib/date-range"
 import { getCalls, type Call } from "@/lib/google-ads/calls"
 import {
@@ -197,6 +198,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
           q={q}
           personName={await currentName()}
           aiReady={assistantProvider() !== null}
+          requests={requests.filter((r) => r.kind === "ad")}
         />
       )}
 
@@ -526,6 +528,7 @@ function CampaignFacts({ c }: { c: CampaignInfo }) {
 const labelTone = { BEST: "green", GOOD: "green", LOW: "red", LEARNING: "violet", PENDING: "gray", UNKNOWN: "gray" } as const
 const strengthTone = { EXCELLENT: "green", GOOD: "green", AVERAGE: "amber", POOR: "red" } as const
 function AdsTab({
+  requests,
   campaignId,
   personName,
   aiReady,
@@ -545,6 +548,7 @@ function AdsTab({
   campaignId: string
   personName: string
   aiReady: boolean
+  requests: ChangeRequest[]
 }) {
   if (!ads.ok) return <ReportProblem problem={ads} />
   const a: CampaignAssets = assets.ok
@@ -630,6 +634,18 @@ function AdsTab({
               ))}
             </ul>
             <AdBlock ad={current} assets={a} />
+          </div>
+        )}
+        {current && requests.some((r) => r.ad?.id === current.id) && (
+          <div className="flex flex-col gap-1 rounded-xl border p-3">
+            <p className="text-sm font-semibold">Edit history for this ad</p>
+            <ul className="divide-y text-sm">
+              {requests
+                .filter((r) => r.ad?.id === current.id)
+                .map((r) => (
+                  <RequestLine key={r.id} r={r} />
+                ))}
+            </ul>
           </div>
         )}
         {current && current.type === "RESPONSIVE_SEARCH_AD" && (
@@ -1316,14 +1332,11 @@ function HistoryCard({
           )}
         </div>
         <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium text-muted-foreground">Approval requests</p>
+          <p className="text-xs font-medium text-muted-foreground">Approval requests (ad edits, on/off, learning holds)</p>
           {requests.length ? (
-            <ul className="divide-y text-sm">
-              {requests.slice(0, 10).map((r) => (
-                <li key={r.id} className="flex items-center justify-between gap-3 py-1.5">
-                  <span className="min-w-0">{requestTitle(r)}</span>
-                  <Pill tone={isOpen(r) ? "violet" : requestStage(r) === "done" ? "green" : "gray"}>{enumLabel(requestStage(r))}</Pill>
-                </li>
+            <ul className="max-h-[32rem] divide-y overflow-y-auto text-sm">
+              {requests.slice(0, 20).map((r) => (
+                <RequestLine key={r.id} r={r} />
               ))}
             </ul>
           ) : (
@@ -1338,5 +1351,36 @@ function HistoryCard({
         </div>
       </div>
     </Section>
+  )
+}
+
+const when = (iso: string | undefined) =>
+  iso
+    ? new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : ""
+
+// One approval request in a history list: what, where it ended up, who did each step and when,
+// and for ad edits the lines that changed.
+function RequestLine({ r }: { r: ChangeRequest }) {
+  const stage = requestStage(r)
+  const failed = !!r.applied?.failures.length
+  return (
+    <li className="flex flex-col gap-0.5 py-2">
+      <span className="flex items-start justify-between gap-3">
+        <span className="min-w-0 font-medium">{requestTitle(r)}</span>
+        <Pill tone={failed ? "red" : isOpen(r) ? (stage === "ready" ? "amber" : "violet") : stage === "done" ? "green" : "gray"}>
+          {outcomeLabel(r)}
+        </Pill>
+      </span>
+      <span className="text-[11px] text-muted-foreground">
+        Asked by {r.requested.by} {when(r.requested.at)}
+        {r.checked && ` · ${r.checked.ok ? "checked" : "stopped"} by ${r.checked.by}`}
+        {r.approved && ` · ${r.approved.ok ? "approved" : "not approved"} by ${r.approved.by}`}
+        {r.applied && ` · applied by ${r.applied.by} ${when(r.applied.at)}`}
+      </span>
+      {failed && <span className="text-xs text-destructive">{r.applied!.failures.join("; ")}</span>}
+      <span className="text-xs text-muted-foreground">Why: {r.reason}</span>
+      {r.kind === "ad" && r.ad && <AdChangeDetails ad={r.ad} />}
+    </li>
   )
 }

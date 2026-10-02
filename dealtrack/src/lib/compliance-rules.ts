@@ -32,3 +32,15 @@ export function requestTitle(r: ChangeRequest) {
     return `${r.ad?.undoOf ? "Put back the old text of" : "New text for"} the ad “${r.ad?.firstHeadline ?? "ad"}” in ${r.campaigns[0]?.name ?? "a campaign"}`
   return r.change?.label ?? "Change during learning"
 }
+
+// Where a request ended up, in a few words, for history lists.
+export function outcomeLabel(r: ChangeRequest, now = Date.now()): string {
+  const stage = requestStage(r, now)
+  if (stage === "done") {
+    if (r.applied?.failures.length) return "Failed in Google Ads"
+    if (r.kind === "learning") return "Went through"
+    return r.applied?.dryRun ? "Applied (dry run, nothing changed)" : "Applied in Google Ads"
+  }
+  if (stage === "ready") return r.kind === "learning" ? "Approved, push it again" : "Approved, waiting for an admin to apply"
+  return { checking: "Waiting for a check", approving: "Waiting for approval", rejected: "Stopped", expired: "Approval expired" }[stage]
+}

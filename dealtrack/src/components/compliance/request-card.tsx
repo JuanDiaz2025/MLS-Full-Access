@@ -8,9 +8,9 @@ import { useState, useTransition } from "react"
 
 import { applyAdEditAction } from "@/app/actions/ads"
 import { applyStatusRequestAction, decideRequestAction } from "@/app/actions/compliance"
+import AdDiff from "@/components/compliance/ad-diff"
 import { Pill, type PillTone } from "@/components/pill"
 import { Button } from "@/components/ui/button"
-import { adTextDiff, shownText, type AdLine } from "@/lib/ad-text"
 import { requestTitle, type RequestStage } from "@/lib/compliance-rules"
 import type { ChangeRequest } from "@/lib/store"
 import { cn } from "@/lib/utils"
@@ -234,45 +234,5 @@ export default function RequestCard({ r, admin, personName }: { r: RequestView; 
         </p>
       )}
     </article>
-  )
-}
-
-// What the edit changes: removed and added lines (and pin moves), headlines then descriptions.
-function AdDiff({ ad }: { ad: NonNullable<ChangeRequest["ad"]> }) {
-  const diff = adTextDiff(ad.before, ad.after)
-  const pin = (l: AdLine) => (l.pinned ? ` (pin ${l.pinned.replace(/\D/g, "")})` : "")
-  const part = (title: string, d: ReturnType<typeof adTextDiff>["headlines"], total: number) =>
-    d.removed.length || d.added.length || d.repinned.length ? (
-      <div className="flex flex-col gap-1">
-        <p className="text-xs font-medium text-muted-foreground">
-          {title}: {d.kept} kept, {d.removed.length} removed, {d.added.length} added ({total} after)
-        </p>
-        <ul className="flex flex-col gap-0.5 text-[13px]">
-          {d.removed.map((l) => (
-            <li key={`-${l.text}`} className="text-red-800 line-through decoration-red-400">
-              − {shownText(l.text)}
-              {pin(l)}
-            </li>
-          ))}
-          {d.added.map((l) => (
-            <li key={`+${l.text}`} className="text-emerald-800">
-              + {shownText(l.text)}
-              {pin(l)}
-            </li>
-          ))}
-          {d.repinned.map((l) => (
-            <li key={`~${l.text}`} className="text-amber-800">
-              ~ {shownText(l.text)}: {l.pinned ? `pinned to ${l.pinned.replace(/\D/g, "")}` : "unpinned"}
-            </li>
-          ))}
-        </ul>
-      </div>
-    ) : null
-  return (
-    <div className="mt-1 flex flex-col gap-2 rounded-xl border bg-muted/30 p-3">
-      <p className="text-xs text-muted-foreground">Ad group {ad.adGroup}</p>
-      {part("Headlines", diff.headlines, ad.after.headlines.length)}
-      {part("Descriptions", diff.descriptions, ad.after.descriptions.length)}
-    </div>
   )
 }

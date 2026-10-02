@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 
+import { AdChangeDetails } from "@/components/compliance/ad-diff"
 import RequestCard, { type RequestView } from "@/components/compliance/request-card"
 import StatusRequestForm from "@/components/compliance/status-request-form"
 import UndoAdButton from "@/components/compliance/undo-ad-button"
@@ -121,7 +122,16 @@ export default async function CompliancePage() {
           rowKey={(r) => r.id}
           empty="No closed requests yet."
           columns={[
-            { key: "what", label: "Request", render: (r) => <span className="font-medium">{requestTitle(r)}</span> },
+            {
+              key: "what",
+              label: "Request",
+              render: (r) => (
+                <span className="flex flex-col">
+                  <span className="font-medium">{requestTitle(r)}</span>
+                  {r.kind === "ad" && r.ad && <AdChangeDetails ad={r.ad} />}
+                </span>
+              ),
+            },
             {
               key: "stage",
               label: "Outcome",
