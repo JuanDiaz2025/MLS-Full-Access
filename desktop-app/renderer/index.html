@@ -114,6 +114,13 @@
       <button id="stop" disabled>⏹ Stop</button>
     </div>
     <div class="row" style="margin-top:8px">
+      <button id="redfinScan">🏠 Scan Redfin — Coming Soon &amp; Early Access</button>
+    </div>
+    <div class="hint"><b>No MLS sign-in needed.</b> Opens redfin.com, goes through each ticked area (houses under
+      the area's price cap, newest first) and picks out the homes badged <b>Coming Soon</b> / <b>Early Access</b> /
+      private exclusive. Each one's page is read and judged by the same rules — renovated still drops — and the
+      leads go to the Lead Board with their own Redfin link.</div>
+    <div class="row" style="margin-top:8px">
       <button id="refreshBoard" disabled>↻ Refresh leads on the board</button>
       <button id="rebuildBoard" class="ghost">▦ Update Board tab</button>
     </div>
@@ -332,6 +339,14 @@
     await window.fs.startScan({ areaIndexes });
     setScanButtons(false);
   };
+  $('redfinScan').onclick = async () => {
+    const areaIndexes = selectedAreas();
+    if (!areaIndexes.length) { log('Pick at least one area to scan.','warn'); return; }
+    setScanButtons(true); $('redfinScan').disabled = true;
+    $('finished').style.display='none';
+    await window.fs.redfinScan({ areaIndexes });
+    setScanButtons(false); $('redfinScan').disabled = false;
+  };
   $('refreshBoard').onclick = async () => {
     setScanButtons(true);
     $('finished').style.display='none';
@@ -521,7 +536,7 @@
     box.style.display = 'block';
     box.className = 'status ' + (p.stopped || p.neverStarted ? 'warn' : 'good');
     box.innerHTML = (p.neverStarted ? '' : (p.stopped ? '⏹ ' : '✓ ')) + p.summary
-      + (p.neverStarted ? '' : '<br>The MLS window is closed and nothing is running.');
+      + (p.neverStarted ? '' : '<br>The ' + (p.redfin ? 'Redfin' : 'MLS') + ' window is closed and nothing is running.');
   });
 
   window.fs.on('log', p => log(p.msg, p.level));

@@ -1060,7 +1060,126 @@ function listingLabel({ status, comingSoon, remarks, privateRemarks } = {}) {
   return st || 'Active';
 }
 
+// ---------- Redfin: Coming Soon / Early Access (v1.50) ----------
+// Bryan, 2 Oct: find the Coming Soon and early-access homes on Redfin too,
+// straight from redfin.com, no MLS sign-in. The app drives a Redfin window
+// from the user's own computer (Redfin refuses cloud servers), reads the
+// search cards class-agnostically (a card is the box around a /home/<id>
+// link) and keeps only cards whose badge says the home is not on the open
+// market yet. Each kept card's own page is then read and judged by the same
+// rules as an MLS listing.
+
+/** A badge that means "not on the open market yet". Read off the TOP of a
+ *  card only, so a description that mentions "coming soon" (a new roof coming
+ *  soon) does not count. */
+const REDFIN_EARLY_RE = /\b(coming[\s-]*soon|early[\s-]*access|pre[\s-]*market|private[\s-]*(?:listing|exclusive)|off[\s-]*market[\s-]*(?:listing|exclusive)|exclusive[\s-]*listing|(?:redfin|compass|zillow)[\s-]*exclusive)\b/i;
+
+/** The Redfin county page for a buy-box county, from Redfin's own location
+ *  lookup ("{}&&{json}"): "/county/343/CA/San-Francisco-County". */
+function redfinCountyPath(body, county) {
+  let j;
+  try { j = JSON.parse(String(body || '').replace(/^\{\}&&/, '')); } catch (_) { return ''; }
+  const want = String(county || '').toLowerCase().replace(/\s+county$/, '').replace(/[^a-z]+/g, '-');
+  const rows = [];
+  ((j.payload && j.payload.sections) || []).forEach(s => (s.rows || []).forEach(r => rows.push(r)));
+  if (j.payload && j.payload.exactMatch) rows.unshift(j.payload.exactMatch);
+  const hit = rows.map(r => String(r.url || '')).find(u =>
+    /^\/county\/\d+\/CA\/[A-Za-z-]+$/.test(u) && (!want || u.toLowerCase().includes('/' + want + '-county')));
+  return hit || '';
+}
+
+/** "$1.5M" → Redfin's price slug. */
+const redfinPrice = maxk => (maxk >= 1000 ? (maxk / 1000) + 'M' : maxk + 'k');
+
+/** The county's search: houses under the area's cap, newest first. Coming
+ *  Soon homes are part of Redfin's for-sale results and are told apart by
+ *  their badge, so no status slug has to be guessed. */
+function redfinSearchUrl(countyPath, maxk, page) {
+  return 'https://www.redfin.com' + countyPath + '/filter/property-type=house,max-price=' + redfinPrice(maxk)
+    + ',sort=lo-days' + (page > 1 ? '/page-' + page : '');
+}
+
+/** One search card's text → the facts on it. `top` is the badge area. */
+function redfinCard({ href, text }) {
+  const url = String(href || '').replace(/[?#].*$/, '');
+  const m = url.match(/^https:\/\/www\.redfin\.com\/[A-Z]{2}\/[^/]+\/[^/]+\/home\/(\d+)$/);
+  if (!m) return null;
+  const t = String(text || '');
+  const lines = t.split(/\n+/).map(x => x.trim()).filter(Boolean);
+  const priceAt = lines.findIndex(x => /^\$[\d,]+$/.test(x));
+  // The badge sits above the price on a Redfin card.
+  const top = (priceAt > 0 ? lines.slice(0, priceAt) : lines.slice(0, 2)).join(' · ');
+  const badge = (top.match(REDFIN_EARLY_RE) || [])[0] || '';
+  const n = re => { const x = t.match(re); return x ? Number(x[1].replace(/,/g, '')) : 0; };
+  const addr = lines.find(x => /^\d+\S*\s.+,\s*[A-Za-z .'-]+,\s*CA\s*9\d{4}$/.test(x)) || redfinAddrFromUrl(url);
+  return {
+    homeId: m[1], url, addr, badge, top,
+    price: priceAt >= 0 ? Number(lines[priceAt].replace(/[$,]/g, '')) : 0,
+    beds: n(/([\d.]+)\s*beds?\b/i), baths: n(/([\d.]+)\s*baths?\b/i), sqft: n(/([\d,]+)\s*sq\s*ft/i),
+    early: !!badge,
+  };
+}
+
+/** "/CA/San-Francisco/21-College-Ter-94112/home/1" → "21 College Ter, San Francisco, CA 94112". */
+function redfinAddrFromUrl(url) {
+  const m = String(url || '').match(/\/([A-Z]{2})\/([^/]+)\/([^/]+)-(9\d{4})\/home\/\d+$/);
+  return m ? `${m[3].replace(/-/g, ' ')}, ${m[2].replace(/-/g, ' ')}, ${m[1]} ${m[4]}` : '';
+}
+
+/** A Redfin home page's text → what the rules need. */
+function parseRedfinHome(text) {
+  const t = String(text || '').replace(/\r/g, '');
+  const grab = re => { const m = t.match(re); return m ? m[1].trim() : ''; };
+  let remarks = grab(/About this home\s*\n([\s\S]{20,4000}?)\n\s*(?:Show (?:more|less)|Listed by|Redfin last checked|Source:|Hide|Read more|Home facts|Property details)/i);
+  remarks = remarks.replace(/\s+/g, ' ').trim();
+  const source = grab(/Source:\s*([^\n#]{2,60}?)\s*#/i);
+  const rawMls = grab(/(?:MLS\s*#|Source:[^\n#]{0,60}#)\s*([A-Z]{0,4}\d{5,12})\b/i).toUpperCase();
+  const year = Number(grab(/(?:Built in|Year Built\s*:?)\s*((?:18|19|20)\d{2})\b/i)) || 0;
+  const dom = grab(/\b(\d+)\s+days?\s+on\s+Redfin/i);
+  const lot = t.match(/Lot Size\s*:?\s*([\d,.]+)\s*(sq\.?\s*ft|acres?)/i);
+  const status = (t.slice(0, 1500).match(REDFIN_EARLY_RE) || [])[0]
+    || grab(/(?:Listing |MLS )?Status\s*:?\s*([A-Za-z][A-Za-z -]{2,30})\n/i);
+  const ptype = grab(/Property Type\s*:?\s*([A-Za-z][^\n]{2,40})/i);
+  return {
+    remarks, year, dom: dom === '' ? '' : Number(dom), status,
+    agent: grab(/Listed by\s+([^•·\n]{3,80}?)\s*(?:•|·|\n|$)/i),
+    mls: redfinMlsId(rawMls, source),
+    lotSqft: lot ? Math.round(Number(lot[1].replace(/,/g, '')) * (/acre/i.test(lot[2]) ? 43560 : 1)) : 0,
+    propClass: /single/i.test(ptype) ? 'Res. Single Family' : ptype,
+  };
+}
+
+/** Redfin shows the MLS's number; turn it into the id the MLS scan uses, so
+ *  the same house is not reviewed twice. SFAR numbers appear without "SF". */
+function redfinMlsId(raw, source) {
+  const id = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!id) return '';
+  if (/^[A-Z]{2,4}\d{5,}$/.test(id)) return id;
+  if (/^\d{9}$/.test(id) && /san francisco/i.test(source || '')) return 'SF' + id;
+  return id;
+}
+
+/** The label a Redfin find carries on the board: always reads as Coming Soon
+ *  or Private Listing, so the chip is coloured (Team Guide). */
+function redfinLabel(badge) {
+  const b = String(badge || '');
+  if (/private|exclusive/i.test(b)) return 'Private Listing';
+  if (/early[\s-]*access/i.test(b)) return 'Coming Soon · Early Access';
+  return 'Coming Soon';
+}
+
+/** Big-photo URLs anywhere in a Redfin page's HTML, in order, deduplicated. */
+function redfinPhotoUrls(html) {
+  const seen = new Set(), out = [];
+  const re = /https:\/\/ssl\.cdn-redfin\.com\/photo\/[^"'\s)\\]+?\/bigphoto\/[^"'\s)\\]+?\.(?:jpg|jpeg|webp)/gi;
+  let m;
+  while ((m = re.exec(String(html || '')))) { if (!seen.has(m[0])) { seen.add(m[0]); out.push(m[0]); } }
+  return out;
+}
+
 module.exports = {
+  REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
+  redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,

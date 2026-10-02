@@ -173,3 +173,12 @@ Each report is scrolled top to bottom before it is read — "Scroll pause per sc
 Section 3 → "Also scan Coming Soon listings" (on by default). Each area gets a second, small search for
 Coming Soon homes, reviewed like any other. A Coming Soon home with only its first few photos posted is kept
 for review (B) instead of being dropped, and its Why says "Coming Soon".
+
+## Redfin — Coming Soon & Early Access (v1.50)
+Section 3 → **🏠 Scan Redfin — Coming Soon & Early Access**. No MLS sign-in. A Redfin window opens and goes
+through each ticked area (houses under the area's price cap, newest first), keeps only the homes whose card is
+badged Coming Soon / Early Access / private exclusive, reads each one's page slowly and judges it with the same
+rules (renovated still drops; the AI photo check runs on Redfin's photos when it is on). Kept homes go to the
+Lead Board file and the sheet with their own Redfin link and a coloured Coming Soon / Private Listing label.
+Homes an MLS scan already checked are skipped. If an area reads 0 homes, the page is saved under
+`grid-debug/redfin-*` in the app's data folder — send those two files.

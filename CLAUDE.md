@@ -595,6 +595,26 @@ in the remarks (whole phrases — "private remarks", "private yard" are not).
 The Coming Soon pass also ticks a Private / Office Exclusive status when the
 search form offers one.
 
+**Redfin Coming Soon / Early Access scan (v1.50, Bryan 2 Oct — no MLS
+sign-in).** Section 3's **🏠 Scan Redfin** button drives a visible Redfin
+window (`persist:redfin`) from the user's PC — Redfin 403s cloud servers, so it
+cannot be tested from here. Per ticked county: Redfin's location lookup →
+county page (`core.redfinCountyPath`) → `…/filter/property-type=house,
+max-price=<cap>,sort=lo-days[/page-N]` (≤25 pages) → every `/home/<id>` card
+read class-agnostically (`JS_REDFIN_CARDS`, `core.redfinCard`) → kept only when
+the badge ABOVE the price says Coming Soon / Early Access / private or broker
+exclusive (`REDFIN_EARLY_RE`; a description saying "coming soon" does not
+count). Each kept card's page is scrolled and read (`core.parseRedfinHome`:
+About this home, Built in, Listed by, days on Redfin, Source … #MLS — an SFAR
+number gets its `SF` prefix), judged by `qualify()` with `comingSoon:true`, and
+its Redfin photos (`redfinPhotoUrls`, fetched via `net.fetch` + nativeImage)
+go to the AI check when it is on. Ledger keys `RF<homeId>`; a house whose MLS #
+an MLS scan already checked is skipped. Leads carry `mlsStatus` Coming Soon /
+Coming Soon · Early Access / Private Listing and the card's own Redfin URL; MLS
+id is the MLS # when Redfin shows one, else `RF<homeId>`. Zero cards read →
+the page text + screenshot go to `<userData>/grid-debug/redfin-*` — ask for
+those before guessing at Redfin's layout. **Not yet run against live Redfin.**
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

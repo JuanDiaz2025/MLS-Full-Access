@@ -7,7 +7,7 @@
  * detects the dashboard. Scanning navigates the MLS window through Matrix and
  * runs the same extraction used by the headless pipeline.
  */
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, net, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
@@ -575,9 +575,9 @@ async function showGallery(mls, opts) {
 // reads a listing: all of it, not the first screen. The pause per screen is
 // the "Scroll pause" setting in section 3. Only real content panels are
 // scrolled — the page and at most two tall panels — not every menu.
-async function readWholePage() {
+async function readWholePage(run = js) {
   const pause = Math.max(150, Number(cfg.scrollPauseMs != null ? cfg.scrollPauseMs : 700));
-  await js(`(async () => {
+  await run(`(async () => {
     const wait = ms => new Promise(r => setTimeout(r, ms));
     const panels = [document.scrollingElement || document.documentElement]
       .concat([...document.querySelectorAll('div, main, section')]
@@ -592,7 +592,7 @@ async function readWholePage() {
     for (const el of panels) el.scrollTop = 0;
     return true;
   })()`).catch(() => false);
-  return await js('document.body.innerText').catch(() => '');
+  return await run('document.body.innerText').catch(() => '');
 }
 
 // Look the kept house up on Redfin, from this computer, so the Lead Board can
@@ -752,7 +752,7 @@ async function collectPhotos(urls, max) {
 async function autoDecide(c) {
   try {
     const gal = c._gal || {};
-    const photos = await collectPhotos(gal.urls, 20);
+    const photos = gal.b64 || await collectPhotos(gal.urls, 20);
     if (!photos.length) {
       // Never guess with no pictures — Rule #2 says judge from the gallery.
       return { decision: 'drop', reason: 'no photos could be loaded — insufficient photos to judge' };
@@ -1182,6 +1182,218 @@ function closeMlsWindow() {
 ipcMain.on('pause', () => { control.paused = true; log('Paused.', 'warn'); });
 ipcMain.on('resume', () => { control.paused = false; log('Resumed.', 'good'); });
 ipcMain.on('stop', () => { control.stopped = true; control.paused = false; });
+
+// ---------- Redfin: Coming Soon / Early Access (v1.50) ----------
+// No MLS sign-in. A visible Redfin window is driven from this computer (Redfin
+// refuses cloud servers, so this only ever runs here). For each ticked county:
+// Redfin's location lookup gives the county page, the search (houses under the
+// area's cap, newest first) is paged through, and only cards whose badge says
+// Coming Soon / Early Access / private exclusive are kept. Each one's own page
+// is read slowly, then judged by the same rules as an MLS listing — renovated
+// still drops (Rule #0) — and its photos go to the AI check when it is on.
+let rfWin = null;
+function ensureRedfinWindow() {
+  if (rfWin && !rfWin.isDestroyed()) return rfWin;
+  rfWin = new BrowserWindow({ width: 1280, height: 900, show: true, title: 'Redfin — FlipScout',
+    webPreferences: { partition: 'persist:redfin' } });
+  rfWin.on('closed', () => { rfWin = null; });
+  return rfWin;
+}
+const rfJs = code => ensureRedfinWindow().webContents.executeJavaScript(code, true);
+async function rfNav(url, settle = 3500) {
+  await ensureRedfinWindow().loadURL(url).catch(() => {});
+  await sleep(settle);
+}
+
+// Every search card on the page: the box around each /home/<id> link.
+const JS_REDFIN_CARDS = `(() => {
+  const out = [], seen = new Set();
+  document.querySelectorAll('a[href*="/home/"]').forEach(a => {
+    const href = a.href.split(/[?#]/)[0];
+    if (!/\\/home\\/\\d+$/.test(href) || seen.has(href)) return;
+    let el = a;
+    for (let i = 0; i < 8 && el.parentElement; i++) {
+      el = el.parentElement;
+      const t = el.innerText || '';
+      if (/\\$[\\d,]{5,}/.test(t) && /beds?|sq\\s*ft/i.test(t)) break;
+    }
+    seen.add(href);
+    out.push({ href, text: (el.innerText || '').slice(0, 800) });
+  });
+  return out;
+})()`;
+
+/** Photos for the AI without going through a page: fetched here and shrunk
+ *  with nativeImage, so a CDN's CORS rules cannot stop it. */
+async function collectPhotosDirect(urls, max) {
+  const out = [];
+  for (const u of spreadPhotos(urls, max || 20)) {
+    try {
+      const r = await net.fetch(u);
+      if (!r.ok) continue;
+      let img = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
+      if (img.isEmpty()) continue;
+      const { width, height } = img.getSize();
+      if (Math.max(width, height) > 768) img = img.resize(width >= height ? { width: 768 } : { height: 768 });
+      const b = img.toJPEG(72).toString('base64');
+      if (b.length > 2000) out.push(b);
+    } catch (_) { /* one bad photo must not sink the listing */ }
+  }
+  return out;
+}
+
+async function redfinCounty(county) {
+  const path_ = await rfJs(`fetch('/stingray/do/location-autocomplete?v=2&al=1&location=' + encodeURIComponent(${JSON.stringify(county + ' County, CA')}))
+    .then(r => r.text()).catch(() => '')`).catch(() => '');
+  return core.redfinCountyPath(path_, county);
+}
+
+ipcMain.handle('redfin-scan', async (_e, opts) => {
+  if (control.running) return { ok: false, error: 'already running' };
+  const picked = opts && Array.isArray(opts.areaIndexes) ? opts.areaIndexes : null;
+  const areas = (picked ? picked.map(i => core.DEFAULT_BUYBOX[i]) : core.DEFAULT_BUYBOX).filter(Boolean);
+  if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
+  control.running = true; control.stopped = false; control.paused = false;
+  aiFailStreak = 0;
+  const runKpi = Object.assign(blankKpi(), { runs: 1 });
+  const MAX_PAGES = 25;
+  let found = 0;
+  try {
+    log('━━━ Redfin — Coming Soon & Early Access (no MLS sign-in) ━━━', 'good');
+    await rfNav('https://www.redfin.com/', 4000);
+    // The ledger knows every MLS # the MLS scans have checked; Redfin shows the
+    // same numbers, sometimes without the board's prefix — match on digits too.
+    const seen = loadLedger();
+    const seenDigits = new Set(Object.keys(seen).map(k => k.replace(/\D/g, '')).filter(d => d.length >= 6));
+    const isSeen = id => !!id && (seen[id] || seenDigits.has(id.replace(/\D/g, '')));
+    for (let ai = 0; ai < areas.length; ai++) {
+      if (await stopRequested()) break;
+      const area = areas[ai];
+      const label = `All ${area.county}`;
+      send('city', { label: 'Redfin · ' + label, index: ai + 1, total: areas.length, phase: 'scanning' });
+      const cpath = await redfinCounty(area.county);
+      if (!cpath) { log(`  ${label}: Redfin did not return the county page — skipped`, 'warn'); continue; }
+      // --- page through the search, keeping only the not-on-the-market cards ---
+      const early = [], ids = new Set();
+      let cardsSeen = 0, page = 1;
+      for (; page <= MAX_PAGES; page++) {
+        if (await stopRequested()) break;
+        await rfNav(core.redfinSearchUrl(cpath, area.maxk, page), 4500);
+        const raw = await rfJs(JS_REDFIN_CARDS).catch(() => []);
+        const cards = (raw || []).map(core.redfinCard).filter(c => c && !ids.has(c.homeId));
+        if (!cards.length) break;
+        cards.forEach(c => { ids.add(c.homeId); if (c.early) early.push(c); });
+        cardsSeen += cards.length;
+      }
+      if (page > MAX_PAGES) log(`  ⚠ ${label}: stopped at ${MAX_PAGES} pages of Redfin results — some homes not looked at`, 'warn');
+      if (!cardsSeen) {
+        const dir = path.join(app.getPath('userData'), 'grid-debug');
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+          const f = path.join(dir, `redfin-${area.county.replace(/\W+/g, '-')}-${Date.now()}`);
+          fs.writeFileSync(f + '.txt', String(await rfJs('location.href + "\\n\\n" + document.body.innerText.slice(0, 20000)').catch(() => '')));
+          fs.writeFileSync(f + '.png', (await ensureRedfinWindow().webContents.capturePage()).toPNG());
+          log(`  ${label}: read 0 homes off Redfin — page saved to ${f}.txt/.png for checking`, 'error');
+        } catch (_) { log(`  ${label}: read 0 homes off Redfin`, 'error'); }
+        continue;
+      }
+      runKpi.scanned += early.length;
+      const fresh = early.filter(c => !seen['RF' + c.homeId]);
+      log(`${label}: ${cardsSeen} houses on Redfin → ${early.length} Coming Soon / Early Access → ${fresh.length} new`, 'good');
+      // --- read each one's own page, judge it like an MLS listing ---
+      const kept = [], rejects = [];
+      for (let i = 0; i < fresh.length; i++) {
+        if (await stopRequested()) break;
+        const c = fresh[i];
+        log(`[Redfin ${area.county}] ${i + 1}/${fresh.length}: ${c.addr || c.url} — ${c.badge}`);
+        await rfNav(c.url, 4000);
+        const text = await readWholePage(rfJs);
+        const html = await rfJs('document.documentElement.innerHTML').catch(() => '');
+        const h = core.parseRedfinHome(text);
+        if (isSeen(h.mls)) { log(`  already checked as ${h.mls} by an MLS scan — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
+        const urls = core.redfinPhotoUrls(html);
+        const city = (c.addr.split(',')[1] || area.county).trim();
+        const q = core.qualify({
+          addr: c.addr, remarks: h.remarks, propClass: h.propClass,
+          photos: urls.length, photosReliable: false, dom: h.dom, yearBuilt: h.year,
+          price: c.price, whenUnsure: cfg.whenUnsure, comingSoon: true,
+        });
+        q.why = 'Redfin ' + c.badge + ' · ' + q.why;
+        const tooFew = urls.length <= 4;
+        if (tooFew) q.why += ' + photos not posted on Redfin yet — check them before offering';
+        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !q.hard && q.bucket !== 'C' && !tooFew) {
+          const b64 = await collectPhotosDirect(urls, 20);
+          const v = await autoDecide({ addr: c.addr, _cityKey: city, _sqft: c.sqft, _price: c.price,
+            _gal: { b64, remarks: h.remarks } });
+          if (v.error) { aiFailStreak++; log(`  ${v.reason} — kept the text rules' verdict`, 'warn'); }
+          else if (v.decision !== 'keep') {
+            aiFailStreak = 0;
+            Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop', score: Math.min(q.score, 15), why: 'AI (vision): ' + v.reason });
+          } else { aiFailStreak = 0; q.why += ' + AI (vision) keep: ' + v.reason; }
+        }
+        runKpi.reviewed++; runKpi['bucket' + q.bucket]++;
+        const id = h.mls || ('RF' + c.homeId);
+        log(`  ${q.label} · score ${q.score} — ${q.why}`, q.decision === 'keep' ? 'good' : 'info');
+        if (q.decision === 'keep') {
+          runKpi.kept++;
+          const offer = core.offerDue(h.remarks);
+          kept.push({
+            mls: id, address: c.addr, city, zip: (c.addr.match(/\b(9\d{4})$/) || [])[1] || '',
+            beds: c.beds, baths: c.baths, sqft: c.sqft, lotSqft: h.lotSqft || '', yearBuilt: h.year || '',
+            dom: h.dom, price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '',
+            arv: 0, arvBasis: 'not comped yet', recommendation: 'Needs Comps', flipQuality: '', score: '',
+            risks: 'Found on Redfin (' + c.badge + ') — confirm on the MLS',
+            bucket: q.bucket, bucketLabel: q.label, oppScore: q.score, why: q.why,
+            listedBy: h.agent, offerDue: offer, privateRemarks: '', occupiedBy: '',
+            mlsStatus: core.redfinLabel(c.badge), remarks: h.remarks, redfin: c.url,
+            agentPhone: '', agentEmail: '', showing: '', disclosures: '', priceCut: '',
+            link: c.url, surface: true, needsComps: true,
+          });
+        } else {
+          runKpi.dropped++;
+          rejects.push({ mls: id, addr: c.addr, city, zip: '', price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '',
+            sqft: c.sqft, dom: h.dom, reason: `Auto-pass (score ${q.score}): ${q.why}`, score: q.score, why: q.why,
+            stage: 'Redfin review', link: c.url });
+        }
+        ledgerRecord('RF' + c.homeId, q.decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city, mls: h.mls });
+      }
+      found += kept.length;
+      if (kept.length || rejects.length) {
+        const rows = kept.map(toSheetRow);
+        if (googleReady() && googleCfg().autoSync) {
+          const r = await googleSync(rows, rejects);
+          if (r.ok) { runKpi.pushed += r.leads.added; log(`[Redfin ${area.county}] sheet: ${r.leads.added} new lead(s)`, 'good'); }
+          else log(`[Redfin ${area.county}] sheet write failed: ${r.error} — kept in the local backup`, 'warn');
+        }
+        writeBackup(rows, rejects);
+        if (kept.length) {
+          const b = writeBoardScan(kept);
+          log(b.ok ? `[Redfin ${area.county}] ${kept.length} lead(s) added to today's Lead Board file` : `could not write the Lead Board file: ${b.error}`, b.ok ? 'good' : 'warn');
+        }
+      }
+      send('report', { leads: kept, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
+    }
+    return { ok: true, found };
+  } catch (e) {
+    log('Redfin scan error: ' + e.message, 'error'); return { ok: false, error: e.message };
+  } finally {
+    control.running = false;
+    try { if (rfWin && !rfWin.isDestroyed()) rfWin.close(); } catch (_) {}
+    rfWin = null;
+    const day = recordKpi(runKpi);
+    const line = `Redfin scan ${control.stopped ? 'STOPPED' : 'COMPLETE'} — ${runKpi.scanned} Coming Soon / Early Access found · `
+      + `${runKpi.reviewed} reviewed → ${runKpi.bucketA} A · ${runKpi.bucketB} B · ${runKpi.bucketC} C.`;
+    log(line, 'good');
+    const board = boardStatus();
+    if (board.count) {
+      try { clipboard.writeText(fs.readFileSync(board.file, 'utf8'));
+        log(`Today's ${board.count} lead(s) are copied — open the Lead Board, click "Add scan", and paste.`, 'good'); } catch (_) {}
+    }
+    send('board', board);
+    send('kpi', { today: day, history: kpiReport() });
+    send('done', { stopped: control.stopped, summary: line, redfin: true });
+  }
+});
 
 // ---------- the Lead Board hand-off ----------
 // One file per day, in Documents/FlipScout, holding every lead the day's runs

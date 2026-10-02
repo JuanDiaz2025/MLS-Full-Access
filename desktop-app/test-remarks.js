@@ -82,6 +82,41 @@ const eq = (a, b, m) => {
   eq(core.redfinUrlFrom(body, 'College Terrace'), '', 'Redfin: no street number, no guess');
 }
 
+// ---- Redfin: Coming Soon / Early Access ----
+{
+  const ac = '{}&&{"payload":{"sections":[{"rows":[{"name":"San Francisco","url":"/city/17151/CA/San-Francisco"},'
+    + '{"name":"San Francisco County","url":"/county/343/CA/San-Francisco-County"}]}]}}';
+  eq(core.redfinCountyPath(ac, 'San Francisco'), '/county/343/CA/San-Francisco-County', 'Redfin: county page from the lookup, not the city');
+  eq(core.redfinCountyPath(ac, 'Marin'), '', 'Redfin: wrong county is no page');
+  eq(core.redfinSearchUrl('/county/343/CA/San-Francisco-County', 1500, 1),
+    'https://www.redfin.com/county/343/CA/San-Francisco-County/filter/property-type=house,max-price=1.5M,sort=lo-days', 'Redfin: search URL');
+  eq(core.redfinSearchUrl('/county/1/CA/San-Mateo-County', 2000, 3).endsWith('max-price=2M,sort=lo-days/page-3'), true, 'Redfin: $2M cap and page 3');
+  const card = core.redfinCard({ href: 'https://www.redfin.com/CA/San-Francisco/21-College-Ter-94112/home/809328?x=1',
+    text: 'COMING SOON\n$995,000\n3 beds\n2 baths\n2,185 sq ft\n21 College Ter, San Francisco, CA 94112\nListing by Coldwell Banker' });
+  eq([card.homeId, card.early, card.badge, card.price, card.beds, card.baths, card.sqft, card.addr],
+    ['809328', true, 'COMING SOON', 995000, 3, 2, 2185, '21 College Ter, San Francisco, CA 94112'], 'Redfin: a Coming Soon card read');
+  const plain = core.redfinCard({ href: 'https://www.redfin.com/CA/Oakland/1-A-St-94601/home/5',
+    text: 'NEW 3 HRS AGO\n$700,000\n2 beds\n1 bath\n900 sq ft\n1 A St, Oakland, CA 94601\nNew roof coming soon per seller' });
+  eq(plain.early, false, 'Redfin: an Active card is not kept, even when the description says "coming soon"');
+  eq(core.redfinCard({ href: 'https://www.redfin.com/CA/Oakland/1-A-St-94601/home/5', text: 'EARLY ACCESS\n$700,000\n2 beds' }).early, true, 'Redfin: Early Access badge');
+  eq(core.redfinCard({ href: 'https://www.redfin.com/CA/Oakland/12-B-Ave-94601/home/6', text: 'COMING SOON\n$700,000' }).addr,
+    '12 B Ave, Oakland, CA 94601', 'Redfin: address from the link when the card has none');
+  eq(core.redfinCard({ href: 'https://www.redfin.com/city/1/CA/Oakland', text: '' }), null, 'Redfin: not a home link');
+  const h = core.parseRedfinHome('COMING SOON\n21 College Ter\nAbout this home\nExceptional Renovation Opportunity. Bring your imagination. Offers due Tuesday 10/6/26 by 5pm.\nShow more\n'
+    + 'Listed by Karyn Kambur • Coldwell Banker\nBuilt in 1914\nLot Size: 2,500 sq ft\nProperty Type: Single Family Residential\n3 days on Redfin\nSource: San Francisco MLS #426150277');
+  eq([h.year, h.dom, h.agent, h.mls, h.lotSqft, h.propClass, /Renovation Opportunity/.test(h.remarks), /COMING SOON/i.test(h.status)],
+    [1914, 3, 'Karyn Kambur', 'SF426150277', 2500, 'Res. Single Family', true, true], 'Redfin: home page facts, SFAR number gets SF');
+  eq(core.redfinMlsId('ML82063204', 'MLSListings'), 'ML82063204', 'Redfin: MLSListings number kept as is');
+  eq([core.redfinLabel('COMING SOON'), core.redfinLabel('Early Access'), core.redfinLabel('Compass Exclusive')],
+    ['Coming Soon', 'Coming Soon · Early Access', 'Private Listing'], 'Redfin: board label is coloured Coming Soon / Private');
+  eq(core.redfinPhotoUrls('<img src="https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_0.jpg"> "https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_1_0.jpg" https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_0.jpg').length,
+    2, 'Redfin: photo URLs deduplicated');
+  const bl = core.boardLead({ mls: 'RF809328', address: '21 College Ter, San Francisco, CA 94112', city: 'San Francisco', zip: '94112',
+    mlsStatus: core.redfinLabel('COMING SOON'), redfin: card.url });
+  eq([bl.mls, bl.addr, bl.mlsStatus, bl.redfin], ['RF809328', '21 College Ter, San Francisco, CA 94112', 'Coming Soon',
+    'https://www.redfin.com/CA/San-Francisco/21-College-Ter-94112/home/809328'], 'Redfin: board lead keeps one address and its Redfin page');
+}
+
 // ---- the page-reading snippets must reach the page with their backslashes ----
 {
   const src = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
