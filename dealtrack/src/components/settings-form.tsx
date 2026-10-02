@@ -17,6 +17,7 @@ export type SettingsField = {
   prefix?: string // e.g. "$"
   suffix?: string // e.g. "%"
   placeholder?: string
+  options?: { value: string; label: string }[] // a dropdown instead of a text box
 }
 
 export default function SettingsForm({
@@ -39,13 +40,23 @@ export default function SettingsForm({
             <span className="text-xs font-medium text-muted-foreground">{f.label}</span>
             <span className="flex items-center gap-1">
               {f.prefix && <span className="text-muted-foreground">{f.prefix}</span>}
-              <input
-                name={f.name}
-                defaultValue={f.value}
-                inputMode="decimal"
-                placeholder={f.placeholder}
-                className="h-9 w-full rounded-lg border border-input bg-background px-2 tabular-nums"
-              />
+              {f.options ? (
+                <select name={f.name} defaultValue={f.value} className="h-9 w-full rounded-lg border border-input bg-background px-2">
+                  {f.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  name={f.name}
+                  defaultValue={f.value}
+                  inputMode="decimal"
+                  placeholder={f.placeholder}
+                  className="h-9 w-full rounded-lg border border-input bg-background px-2 tabular-nums"
+                />
+              )}
               {f.suffix && <span className="text-muted-foreground">{f.suffix}</span>}
             </span>
             {f.hint && <span className="text-xs text-muted-foreground">{f.hint}</span>}

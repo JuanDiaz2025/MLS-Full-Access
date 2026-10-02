@@ -9,7 +9,7 @@ import { refresh } from "next/cache"
 import { MANUAL_CHECKS } from "@/lib/audit"
 import { isAdmin, isSignedIn } from "@/lib/auth"
 import { rememberName } from "@/lib/people"
-import { updateData } from "@/lib/store"
+import { updateData, type GradeSettings } from "@/lib/store"
 
 export type FormState = { ok?: boolean; message?: string }
 
@@ -79,6 +79,24 @@ export async function saveAlertSettings(_prev: FormState, form: FormData): Promi
   })
   refresh()
   return { ok: true, message: "Saved." }
+}
+
+export async function saveGradeSettings(_prev: FormState, form: FormData): Promise<FormState> {
+  if (!(await isAdmin())) return { ok: false, message: "Only admins can change how the grade works. Sign in as an admin." }
+  const name = await signedName(form)
+  if (!name) return { ok: false, message: "Type your name, so everyone can see who changed the grade." }
+
+  const leadCost = money(form, "leadCost", "What a lead usually costs")
+  if (typeof leadCost === "string") return { ok: false, message: leadCost }
+  if (!leadCost) return { ok: false, message: "Type what a lead usually costs, e.g. 1500." }
+  const strictness = String(form.get("strictness")) as GradeSettings["strictness"]
+  if (!["relaxed", "normal", "strict"].includes(strictness)) return { ok: false, message: "Pick how strict the grade is." }
+
+  await updateData((d) => {
+    d.grade = { leadCost, strictness, updatedBy: name, updatedAt: new Date().toISOString() }
+  })
+  refresh()
+  return { ok: true, message: "Saved. The grade uses it now." }
 }
 
 // Ticks (or unticks) a go-live check that only a person can confirm, like after-hours coverage.

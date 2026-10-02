@@ -2,13 +2,16 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, CircleCheck } from "lucide-react"
 
+import { saveGradeSettings } from "@/app/actions/settings"
 import CompareChart from "@/components/dashboard/compare-chart"
 import { formatConversions, formatDate, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
 import TrendKpis from "@/components/dashboard/trend-kpis"
 import MetricPicker from "@/components/metric-picker"
 import RefreshButton from "@/components/refresh-button"
-import { DataTable, PageHeader, Pill, ReportProblem, Section, StatusPill } from "@/components/report"
+import { AdminLink, DataTable, PageHeader, Pill, ReportProblem, Section, StatusPill } from "@/components/report"
+import SettingsForm from "@/components/settings-form"
 import { bySeverity, checkAlerts, googleAdsRules } from "@/lib/alert-rules"
+import { isAdmin } from "@/lib/auth"
 import { getPacing, type Pacing } from "@/lib/budget"
 import { isOpen } from "@/lib/compliance-rules"
 import { formatDay, parseRange, rangeQuery, today, type DateRange } from "@/lib/date-range"
@@ -19,7 +22,8 @@ import { lastFetchedAt } from "@/lib/google-ads/client"
 import { load, type Loaded } from "@/lib/load"
 import { OVERVIEW_METRICS, delta, formatUnit, metricById, type MetricDef } from "@/lib/overview-metrics"
 import { completeWeeks, stageOf } from "@/lib/negative-batches"
-import { readData, type AlertRecord, type NegativeBatch } from "@/lib/store"
+import { currentName } from "@/lib/people"
+import { DEFAULT_GRADE, readData, type AlertRecord, type GradeSettings, type NegativeBatch } from "@/lib/store"
 import { cn } from "@/lib/utils"
 
 export const metadata: Metadata = { title: "Overview · DealTrack" }
@@ -42,7 +46,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
   const savedData = load(() => readData())
   // Calls Google counted in the period (it lists them by time, counted back from today).
   const callDays = Math.min(365, Math.round((Date.parse(`${today()}T00:00:00Z`) - Date.parse(`${range.from}T00:00:00Z`)) / 86_400_000))
-  const [result, saved, pacing, alerts, calls] = await Promise.all([
+  const [result, saved, pacing, alerts, calls, admin, personName] = await Promise.all([
     load(async () => {
       const [account, overview, campaigns, terms, locations] = await Promise.all([
         getAccount(),
@@ -57,6 +61,8 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
     savedData.then((s) => (s.ok ? load(() => getPacing(s.data.budget)) : s)),
     savedData.then((s) => (s.ok ? load(() => checkAlerts(googleAdsRules(s.data))) : s)),
     load(async () => (await getCalls(callDays)).filter((c) => c.start.slice(0, 10) >= range.from && c.start.slice(0, 10) <= range.to)),
+    isAdmin(),
+    currentName(),
   ])
 
   if (!result.ok) {
@@ -90,8 +96,10 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
   const waitingRequests = saved.ok ? saved.data.changeRequests.filter(isOpen) : []
   const callList: Call[] | null = calls.ok ? calls.data : null
   const missedCalls = callList ? callList.filter((c) => c.missed).length : 0
+  const gradeSettings = saved.ok ? saved.data.grade : DEFAULT_GRADE
   const todos = doToday({
     q,
+    grade: gradeSettings,
     totalsCost: totals.cost,
     leads: totals.leads,
     attention: {
@@ -106,7 +114,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
     missedCalls,
     waitingRequests: waitingRequests.length,
   })
-  const grade = gradeOf(todos)
+  const grade = gradeOf(todos, gradeSettings)
   const callsTile = {
     label: "Calls from ads",
     value: callList ? formatNumber(callList.length) : "—",
@@ -133,7 +141,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
         <RefreshButton />
       </p>
 
-      <AtAGlance grade={grade} totals={totals} before={before} range={range} />
+      <AtAGlance grade={grade} totals={totals} before={before} range={range} leadCost={gradeSettings.leadCost} />
 
       <DoToday todos={todos} />
 
@@ -201,6 +209,8 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
           ]}
         />
       </Section>
+
+      <GradeSettingsSection settings={gradeSettings} admin={admin} personName={personName} />
 
       <Glossary />
     </>
@@ -330,6 +340,7 @@ const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 } as const
 // places, and campaigns that brought nothing back, missed calls, and changes waiting for approval.
 function doToday(input: {
   q: string
+  grade: GradeSettings
   totalsCost: number
   leads: number
   attention: {
@@ -345,12 +356,15 @@ function doToday(input: {
   waitingRequests: number
 }): Todo[] {
   const { q, totalsCost, leads, attention: a } = input
+  const { leadCost } = input.grade
   const share = (n: number) => (totalsCost ? n / totalsCost : 0)
   const out: Todo[] = []
-  if (totalsCost >= 200 && leads === 0) {
+  // Spending less than a lead usually costs, with no lead yet, is normal; it only counts as a
+  // problem past that line, and as urgent past twice it.
+  if (totalsCost >= leadCost && leads === 0) {
     out.push({
       key: "no-leads",
-      severity: "critical",
+      severity: totalsCost >= 2 * leadCost ? "critical" : "high",
       title: `${formatUsd(totalsCost)} spent and Google recorded no leads`,
       detail: "Either the ads aren't bringing sellers or conversion tracking is broken. Check tracking first.",
       href: "/conversions",
@@ -370,7 +384,7 @@ function doToday(input: {
   if (a.wastedTermCost > 0) {
     out.push({
       key: "wasted-terms",
-      severity: share(a.wastedTermCost) >= 0.2 ? "high" : "medium",
+      severity: a.wastedTermCost < leadCost ? "low" : share(a.wastedTermCost) >= 0.2 ? "high" : "medium",
       title: `Block wasted searches: ${formatUsd(a.wastedTermCost)} on ${formatNumber(a.wastedTerms)} search terms with no leads`,
       detail: `${formatPercent(share(a.wastedTermCost), 0)} of spend.${a.suggested ? ` ${a.suggested} negative keyword${a.suggested === 1 ? "" : "s"} suggested.` : ""}`,
       href: `/search-terms${q}`,
@@ -387,13 +401,15 @@ function doToday(input: {
       cost: a.outsideCost,
     })
   }
-  if (a.deadCampaigns.length) {
-    const cost = a.deadCampaigns.reduce((s, c) => s + c.metrics.cost, 0)
+  // Only campaigns that spent more than a lead usually costs; below that it's too early to tell.
+  const dead = a.deadCampaigns.filter((c) => c.metrics.cost >= leadCost)
+  if (dead.length) {
+    const cost = dead.reduce((s, c) => s + c.metrics.cost, 0)
     out.push({
       key: "dead-campaigns",
       severity: share(cost) >= 0.25 ? "high" : "medium",
-      title: `${a.deadCampaigns.length} campaign${a.deadCampaigns.length === 1 ? "" : "s"} spent ${formatUsd(cost)} with no leads`,
-      detail: a.deadCampaigns
+      title: `${dead.length} campaign${dead.length === 1 ? "" : "s"} spent ${formatUsd(cost)} with no leads`,
+      detail: dead
         .slice(0, 3)
         .map((c) => c.name)
         .join(", "),
@@ -435,9 +451,12 @@ function doToday(input: {
 
 // A grade for the account, like One Marketing Command Center's: every problem costs points,
 // more for worse ones.
-function gradeOf(todos: Todo[]) {
+const STRICTNESS = { relaxed: 0.5, normal: 1, strict: 1.5 } as const
+
+function gradeOf(todos: Todo[], settings: GradeSettings) {
   const cost = { critical: 25, high: 15, medium: 5, low: 0 } as const
-  const score = Math.max(0, 100 - todos.reduce((s, t) => s + cost[t.severity], 0))
+  const off = todos.reduce((s, t) => s + cost[t.severity], 0) * STRICTNESS[settings.strictness]
+  const score = Math.max(0, Math.round(100 - off))
   const letter = score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : score >= 40 ? "D" : "F"
   const words = { A: "Healthy", B: "Mostly fine", C: "Needs work", D: "Losing money", F: "Urgent fixes needed" }[letter]
   const tone = letter === "A" || letter === "B" ? "good" : letter === "C" ? "warn" : "bad"
@@ -447,7 +466,19 @@ function gradeOf(todos: Todo[]) {
 type Totals = { cost: number; leads: number; clicks: number }
 const change = (now: number, before: number) => (before ? (now - before) / before : null)
 
-function AtAGlance({ grade, totals, before, range }: { grade: ReturnType<typeof gradeOf>; totals: Totals; before: Totals; range: DateRange }) {
+function AtAGlance({
+  grade,
+  totals,
+  before,
+  range,
+  leadCost,
+}: {
+  grade: ReturnType<typeof gradeOf>
+  totals: Totals
+  before: Totals
+  range: DateRange
+  leadCost: number
+}) {
   const period = range.preset ? range.label.toLowerCase().replace(/^last/, "in the last") : `from ${formatDay(range.from)} to ${formatDay(range.to)}`
   const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
   const cpl = totals.leads ? totals.cost / totals.leads : null
@@ -456,7 +487,9 @@ function AtAGlance({ grade, totals, before, range }: { grade: ReturnType<typeof 
     ? `Your ads didn't spend anything ${period}.`
     : totals.leads
       ? `${cap(period)} you spent ${formatUsd(totals.cost)} and got ${formatConversions(totals.leads)} lead${totals.leads === 1 ? "" : "s"} from Google Ads, at ${formatUsd(cpl!)} each.`
-      : `${cap(period)} you spent ${formatUsd(totals.cost)} but Google Ads recorded no leads.`
+      : `${cap(period)} you spent ${formatUsd(totals.cost)} but Google Ads recorded no leads.${
+          totals.cost < leadCost ? ` That's still under what a lead usually costs (${formatUsd(leadCost)}), so it's too early to judge.` : ""
+        }`
   const leadsChange = change(totals.leads, before.leads)
   const cplChange = cpl !== null && beforeCpl ? (cpl - beforeCpl) / beforeCpl : null
   const trend =
@@ -495,6 +528,9 @@ function AtAGlance({ grade, totals, before, range }: { grade: ReturnType<typeof 
           </span>
         </h2>
         <p className="text-sm">{story}</p>
+        <a href="#grade" className="w-fit text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+          {grade.score} out of 100 · How the grade works
+        </a>
         {trend && (
           <p
             className={cn(
@@ -507,6 +543,59 @@ function AtAGlance({ grade, totals, before, range }: { grade: ReturnType<typeof 
         )}
       </div>
     </section>
+  )
+}
+
+const STRICTNESS_LABEL = {
+  relaxed: "Relaxed: half the points off",
+  normal: "Normal",
+  strict: "Strict: half again more points off",
+} as const
+
+function GradeSettingsSection({ settings, admin, personName }: { settings: GradeSettings; admin: boolean; personName: string }) {
+  return (
+    <Section
+      id="grade"
+      title="How the grade works"
+      description={
+        <>
+          Every item in “Do these today” takes points off 100: urgent 25, big 15, small 5, minor 0. A is 90+, B 75+, C 60+, D 40+, below that F. Spend
+          with no leads only counts once it passes what a lead usually costs, so one expensive click doesn&apos;t sink the grade. Alerts have their
+          own thresholds on the{" "}
+          <Link href="/alerts" className="text-primary hover:underline">
+            Alerts page
+          </Link>
+          .{settings.updatedBy && ` Last changed by ${settings.updatedBy}.`}
+        </>
+      }
+    >
+      {admin ? (
+        <SettingsForm
+          action={saveGradeSettings}
+          personName={personName}
+          fields={[
+            {
+              name: "leadCost",
+              label: "What a lead usually costs",
+              prefix: "$",
+              value: String(settings.leadCost),
+              hint: "In San Francisco this can be well over $1,000. Spend with no leads below this is “too early”, not a problem.",
+            },
+            {
+              name: "strictness",
+              label: "How strict",
+              value: settings.strictness,
+              options: (["relaxed", "normal", "strict"] as const).map((v) => ({ value: v, label: STRICTNESS_LABEL[v] })),
+              hint: "How many points each problem takes off.",
+            },
+          ]}
+        />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          A lead is counted as costing about {formatUsd(settings.leadCost)}; strictness is {settings.strictness}. <AdminLink />
+        </p>
+      )}
+    </Section>
   )
 }
 

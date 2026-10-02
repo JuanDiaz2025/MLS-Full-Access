@@ -34,6 +34,16 @@ export type AlertSettings = {
   updatedAt?: string
 }
 
+// How strict the Overview grade is. A campaign that hasn't yet spent what a lead usually costs
+// isn't failing; it's just early. In expensive markets (San Francisco clicks can be $300) that
+// line is much higher.
+export type GradeSettings = {
+  leadCost: number // what a lead usually costs; spend with no leads below this isn't a problem yet
+  strictness: "relaxed" | "normal" | "strict"
+  updatedBy?: string
+  updatedAt?: string
+}
+
 export type AlertRecord = {
   key: string // stable id of the condition, e.g. "budget:pause-line:2026-10"
   severity: "critical" | "high" | "medium" | "info"
@@ -188,6 +198,7 @@ export type Data = {
   version: 1
   budget: BudgetSettings
   alerts: AlertSettings
+  grade: GradeSettings
   alertLog: AlertRecord[]
   batches: NegativeBatch[]
   keywordBatches: KeywordBatch[]
@@ -204,10 +215,13 @@ export const DEFAULT_ALERTS: AlertSettings = {
   invalidClickRate: 0.25,
 }
 
+export const DEFAULT_GRADE: GradeSettings = { leadCost: 1000, strictness: "normal" }
+
 const empty = (): Data => ({
   version: 1,
   budget: { monthly: null, alertLine: null, pauseLine: null },
   alerts: { ...DEFAULT_ALERTS },
+  grade: { ...DEFAULT_GRADE },
   alertLog: [],
   batches: [],
   keywordBatches: [],
@@ -232,6 +246,7 @@ export async function readData(): Promise<Data> {
       ...saved,
       budget: { ...base.budget, ...saved.budget },
       alerts: { ...base.alerts, ...saved.alerts },
+      grade: { ...base.grade, ...saved.grade },
       alertLog: Array.isArray(saved.alertLog) ? saved.alertLog : [],
       // Older files may lack fields added later; fill them in so pages can rely on them.
       batches: Array.isArray(saved.batches)
