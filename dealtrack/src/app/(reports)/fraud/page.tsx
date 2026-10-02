@@ -74,6 +74,11 @@ export default async function FraudPage({ searchParams }: { searchParams: Promis
   const view: View = VIEWS.some((v) => v.id === asked) ? (asked as View) : "overview"
   const campaignId = /^\d+$/.test(first(params.campaign) ?? "") ? first(params.campaign)! : ""
   const day = /^\d{4}-\d{2}-\d{2}$/.test(first(params.day) ?? "") ? first(params.day)! : ""
+  // The refund claim can open with chosen days ticked (from the "Still claimable" tile).
+  const days = (first(params.days) ?? "")
+    .split(",")
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .slice(0, 60)
   const who = KINDS.some((k) => k.id === first(params.who)) ? (first(params.who) as VisitKind | "all") : "all"
   const ip = /^[0-9a-f.:/]{3,60}$/i.test(first(params.ip) ?? "") ? first(params.ip)! : ""
   const campaigns = await load(() => getEditableCampaigns())
@@ -120,8 +125,11 @@ export default async function FraudPage({ searchParams }: { searchParams: Promis
           Showing only <span className="font-medium">{chosen.name}</span> ({chosen.status === "ENABLED" ? "running" : "paused"}).
         </p>
       )}
-      <Suspense key={`${view}|${range.from}|${range.to}|${campaignId}|${day}|${who}|${ip}`} fallback={<PageLoading message={LOADING[view]} />}>
-        <TabBody view={view} range={range} campaignId={chosen ? campaignId : undefined} day={day} who={who} ip={ip} />
+      <Suspense
+        key={`${view}|${range.from}|${range.to}|${campaignId}|${day}|${who}|${ip}|${days.join(",")}`}
+        fallback={<PageLoading message={LOADING[view]} />}
+      >
+        <TabBody view={view} range={range} campaignId={chosen ? campaignId : undefined} day={day} who={who} ip={ip} days={days} />
       </Suspense>
     </>
   )
@@ -142,6 +150,7 @@ async function TabBody({
   day,
   who,
   ip,
+  days,
 }: {
   view: View
   range: DateRange
@@ -149,11 +158,12 @@ async function TabBody({
   day: string
   who: VisitKind | "all"
   ip: string
+  days: string[]
 }) {
   if (view === "clicks") return <ClicksTab range={range} campaignId={campaignId} day={day} />
   if (view === "visitors") return <VisitorsTab range={range} who={who} ip={ip} />
   if (view === "leads") return <LeadsTab range={range} />
-  if (view === "claim") return <ClaimTab range={range} campaignId={campaignId} />
+  if (view === "claim") return <ClaimTab range={range} campaignId={campaignId} days={days} />
   return <OverviewTab range={range} campaignId={campaignId} />
 }
 
@@ -264,8 +274,15 @@ async function OverviewTab({ range, campaignId }: { range: DateRange; campaignId
           {
             label: "Still claimable",
             value: p ? formatNumber(claimable.length) : "—",
-            note: `Google takes claims up to ${CLAIM_DAYS} days after the clicks`,
+            note: claimable.length
+              ? claimable
+                  .slice(0, 3)
+                  .map((d) => `${formatDay(d.date)} (${CLAIM_DAYS - ageDays(d.date)} days left)`)
+                  .join(", ") + (claimable.length > 3 ? ` and ${claimable.length - 3} more` : "")
+              : `Google takes claims up to ${CLAIM_DAYS} days after the clicks`,
             tone: claimable.length ? "bad" : "default",
+            href: claimable.length ? `/fraud${join}view=claim&days=${claimable.map((d) => d.date).join(",")}${camp}` : undefined,
+            linkLabel: claimable.length === 1 ? "Claim this day" : "Claim these days",
           },
           {
             label: "Invalid clicks filtered",
@@ -1094,7 +1111,7 @@ async function LeadsTab({ range }: { range: DateRange }) {
 
 // ---- Refund claim ----------------------------------------------------------------------------
 
-async function ClaimTab({ range, campaignId }: { range: DateRange; campaignId?: string }) {
+async function ClaimTab({ range, campaignId, days }: { range: DateRange; campaignId?: string; days: string[] }) {
   const [patterns, account, visits] = await Promise.all([
     load(() => getClickPatterns(range, campaignId)),
     load(() => getAccount()),
@@ -1126,6 +1143,7 @@ async function ClaimTab({ range, campaignId }: { range: DateRange; campaignId?: 
         oldestClaimable={addDays(today(), -CLAIM_DAYS)}
         oldestDetail={addDays(today(), -(CLICK_DETAIL_DAYS - 1))}
         formUrl={CLAIM_FORM}
+        picked={days.length ? days : undefined}
       />
     </>
   )

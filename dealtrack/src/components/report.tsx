@@ -70,26 +70,39 @@ export function Section({
   )
 }
 
-export type Kpi = { label: string; value: string; note?: string; tone?: "default" | "bad" | "good" }
+// `href` makes the tile a link (with `linkLabel` as its call to action).
+export type Kpi = { label: string; value: string; note?: string; tone?: "default" | "bad" | "good"; href?: string; linkLabel?: string }
 
 export function KpiGrid({ items }: { items: Kpi[] }) {
   return (
     <section aria-label="Summary" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-      {items.map((kpi) => (
-        <div key={kpi.label} className="rounded-2xl border bg-card p-4 shadow-xs">
-          <p className="text-xs text-muted-foreground">{kpi.label}</p>
-          <p
-            className={cn(
-              "mt-1.5 text-2xl font-semibold tracking-tight tabular-nums",
-              kpi.tone === "bad" && "text-destructive",
-              kpi.tone === "good" && "text-emerald-600",
-            )}
-          >
-            {kpi.value}
-          </p>
-          {kpi.note && <p className="mt-1 text-xs text-muted-foreground">{kpi.note}</p>}
-        </div>
-      ))}
+      {items.map((kpi) => {
+        const body = (
+          <>
+            <p className="text-xs text-muted-foreground">{kpi.label}</p>
+            <p
+              className={cn(
+                "mt-1.5 text-2xl font-semibold tracking-tight tabular-nums",
+                kpi.tone === "bad" && "text-destructive",
+                kpi.tone === "good" && "text-emerald-600",
+              )}
+            >
+              {kpi.value}
+            </p>
+            {kpi.note && <p className="mt-1 text-xs text-muted-foreground">{kpi.note}</p>}
+            {kpi.href && kpi.linkLabel && <p className="mt-1.5 text-xs font-medium text-primary group-hover:underline">{kpi.linkLabel} →</p>}
+          </>
+        )
+        return kpi.href ? (
+          <Link key={kpi.label} href={kpi.href} className="group rounded-2xl border bg-card p-4 shadow-xs hover:border-primary/40">
+            {body}
+          </Link>
+        ) : (
+          <div key={kpi.label} className="rounded-2xl border bg-card p-4 shadow-xs">
+            {body}
+          </div>
+        )
+      })}
     </section>
   )
 }

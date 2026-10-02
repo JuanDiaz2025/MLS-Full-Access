@@ -70,6 +70,7 @@ export default function ClaimBuilder({
   oldestClaimable,
   oldestDetail,
   formUrl,
+  picked,
 }: {
   account: { id: string; name: string }
   accountLabel: string
@@ -83,10 +84,11 @@ export default function ClaimBuilder({
   oldestClaimable: string
   oldestDetail: string
   formUrl: string
+  picked?: string[] // days to start with ticked (e.g. from the "Still claimable" tile)
 }) {
   const flaggedSet = useMemo(() => new Set(flagged), [flagged])
   const [showAll, setShowAll] = useState(flagged.length === 0)
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(flagged.filter((d) => d >= oldestClaimable)))
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(picked ?? flagged.filter((d) => d >= oldestClaimable)))
   const [clicks, setClicks] = useState<AdClick[]>(initialClicks)
   const [loaded, setLoaded] = useState<Set<string>>(() => new Set(loadedDays))
   const [clickError, setClickError] = useState("")
@@ -137,6 +139,29 @@ export default function ClaimBuilder({
   const rows = useMemo(() => evidenceRows(input, today), [input, today])
   const text = useMemo(() => claimText(input, rows), [input, rows])
   const withIp = rows.filter((r) => r.siteIp || r.logIp).length
+  const fromPosthog = rows.filter((r) => r.siteIp).length
+  const fromLogs = rows.filter((r) => r.logIp).length
+  // Every ad visit PostHog saw on the picked days, by IP address, most visits first.
+  const ips = useMemo(() => {
+    const by = new Map<string, { ip: string; visits: number; place: string; first: string; last: string; forms: number }>()
+    for (const v of input.visits) {
+      if (!v.ip) continue
+      const e = by.get(v.ip) ?? {
+        ip: v.ip,
+        visits: 0,
+        place: [v.city, v.region, v.country].filter(Boolean).join(", "),
+        first: v.startedAt,
+        last: v.startedAt,
+        forms: 0,
+      }
+      e.visits += 1
+      if (v.submitted) e.forms += 1
+      if (v.startedAt < e.first) e.first = v.startedAt
+      if (v.startedAt > e.last) e.last = v.startedAt
+      by.set(v.ip, e)
+    }
+    return [...by.values()].sort((a, b) => b.visits - a.visits)
+  }, [input.visits])
 
   const toggle = (date: string) =>
     setSelected((s) => {
@@ -246,6 +271,45 @@ export default function ClaimBuilder({
             Google keeps single clicks for 90 days, so older days are claimed with the daily numbers plus whatever your logs show.
           </p>
         )}
+        {chosen.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-xl border bg-muted/20 p-3 text-sm">
+            <p className="font-medium">IP addresses on these days, from PostHog</p>
+            <p className="text-xs text-muted-foreground">
+              PostHog (your site analytics) records the IP address of every visitor who lands from an ad, with the ad&apos;s click ID (GCLID).
+              DealTrack matches that click ID to Google&apos;s billed click, so each row in the spreadsheet gets its IP. Server logs (step 2) add a
+              second, independent record of the same clicks.
+            </p>
+            {ips.length ? (
+              <ul className="flex max-h-56 flex-col divide-y overflow-y-auto rounded-lg border bg-card">
+                {ips.slice(0, 30).map((e) => (
+                  <li key={e.ip} className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5">
+                    <span className="flex min-w-0 flex-col">
+                      <span className="font-mono text-xs break-all">{e.ip}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {e.place || "Unknown place"} · {pacific(e.first)}
+                        {e.visits > 1 ? ` to ${pacific(e.last)}` : ""}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      {e.forms > 0 && <Pill tone="green">Sent a form</Pill>}
+                      <Pill tone={e.visits >= 3 ? "red" : e.visits === 2 ? "amber" : "gray"}>
+                        {e.visits} ad visit{e.visits === 1 ? "" : "s"}
+                      </Pill>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                PostHog has no ad visits with an IP address on these days (it keeps data for about a year; ad blockers hide some visitors). Add the
+                server logs in step 2 for IPs.
+              </p>
+            )}
+            {ips.length > 30 && (
+              <p className="text-[11px] text-muted-foreground">Showing the 30 with the most visits of {ips.length}; all are in the spreadsheet.</p>
+            )}
+          </div>
+        )}
       </section>
 
       <section className={step}>
@@ -346,6 +410,9 @@ export default function ClaimBuilder({
             <div className="flex flex-wrap gap-2 text-sm">
               <Pill tone="violet">{rows.length} clicks in the spreadsheet</Pill>
               <Pill tone={withIp ? "green" : "gray"}>{withIp} with an IP address</Pill>
+              <Pill>
+                IPs: {fromPosthog} from PostHog · {fromLogs} from server logs
+              </Pill>
               {accountLabel && <Pill>Account {accountLabel}</Pill>}
             </div>
             <textarea
