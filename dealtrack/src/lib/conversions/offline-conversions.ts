@@ -194,7 +194,52 @@ async function conversionAction(connection: AdsConnection, account: AdsAccount, 
   const target = targets[kind]?.resourceName
   if (target) return target
   const { name, category } = ACTIONS[kind]
-  const created = await postToAds<{ results?: { resourceName?: string }[] }>(connection, account, "/conversionActions:mutate", {
+  let created: { results?: { resourceName?: string }[] }
+  try {
+    created = await createAction(connection, account, kind, name, category)
+  } catch (e) {
+    // The app's own action is already there (made earlier, maybe by One Marketing Command Center),
+    // but wasn't picked: it's primary, hidden, or not an import. Use it if it fits, else say what
+    // to change in Google Ads instead of failing the same way every hour.
+    if (!(e instanceof AdsApiError) || !/already exists|DUPLICATE_NAME/i.test(e.message)) throw e
+    const existing = await existingAction(connection, account, name, kind)
+    await actionsFile.update((db) => {
+      db[account.customerId] = { ...db[account.customerId], [kind]: existing, v: 2, checkedAt: new Date().toISOString() }
+    })
+    return existing
+  }
+  const resource = created.results?.[0]?.resourceName
+  if (!resource) throw new AdsApiError("Google Ads didn't create the conversion action.")
+  await actionsFile.update((db) => {
+    db[account.customerId] = { ...db[account.customerId], [kind]: resource, v: 2, checkedAt: new Date().toISOString() }
+  })
+  return resource
+}
+
+// The app's own action by name, if it can take this stage's leads; otherwise what to fix.
+async function existingAction(connection: AdsConnection, account: AdsAccount, name: string, kind: ConversionKind) {
+  const rows = (await runQuery(
+    connection,
+    account,
+    `SELECT conversion_action.resource_name, conversion_action.status, conversion_action.type, conversion_action.primary_for_goal
+     FROM conversion_action WHERE conversion_action.name = '${name.replace(/'/g, "\\'")}' AND conversion_action.status != 'REMOVED'`,
+  )) as { conversionAction?: { resourceName?: string; status?: string; type?: string; primaryForGoal?: boolean } }[]
+  const a = rows[0]?.conversionAction
+  const where = "In Google Ads: Goals → Conversions → Summary → open it → Edit settings"
+  if (!a?.resourceName) throw new AdsApiError(`Google Ads says “${name}” already exists but didn't return it. Pick an action for this stage on Leads → Lead automation.`)
+  if (a.type !== "UPLOAD_CLICKS")
+    throw new AdsApiError(`“${name}” already exists in Google Ads but isn't an “Import from clicks” action, so it can't receive leads. Rename or remove it in Google Ads, or pick another action on Leads → Lead automation.`)
+  if (a.status !== "ENABLED")
+    throw new AdsApiError(`“${name}” is ${String(a.status ?? "off").toLowerCase()} in Google Ads. Turn it back on (${where}), or pick another action on Leads → Lead automation.`)
+  if (kind === "invalid" && a.primaryForGoal)
+    throw new AdsApiError(
+      `“${name}” is set as a primary conversion in Google Ads, so junk leads aren't sent to it (Google would bid for more like them). Make it secondary (${where} → Action optimization: Secondary), or pick another secondary action on Leads → Lead automation.`,
+    )
+  return a.resourceName
+}
+
+function createAction(connection: AdsConnection, account: AdsAccount, kind: ConversionKind, name: string, category: string) {
+  return postToAds<{ results?: { resourceName?: string }[] }>(connection, account, "/conversionActions:mutate", {
     operations: [
       {
         create: {
@@ -210,12 +255,6 @@ async function conversionAction(connection: AdsConnection, account: AdsAccount, 
       },
     ],
   })
-  const resource = created.results?.[0]?.resourceName
-  if (!resource) throw new AdsApiError("Google Ads didn't create the conversion action.")
-  await actionsFile.update((db) => {
-    db[account.customerId] = { ...db[account.customerId], [kind]: resource, v: 2, checkedAt: new Date().toISOString() }
-  })
-  return resource
 }
 
 // Errors worth trying again later: a just-created conversion action, or a click Google hasn't
@@ -226,6 +265,8 @@ const SETUP_RETRY_MS = 5 * 60_000
 const OLD_UPLOAD_CLOSED = /ConversionUploadService|limited to existing users/i
 // The old "not found" refusal, from before the app sent to the account that owns the action.
 const NOT_FOUND_BEFORE = /^(?!Google can't find)[\s\S]*Resource not found/i
+// "The specified conversion action name already exists", from before the app reused its own action.
+const NAME_TAKEN_BEFORE = /conversion action name already exists/i
 // Refusals that depend on which account the lead went to.
 const ACCOUNT_RELATED = /Resource not found|can't find the conversion action|terms for enhanced conversions|customer data terms|PERMISSION_DENIED|can't use that Google Ads account/i
 const MAX_TRIES = 12
@@ -451,6 +492,13 @@ export function sendPendingConversions(connection: AdsConnection, account: AdsAc
         // conversion action: try those once more.
         if (entry?.state === "failed" && !entry.fixRetry && NOT_FOUND_BEFORE.test(entry.error ?? "") && !(kind !== "invalid" && lead.status === "not_interested")) {
           const again = { ...entry, state: "pending" as const, tries: 0, error: undefined, lastTry: undefined, fixRetry: true }
+          await updateLead(lead.id, (l) => {
+            l.conversions![kind] = again
+          })
+          lead.conversions![kind] = entry = again
+        }
+        if (entry?.state === "failed" && !entry.nameRetry && NAME_TAKEN_BEFORE.test(entry.error ?? "") && !(kind !== "invalid" && lead.status === "not_interested")) {
+          const again = { ...entry, state: "pending" as const, tries: 0, error: undefined, lastTry: undefined, nameRetry: true }
           await updateLead(lead.id, (l) => {
             l.conversions![kind] = again
           })

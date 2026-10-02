@@ -87,6 +87,8 @@ export type ConversionUpload = {
   retraction?: { state: "pending" | "sent" | "failed"; at: string; tries?: number; lastTry?: string; error?: string }
   // Sent once more after a "not found" refusal, when the app learned to send to the owning account.
   fixRetry?: boolean
+  // Retried once after DealTrack learned to use its existing conversion action when Google said the name was taken.
+  nameRetry?: boolean
   // The Google Ads account it last failed in, and how often it was tried again after the account changed.
   accountId?: string
   accountResets?: number
