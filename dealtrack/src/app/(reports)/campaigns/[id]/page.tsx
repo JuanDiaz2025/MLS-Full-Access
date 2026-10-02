@@ -15,8 +15,8 @@ import MetricPicker from "@/components/metric-picker"
 import { AdminLink, PageHeader, Pill, ReportProblem, Section, StatusPill, enumLabel } from "@/components/report"
 import { isAdmin } from "@/lib/auth"
 import { isOpen, requestStage, requestTitle } from "@/lib/compliance-rules"
-import { addDays, formatDay, parseRange, rangeQuery, today } from "@/lib/date-range"
-import { getCalls } from "@/lib/google-ads/calls"
+import { addDays, formatDay, parseRange, rangeQuery, today, type DateRange } from "@/lib/date-range"
+import { getCalls, type Call } from "@/lib/google-ads/calls"
 import {
   getCampaignAds,
   getCampaignAssets,
@@ -48,7 +48,7 @@ import type { Lead } from "@/lib/leads/types"
 import { load, type Loaded } from "@/lib/load"
 import { OVERVIEW_METRICS, delta, formatUnit, metricById, type MetricDef } from "@/lib/overview-metrics"
 import { checkPage, getPageSpeed } from "@/lib/pagespeed"
-import { DEFAULT_GRADE, readData } from "@/lib/store"
+import { DEFAULT_GRADE, readData, type ChangeRequest, type GradeSettings } from "@/lib/store"
 import { cn } from "@/lib/utils"
 
 export const metadata: Metadata = { title: "Campaign · DealTrack" }
@@ -75,22 +75,49 @@ function fromCampaign(lead: Lead, info: CampaignInfo) {
 const LEARNING = /^LEARNING/
 const leadsText = (n: number) => `${formatConversions(n)} lead${n === 1 ? "" : "s"}`
 
+const TABS = [
+  { id: "summary", label: "Summary" },
+  { id: "ads", label: "Ads" },
+  { id: "landing", label: "Landing page" },
+  { id: "searches", label: "Searches & keywords" },
+  { id: "where", label: "Where & when" },
+  { id: "leads", label: "Leads & budget" },
+  { id: "history", label: "History" },
+] as const
+type TabId = (typeof TABS)[number]["id"]
+
+// Where each to-do points, as a tab of this page.
+const TODO_TAB: Record<string, TabId> = {
+  "/search-terms": "searches",
+  "#searches": "searches",
+  "#keywords": "searches",
+  "/locations": "where",
+  "#where": "where",
+  "/leads": "leads",
+  "#leads": "leads",
+  "#budget": "leads",
+  "/compliance": "history",
+  "#ads": "ads",
+}
+
 export default async function CampaignPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Params> }) {
   const { id } = await params
   if (!validCampaignId(id)) notFound()
   const sp = await searchParams
   const range = parseRange(sp)
   const q = rangeQuery(range)
-  const m1 = metricById(first(sp.m1)) ?? metricById("cost")!
-  const m2 = first(sp.m2) === "none" ? null : (metricById(first(sp.m2)) ?? (m1.id === "leads" ? metricById("cost")! : metricById("leads")!))
+  const tab: TabId = TABS.find((t) => t.id === first(sp.tab))?.id ?? "summary"
+  const tabHref = (t: TabId, extra = "") => `/campaigns/${id}${q ? `${q}&` : "?"}tab=${t}${extra}`
   const callDays = Math.min(365, Math.round((Date.parse(`${today()}T00:00:00Z`) - Date.parse(`${range.from}T00:00:00Z`)) / 86_400_000))
 
-  const [info, overview, list, saved, admin] = await Promise.all([
+  // Every tab needs the campaign, the list for the switcher, and the ads (their count is on the
+  // tab, and the summary and landing page use them). The rest loads only on its own tab.
+  const [info, list, saved, admin, ads] = await Promise.all([
     load(() => getCampaignInfo(id)),
-    load(() => getOverview(range, id)),
     load(() => getAllCampaigns(range)),
     load(() => readData()),
     isAdmin(),
+    load(() => getCampaignAds(id, range)),
   ])
   if (info.ok && !info.data) notFound()
 
@@ -99,38 +126,144 @@ export default async function CampaignPage({ params, searchParams }: { params: P
       <Link href={`/campaigns${q}`} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" aria-hidden /> All campaigns
       </Link>
-      {list.ok && <CampaignSwitcher current={id} campaigns={list.data} query={q} />}
+      {list.ok && <CampaignSwitcher current={id} campaigns={list.data} query={q} tab={tab} />}
     </div>
   )
-  if (!info.ok || !overview.ok) {
+  if (!info.ok) {
     return (
       <>
         {header}
         <PageHeader title="Campaign" description="Everything about one campaign." range={range} />
-        <ReportProblem problem={!info.ok ? info : (overview as Exclude<typeof overview, { ok: true }>)} />
+        <ReportProblem problem={info} />
       </>
     )
   }
   const c = info.data!
-  const ov = overview.data
+  const adList = ads.ok ? ads.data : []
+  const requests = saved.ok ? saved.data.changeRequests.filter((r) => r.campaigns.some((x) => x.id === id)) : []
+  const callsFor = () =>
+    load(async () => (await getCalls(callDays)).filter((call) => call.campaign === c.name && call.start.slice(0, 10) <= range.to))
+  const count: Partial<Record<TabId, number>> = { ads: adList.length, history: requests.filter(isOpen).length || undefined }
 
-  const [ads, assets, keywords, terms, places, schedule, calls, leads, history, editable, negatives] = await Promise.all([
-    load(() => getCampaignAds(id, range)),
-    load(() => getCampaignAssets(id)),
-    load(() => getCampaignKeywords(id, range)),
-    load(() => getSearchTerms(range, id)),
-    load(() => getLocationData(range, id)),
-    load(() => getCampaignSchedule(id, range)),
-    load(async () => (await getCalls(callDays)).filter((call) => call.campaign === c.name && call.start.slice(0, 10) <= range.to)),
-    load(async () =>
-      (await listLeads()).filter((l) => fromCampaign(l, c) && l.createdAt.slice(0, 10) >= range.from && l.createdAt.slice(0, 10) <= range.to),
-    ),
-    load(async () => (await getChangeHistory(addDays(today(), -29), today())).filter((e) => e.campaign === c.name)),
-    admin ? load(() => getEditableCampaigns()) : Promise.resolve(null),
-    admin ? load(() => getCampaignNegatives({ campaignIds: [id] })) : Promise.resolve(null),
+  return (
+    <>
+      {header}
+      <PageHeader title={c.name} description="One campaign: its numbers, ads, landing page, searches, places, hours, and leads." range={range} />
+      <CampaignFacts c={c} />
+
+      <nav aria-label="Campaign sections" className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
+        {TABS.map((t) => (
+          <Link
+            key={t.id}
+            href={tabHref(t.id)}
+            scroll={false}
+            aria-current={t.id === tab ? "page" : undefined}
+            className={cn(
+              "shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground hover:border-primary/40 hover:text-foreground",
+              t.id === tab && "border-primary bg-primary text-primary-foreground hover:text-primary-foreground",
+            )}
+          >
+            {t.label}
+            {count[t.id] !== undefined && <span className="ml-1 opacity-75">({count[t.id]})</span>}
+          </Link>
+        ))}
+      </nav>
+
+      {tab === "summary" && (
+        <SummaryTab
+          c={c}
+          sp={sp}
+          range={range}
+          q={q}
+          ads={adList}
+          requests={requests}
+          grade={saved.ok ? saved.data.grade : DEFAULT_GRADE}
+          calls={callsFor}
+          tabHref={tabHref}
+        />
+      )}
+
+      {tab === "ads" && (
+        <AdsTab ads={ads} assets={await load(() => getCampaignAssets(id))} selected={first(sp.ad)} group={first(sp.group)} tabHref={tabHref} q={q} />
+      )}
+
+      {tab === "landing" && (
+        <Suspense fallback={<LandingSkeleton />}>
+          <LandingSection
+            urls={[
+              ...new Set(
+                adList
+                  .filter((a) => a.status === "ENABLED")
+                  .map((a) => a.finalUrl)
+                  .filter(Boolean),
+              ),
+            ]}
+          />
+        </Suspense>
+      )}
+
+      {tab === "searches" && <SearchesTab id={id} range={range} q={q} admin={admin} />}
+
+      {tab === "where" && (
+        <WhereWhenTab places={await load(() => getLocationData(range, id))} schedule={await load(() => getCampaignSchedule(id, range))} q={q} />
+      )}
+
+      {tab === "leads" && (
+        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+          <LeadsCard
+            leads={await load(async () =>
+              (await listLeads()).filter((l) => fromCampaign(l, c) && l.createdAt.slice(0, 10) >= range.from && l.createdAt.slice(0, 10) <= range.to),
+            )}
+            calls={await callsFor()}
+          />
+          <BudgetCard c={c} />
+        </div>
+      )}
+
+      {tab === "history" && (
+        <HistoryCard
+          history={await load(async () => (await getChangeHistory(addDays(today(), -29), today())).filter((e) => e.campaign === c.name))}
+          requests={requests}
+        />
+      )}
+    </>
+  )
+}
+
+// ---- Tabs -----------------------------------------------------------------------------------
+
+async function SummaryTab({
+  c,
+  sp,
+  range,
+  q,
+  ads,
+  requests,
+  grade,
+  calls,
+  tabHref,
+}: {
+  c: CampaignInfo
+  sp: Params
+  range: DateRange
+  q: string
+  ads: CampaignAd[]
+  requests: ChangeRequest[]
+  grade: GradeSettings
+  calls: () => Promise<Loaded<Call[]>>
+  tabHref: (t: TabId, extra?: string) => string
+}) {
+  const m1 = metricById(first(sp.m1)) ?? metricById("cost")!
+  const m2 = first(sp.m2) === "none" ? null : (metricById(first(sp.m2)) ?? (m1.id === "leads" ? metricById("cost")! : metricById("leads")!))
+  const [overview, keywords, terms, places, callLoad] = await Promise.all([
+    load(() => getOverview(range, c.id)),
+    load(() => getCampaignKeywords(c.id, range)),
+    load(() => getSearchTerms(range, c.id)),
+    load(() => getLocationData(range, c.id)),
+    calls(),
   ])
-
-  const grade = saved.ok ? saved.data.grade : DEFAULT_GRADE
+  if (!overview.ok) return <ReportProblem problem={overview} />
+  const ov = overview.data
   const totals = ov.totals
   const before = ov.previous.totals
   const series = (m: MetricDef) => ov.buckets.map((b: Bucket) => m.value(b))
@@ -138,51 +271,51 @@ export default async function CampaignPage({ params, searchParams }: { params: P
     const m = metricById(mid)!
     return { label: m.label, value: formatUnit(m.unit, m.value(totals)), delta: delta(m, m.value(totals), m.value(before)), note, spark: series(m) }
   }
-
   const termRows = terms.ok ? terms.data : []
   const wasted = termRows.filter((t) => isWaste(t.metrics))
-  const wastedCost = wasted.reduce((s, t) => s + t.metrics.cost, 0)
-  const placeRows = places.ok ? places.data.rows : []
-  const outside = placeRows.filter((p) => p.status === "outside")
-  const callList = calls.ok ? calls.data : null
+  const outside = (places.ok ? places.data.rows : []).filter((p) => p.status === "outside")
+  const callList = callLoad.ok ? callLoad.data : null
   const missedCalls = callList ? callList.filter((x) => x.missed).length : 0
-  const requests = saved.ok ? saved.data.changeRequests.filter((r) => r.campaigns.some((x) => x.id === id)) : []
 
-  // The account-wide to-dos, narrowed to this campaign, then the ones only a campaign has.
-  const anchor: Record<string, string> = { "/search-terms": "#searches", "/locations": "#where", "/leads": "#leads", "/compliance": "#history" }
-  const todos: Todo[] = doToday({
-    q,
-    grade,
-    totalsCost: totals.cost,
-    leads: totals.leads,
-    attention: {
-      wastedTermCost: wastedCost,
-      wastedTerms: wasted.length,
-      suggested: new Set(termRows.filter((t) => t.suggestion && t.status === "NONE").map((t) => t.suggestion)).size,
-      outsideCost: outside.reduce((s, p) => s + p.metrics.cost, 0),
-      outsideTop: outside.slice(0, 3).map((p) => p.city),
-      deadCampaigns: [],
-    },
-    alerts: [],
-    missedCalls,
-    waitingRequests: requests.filter(isOpen).length,
-  }).map((t) => ({ ...t, href: anchor[t.href.split(/[?#]/)[0]] ?? t.href }))
-  todos.push(...campaignTodos(c, ads.ok ? ads.data : [], keywords.ok ? keywords.data : [], totals.lostToBudget))
+  // The account-wide to-dos, narrowed to this campaign, then the ones only a campaign has; each
+  // opens the tab that deals with it.
+  const todos: Todo[] = [
+    ...doToday({
+      q,
+      grade,
+      totalsCost: totals.cost,
+      leads: totals.leads,
+      attention: {
+        wastedTermCost: wasted.reduce((s, t) => s + t.metrics.cost, 0),
+        wastedTerms: wasted.length,
+        suggested: new Set(termRows.filter((t) => t.suggestion && t.status === "NONE").map((t) => t.suggestion)).size,
+        outsideCost: outside.reduce((s, p) => s + p.metrics.cost, 0),
+        outsideTop: outside.slice(0, 3).map((p) => p.city),
+        deadCampaigns: [],
+      },
+      alerts: [],
+      missedCalls,
+      waitingRequests: requests.filter(isOpen).length,
+    }),
+    ...campaignTodos(c, ads, keywords.ok ? keywords.data : [], totals.lostToBudget),
+  ].map((t) => {
+    const to = TODO_TAB[t.href.startsWith("#") ? t.href : t.href.split(/[?#]/)[0]]
+    return to ? { ...t, href: tabHref(to) } : t
+  })
   const rank = { critical: 0, high: 1, medium: 2, low: 3 } as const
   todos.sort((a, b) => rank[a.severity] - rank[b.severity] || b.cost - a.cost)
-  const g = gradeOf(todos, grade)
 
   return (
     <>
-      {header}
-      <PageHeader title={c.name} description={`One campaign: its numbers, ads, landing page, searches, places, hours, and leads.`} range={range} />
-
-      <CampaignFacts c={c} />
-
-      <AtAGlance grade={g} totals={totals} before={before} range={range} leadCost={grade.leadCost} title="This campaign at a glance" />
-
+      <AtAGlance
+        grade={gradeOf(todos, grade)}
+        totals={totals}
+        before={before}
+        range={range}
+        leadCost={grade.leadCost}
+        title="This campaign at a glance"
+      />
       <DoToday todos={todos} />
-
       <TrendKpis
         cols="md:grid-cols-4 xl:grid-cols-8"
         caption={`Changes compare with the ${formatNumber(daysIn(range))} days before (${formatDay(ov.previous.range.from)} – ${formatDay(ov.previous.range.to)}).`}
@@ -207,7 +340,6 @@ export default async function CampaignPage({ params, searchParams }: { params: P
           },
         ]}
       />
-
       <Section
         title="Compare two metrics"
         description={`By ${ov.grain}: ${m1.label.toLowerCase()} on the left${m2 ? `, ${m2.label.toLowerCase()} (dashed) on the right` : ""}.`}
@@ -218,52 +350,42 @@ export default async function CampaignPage({ params, searchParams }: { params: P
           series={[m1, ...(m2 ? [m2] : [])].map((m) => ({ label: m.label, unit: m.unit, values: series(m) }))}
         />
       </Section>
+    </>
+  )
+}
 
-      <AdsSection ads={ads} assets={assets} q={q} />
-
-      <Suspense fallback={<LandingSkeleton />}>
-        <LandingSection
-          urls={
-            ads.ok
-              ? [
-                  ...new Set(
-                    ads.data
-                      .filter((a) => a.status === "ENABLED")
-                      .map((a) => a.finalUrl)
-                      .filter(Boolean),
-                  ),
-                ]
-              : []
-          }
-        />
-      </Suspense>
-
+async function SearchesTab({ id, range, q, admin }: { id: string; range: DateRange; q: string; admin: boolean }) {
+  const [terms, keywords, editable, negatives] = await Promise.all([
+    load(() => getSearchTerms(range, id)),
+    load(() => getCampaignKeywords(id, range)),
+    admin ? load(() => getEditableCampaigns()) : Promise.resolve(null),
+    admin ? load(() => getCampaignNegatives({ campaignIds: [id] })) : Promise.resolve(null),
+  ])
+  return (
+    <>
       <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
         <SearchesCard terms={terms} q={q} />
         <KeywordsCard keywords={keywords} />
       </div>
-
-      <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-        <WhereCard places={places} q={q} />
-        <WhenCard schedule={schedule} />
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-        <BudgetCard c={c} />
-        <LeadsCard leads={leads} calls={calls} />
-      </div>
-
-      {admin && editable?.ok && negatives?.ok && (
-        <BlockSearches terms={termRows} campaigns={editable.data.filter((e) => e.id === id)} existing={negatives.data} />
+      {admin && editable?.ok && negatives?.ok ? (
+        <BlockSearches terms={terms.ok ? terms.data : []} campaigns={editable.data.filter((e) => e.id === id)} existing={negatives.data} />
+      ) : (
+        !admin && (
+          <p className="text-xs text-muted-foreground">
+            Admins can block wasted searches for this campaign right here. <AdminLink />
+          </p>
+        )
       )}
-      {!admin && (
-        <p className="text-xs text-muted-foreground">
-          Admins can block wasted searches for this campaign right here. <AdminLink />
-        </p>
-      )}
-
-      <HistoryCard history={history} requests={requests} />
     </>
+  )
+}
+
+function WhereWhenTab({ places, schedule, q }: { places: Loaded<{ rows: LocationRow[] }>; schedule: Loaded<ScheduleGrid>; q: string }) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+      <WhereCard places={places} q={q} />
+      <WhenCard schedule={schedule} />
+    </div>
   )
 }
 
@@ -390,58 +512,126 @@ function CampaignFacts({ c }: { c: CampaignInfo }) {
 
 const labelTone = { BEST: "green", GOOD: "green", LOW: "red", LEARNING: "violet", PENDING: "gray", UNKNOWN: "gray" } as const
 const strengthTone = { EXCELLENT: "green", GOOD: "green", AVERAGE: "amber", POOR: "red" } as const
-const ADS_SHOWN = 2
-
-function AdsSection({ ads, assets, q }: { ads: Loaded<CampaignAd[]>; assets: Loaded<CampaignAssets>; q: string }) {
+function AdsTab({
+  ads,
+  assets,
+  selected,
+  group,
+  tabHref,
+  q,
+}: {
+  ads: Loaded<CampaignAd[]>
+  assets: Loaded<CampaignAssets>
+  selected?: string
+  group?: string
+  tabHref: (t: TabId, extra?: string) => string
+  q: string
+}) {
   if (!ads.ok) return <ReportProblem problem={ads} />
   const a: CampaignAssets = assets.ok
     ? assets.data
     : { businessName: "", logo: null, images: [], sitelinks: [], callouts: [], snippets: [], phone: "" }
-  const rest = ads.data.slice(ADS_SHOWN)
+  const groups = [...new Set(ads.data.map((x) => x.adGroup))].sort()
+  const shown = group && groups.includes(group) ? ads.data.filter((x) => x.adGroup === group) : ads.data
+  const current = shown.find((x) => x.id === selected) ?? shown[0]
+  const groupParam = group && groups.includes(group) ? `&group=${encodeURIComponent(group)}` : ""
+  const firstLine = (ad: CampaignAd) => shownText((ad.headlines.find((h) => h.pinned === "HEADLINE_1") ?? ad.headlines[0])?.text ?? "(no headlines)")
   return (
-    <Section
-      id="ads"
-      title="Ads"
-      description="How each ad looks on Google (one likely mix: pinned headlines in their spot, Google's best-rated first), with every headline and description. Google tags each Best, Good or Low once it has enough data."
-      actions={
-        <Link href={`/ads${q}`} className="text-sm font-medium text-primary hover:underline">
-          Ads &amp; creatives
-        </Link>
-      }
-    >
-      {!ads.data.length ? (
-        <p className="text-sm text-muted-foreground">No ads in this campaign.</p>
+    <>
+      <Section
+        id="ads"
+        title={`${ads.data.length} ad${ads.data.length === 1 ? "" : "s"}`}
+        description="Pick an ad to see how it looks on Google (one likely mix: pinned headlines in their spot, Google's best-rated first), with every headline and description. Google tags each Best, Good or Low once it has enough data."
+        actions={
+          <Link href={`/ads${q}`} className="text-sm font-medium text-primary hover:underline">
+            Ads &amp; creatives
+          </Link>
+        }
+      >
+        {groups.length > 1 && (
+          <nav aria-label="Ad groups" className="flex flex-wrap gap-1.5">
+            {[
+              { name: "", label: "All ad groups", n: ads.data.length },
+              ...groups.map((g) => ({ name: g, label: g, n: ads.data.filter((x) => x.adGroup === g).length })),
+            ].map((g) => {
+              const on = (g.name || undefined) === (groupParam ? group : undefined)
+              return (
+                <Link
+                  key={g.name || "all"}
+                  href={tabHref("ads", g.name ? `&group=${encodeURIComponent(g.name)}` : "")}
+                  scroll={false}
+                  aria-current={on ? "true" : undefined}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                    on && "border-primary bg-primary text-primary-foreground hover:text-primary-foreground",
+                  )}
+                >
+                  {g.label} ({g.n})
+                </Link>
+              )
+            })}
+          </nav>
+        )}
+        {!current ? (
+          <p className="text-sm text-muted-foreground">No ads in this campaign.</p>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+            <ul className="flex max-h-72 flex-col gap-1.5 overflow-y-auto pr-1 lg:max-h-[46rem]" aria-label="Ads">
+              {shown.map((ad, i) => (
+                <li key={ad.id}>
+                  <Link
+                    href={tabHref("ads", `${groupParam}&ad=${ad.id}`)}
+                    scroll={false}
+                    aria-current={ad.id === current.id ? "true" : undefined}
+                    className={cn(
+                      "flex flex-col gap-1 rounded-lg border p-2.5 text-sm hover:border-primary/40",
+                      ad.id === current.id ? "border-primary bg-primary/5" : "bg-card",
+                      ad.status !== "ENABLED" && "opacity-70",
+                    )}
+                  >
+                    <span className="flex items-start justify-between gap-2">
+                      <span className="line-clamp-2 font-medium">
+                        <span className="text-muted-foreground">{i + 1}. </span>
+                        {firstLine(ad)}
+                      </span>
+                      {ad.status !== "ENABLED" && <StatusPill status={ad.status} />}
+                    </span>
+                    <span className="flex flex-wrap items-center gap-1">
+                      <span className="mr-1 text-[11px] text-muted-foreground">{ad.adGroup}</span>
+                      <Pill tone={strengthTone[ad.strength as keyof typeof strengthTone] ?? "gray"}>{enumLabel(ad.strength)}</Pill>
+                      {ad.approval !== "APPROVED" && <Pill tone={ad.approval === "DISAPPROVED" ? "red" : "amber"}>{enumLabel(ad.approval)}</Pill>}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground tabular-nums">
+                      {formatUsd(ad.metrics.cost)} · {formatNumber(ad.metrics.clicks)} click{ad.metrics.clicks === 1 ? "" : "s"}
+                      {ad.metrics.impressions ? ` · ${formatPercent(rates(ad.metrics).ctr)} CTR` : ""}
+                      {ad.metrics.conversions > 0 && ` · ${leadsText(ad.metrics.conversions)}`}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <AdBlock ad={current} assets={a} />
+          </div>
+        )}
+      </Section>
+      {assets.ok ? (
+        <Section
+          title="What shows with the ads"
+          description="Images, sitelinks, callouts and the call button: the campaign's own, or the account's when it has none."
+        >
+          <AssetsStrip assets={a} />
+        </Section>
       ) : (
-        <div className="flex flex-col gap-6">
-          {ads.data.slice(0, ADS_SHOWN).map((ad) => (
-            <AdBlock key={ad.id} ad={ad} assets={a} />
-          ))}
-          {rest.length > 0 && (
-            <details className="group">
-              <summary className="cursor-pointer list-none text-sm font-medium text-primary hover:underline">
-                <span className="group-open:hidden">
-                  Show {rest.length} more ad{rest.length === 1 ? "" : "s"}
-                </span>
-                <span className="hidden group-open:inline">Show fewer</span>
-              </summary>
-              <div className="mt-4 flex flex-col gap-6">
-                {rest.map((ad) => (
-                  <AdBlock key={ad.id} ad={ad} assets={a} />
-                ))}
-              </div>
-            </details>
-          )}
-        </div>
+        <ReportProblem problem={assets} />
       )}
-      {assets.ok && <AssetsStrip assets={a} />}
-    </Section>
+    </>
   )
 }
 
 function AdBlock({ ad, assets }: { ad: CampaignAd; assets: CampaignAssets }) {
   const r = rates(ad.metrics)
   return (
-    <div className="grid gap-4 border-t pt-4 first:border-t-0 first:pt-0 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+    <div className="grid content-start gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="font-medium">{ad.adGroup}</span>
@@ -471,7 +661,7 @@ function AdBlock({ ad, assets }: { ad: CampaignAd; assets: CampaignAssets }) {
           </a>
         )}
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+      <div className="grid content-start gap-4 sm:grid-cols-2 xl:grid-cols-1">
         <TextList title={`Headlines (${ad.headlines.length} of 15)`} items={ad.headlines} max={30} />
         <TextList title={`Descriptions (${ad.descriptions.length} of 4)`} items={ad.descriptions} max={90} />
       </div>
@@ -509,8 +699,7 @@ function TextList({ title, items, max }: { title: string; items: CampaignAd["hea
 function AssetsStrip({ assets }: { assets: CampaignAssets }) {
   const none = !assets.images.length && !assets.sitelinks.length && !assets.callouts.length && !assets.snippets.length && !assets.phone
   return (
-    <div className="flex flex-col gap-3 border-t pt-4">
-      <p className="text-sm font-semibold">What shows with the ads</p>
+    <div className="flex flex-col gap-3">
       {none && <p className="text-sm text-muted-foreground">No images, sitelinks, callouts, or call button set for this campaign or the account.</p>}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="flex flex-col gap-1.5 lg:col-span-2">
