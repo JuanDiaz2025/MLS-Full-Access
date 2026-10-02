@@ -31,7 +31,7 @@ export default async function LoginPage({
   return (
     <main className="flex flex-1 items-center justify-center px-4 py-16">
       <div className="flex w-full max-w-sm flex-col gap-8">
-        <BrandLogo />
+        <BrandLogo large />
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">
             {wantsAdmin ? "Sign in as an admin" : "Sign in to DealTrack"}
