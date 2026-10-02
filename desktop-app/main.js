@@ -1282,7 +1282,10 @@ async function collectPhotosDirect(urls, max) {
   const out = [];
   for (const u of spreadPhotos(urls, max || 20)) {
     try {
-      const r = await net.fetch(u);
+      // Through the Redfin window's own session (its cookies, as that page
+      // would load it), with Redfin as the referrer.
+      const ses = ensureRedfinWindow().webContents.session;
+      const r = await timeLimit((ses.fetch ? ses.fetch.bind(ses) : net.fetch)(u, { headers: { Referer: 'https://www.redfin.com/' } }), 20000, 'photo');
       if (!r.ok) continue;
       let img = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
       if (img.isEmpty()) continue;
@@ -1466,36 +1469,52 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           continue;
         }
         if (/sign in|join or sign/i.test(text.slice(0, 3000)) && !h.remarks) log('  this Early Access home is only shown in full when signed in to Redfin', 'warn');
-        // EVERY photo, one by one, in Redfin's own viewer (Rule #2).
+        if (isSeen(h.mls)) { log(`  already checked as ${h.mls} by an MLS scan — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
+        const city = (c.addr.split(',')[1] || area.county).trim();
+        // PHOTOS FIRST (Bryan, 2 Oct: "only fixer property, look on the photo
+        // first"). Every photo is stepped through in Redfin's viewer and judged
+        // before anything else; a house the photos do not show as a fixer is
+        // dropped here, before the agent or the description is even read.
         const seenPhotos = await viewRedfinPhotos(Number(cfg.scrollPauseMs) || 700);
         const urls = core.redfinPhotoUrls(seenPhotos.join(' ') + ' ' + html);
         log(`  looked through ${urls.length} photo(s)`, urls.length > 4 ? 'good' : 'warn');
+        const tooFew = urls.length <= 4;
+        let aiKept = false, aiWhy = '';
+        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !tooFew && !core.isConfirmed(c.addr)) {
+          const b64 = await collectPhotosDirect(urls, 20);
+          // Photos the AI could not be given are not a verdict on the house.
+          const v = !b64.length ? { error: true, reason: `could not download the ${urls.length} photo(s) for the AI check` }
+            : await autoDecide({ addr: c.addr, _cityKey: city, _sqft: c.sqft, _price: c.price, _gal: { b64, remarks: h.remarks } });
+          if (v.error) {
+            if (b64.length) aiFailStreak++;   // a photo download problem is not an AI failure
+            log(`  ${v.reason} — falling back to the description`, 'warn');
+            if (aiFailStreak >= 3) log('AI photo check failed 3 times in a row — off for the rest of this run. Check the key in section 2 (Test key).', 'error');
+          } else if (v.decision !== 'keep') {
+            aiFailStreak = 0;
+            const why = 'photos: not a fixer — ' + v.reason;
+            log(`  C — Auto-Pass — ${why}`);
+            runKpi.reviewed++; runKpi.bucketC++; runKpi.dropped++;
+            rejects.push(rejectRow({ ...c, mls: h.mls || c.mls }, 'Auto-pass: ' + why, 'Photo review'));
+            send('review', { i: i + 1, total: fresh.length, city: area.county, mls: h.mls || 'RF' + c.homeId, addr: c.addr, price: c.price,
+              sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: urls.length, remarks: h.remarks || '', details: {},
+              verdict: 'drop', why });
+            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, city, mls: h.mls });
+            continue;
+          } else { aiFailStreak = 0; aiKept = true; aiWhy = v.reason; log(`  photos: fixer — ${v.reason}`, 'good'); }
+        }
         const ag = core.parseRedfinAgent(await rfJs(JS_REDFIN_AGENT(Number(cfg.scrollPauseMs) || 700)).catch(() => null));
         log(ag.name || ag.phone || ag.email
           ? `  listing agent: ${[ag.name, ag.brokerage, ag.phone, ag.email].filter(Boolean).join(' · ')}`
           : '  listing agent contact not shown on Redfin — call the brokerage', ag.phone || ag.email ? 'good' : 'info');
-        if (isSeen(h.mls)) { log(`  already checked as ${h.mls} by an MLS scan — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
-        const city = (c.addr.split(',')[1] || area.county).trim();
         const q = core.qualify({
           addr: c.addr, remarks: h.remarks, propClass: h.propClass,
           photos: urls.length, photosReliable: false, dom: h.dom, yearBuilt: h.year,
           price: c.price, whenUnsure: cfg.whenUnsure, comingSoon: true,
         });
         q.why = 'Redfin ' + c.badge + ' · ' + q.why;
-        if (!(cfg.useAI && cfg.apiKey)) q.why += ' + photos viewed but not judged (AI photo check off)';
-        const tooFew = urls.length <= 4;
+        if (aiKept) q.why += ' + photos show a fixer: ' + aiWhy;
+        else if (!(cfg.useAI && cfg.apiKey)) q.why += ' + photos viewed but not judged (AI photo check off)';
         if (tooFew) q.why += ' + photos not posted on Redfin yet — check them before offering';
-        let aiKept = false;
-        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !q.hard && q.bucket !== 'C' && !tooFew) {
-          const b64 = await collectPhotosDirect(urls, 20);
-          const v = await autoDecide({ addr: c.addr, _cityKey: city, _sqft: c.sqft, _price: c.price,
-            _gal: { b64, remarks: h.remarks } });
-          if (v.error) { aiFailStreak++; log(`  ${v.reason} — kept the text rules' verdict`, 'warn'); }
-          else if (v.decision !== 'keep') {
-            aiFailStreak = 0;
-            Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop', score: Math.min(q.score, 15), why: 'AI (vision): ' + v.reason });
-          } else { aiFailStreak = 0; aiKept = true; q.why += ' + AI (vision) keep: ' + v.reason; }
-        }
         // Fixers only (Bryan, 2 Oct: "on early access make sure only fixer").
         // A Coming Soon / Early Access home stays only if its description says
         // it needs work, or the AI saw the wear in its photos.

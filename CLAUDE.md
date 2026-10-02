@@ -337,7 +337,7 @@ writing up any summary.
 what binds every analysis (see also `docs/investigation-playbook.md` for the
 headless-scrape workflow):
 
-- **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.0M max;
+- **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.5M max** (Bryan, 2 Oct — was $2.0M);
   ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
   data floor only guards against garbled prices).
   **Areas = THE WHOLE BAY AREA, all nine counties, every city** (Bryan, 1 Aug):
@@ -668,7 +668,7 @@ search filters are not trusted: `core.redfinBuyBox()` checks every Coming Soon
 / Early Access home twice — from Redfin's data (before the page is opened) and
 from the home's own page (before any photo) — single-family only (Redfin
 `uiPropertyType` 1, or a "Single Family" label; condo / townhouse / multi /
-land / mobile drop), price ≤ the area cap (San Mateo $2.0M, else $1.5M) and
+land / mobile drop), price ≤ the area cap (San Mateo $2.5M, else $1.5M) and
 **never over $3M** (`REDFIN_PRICE_CEILING`), 25+ years old when the year is
 known. Drops go to Rejected with stage *Buy-box filter*. The MLS grid got the
 same backstop: `JS_SCRAPE_GRID` now reads the **Class** column and
@@ -685,6 +685,20 @@ already means wear was seen). A home whose description says nothing about its
 condition — or has none yet — and no AI check → C "not a fixer". Turn the AI
 check on so a quiet description with a worn interior is not lost. Confirmed
 deals are never dropped. The MLS scan's own Coming Soon pass is unchanged.
+
+**v1.56 — Peninsula cap $2.5M, and Redfin judges the PHOTOS FIRST (Bryan 2
+Oct: "maximum 2.5m for peninsula area… only fixer property, look on the photo
+first").** `DEFAULT_BUYBOX` San Mateo `maxk: 2500` (MLS search box, grid
+backstop, Redfin buy box and `scripts/mls-multi-scan.js` all follow it; $3M
+ceiling unchanged). On each Redfin home, right after the buy-box check, every
+photo is stepped through and sent to the AI **before** the agent, the
+description or the score: a "not a fixer" photo verdict drops it there (stage
+*Photo review*). A photo download that fails is **not** a verdict — it falls
+back to the description and does not count toward the 3-failures AI cut-off
+(the first test dropped every home as "no photos could be loaded"). Photos are
+fetched through the Redfin window's own session with a redfin.com referrer.
+Tested end to end with a mock AI: renovated and "dated but tidy" drop on the
+photos, the worn original house is kept.
 
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the

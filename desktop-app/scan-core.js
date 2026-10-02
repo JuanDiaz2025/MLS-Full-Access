@@ -24,7 +24,7 @@ const SEARCH_URL = 'https://search.mlslistings.com/Matrix/Search/Residential/Res
 // City '*' means the entire county, so no city list has to be maintained and
 // nothing is missed because a town was never typed in.
 //
-// Price caps follow the standing rule: San Mateo (the Peninsula) $2.0M,
+// Price caps follow the standing rule: San Mateo (the Peninsula) $2.5M (Bryan, 2 Oct; was $2.0M),
 // everywhere else $1.5M. County names are exactly as the Matrix dropdown spells
 // them — checked against the live form, not guessed.
 //
@@ -32,7 +32,7 @@ const SEARCH_URL = 'https://search.mlslistings.com/Matrix/Search/Residential/Res
 // finished completely before the next one starts, so SF reaches the sheet first.
 const DEFAULT_BUYBOX = [
   { county: 'San Francisco', city: '*', maxk: 1500 },
-  { county: 'San Mateo', city: '*', maxk: 2000 },
+  { county: 'San Mateo', city: '*', maxk: 2500 },
   { county: 'Santa Clara', city: '*', maxk: 1500 },
   { county: 'Alameda', city: '*', maxk: 1500 },
   { county: 'Contra Costa', city: '*', maxk: 1500 },
@@ -1259,7 +1259,7 @@ function redfinHome(o) {
 }
 
 /** Never above this, whatever the area's cap says (Bryan, 2 Oct: "we don't
- *  buy 3M above"). The area caps — $2.0M San Mateo, $1.5M everywhere else —
+ *  buy 3M above"). The area caps — $2.5M San Mateo, $1.5M everywhere else —
  *  are lower still and apply first. */
 const REDFIN_PRICE_CEILING = 3000000;
 const NOT_HOUSE_RE = /condo|co-?op|town\s*house|townhome|multi[\s-]*family|duplex|triplex|fourplex|quadruplex|\d\s*units?\b|land|lot\b|mobile|manufactured|floating|houseboat|commercial|rental/i;

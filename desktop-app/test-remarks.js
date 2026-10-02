@@ -147,11 +147,12 @@ const eq = (a, b, m) => {
 
 // ---- the same buy box on Redfin and on the MLS grid: single-family, under the cap, never over $3M ----
 {
-  const sf = { county: 'San Francisco', maxk: 1500 }, sm = { county: 'San Mateo', maxk: 2000 };
+  const sf = { county: 'San Francisco', maxk: 1500 }, sm = { county: 'San Mateo', maxk: 2500 };
   const H = o => Object.assign({ addr: '1 A St, Oakland, CA 94601', price: 900000, ptype: '1', year: 1950 }, o);
   eq(core.redfinBuyBox(H({}), sf, 'list'), '', 'Redfin buy box: a 1950 house under the cap is kept');
   eq(/over the \$1.5M cap/.test(core.redfinBuyBox(H({ price: 1600000 }), sf, 'list')), true, 'Redfin buy box: over the $1.5M area cap');
-  eq(core.redfinBuyBox(H({ price: 1900000 }), sm, 'list'), '', 'Redfin buy box: San Mateo keeps its $2M cap');
+  eq(core.redfinBuyBox(H({ price: 2400000 }), sm, 'list'), '', 'Redfin buy box: San Mateo keeps its $2.5M cap');
+  eq(/over the \$2.5M cap/.test(core.redfinBuyBox(H({ price: 2600000 }), sm, 'list')), true, 'Redfin buy box: over the $2.5M Peninsula cap');
   eq(/over the \$3M cap/.test(core.redfinBuyBox(H({ price: 3200000 }), { county: 'X', maxk: 5000 }, 'list')), true, 'Redfin buy box: never over $3M, whatever the area says');
   eq(/not a single-family/.test(core.redfinBuyBox(H({ ptype: '2' }), sf, 'list')), true, 'Redfin buy box: a condo (type 2) is dropped');
   eq(/not a single-family/.test(core.redfinBuyBox(H({ ptype: 'Townhouse' }), sf, 'list')), true, 'Redfin buy box: a townhouse is dropped');

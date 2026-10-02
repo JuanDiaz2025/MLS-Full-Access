@@ -18,11 +18,11 @@ const fs = require('fs');
 const { launchBrowser, STATE } = require('./mls-lib');
 
 // Full buy box (flip-scout-SOP.md). Entry format: "County:City[:maxPriceK]".
-// City "*" (or empty) scans the WHOLE county. Peninsula/San Mateo caps at $2.0M;
+// City "*" (or empty) scans the WHOLE county. Peninsula/San Mateo caps at $2.5M (Bryan, 2 Oct);
 // everywhere else $1.5M. "San Francisco:*" = the whole city (county == city).
 const DEFAULT_CITIES = [
   'San Francisco:*',            // SF county = the whole city, $1.5M
-  'San Mateo:*:2000',           // entire Peninsula, $2.0M cap
+  'San Mateo:*:2500',           // entire Peninsula, $2.5M cap
   'Santa Clara:Sunnyvale',
   'Santa Clara:San Jose',
   'Alameda:Oakland',
