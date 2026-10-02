@@ -5,6 +5,7 @@ import BrandLogo from "@/components/brand-logo"
 import GoogleButton from "@/components/google-button"
 import LoginForm from "@/app/login/login-form"
 import { changesEnabled, googleSignInEnabled, isAdmin, isSignedIn, passwordConfigured } from "@/lib/auth"
+import { safeNext } from "@/lib/google-signin"
 
 const ERRORS: Record<string, string> = {
   not_allowed: "That Google account isn't on DealTrack's list. Ask your admin to add it to ALLOWED_EMAILS.",
@@ -23,7 +24,7 @@ export default async function LoginPage({
 }) {
   const params = await searchParams
   const raw = typeof params.next === "string" ? params.next : "/overview"
-  const next = raw.startsWith("/") && !raw.startsWith("//") ? raw : "/overview"
+  const next = safeNext(raw)
   // ?admin=1 lets someone who can already see the reports sign in again as an admin.
   const wantsAdmin = params.admin === "1"
   if ((await isSignedIn()) && !(wantsAdmin && !(await isAdmin()))) redirect(next)

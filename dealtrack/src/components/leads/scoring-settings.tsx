@@ -48,14 +48,14 @@ export default function ScoringSettings({ autoStatus }: { autoStatus: boolean })
             }}
             className="size-5 accent-[var(--primary)]"
           />
-          <span className="font-medium">Send new leads to Google Ads by my rules</span>
+          <span className="font-medium">Send new leads to Google Ads automatically</span>
         </label>
       </div>
       <p className={cn("rounded-lg p-3", on ? "bg-emerald-500/10 text-emerald-900" : "bg-card text-muted-foreground")}>
         {on ? (
           <>
-            <strong>On.</strong> Your <strong>Google Ads rules</strong> (below) decide which new leads Google hears about. To start
-            with, Hot leads go as <strong>Qualified leads</strong> and Junk is never sent. Google Ads recommends sending back only
+            <strong>On.</strong> New leads go to Google Ads automatically: Hot leads as <strong>Qualified leads</strong>, and Junk is
+            reported as an invalid lead (reporting only, never bid for). Google Ads recommends sending back only
             qualified leads like this, so its bidding finds more real sellers instead of more form-fillers. Lead statuses stay yours.
           </>
         ) : (
@@ -91,7 +91,7 @@ export default function ScoringSettings({ autoStatus }: { autoStatus: boolean })
           <li>Marking a lead Interested or further means it&apos;s real, so it&apos;s never counted as Junk</li>
         </ul>
         <p className="mt-2 text-muted-foreground">
-          Only leads that arrived in the last 24 hours go through the rules. Older leads (from before scoring, or brought in
+          Only leads that arrived in the last 24 hours are sent automatically. Older leads (from before scoring, or brought in
           late from the website) are scored too, but nothing old is sent to Google Ads without you.
           A lead whose form fields weren&apos;t recognized is never sent automatically.
         </p>

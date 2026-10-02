@@ -9,7 +9,9 @@ export const trackingAliases: Record<keyof LeadTracking, string[]> = {
   utmCampaign: ["utmcampaign", "campaign"],
   utmTerm: ["utmterm", "term", "keyword"],
   utmContent: ["utmcontent", "content"],
-  gclid: ["gclid", "gbraid", "wbraid"],
+  gclid: ["gclid"],
+  gbraid: ["gbraid"],
+  wbraid: ["wbraid"],
   fbclid: ["fbclid"],
   msclkid: ["msclkid"],
   landingPage: ["landingpage", "landingpageurl", "pageurl", "url", "sourceurl", "posturl", "page", "formpage"],
@@ -22,10 +24,28 @@ const fromUrl: [keyof LeadTracking, string[]][] = [
   ["utmCampaign", ["utm_campaign"]],
   ["utmTerm", ["utm_term"]],
   ["utmContent", ["utm_content"]],
-  ["gclid", ["gclid", "gbraid", "wbraid"]],
+  ["gclid", ["gclid"]],
+  ["gbraid", ["gbraid"]],
+  ["wbraid", ["wbraid"]],
   ["fbclid", ["fbclid"]],
   ["msclkid", ["msclkid"]],
 ]
+
+// The Google Ads click a lead came from, each id under its own name, the way Google wants it. A
+// gbraid/wbraid that an older website script copied into gclid (they start with "0AAAA") isn't sent
+// as a gclid, which Google would refuse.
+export function googleClick(t?: LeadTracking) {
+  if (!t) return null
+  const braid = (v?: string) => Boolean(v && /^0AAAA/.test(v))
+  const gbraid = t.gbraid || (braid(t.gclid) && !t.wbraid ? t.gclid : undefined)
+  const wbraid = t.wbraid
+  const gclid = t.gclid && t.gclid !== gbraid && t.gclid !== wbraid && !braid(t.gclid) ? t.gclid : undefined
+  if (gclid) return { gclid }
+  if (gbraid) return { gbraid }
+  if (wbraid) return { wbraid }
+  return null
+}
+export const hasAdClick = (t?: LeadTracking) => Boolean(t?.gclid || t?.gbraid || t?.wbraid)
 
 // Fills in anything missing from the landing page's own address (?utm_source=...&gclid=...).
 export function completeTracking(t: LeadTracking): LeadTracking | undefined {
@@ -63,7 +83,7 @@ export function leadChannel(lead: Lead): string {
   const source = t.utmSource?.toLowerCase() ?? ""
   const medium = t.utmMedium?.toLowerCase() ?? ""
   const paid = /cpc|ppc|paid|ads?$|display|search/.test(medium)
-  if (t.gclid || (/google|adwords/.test(source) && paid)) return "Google Ads"
+  if (hasAdClick(t) || (/google|adwords/.test(source) && paid)) return "Google Ads"
   if (t.msclkid || (/bing|microsoft/.test(source) && paid)) return "Microsoft Ads"
   if (t.fbclid || /facebook|instagram|(^|[^a-z])(fb|ig|meta)([^a-z]|$)/.test(source)) return paid || t.fbclid ? "Facebook / Instagram Ads" : "Facebook / Instagram"
   if (/lsa|localservices/.test(source)) return "Local Services Ads"

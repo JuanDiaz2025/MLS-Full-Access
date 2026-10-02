@@ -6,7 +6,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { cookies } from "next/headers"
 
 import { signValue, unsignValue } from "@/lib/auth"
-import { ADS_SCOPE, DATA_MANAGER_SCOPE, saveConnection } from "@/lib/conversions/google"
+import { ADS_SCOPE, DATA_MANAGER_SCOPE, SHEETS_SCOPE, saveConnection } from "@/lib/conversions/google"
 import { adsAccountConfig } from "@/lib/google-ads/client"
 import { redirectUri } from "@/lib/google-signin"
 
@@ -30,7 +30,7 @@ export async function startConnect(requestUrl: string, by: string) {
     client_id: clientId,
     redirect_uri: redirectUri(requestUrl),
     response_type: "code",
-    scope: ["openid", "email", ADS_SCOPE, DATA_MANAGER_SCOPE].join(" "),
+    scope: ["openid", "email", ADS_SCOPE, DATA_MANAGER_SCOPE, SHEETS_SCOPE].join(" "),
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",

@@ -8,6 +8,7 @@
 // number 20, a full name 5, a paid ad click 10, a seller search ("sell my house fast") 10, a
 // motivated seller in the message (inherited, foreclosure, repairs...) 15, coming back again 5.
 import { jsonFileStore } from "@/lib/json-file-store"
+import { hasAdClick } from "@/lib/leads/tracking"
 import type { Lead, LeadGrade, LeadScore, LeadStatus } from "@/lib/leads/types"
 
 export const HOT_AT = 70
@@ -126,7 +127,7 @@ function baseScore(lead: Lead, earlier: Lead[], vouched: boolean): LeadScore {
 
   // Where they came from.
   const t = lead.tracking ?? {}
-  if (t.gclid || /^(cpc|ppc|paid|paidsearch|paid_search)$/i.test(t.utmMedium ?? "")) add(10, "Came from a paid ad click")
+  if (hasAdClick(t) || /^(cpc|ppc|paid|paidsearch|paid_search)$/i.test(t.utmMedium ?? "")) add(10, "Came from a paid ad click")
   // Campaign names often use _ + - for spaces ("Sell_House_Fast").
   const searched = [t.utmTerm, t.utmCampaign].filter(Boolean).join(" ").replace(/[_+-]+/g, " ")
   if (SELLER_SEARCH.test(searched)) add(10, `Searched like a seller ("${(t.utmTerm || t.utmCampaign || "").slice(0, 40)}")`)

@@ -6,7 +6,7 @@
 //
 // Nothing in here touches the disk, so the Leads page can also use it to show which recent leads
 // a rule would have matched.
-import { leadChannel } from "@/lib/leads/tracking"
+import { hasAdClick, leadChannel } from "@/lib/leads/tracking"
 import type { Lead, LeadGrade } from "@/lib/leads/types"
 
 export type RuleCondition =
@@ -89,7 +89,7 @@ function matches(lead: Lead, c: RuleCondition): boolean {
     case "gradeIs":
       return score?.grade === c.value && !score.unscored
     case "fromGoogleAd":
-      return Boolean(lead.tracking?.gclid)
+      return hasAdClick(lead.tracking)
     case "channelIs":
       return leadChannel(lead).toLowerCase() === c.value.trim().toLowerCase()
     case "messageHas":

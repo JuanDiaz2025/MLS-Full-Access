@@ -16,8 +16,18 @@ export function redirectUri(requestUrl: string) {
   return `${base}/api/auth/google/callback`
 }
 
-export const safeNext = (next: string | null | undefined) =>
-  next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/overview"
+// Only same-site paths, so a crafted ?next= can't send people to another website. Browsers drop
+// tabs and newlines in addresses ("/\t/evil.com" becomes "//evil.com"), so the final check is where
+// the address really leads (from One Marketing Command Center).
+export function safeNext(next: string | null | undefined, fallback = "/overview") {
+  if (!next || !next.startsWith("/") || /[\x00-\x1f\\]/.test(next)) return fallback
+  try {
+    const url = new URL(next, "http://app.invalid")
+    return url.origin === "http://app.invalid" ? `${url.pathname}${url.search}${url.hash}` : fallback
+  } catch {
+    return fallback
+  }
+}
 
 // Starts a sign-in: remembers the state and PKCE verifier for 10 minutes, returns Google's URL.
 export async function startSignIn(requestUrl: string, next: string) {

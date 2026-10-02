@@ -6,6 +6,8 @@ import path from "node:path"
 
 import { DATA_DIR } from "@/lib/store"
 
+import { shared } from "@/lib/shared-state"
+
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function jsonFileStore<T>(name: string, seed: () => T | Promise<T>) {
@@ -60,15 +62,16 @@ export function jsonFileStore<T>(name: string, seed: () => T | Promise<T>) {
 
   // Read, change and save one at a time, so two changes at the same moment (two website leads
   // arriving together) can't overwrite each other. `change` edits the data in place.
-  let queue: Promise<unknown> = Promise.resolve()
+  // One queue per file for the whole app (pages and API routes alike), see shared-state.ts.
+  const q = shared(`file-queue:${file}`, () => ({ queue: Promise.resolve() as Promise<unknown> }))
   function update<R>(change: (data: T) => R | Promise<R>): Promise<R> {
-    const run = queue.then(async () => {
+    const run = q.queue.then(async () => {
       const data = await read()
       const result = await change(data)
       await write(data)
       return result
     })
-    queue = run.catch(() => {})
+    q.queue = run.catch(() => {})
     return run
   }
 

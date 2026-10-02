@@ -83,6 +83,9 @@ function run(args: string[], stdin: string, cwd: string, env: NodeJS.ProcessEnv)
       if (windows && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }).on("error", () => child.kill())
       else child.kill()
     }, TIMEOUT_MS)
+    // Decode as one stream, so a character split between two reads isn't garbled.
+    child.stdout.setEncoding("utf8")
+    child.stderr.setEncoding("utf8")
     child.stdout.on("data", (d) => (stdout += d))
     child.stderr.on("data", (d) => (stderr += d))
     child.on("error", (error) => {

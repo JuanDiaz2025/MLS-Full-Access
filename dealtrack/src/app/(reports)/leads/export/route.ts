@@ -30,7 +30,7 @@ export async function GET() {
       l.score ? String(l.score.value) : "", l.score ? gradeLabels[l.score.grade] : "", leadStatuses.find((s) => s.id === (l.status ?? "new"))?.label,
       l.phone && formatPhone(l.phone), l.email, l.propertyAddress, leadChannel(l),
       l.tracking?.utmSource, l.tracking?.utmMedium, l.tracking?.utmCampaign, l.tracking?.utmTerm, l.tracking?.utmContent,
-      l.tracking?.gclid, l.tracking?.fbclid, l.tracking?.msclkid, l.tracking?.landingPage, l.tracking?.referrer,
+      l.tracking?.gclid || l.tracking?.gbraid || l.tracking?.wbraid, l.tracking?.fbclid, l.tracking?.msclkid, l.tracking?.landingPage, l.tracking?.referrer,
       leadSource(l, placements), l.notes,
     ]),
   ]

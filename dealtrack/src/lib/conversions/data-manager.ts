@@ -10,7 +10,7 @@ export type DataManagerEvent = {
   eventTimestamp: string // ISO 8601
   transactionId?: string
   eventSource: "WEB" | "CALL"
-  adIdentifiers?: { gclid: string }
+  adIdentifiers?: { gclid?: string; gbraid?: string; wbraid?: string }
   userData?: { userIdentifiers: ({ emailAddress: string } | { phoneNumber: string })[] }
   conversionValue?: number
   currency?: string
@@ -32,6 +32,42 @@ type ErrorBody = {
 
 // Sends events for one conversion action. Throws AdsApiError with a code saying what to do:
 // NEEDS_PERMISSION (connect Google Ads again), API_OFF (turn on the API), TRANSIENT, or none.
+type Destination = {
+  operatingAccount: { accountType: "GOOGLE_ADS"; accountId: string }
+  loginAccount?: { accountType: "GOOGLE_ADS"; accountId: string }
+  productDestinationId: string
+}
+
+// The ways of naming the account to send to, best first. The conversion action may belong to a
+// manager account (cross-account conversion tracking), and then the conversions have to go to that
+// account; otherwise to the account itself, through the manager it's reached by, if any.
+function destinations(account: AdsAccount, conversionActionId: string, owner?: string): Destination[] {
+  const ga = (id: string) => ({ accountType: "GOOGLE_ADS" as const, accountId: id })
+  const login = account.loginCustomerId
+  const list: Destination[] = []
+  const add = (operating: string, via?: string) => {
+    const d: Destination = { operatingAccount: ga(operating), ...(via && via !== operating ? { loginAccount: ga(via) } : {}), productDestinationId: conversionActionId }
+    if (!list.some((x) => JSON.stringify(x) === JSON.stringify(d))) list.push(d)
+  }
+  if (owner) add(owner, login)
+  add(account.customerId, login)
+  add(account.customerId)
+  if (owner) add(owner)
+  if (login) add(login)
+  return list
+}
+// The last destination that worked, per account, so later sends go straight there.
+const g = globalThis as typeof globalThis & { __omccDestination?: Map<string, string> }
+const worked = (g.__omccDestination ??= new Map<string, string>())
+
+// Google couldn't find the account or the conversion action from that way of naming them, or
+// refused that way in (a wrong manager account): worth trying the other ways.
+const NOT_FOUND = /not found|NOT_FOUND|INVALID_OPERATING_ACCOUNT|INVALID_LOGIN_ACCOUNT|PRODUCT_DESTINATION/i
+const DENIED = /PERMISSION_DENIED|does not have permission|not authorized|caller does not have/i
+
+// Sends events for one conversion action. Throws AdsApiError with a code saying what to do:
+// NEEDS_PERMISSION (connect Google Ads again), API_OFF (turn on the API), TRANSIENT, or none.
+// `owner` is the account that owns the conversion action, when it isn't this one.
 // `validateOnly` asks Google to check the request without counting anything (for the Leads page's check).
 export async function ingestEvents(
   connection: AdsConnection,
@@ -39,14 +75,39 @@ export async function ingestEvents(
   conversionActionId: string,
   events: DataManagerEvent[],
   validateOnly = false,
+  owner?: string,
 ) {
-  const destination = {
-    operatingAccount: { accountType: "GOOGLE_ADS", accountId: account.customerId },
-    ...(account.loginCustomerId && account.loginCustomerId !== account.customerId
-      ? { loginAccount: { accountType: "GOOGLE_ADS", accountId: account.loginCustomerId } }
-      : {}),
-    productDestinationId: conversionActionId,
+  const key = `${account.customerId}:${conversionActionId}`
+  let options = destinations(account, conversionActionId, owner)
+  const known = worked.get(key)
+  if (known) options = [...options.filter((d) => JSON.stringify(d) === known), ...options.filter((d) => JSON.stringify(d) !== known)]
+  const errors: AdsApiError[] = []
+  for (const destination of options) {
+    try {
+      const result = await sendOnce(connection, destination, events, validateOnly)
+      worked.set(key, JSON.stringify(destination))
+      return result
+    } catch (e) {
+      if (!(e instanceof AdsApiError) || !(e.notFound || e.denied)) throw e
+      errors.push(e)
+    }
   }
+  // The first answer is about the best way in (the account itself), so it's the one to show.
+  const first = errors[0]?.message ?? "Resource not found"
+  if (errors.length && errors.every((e) => e.denied)) {
+    // Not retried: nothing changes until someone with access connects, or another account is picked.
+    throw new AdsApiError(
+      `The Google account you connected can't use that Google Ads account (${account.name}, ${account.customerId}) for conversions. On the Google Ads page, pick your main account, or connect Google Ads again with a Google account that has access to it. (Google's words: “${first}”)`,
+      "NO_ACCESS",
+    )
+  }
+  throw new AdsApiError(
+    `Google can't find the conversion action (id ${conversionActionId}) in your Google Ads account ${account.name} (${account.customerId})${owner && owner !== account.customerId ? ` or in ${owner}, which owns it` : ""}. If this isn't your main account, pick your main one on the Google Ads page. The app looks up your conversion actions again and retries on its own. (Google's words: “${first}”)`,
+    "NOT_FOUND",
+  )
+}
+
+async function sendOnce(connection: AdsConnection, destination: Destination, events: DataManagerEvent[], validateOnly: boolean) {
   const res = await fetch("https://datamanager.googleapis.com/v1/events:ingest", {
     method: "POST",
     headers: { Authorization: `Bearer ${await accessToken(connection)}`, "Content-Type": "application/json" },
@@ -82,8 +143,13 @@ export async function ingestEvents(
     )
   }
   if (res.status === 429 || res.status >= 500) throw new AdsApiError(message, "TRANSIENT")
-  const violation = e.details?.flatMap((d) => d.fieldViolations ?? [])[0]
-  throw new AdsApiError(violation?.description ? `${message} ${violation.description}` : message, e.status)
+  const violations = e.details?.flatMap((d) => d.fieldViolations ?? []) ?? []
+  const text = [message, ...violations.map((v) => [v.description, v.field && `(${v.field})`].filter(Boolean).join(" "))].join(" ")
+  const err = new AdsApiError(text, e.status)
+  const all = `${text} ${reasons} ${e.status ?? ""} ${violations.map((v) => v.reason).join(" ")}`
+  err.denied = res.status === 403 || DENIED.test(all)
+  err.notFound = !err.denied && (res.status === 404 || NOT_FOUND.test(all))
+  throw err
 }
 
 export type RequestStatus = {

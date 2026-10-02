@@ -13,9 +13,15 @@ import { jsonFileStore } from "@/lib/json-file-store"
 
 export const ADS_SCOPE = "https://www.googleapis.com/auth/adwords"
 export const DATA_MANAGER_SCOPE = "https://www.googleapis.com/auth/datamanager"
+// For keeping the deals spreadsheet up to date (lib/sheets/sync.ts).
+export const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
 // `code` says what to do: NEEDS_PERMISSION (connect again), API_OFF (turn the API on), TRANSIENT.
 export class AdsApiError extends Error {
+  // Set when Google couldn't find the account or item asked for (worth trying another way).
+  notFound = false
+  // Set when Google refused that way in (no permission): also worth trying another way.
+  denied = false
   constructor(
     message: string,
     readonly code?: string,

@@ -23,7 +23,15 @@ export function applyStatus(lead: Lead, status: LeadStatus, by: "auto" | "you", 
   if (status === "not_interested") {
     for (const kind of ["interested", "closed"] as const) {
       const entry = lead.conversions[kind]
-      if (entry?.state === "sent" && !entry.retraction) entry.retraction = { state: "pending", at: now }
+      if (!entry) continue
+      // Not sent yet: never send it. Its resend id is kept if it has one (an earlier send under the
+      // usual id was taken back, so that id can't be used again).
+      if (entry.state !== "sent") {
+        if (entry.transactionId) lead.conversions[kind] = { state: "skipped", at: entry.at, transactionId: entry.transactionId, error: "Marked Not interested before it was sent." }
+        else delete lead.conversions[kind]
+      }
+      // Google refused it anyway: nothing to take back.
+      else if (!entry.retraction && entry.google?.status !== "rejected") entry.retraction = { state: "pending", at: now }
     }
     reportInvalid(lead, now)
     return
@@ -45,7 +53,7 @@ export function applyStatus(lead: Lead, status: LeadStatus, by: "auto" | "you", 
       // Taken back earlier and good again: send it as a new conversion.
       lead.conversions[kind] = { state: "pending", at: now, transactionId: `${lead.id}-${kind}-${Date.now().toString(36)}` }
     } else if (!entry || entry.state === "failed" || entry.state === "skipped") {
-      lead.conversions[kind] = { state: "pending", at: now }
+      lead.conversions[kind] = { state: "pending", at: now, transactionId: entry?.transactionId }
     }
   }
 }
@@ -57,7 +65,7 @@ function reportInvalid(lead: Lead, now: string, rule?: string) {
   const entry = lead.conversions.invalid
   if (entry?.retraction && entry.retraction.state !== "sent") delete entry.retraction
   else if (entry?.retraction?.state === "sent") lead.conversions.invalid = { state: "pending", at: now, value: 0, rule, transactionId: `${lead.id}-invalid-${Date.now().toString(36)}` }
-  else if (!entry || entry.state === "failed" || entry.state === "skipped") lead.conversions.invalid = { state: "pending", at: now, value: 0, rule }
+  else if (!entry || entry.state === "failed" || entry.state === "skipped") lead.conversions.invalid = { state: "pending", at: now, value: 0, rule, transactionId: entry?.transactionId }
 }
 
 // Queues what a Google Ads rule decided, without touching the lead's status.
@@ -71,6 +79,7 @@ export function applyRule(lead: Lead, rule: { name: string; then: "qualified" | 
     return
   }
   const kinds: ConversionKind[] = rule.then === "converted" ? ["interested", "closed"] : ["interested"]
+  if (lead.status === "not_interested") return
   lead.conversions ??= {}
   for (const kind of kinds) {
     // A converted lead also counts as qualified; the value goes with the conversion the rule is

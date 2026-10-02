@@ -3,6 +3,8 @@
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
+import LinkPending from "@/components/link-pending"
+
 import { presets, type DateRange } from "@/lib/date-range"
 import { cn } from "@/lib/utils"
 
@@ -26,11 +28,12 @@ export default function RangePicker({ range }: { range: DateRange }) {
             href={withKept(`range=${p.id}`)}
             aria-current={range.preset === p.id ? "true" : undefined}
             className={cn(
-              "rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground",
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground",
               range.preset === p.id && "border-primary bg-primary text-primary-foreground hover:text-primary-foreground",
             )}
           >
             {p.label}
+            <LinkPending />
           </Link>
         ))}
       </div>

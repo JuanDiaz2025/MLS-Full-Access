@@ -4,14 +4,10 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { SESSION_COOKIE, SESSION_DAYS, newSessionToken, roleForPassword } from "@/lib/auth"
+import { safeNext } from "@/lib/google-signin"
 
 export type LoginState = { error?: string }
 
-// Only allow redirects back into this app.
-function safeNext(value: FormDataEntryValue | null) {
-  const next = typeof value === "string" ? value : ""
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/overview"
-}
 
 export async function signIn(_prev: LoginState, form: FormData): Promise<LoginState> {
   const role = roleForPassword(String(form.get("password") ?? ""))
@@ -24,7 +20,8 @@ export async function signIn(_prev: LoginState, form: FormData): Promise<LoginSt
     path: "/",
     maxAge: SESSION_DAYS * 86_400,
   })
-  redirect(safeNext(form.get("next")))
+  const next = form.get("next")
+  redirect(safeNext(typeof next === "string" ? next : null))
 }
 
 export async function signOut() {

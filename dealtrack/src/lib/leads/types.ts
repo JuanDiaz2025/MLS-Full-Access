@@ -33,8 +33,11 @@ export type LeadTracking = {
   utmCampaign?: string
   utmTerm?: string
   utmContent?: string
-  // Google Ads click id (gclid, or gbraid/wbraid on iPhones).
+  // Google Ads click id. On iPhones Google sends gbraid or wbraid instead (older website
+  // scripts also copied those into gclid; see googleClick in tracking.ts).
   gclid?: string
+  gbraid?: string
+  wbraid?: string
   fbclid?: string
   msclkid?: string
   // The page the visitor first landed on, and the site that sent them there.
@@ -82,6 +85,11 @@ export type ConversionUpload = {
   google?: { status: "processing" | "accepted" | "rejected"; reason?: string; checkedAt: string }
   // Taking it back from Google Ads (a retraction), when the lead turned out Not interested.
   retraction?: { state: "pending" | "sent" | "failed"; at: string; tries?: number; lastTry?: string; error?: string }
+  // Sent once more after a "not found" refusal, when the app learned to send to the owning account.
+  fixRetry?: boolean
+  // The Google Ads account it last failed in, and how often it was tried again after the account changed.
+  accountId?: string
+  accountResets?: number
 }
 
 // How good a lead looks the moment it arrives, scored by the app (scoring.ts).

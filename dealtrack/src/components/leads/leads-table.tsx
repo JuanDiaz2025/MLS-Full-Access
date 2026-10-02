@@ -279,6 +279,7 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
             aria-selected={list === id}
             onClick={() => {
               setList(id)
+              setStatus("")
               setPage(0)
             }}
             className={cn(
@@ -376,6 +377,7 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
             ))}
           </select>
         </label>
+        {list === "active" && (
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Status</span>
           <select
@@ -387,13 +389,17 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
             className="h-10 rounded-lg border bg-card px-2 text-sm"
           >
             <option value="">All</option>
-            {leadStatuses.map((st) => (
-              <option key={st.id} value={st.id}>
-                {st.label} ({rows.filter((r) => r.status === st.id).length})
-              </option>
-            ))}
+            {/* Not interested leads have their own tab. */}
+            {leadStatuses
+              .filter((st) => st.id !== "not_interested")
+              .map((st) => (
+                <option key={st.id} value={st.id}>
+                  {st.label} ({rows.filter((r) => r.status === st.id).length})
+                </option>
+              ))}
           </select>
         </label>
+        )}
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Score</span>
           <select
@@ -459,7 +465,7 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
                   <ScoreCell score={r.score} />
                 </td>
                 <td className={td}>
-                  <StatusCell id={r.id} status={r.status} auto={r.statusBy === "auto"} rule={r.statusRule} />
+                  <StatusCell key={`${r.id}-${r.status}-${r.statusBy ?? ""}`} id={r.id} status={r.status} auto={r.statusBy === "auto"} rule={r.statusRule} />
                 </td>
                 <td className={td} title={r.google?.detail}>
                   {r.google ? (

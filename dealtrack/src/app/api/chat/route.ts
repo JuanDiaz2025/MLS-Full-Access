@@ -12,7 +12,12 @@ import { currentName } from "@/lib/people"
 
 const requestSchema = z.object({
   messages: z
-    .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(20_000) }))
+    // Questions up to 20,000 characters; earlier answers can be much longer (the whole chat is sent back).
+    .array(
+      z
+        .object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(400_000) })
+        .refine((m) => m.role === "assistant" || m.content.length <= 20_000, "That question is too long."),
+    )
     .min(1)
     .max(200)
     .refine((m) => m.at(-1)?.role === "user", "The last message must be a question."),

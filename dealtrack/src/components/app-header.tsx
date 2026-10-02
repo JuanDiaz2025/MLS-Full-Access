@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation"
 
 import { signOut } from "@/app/login/actions"
 import BrandLogo from "@/components/brand-logo"
+import LinkPending from "@/components/link-pending"
 import { cn } from "@/lib/utils"
 
 // Pages grouped the way PPC tools like Optmyzr group them. The first row picks a group, the
@@ -61,6 +62,7 @@ export const navGroups = [
     links: [
       { href: "/report", label: "Weekly report" },
       { href: "/changes", label: "Changes" },
+      { href: "/deals", label: "Deal History" },
     ],
   },
 ] as const
@@ -99,11 +101,12 @@ export default function AppHeader({
       href={`${href}${query}`}
       aria-current={current ? "page" : undefined}
       className={cn(
-        "shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground",
         current && "bg-muted font-medium text-foreground",
       )}
     >
       {label}
+      <LinkPending />
     </Link>
   )
 

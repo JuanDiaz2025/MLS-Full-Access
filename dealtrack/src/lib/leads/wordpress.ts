@@ -3,6 +3,7 @@
 // most every 30 seconds. WordPress is always online and its address never changes, so leads sent
 // while this computer or the app was off still arrive, with the time they were really sent.
 import { jsonFileStore } from "@/lib/json-file-store"
+import { shared } from "@/lib/shared-state"
 import { addLead } from "@/lib/leads/store"
 import { parseWebsiteLead, webhookSecret } from "@/lib/leads/webhook"
 import { logAttempt } from "@/lib/leads/webhook-log"
@@ -26,8 +27,8 @@ type Answer = { ok?: boolean; code?: string; error?: string; message?: string; l
 
 const file = jsonFileStore<WordPressState>("wordpress.json", () => ({}))
 const SYNC_EVERY_MS = 30_000
-let lastAttempt = 0
-let running: Promise<void> | null = null
+// One for the whole app (pages and API routes alike), see shared-state.ts.
+const sync = shared("wordpress-sync", () => ({ lastAttempt: 0, running: null as Promise<void> | null }))
 
 export const getWordPress = () => file.read()
 
@@ -58,7 +59,7 @@ export async function setWordPressSite(site: string | null) {
       s.lastId = same ? (lastId ?? 0) : 0
     }
   })
-  lastAttempt = 0
+  sync.lastAttempt = 0
 }
 
 // The site's answer for leads after `after`, trying the usual /wp-json/ address first and then
@@ -111,10 +112,10 @@ async function ask(state: WordPressState, key: string, after: number): Promise<{
 // time; `force` skips the wait (e.g. right after connecting).
 export function syncWordPress(force = false): Promise<void> {
   // A check already under way may be for the old address: let it finish, then check again.
-  if (running) return force ? running.then(() => syncWordPress(true)) : running
-  if (!force && Date.now() - lastAttempt < SYNC_EVERY_MS) return Promise.resolve()
-  lastAttempt = Date.now()
-  running = (async () => {
+  if (sync.running) return force ? sync.running.then(() => syncWordPress(true)) : sync.running
+  if (!force && Date.now() - sync.lastAttempt < SYNC_EVERY_MS) return Promise.resolve()
+  sync.lastAttempt = Date.now()
+  sync.running = (async () => {
     const state = await file.read()
     if (!state.site) return
     try {
@@ -190,7 +191,7 @@ export function syncWordPress(force = false): Promise<void> {
       })
     }
   })().finally(() => {
-    running = null
+    sync.running = null
   })
-  return running
+  return sync.running
 }
