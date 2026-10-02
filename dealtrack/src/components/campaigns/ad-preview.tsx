@@ -3,12 +3,12 @@
 // sitelinks and callouts that can show underneath. Google mixes these itself, so it's a likely
 // look, not the only one.
 
+import { shownText } from "@/lib/ad-text"
 import type { AdText, CampaignAd, CampaignAssets } from "@/lib/google-ads/campaign"
 import { cn } from "@/lib/utils"
 
-// "{LOCATION(City):Local}" shows the searcher's city, or "Local" when Google can't tell; the
-// preview uses the fallback. Keyword insertion ("{KeyWord:Cash Offer}") works the same way.
-export const shownText = (text: string) => text.replace(/\{[A-Za-z]+(?:\([^)]*\))?:([^}]*)\}/g, "$1")
+// The preview shows a location or keyword insertion's fallback text ("{LOCATION(City):Local}" → "Local").
+export { shownText }
 
 const RANK: Record<string, number> = { BEST: 0, GOOD: 1, LEARNING: 2, PENDING: 3, UNKNOWN: 3, LOW: 4 }
 
@@ -23,7 +23,12 @@ function pick(items: AdText[], slots: string[]): AdText[] {
   return out
 }
 
-export default function AdPreview({ ad, assets, className }: { ad: CampaignAd; assets: CampaignAssets; className?: string }) {
+export type PreviewAd = Pick<CampaignAd, "displayUrl" | "finalUrl"> & {
+  headlines: Pick<AdText, "text" | "pinned" | "label">[]
+  descriptions: Pick<AdText, "text" | "pinned" | "label">[]
+}
+
+export default function AdPreview({ ad, assets, className }: { ad: PreviewAd; assets: CampaignAssets; className?: string }) {
   const headlines = pick(ad.headlines, ["HEADLINE_1", "HEADLINE_2", "HEADLINE_3"])
   const descriptions = pick(ad.descriptions, ["DESCRIPTION_1", "DESCRIPTION_2"])
   const name = assets.businessName || ad.displayUrl.split("/")[0]

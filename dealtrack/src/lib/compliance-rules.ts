@@ -28,5 +28,7 @@ export const newRequestId = () => `cr-${Date.now().toString(36)}-${Math.random()
 export function requestTitle(r: ChangeRequest) {
   if (r.kind === "status")
     return `${r.status === "ENABLED" ? "Turn on" : "Turn off"} ${r.campaigns.length === 1 ? r.campaigns[0].name : `${r.campaigns.length} campaigns`}`
+  if (r.kind === "ad")
+    return `${r.ad?.undoOf ? "Put back the old text of" : "New text for"} the ad “${r.ad?.firstHeadline ?? "ad"}” in ${r.campaigns[0]?.name ?? "a campaign"}`
   return r.change?.label ?? "Change during learning"
 }

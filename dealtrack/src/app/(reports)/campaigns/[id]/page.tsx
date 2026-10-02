@@ -4,6 +4,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ArrowLeft, ExternalLink, Phone } from "lucide-react"
 
+import AdFixer from "@/components/campaigns/ad-fixer"
 import AdPreview, { shownText } from "@/components/campaigns/ad-preview"
 import CampaignSwitcher from "@/components/campaigns/campaign-switcher"
 import NegativeKeywordPanel from "@/components/changes/negative-keyword-panel"
@@ -13,6 +14,7 @@ import { AtAGlance, DoToday, doToday, gradeOf, type Todo } from "@/components/da
 import TrendKpis from "@/components/dashboard/trend-kpis"
 import MetricPicker from "@/components/metric-picker"
 import { AdminLink, PageHeader, Pill, ReportProblem, Section, StatusPill, enumLabel } from "@/components/report"
+import { assistantProvider } from "@/lib/assistant/shared"
 import { isAdmin } from "@/lib/auth"
 import { isOpen, requestStage, requestTitle } from "@/lib/compliance-rules"
 import { addDays, formatDay, parseRange, rangeQuery, today, type DateRange } from "@/lib/date-range"
@@ -46,6 +48,7 @@ import {
 import { listLeads } from "@/lib/leads/store"
 import type { Lead } from "@/lib/leads/types"
 import { load, type Loaded } from "@/lib/load"
+import { currentName } from "@/lib/people"
 import { OVERVIEW_METRICS, delta, formatUnit, metricById, type MetricDef } from "@/lib/overview-metrics"
 import { checkPage, getPageSpeed } from "@/lib/pagespeed"
 import { DEFAULT_GRADE, readData, type ChangeRequest, type GradeSettings } from "@/lib/store"
@@ -184,7 +187,17 @@ export default async function CampaignPage({ params, searchParams }: { params: P
       )}
 
       {tab === "ads" && (
-        <AdsTab ads={ads} assets={await load(() => getCampaignAssets(id))} selected={first(sp.ad)} group={first(sp.group)} tabHref={tabHref} q={q} />
+        <AdsTab
+          campaignId={id}
+          ads={ads}
+          assets={await load(() => getCampaignAssets(id))}
+          selected={first(sp.ad)}
+          group={first(sp.group)}
+          tabHref={tabHref}
+          q={q}
+          personName={await currentName()}
+          aiReady={assistantProvider() !== null}
+        />
       )}
 
       {tab === "landing" && (
@@ -513,6 +526,9 @@ function CampaignFacts({ c }: { c: CampaignInfo }) {
 const labelTone = { BEST: "green", GOOD: "green", LOW: "red", LEARNING: "violet", PENDING: "gray", UNKNOWN: "gray" } as const
 const strengthTone = { EXCELLENT: "green", GOOD: "green", AVERAGE: "amber", POOR: "red" } as const
 function AdsTab({
+  campaignId,
+  personName,
+  aiReady,
   ads,
   assets,
   selected,
@@ -526,6 +542,9 @@ function AdsTab({
   group?: string
   tabHref: (t: TabId, extra?: string) => string
   q: string
+  campaignId: string
+  personName: string
+  aiReady: boolean
 }) {
   if (!ads.ok) return <ReportProblem problem={ads} />
   const a: CampaignAssets = assets.ok
@@ -612,6 +631,9 @@ function AdsTab({
             </ul>
             <AdBlock ad={current} assets={a} />
           </div>
+        )}
+        {current && current.type === "RESPONSIVE_SEARCH_AD" && (
+          <AdFixer key={current.id} campaignId={campaignId} ad={current} assets={a} personName={personName} aiReady={aiReady} />
         )}
       </Section>
       {assets.ok ? (

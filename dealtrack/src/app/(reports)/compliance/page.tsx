@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 
 import RequestCard, { type RequestView } from "@/components/compliance/request-card"
 import StatusRequestForm from "@/components/compliance/status-request-form"
+import UndoAdButton from "@/components/compliance/undo-ad-button"
 import { DataTable, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
 import { isAdmin } from "@/lib/auth"
 import { OVERRIDE_DAYS, getLearning, isOpen, requestStage, requestTitle } from "@/lib/compliance"
@@ -45,7 +46,7 @@ export default async function CompliancePage() {
     <>
       <PageHeader
         title="Compliance"
-        description="The brake. Two kinds of change wait for a check and an approval before they reach Google Ads, the same way the weekly negatives and keyword ideas do: turning campaigns on or off, and any change to a campaign while Google's bidding is still learning."
+        description="The brake. These changes wait for a check and an approval before they reach Google Ads, the same way the weekly negatives and keyword ideas do: turning campaigns on or off, new ad text (from a campaign's Ads tab), and any change to a campaign while Google's bidding is still learning."
       />
 
       <section aria-label="Rules" className="grid gap-3 sm:grid-cols-2">
@@ -128,10 +129,13 @@ export default async function CompliancePage() {
                 r.stage === "done" ? (
                   <span className="flex flex-col gap-0.5">
                     <Pill tone={r.applied?.failures.length ? "red" : "green"}>
-                      {r.kind === "status" ? "Applied" : "Went through"}
+                      {r.kind === "learning" ? "Went through" : "Applied"}
                       {r.applied?.dryRun ? " (dry run, nothing changed)" : ""}
                     </Pill>
                     {r.applied?.failures.length ? <span className="text-xs text-destructive">{r.applied.failures.join("; ")}</span> : null}
+                    {r.kind === "ad" && r.ad && !r.ad.undoOf && !r.applied?.failures.length && !r.applied?.dryRun && (
+                      <UndoAdButton id={r.id} personName={name} />
+                    )}
                   </span>
                 ) : r.stage === "expired" ? (
                   <Pill>Approval expired</Pill>

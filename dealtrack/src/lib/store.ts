@@ -8,6 +8,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
 
+import type { AdTextSet } from "@/lib/ad-text"
 import { ServiceError } from "@/lib/services"
 
 export const DATA_DIR = process.env.DEALTRACK_DATA_DIR || path.join(process.cwd(), ".data")
@@ -177,16 +178,19 @@ export type ManualCheck = { done: boolean; by: string; at: string }
 export type KnownNetwork = { network: string; label: string; by: string; at: string }
 
 // The Compliance agent ("the brake"): turning campaigns on or off, and any change to a campaign
-// while Google's bidding is still learning, go through the same steps as a negatives batch:
+// while Google's bidding is still learning, and edits to an ad's text, go through the same steps as a negatives batch:
 // requested, checked, approved, then applied by an admin.
 export type ChangeRequest = {
   id: string
-  kind: "status" | "learning"
+  kind: "status" | "learning" | "ad"
   campaigns: { id: string; name: string }[]
   status?: "ENABLED" | "PAUSED" // kind "status": what to set the campaigns to
   // kind "learning": the held change this request unlocks once approved (used once).
   change?: { key: string; label: string }
   learning?: { campaign: string; reason: string }[] // what Google said when the request was made
+  // kind "ad": new headlines and descriptions for one responsive search ad, and what it said before
+  // (so it can be put back). `ai` is set when the AI drafted it.
+  ad?: { id: string; adGroup: string; firstHeadline: string; before: AdTextSet; after: AdTextSet; ai?: boolean; undoOf?: string }
   reason: string
   requested: BatchStep
   checked?: BatchStep & { ok: boolean }

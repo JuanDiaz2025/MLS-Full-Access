@@ -3,7 +3,8 @@
 // them, its keywords with Quality Score, and when its clicks come in. Read-only.
 
 import { addDays, today, type DateRange } from "@/lib/date-range"
-import { gaql } from "@/lib/google-ads/client"
+import type { AdTextSet } from "@/lib/ad-text"
+import { customerResource, gaql, gaqlFresh, mutate } from "@/lib/google-ads/client"
 import { cleanUrl, emptyMetrics, weekdays, type Metrics, type ScheduleGrid } from "@/lib/google-ads/reports"
 
 type Num = string | number | undefined
@@ -341,4 +342,51 @@ export function monthDays() {
   const total = new Date(Date.UTC(y, m, 0)).getUTCDate()
   const gone = Number(now.slice(8, 10))
   return { gone, total, left: total - gone, yesterday: addDays(now, -1) }
+}
+
+// ---- Editing an ad's text -------------------------------------------------------------------
+
+// The ad as Google has it right now (not cached), to check nothing changed since the edit was asked.
+export async function getAdText(adId: string): Promise<(AdTextSet & { campaignId: string; campaign: string; adGroup: string }) | null> {
+  if (!/^\d{1,20}$/.test(adId)) return null
+  const rows = await gaqlFresh<{
+    campaign: { id?: Num; name?: string }
+    adGroup: { name?: string }
+    adGroupAd: { ad: { responsiveSearchAd?: { headlines?: TextAsset[]; descriptions?: TextAsset[] } } }
+  }>(
+    `SELECT campaign.id, campaign.name, ad_group.name, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions
+     FROM ad_group_ad WHERE ad_group_ad.ad.id = ${adId} AND ad_group_ad.status != 'REMOVED'`,
+  )
+  const r = rows[0]
+  if (!r) return null
+  const lines = (items: TextAsset[] | undefined) => (items ?? []).map((t) => ({ text: t.text ?? "", pinned: t.pinnedField ?? "" }))
+  const rsa = r.adGroupAd.ad.responsiveSearchAd
+  return {
+    campaignId: String(r.campaign.id ?? ""),
+    campaign: r.campaign.name ?? "",
+    adGroup: r.adGroup.name ?? "",
+    headlines: lines(rsa?.headlines),
+    descriptions: lines(rsa?.descriptions),
+  }
+}
+
+// Replaces a responsive search ad's headlines and descriptions (AdService). Google reviews the ad
+// again; it keeps showing the approved version until the new one passes. Returns Google's
+// message when it refuses. In test mode (DEALTRACK_VALIDATE_ONLY=1) Google only checks it.
+export async function updateAdText(adId: string, set: AdTextSet, { validateOnly = false } = {}): Promise<string | null> {
+  const line = (l: { text: string; pinned: string }) => (l.pinned ? { text: l.text, pinnedField: l.pinned } : { text: l.text })
+  const result = await mutate(
+    "ads",
+    [
+      {
+        update: {
+          resourceName: `${customerResource()}/ads/${adId}`,
+          responsiveSearchAd: { headlines: set.headlines.map(line), descriptions: set.descriptions.map(line) },
+        },
+        updateMask: "responsive_search_ad.headlines,responsive_search_ad.descriptions",
+      },
+    ],
+    { validateOnly },
+  )
+  return result.failures.get(0) ?? null
 }
