@@ -145,6 +145,31 @@ const eq = (a, b, m) => {
     'Redfin photos: one per photo, the big size wins');
 }
 
+// ---- the same buy box on Redfin and on the MLS grid: single-family, under the cap, never over $3M ----
+{
+  const sf = { county: 'San Francisco', maxk: 1500 }, sm = { county: 'San Mateo', maxk: 2000 };
+  const H = o => Object.assign({ addr: '1 A St, Oakland, CA 94601', price: 900000, ptype: '1', year: 1950 }, o);
+  eq(core.redfinBuyBox(H({}), sf, 'list'), '', 'Redfin buy box: a 1950 house under the cap is kept');
+  eq(/over the \$1.5M cap/.test(core.redfinBuyBox(H({ price: 1600000 }), sf, 'list')), true, 'Redfin buy box: over the $1.5M area cap');
+  eq(core.redfinBuyBox(H({ price: 1900000 }), sm, 'list'), '', 'Redfin buy box: San Mateo keeps its $2M cap');
+  eq(/over the \$3M cap/.test(core.redfinBuyBox(H({ price: 3200000 }), { county: 'X', maxk: 5000 }, 'list')), true, 'Redfin buy box: never over $3M, whatever the area says');
+  eq(/not a single-family/.test(core.redfinBuyBox(H({ ptype: '2' }), sf, 'list')), true, 'Redfin buy box: a condo (type 2) is dropped');
+  eq(/not a single-family/.test(core.redfinBuyBox(H({ ptype: 'Townhouse' }), sf, 'list')), true, 'Redfin buy box: a townhouse is dropped');
+  eq(/not a single-family/.test(core.redfinBuyBox(H({ ptype: 'Multi-Family (2-4 Unit)' }), sf, 'list')), true, 'Redfin buy box: multi-family is dropped');
+  eq(core.redfinBuyBox(H({ ptype: 'Single Family Residential' }), sf, 'page'), '', 'Redfin buy box: the page saying Single Family keeps it');
+  eq(core.redfinBuyBox(H({ ptype: '' }), sf, 'list'), '', 'Redfin buy box: type unknown in the list waits for the page');
+  eq(/too new/.test(core.redfinBuyBox(H({ year: 2015 }), sf, 'list')), true, 'Redfin buy box: 25+ years old, like the MLS scan');
+  eq(core.redfinBuyBox(H({ addr: '21 College Terrace, San Francisco, CA 94112', price: 2500000 }), sf, 'list'), '', 'Redfin buy box: a confirmed deal is never dropped');
+  const homes = core.redfinGisHomes('{}&&' + JSON.stringify({ payload: { homes: [{ url: '/CA/X/1-A-St-94601/home/9', uiPropertyType: 2, mlsStatus: 'Coming Soon' }] } }));
+  eq(homes[0].ptype, '2', 'Redfin data: the house type travels with the home');
+  const g = core.filterCandidates({ 'All San Francisco': { county: 'San Francisco', rows: [
+    { mls: 'SF1', addr: '1 A St', price: '$1,200,000', sqft: '1,200', age: '70', dom: '5', cls: 'Single Family' },
+    { mls: 'SF2', addr: '2 B St', price: '$1,700,000', sqft: '1,200', age: '70', dom: '5', cls: 'Single Family' },
+    { mls: 'SF3', addr: '3 C St', price: '$900,000', sqft: '900', age: '70', dom: '5', cls: 'Condominium' }] } });
+  eq([g.candidates.map(r => r.mls), g.rejected.map(r => r.mls + ': ' + r._reason).sort()],
+    [['SF1'], ['SF2: $1,700k is over the $1.5M cap', 'SF3: not a single-family home — Condominium']], 'MLS grid: same backstop — over the cap or not single-family is dropped');
+}
+
 // ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
 {
   const A = core.parseRedfinAgent;

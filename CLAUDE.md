@@ -662,6 +662,20 @@ harness intercepting `persist:redfin` https): finds 2 of 3, opens each, steps
 the board file; with every data call held open it times out and finishes in
 ~70 s.
 
+**v1.54 — same buy box on Redfin as on the MLS (Bryan 2 Oct: "make it the
+same command: single family home only and we don't buy 3M above").** Redfin's
+search filters are not trusted: `core.redfinBuyBox()` checks every Coming Soon
+/ Early Access home twice — from Redfin's data (before the page is opened) and
+from the home's own page (before any photo) — single-family only (Redfin
+`uiPropertyType` 1, or a "Single Family" label; condo / townhouse / multi /
+land / mobile drop), price ≤ the area cap (San Mateo $2.0M, else $1.5M) and
+**never over $3M** (`REDFIN_PRICE_CEILING`), 25+ years old when the year is
+known. Drops go to Rejected with stage *Buy-box filter*. The MLS grid got the
+same backstop: `JS_SCRAPE_GRID` now reads the **Class** column and
+`filterCandidates` drops a non-single-family class or a price over the area
+cap / $3M even if the search ignored those boxes. Confirmed deals are never
+dropped. The area caps are unchanged — $3M is a ceiling, not a new cap.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

@@ -1425,10 +1425,22 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
       if (!early.length) log(`  ${label}: none of them is Coming Soon / Early Access on Redfin right now`
         + ' (Early Access homes only show when signed in to Redfin — use "Sign in to Redfin" in section 3)', 'warn');
       runKpi.scanned += early.length;
-      const fresh = early.filter(c => !seen['RF' + c.homeId]);
-      log(`${label}: ${cardsSeen} houses on Redfin → ${early.length} Coming Soon / Early Access → ${fresh.length} new`, 'good');
-      // --- read each one's own page, judge it like an MLS listing ---
+      // The same buy box as the MLS scan, checked here on every home — not
+      // left to Redfin's search filters: single-family only, under the area's
+      // cap (never over $3M), 25+ years old.
       const kept = [], rejects = [];
+      const rejectRow = (c, reason, stage) => ({ mls: c.mls || ('RF' + c.homeId), addr: c.addr, city: (c.addr.split(',')[1] || area.county).trim(),
+        zip: (c.addr.match(/\b(9\d{4})$/) || [])[1] || '', price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', sqft: c.sqft,
+        dom: c.dom, reason, stage, link: c.url });
+      const inBox = [];
+      early.forEach(c => {
+        const why = core.redfinBuyBox(c, area, 'list');
+        if (why) { rejects.push(rejectRow(c, why, 'Buy-box filter')); log(`  skip ${c.addr} — ${why}`); }
+        else inBox.push(c);
+      });
+      const fresh = inBox.filter(c => !seen['RF' + c.homeId]);
+      log(`${label}: ${cardsSeen} houses on Redfin → ${early.length} Coming Soon / Early Access → ${inBox.length} single-family under the cap → ${fresh.length} new`, 'good');
+      // --- read each one's own page, judge it like an MLS listing ---
       for (let i = 0; i < fresh.length; i++) {
         if (await stopRequested()) break;
         const c = fresh[i];
@@ -1445,6 +1457,14 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         if (!h.year && c.year) h.year = c.year;
         if (h.dom === '' && c.dom !== '' && c.dom != null) h.dom = c.dom;
         if (!h.mls && c.mls) h.mls = c.mls;
+        // The page says what the list may not have: the type, the year.
+        const pageWhy = core.redfinBuyBox({ ...c, ptype: h.ptype || c.ptype, year: h.year || c.year }, area, 'page');
+        if (pageWhy) {
+          log(`  skip — ${pageWhy}`);
+          rejects.push(rejectRow(c, pageWhy, 'Buy-box filter'));
+          ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr });
+          continue;
+        }
         if (/sign in|join or sign/i.test(text.slice(0, 3000)) && !h.remarks) log('  this Early Access home is only shown in full when signed in to Redfin', 'warn');
         // EVERY photo, one by one, in Redfin's own viewer (Rule #2).
         const seenPhotos = await viewRedfinPhotos(Number(cfg.scrollPauseMs) || 700);

@@ -62,7 +62,7 @@ const JS_SCRAPE_GRID = `(() => {
     // Failing a column of its own, the street line often carries it.
     const inAddr = (pick('Street Address').match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '';
     out.push({ mls: pick('MLS #'), addr: pick('Street Address'), price: pick('Price'),
-      sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'),
+      sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'), cls: pick('Class'),
       zip: (zipCell.match(/9[0-5]\\d{3}/)||[''])[0] || inAddr });
   });
   // Fallback for a grid whose rows carry other class names (San Francisco read
@@ -130,13 +130,19 @@ const LIST_WINDOW_DAYS = 60;
 
 // Stage-3 filter: older SFR, on the market 45 days or less. The price screens
 // are gone; $/sqft is recorded and sorts the output but excludes nothing.
+const NOT_SFR_CLASS_RE = /condo|co-?op|town\s*house|townhome|multi|duplex|triplex|fourplex|income|land|lot\b|mobile|manufactured|floating|commercial|rental|lease/i;
+
 function filterCandidates(rowsByArea) {
   let all = [];
   for (const key of Object.keys(rowsByArea)) {
     for (const r of rowsByArea[key].rows || []) {
       const price = num(r.price), sqft = num(r.sqft);
       if (!price || !sqft) continue;
+      // The area's own price cap, never over $3M — checked here as well as
+      // in the search box, in case the search ignored it.
+      const box = DEFAULT_BUYBOX.find(a => a.county === rowsByArea[key].county);
       all.push({ ...r, _price: price, _sqft: sqft, _age: num(r.age), _dom: num(r.dom),
+        _cap: Math.min(((box && box.maxk) || 1500) * 1000, 3000000),
         _ppsf: Math.round(price/sqft),
         // "All San Francisco" is a log heading, not a city — never let it reach
         // a lead, a median key, or the vision prompt.
@@ -179,6 +185,11 @@ function filterCandidates(rowsByArea) {
     const a = String(r.addr || '').trim();
     if (isConfirmed(a)) return '';   // confirmed deal — no screen may drop it
     if (REJECTED_ADDR.some(re => re.test(a))) return 'previously rejected by Bryan — do not resurface';
+    // Single-family only, under the cap — the search asks for both, this
+    // makes sure (Bryan, 2 Oct: "filter single family home only and we don't
+    // buy 3M above").
+    if (r._cap && r._price > r._cap) return `$${Math.round(r._price / 1000).toLocaleString()}k is over the $${r._cap / 1e6}M cap`;
+    if (r.cls && NOT_SFR_CLASS_RE.test(r.cls) && !/single[\s-]*family/i.test(r.cls)) return `not a single-family home — ${r.cls}`;
     // A BLANK age field parses to 0, which used to read as "built this year" and
     // silently discarded the listing as too new. Missing is not new: let an
     // unknown age through to photo review, where the pictures settle it.
@@ -1147,7 +1158,7 @@ function parseRedfinHome(text) {
     agent: grab(/Listed by\s+([^•·\n]{3,80}?)\s*(?:•|·|\n|$)/i),
     mls: redfinMlsId(rawMls, source),
     lotSqft: lot ? Math.round(Number(lot[1].replace(/,/g, '')) * (/acre/i.test(lot[2]) ? 43560 : 1)) : 0,
-    propClass: /single/i.test(ptype) ? 'Res. Single Family' : ptype,
+    propClass: /single/i.test(ptype) ? 'Res. Single Family' : ptype, ptype,
   };
 }
 
@@ -1238,11 +1249,38 @@ function redfinHome(o) {
   const badge = parts.filter(x => REDFIN_EARLY_RE.test(x)).sort((a, b) => /early/i.test(b) - /early/i.test(a))[0] || '';
   const street = String(rv(o.streetLine) || o.address || '').trim();
   const addr = street && o.city ? `${street}, ${o.city}, ${o.state || 'CA'} ${o.zip || ''}`.trim() : redfinAddrFromUrl(url);
-  return { homeId: id, url: url.replace(/[?#].*$/, ''), addr, badge, status, early: !!badge,
+  // House type: Redfin's uiPropertyType (1 = house) or its text label.
+  const ptype = o.uiPropertyType != null && o.uiPropertyType !== '' ? String(o.uiPropertyType) : String(rv(o.propertyType) || '');
+  return { homeId: id, url: url.replace(/[?#].*$/, ''), addr, badge, status, early: !!badge, ptype,
     early_access: /early[\s-]*access/i.test(status),
     price: rnum(o.price), beds: rnum(o.beds), baths: rnum(o.baths), sqft: rnum(o.sqFt || o.sqft),
     year: rnum(o.yearBuilt), dom: rv(o.dom) == null || rv(o.dom) === '' ? '' : rnum(o.dom),
     mls: redfinMlsId(rv(o.mlsId), o.source || ''), remarks: String(o.listingRemarks || '').trim() };
+}
+
+/** Never above this, whatever the area's cap says (Bryan, 2 Oct: "we don't
+ *  buy 3M above"). The area caps — $2.0M San Mateo, $1.5M everywhere else —
+ *  are lower still and apply first. */
+const REDFIN_PRICE_CEILING = 3000000;
+const NOT_HOUSE_RE = /condo|co-?op|town\s*house|townhome|multi[\s-]*family|duplex|triplex|fourplex|quadruplex|\d\s*units?\b|land|lot\b|mobile|manufactured|floating|houseboat|commercial|rental/i;
+
+/** The MLS scan's buy box, applied to a Redfin home by the app itself — Redfin's
+ *  own search filters are not trusted to have been honoured. Single-family
+ *  only, at or under the area's cap and never over $3M, 25+ years old when
+ *  the year is known. Returns '' to keep, else the reason. `phase` 'page'
+ *  means the home's own page has been read, so an unknown type now fails. */
+function redfinBuyBox(h, area, phase) {
+  if (isConfirmed(h.addr)) return '';
+  const cap = Math.min(((area && area.maxk) || 1500) * 1000, REDFIN_PRICE_CEILING);
+  if (h.price > cap) return `$${Math.round(h.price / 1000).toLocaleString()}k is over the $${cap / 1e6}M cap for ${area && area.county ? area.county : 'this area'}`;
+  const t = String(h.ptype || '').trim();
+  if (t === '1' || /single[\s-]*family|^house$/i.test(t)) { /* a house */ }
+  else if (/^\d+$/.test(t)) return `not a single-family home (Redfin type ${t})`;
+  else if (t && NOT_HOUSE_RE.test(t)) return `not a single-family home — ${t}`;
+  else if (phase === 'page' && t) return `not a single-family home — ${t}`;
+  const y = Number(h.year) || 0;
+  if (y > 1800 && 2026 - y < 25) return `too new — built ${y}, want 25+ years old`;
+  return '';
 }
 
 /** /stingray/api/gis → homes. */
@@ -1276,14 +1314,14 @@ function redfinCsvHomes(text) {
     url: get(r, 'URL'), streetLine: get(r, 'ADDRESS'), city: get(r, 'CITY'), state: get(r, 'STATE OR PROVINCE'),
     zip: get(r, 'ZIP OR POSTAL CODE'), price: get(r, 'PRICE'), beds: get(r, 'BEDS'), baths: get(r, 'BATHS'),
     sqFt: get(r, 'SQUARE FEET'), yearBuilt: get(r, 'YEAR BUILT'), dom: get(r, 'DAYS ON MARKET'),
-    mlsStatus: get(r, 'STATUS'), mlsId: get(r, 'MLS#'), source: get(r, 'SOURCE'),
+    mlsStatus: get(r, 'STATUS'), mlsId: get(r, 'MLS#'), source: get(r, 'SOURCE'), propertyType: get(r, 'PROPERTY TYPE'),
   })).filter(Boolean);
 }
 
 module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
-  redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes,
+  redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
