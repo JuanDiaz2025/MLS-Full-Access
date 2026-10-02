@@ -135,15 +135,20 @@ export default function NegativeKeywordPanel({
           </table>
         </div>
       ) : (
-        <p className="py-4 text-center text-sm text-muted-foreground">No flagged search terms in this period.</p>
+        <p className="py-4 text-center text-sm text-muted-foreground">
+          No flagged search terms in this period, so there&apos;s nothing to pick here. Choose a longer date range at the top (e.g. Last 90
+          days), or type your own negative keywords below.
+        </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" onClick={() => add(toAdd)} disabled={busy || !toAdd.length || !campaignIds.length}>
-          Add {toAdd.length} selected to Google Ads
-        </Button>
-        <span className="text-xs text-muted-foreground">Terms that converted are left unchecked. Tick them only if you&apos;re sure.</span>
-      </div>
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" onClick={() => add(toAdd)} disabled={busy || !toAdd.length || !campaignIds.length}>
+            Add {toAdd.length} selected to Google Ads
+          </Button>
+          <span className="text-xs text-muted-foreground">Terms that converted are left unchecked. Tick them only if you&apos;re sure.</span>
+        </div>
+      )}
 
       <form
         className="flex flex-col gap-2 border-t pt-4"
@@ -167,6 +172,11 @@ export default function NegativeKeywordPanel({
             Add
           </Button>
         </div>
+        <p className="text-xs text-muted-foreground">
+          {!campaignIds.length
+            ? "Tick at least one campaign above first."
+            : "Clicking Add asks you to confirm below; nothing changes in Google Ads until you click Add to Google Ads there."}
+        </p>
       </form>
 
       {ui}

@@ -3,7 +3,7 @@
 // Pieces shared by the panels that change Google Ads: a campaign picker, a confirm step, and the
 // result message. Every change goes through useChange, which shows a confirmation first.
 
-import { useState, useTransition, type ReactNode } from "react"
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2 } from "lucide-react"
 
@@ -121,6 +121,12 @@ export function useChange() {
   const [pending, setPending] = useState<Pending | null>(null)
   const [result, setResult] = useState<ActionResult | null>(null)
   const [running, startTransition] = useTransition()
+  // The question and the answer can show up below the fold (e.g. under a long list), so they're
+  // scrolled into view; otherwise it looks like the button did nothing.
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (pending || result) box.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+  }, [pending, result])
 
   function ask(p: Pending) {
     setResult(null)
@@ -139,7 +145,7 @@ export function useChange() {
   }
 
   const ui = (
-    <>
+    <div ref={box} className="flex flex-col gap-3 empty:hidden">
       {pending && (
         <div
           role="alertdialog"
@@ -164,7 +170,7 @@ export function useChange() {
         </div>
       )}
       {result && <ResultMessage result={result} onDismiss={() => setResult(null)} />}
-    </>
+    </div>
   )
 
   return { ask, ui, busy: running || !!pending }
