@@ -88,7 +88,10 @@ export default function AppHeader({
 }) {
   const pathname = usePathname()
   const query = useRangeQuery()
-  const active = navGroups.find((g) => g.links.some((l) => pathname === l.href)) ?? navGroups[0]
+  // A page under a tab (a single campaign under Campaigns) lights up that tab, unless it has a tab of its own.
+  const hasTab = navGroups.some((g) => g.links.some((l) => l.href === pathname))
+  const isCurrent = (href: string) => pathname === href || (!hasTab && pathname.startsWith(`${href}/`))
+  const active = navGroups.find((g) => g.links.some((l) => isCurrent(l.href))) ?? navGroups[0]
 
   const tab = (href: string, label: string, current: boolean) => (
     <Link
@@ -140,7 +143,7 @@ export default function AppHeader({
       </nav>
       {active.links.length > 1 && (
         <nav aria-label={active.label} className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 text-xs sm:px-6">
-          {active.links.map((l) => tab(l.href, l.label, pathname === l.href))}
+          {active.links.map((l) => tab(l.href, l.label, isCurrent(l.href)))}
         </nav>
       )}
     </header>

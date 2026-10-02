@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 
+import CampaignSearch from "@/components/campaigns/campaign-search"
 import { formatConversions, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
 import { DataTable, PageHeader, ReportProblem, Section, StatusPill, enumLabel } from "@/components/report"
 import { parseRange, rangeQuery, type DateRange } from "@/lib/date-range"
@@ -26,71 +27,94 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
   const params = await searchParams
   const range = parseRange(params)
   const view = VIEWS.find((v) => v.id === first(params.status)) ?? VIEWS[0]
+  const search = (first(params.q) ?? "").trim().toLowerCase()
   const result = await load(() => getAllCampaigns(range))
 
   return (
     <>
       <PageHeader
         title="Campaigns"
-        description="Every campaign in the account, running or not, with its results for this period. Filter by status the same way Google Ads does."
+        description="Every campaign in the account, running or not, with its results for this period. Search or filter by status, then click a campaign to see everything about it: its numbers, ads, landing page, searches, and leads."
         range={range}
       />
-      {!result.ok ? (
-        <ReportProblem problem={result} />
-      ) : (
-        <Body campaigns={result.data} view={view.id} range={range} />
-      )}
+      {!result.ok ? <ReportProblem problem={result} /> : <Body campaigns={result.data} view={view.id} range={range} search={search} />}
     </>
   )
 }
 
-function Body({ campaigns, view, range }: { campaigns: CampaignListRow[]; view: (typeof VIEWS)[number]["id"]; range: DateRange }) {
+function Body({
+  campaigns,
+  view,
+  range,
+  search,
+}: {
+  campaigns: CampaignListRow[]
+  view: (typeof VIEWS)[number]["id"]
+  range: DateRange
+  search: string
+}) {
   const current = VIEWS.find((v) => v.id === view)!
-  const rows = campaigns.filter((c) => current.match(c.status))
+  const words = search.split(/\s+/).filter(Boolean)
+  const rows = campaigns.filter((c) => current.match(c.status) && words.every((w) => c.name.toLowerCase().includes(w)))
   const count = (match: (s: string) => boolean) => campaigns.filter((c) => match(c.status)).length
   const enabledBudget = campaigns.filter((c) => c.status === "ENABLED").reduce((s, c) => s + (c.dailyBudget ?? 0), 0)
   // Keep the date range when switching status.
   const q = rangeQuery(range)
-  const href = (id: string) => `/campaigns${q ? `${q}&` : "?"}status=${id}`
+  const href = (id: string) => `/campaigns${q ? `${q}&` : "?"}status=${id}${search ? `&q=${encodeURIComponent(search)}` : ""}`
 
   return (
     <Section
       title={`${rows.length} ${rows.length === 1 ? "campaign" : "campaigns"}`}
       description={`${count((s) => s === "ENABLED")} enabled (${formatUsd(enabledBudget)}/day in budgets), ${count((s) => s === "PAUSED")} paused, ${count((s) => s === "REMOVED")} removed.`}
       actions={
-        <nav aria-label="Campaign status" className="flex flex-wrap gap-1.5">
-          {VIEWS.map((v) => (
-            <Link
-              key={v.id}
-              href={href(v.id)}
-              aria-current={v.id === view ? "true" : undefined}
-              className={cn(
-                "rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground",
-                v.id === view && "border-primary bg-primary text-primary-foreground hover:text-primary-foreground",
-              )}
-            >
-              {v.label} ({count(v.match)})
-            </Link>
-          ))}
-        </nav>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
+          <CampaignSearch />
+          <nav aria-label="Campaign status" className="flex flex-wrap gap-1.5">
+            {VIEWS.map((v) => (
+              <Link
+                key={v.id}
+                href={href(v.id)}
+                aria-current={v.id === view ? "true" : undefined}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                  v.id === view && "border-primary bg-primary text-primary-foreground hover:text-primary-foreground",
+                )}
+              >
+                {v.label} ({count(v.match)})
+              </Link>
+            ))}
+          </nav>
+        </div>
       }
     >
-      <CampaignTable rows={rows} />
+      <CampaignTable
+        rows={rows}
+        q={q}
+        empty={words.length ? `No ${current.id === "live" ? "" : `${current.label.toLowerCase()} `}campaign matches “${search}”.` : undefined}
+      />
     </Section>
   )
 }
 
-function CampaignTable({ rows }: { rows: CampaignListRow[] }) {
+function CampaignTable({ rows, q, empty = "No campaigns with this status." }: { rows: CampaignListRow[]; q: string; empty?: string }) {
   const totals = sumMetrics(rows)
   const t = rates(totals)
   return (
     <DataTable<CampaignListRow>
       rows={rows}
       rowKey={(c) => c.id}
-      empty="No campaigns with this status."
+      empty={empty}
       rowClassName={(c) => (c.metrics.impressions === 0 ? "text-muted-foreground" : undefined)}
       columns={[
-        { key: "name", label: "Campaign", render: (c) => <span className="font-medium">{c.name}</span> },
+        {
+          key: "name",
+          label: "Campaign",
+          render: (c) => (
+            <Link href={`/campaigns/${c.id}${q}`} className="font-medium text-primary hover:underline">
+              {c.name}
+            </Link>
+          ),
+        },
         { key: "status", label: "Status", render: (c) => <StatusPill status={c.status} /> },
         { key: "type", label: "Type", render: (c) => <span className="text-muted-foreground">{enumLabel(c.channel)}</span> },
         { key: "bidding", label: "Bidding", render: (c) => <span className="text-muted-foreground">{enumLabel(c.bidding)}</span> },
@@ -122,9 +146,7 @@ function CampaignTable({ rows }: { rows: CampaignListRow[] }) {
             <td className="px-4 py-2 text-right tabular-nums">{formatPercent(t.ctr)}</td>
             <td className="px-4 py-2 text-right tabular-nums">{formatUsdCents(t.cpc)}</td>
             <td className="px-4 py-2 text-right tabular-nums">{formatConversions(totals.conversions)}</td>
-            <td className="px-4 py-2 text-right tabular-nums sm:pr-5">
-              {t.costPerConversion === null ? "—" : formatUsd(t.costPerConversion)}
-            </td>
+            <td className="px-4 py-2 text-right tabular-nums sm:pr-5">{t.costPerConversion === null ? "—" : formatUsd(t.costPerConversion)}</td>
           </tr>
         </tfoot>
       }

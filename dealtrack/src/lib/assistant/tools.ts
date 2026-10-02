@@ -6,7 +6,10 @@ import { addDays, dayOf, today } from "@/lib/date-range"
 import { getClickPatterns } from "@/lib/fraud/clicks"
 import { findJunkLeads } from "@/lib/fraud/leads"
 import { classifyVisits, findClusters, getAdVisits } from "@/lib/fraud/visitors"
+import { getCampaignAds, getCampaignAssets, getCampaignInfo, getCampaignKeywords } from "@/lib/google-ads/campaign"
 import { GoogleAdsError, gaql } from "@/lib/google-ads/client"
+import { getOverview } from "@/lib/google-ads/overview"
+import { getAllCampaigns, getLocationData, getSearchTerms, isWaste } from "@/lib/google-ads/reports"
 import { leadSource } from "@/lib/leads/source"
 import { listLeads, listQrCodes } from "@/lib/leads/store"
 import { leadChannel } from "@/lib/leads/tracking"
@@ -92,7 +95,71 @@ export const toolSpecs: ToolSpec[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "campaign_detail",
+    description:
+      "Everything DealTrack's single-campaign page shows (Optimize → Campaigns → click a campaign) for one campaign: its settings and Google's status, " +
+      "spend, leads, cost per lead, clicks and impression share against the period before, every ad with all headlines and descriptions (with Google's " +
+      "Best/Good/Low ratings and pins), ad strength and approval, sitelinks, callouts and images, keywords with Quality Score, the searches that brought " +
+      "leads and the costliest ones with none, and the top cities. Use it when the question is about one campaign or its ads.",
+    parameters: {
+      type: "object",
+      properties: {
+        campaign: { type: "string", description: "The campaign's name (or part of it) or its ID." },
+        days: { type: "integer", description: "How many days back, from 1 to 365." },
+      },
+      required: ["campaign", "days"],
+      additionalProperties: false,
+    },
+  },
 ]
+
+// One campaign, as its DealTrack page shows it.
+export async function campaignDetail(campaign: string, days: number) {
+  const range = { from: addDays(today(), -(days - 1)), to: today(), label: `Last ${days} days` }
+  const all = await getAllCampaigns(range)
+  const wanted = campaign.trim().toLowerCase()
+  const match =
+    all.find((c) => c.id === wanted) ??
+    all.find((c) => c.name.toLowerCase() === wanted) ??
+    all.filter((c) => wanted.split(/\s+/).every((w) => c.name.toLowerCase().includes(w))).sort((a, b) => (a.status === "ENABLED" ? 0 : 1) - (b.status === "ENABLED" ? 0 : 1))[0]
+  if (!match) return { error: `No campaign matches "${campaign}".`, campaigns: all.filter((c) => c.status === "ENABLED").map((c) => c.name) }
+  const id = match.id
+  const [info, overview, ads, assets, keywords, terms, places] = await Promise.all([
+    getCampaignInfo(id),
+    getOverview(range, id),
+    getCampaignAds(id, range),
+    getCampaignAssets(id),
+    getCampaignKeywords(id, range),
+    getSearchTerms(range, id),
+    getLocationData(range, id),
+  ])
+  const round = (n: number) => Math.round(n * 100) / 100
+  return {
+    page: `/campaigns/${id}`,
+    range,
+    campaign: info,
+    totals: overview.totals,
+    previousPeriod: overview.previous,
+    ads: ads.map((a) => ({
+      adGroup: a.adGroup,
+      status: a.status,
+      strength: a.strength,
+      approval: a.approval,
+      policyTopics: a.topics,
+      finalUrl: a.finalUrl,
+      displayUrl: a.displayUrl,
+      headlines: a.headlines,
+      descriptions: a.descriptions,
+      metrics: a.metrics,
+    })),
+    assets,
+    keywords: keywords.slice(0, 25).map((k) => ({ text: k.text, match: k.matchType, status: k.status, qualityScore: k.quality, cost: round(k.metrics.cost), clicks: k.metrics.clicks, conversions: k.metrics.conversions })),
+    searchesWithLeads: terms.filter((t) => t.metrics.conversions > 0).slice(0, 10).map((t) => ({ term: t.term, cost: round(t.metrics.cost), conversions: t.metrics.conversions })),
+    costliestWithNoLeads: terms.filter((t) => isWaste(t.metrics)).slice(0, 10).map((t) => ({ term: t.term, cost: round(t.metrics.cost), clicks: t.metrics.clicks, blocked: t.status.includes("EXCLUDED") })),
+    topCities: places.rows.slice(0, 10).map((p) => ({ city: p.city, inBuyArea: p.status !== "outside", cost: round(p.metrics.cost), conversions: p.metrics.conversions })),
+  }
+}
 
 const MAX_ROWS = 200
 const MAX_CHARS = 60_000
@@ -246,6 +313,12 @@ export async function runTool(name: string, input: unknown): Promise<{ content: 
     if (name === "fraud_check") {
       const days = Math.min(Math.max(Math.round(Number((input as { days?: unknown }).days) || 30), 1), 365)
       return { content: JSON.stringify(await fraudCheck(days)).slice(0, MAX_CHARS) }
+    }
+    if (name === "campaign_detail") {
+      const { campaign, days } = input as { campaign?: unknown; days?: unknown }
+      if (typeof campaign !== "string" || !campaign.trim()) return { content: "Say which campaign (name or ID).", isError: true }
+      const d = Math.min(Math.max(Math.round(Number(days) || 30), 1), 365)
+      return { content: JSON.stringify(await campaignDetail(campaign, d)).slice(0, MAX_CHARS) }
     }
     if (name === "dealtrack_status") return { content: JSON.stringify(await dealtrackStatus()).slice(0, MAX_CHARS) }
     return { content: `Unknown tool ${name}.`, isError: true }

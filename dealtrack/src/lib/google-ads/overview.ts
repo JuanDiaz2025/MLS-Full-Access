@@ -98,20 +98,26 @@ type Row = {
   }
 }
 
-// Totals for the whole range (grain null) or per day/week/month.
-async function collect(range: DateRange, grain: Grain | null): Promise<Map<string, Totals>> {
+// Totals for the whole range (grain null) or per day/week/month; the whole account, or one
+// campaign when `campaignId` is given.
+async function collect(range: DateRange, grain: Grain | null, campaignId?: string): Promise<Map<string, Totals>> {
   const seg = grain ? `${SEGMENT[grain]}, ` : ""
-  const where = `segments.date BETWEEN '${range.from}' AND '${range.to}'`
+  const one = campaignId && /^\d+$/.test(campaignId) ? campaignId : null
+  const from = one ? "campaign" : "customer"
+  const where = `segments.date BETWEEN '${range.from}' AND '${range.to}'${one ? ` AND campaign.id = ${one}` : ""}`
   const [rows, byAction, actions] = await Promise.all([
     gaql<Row>(
       `SELECT ${seg}metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions, metrics.invalid_clicks,
          metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
-       FROM customer WHERE ${where}`,
+       FROM ${from} WHERE ${where}`,
     ),
-    gaql<Row>(`SELECT ${seg}segments.conversion_action_name, metrics.conversions FROM customer WHERE ${where}`),
-    gaql<{ conversionAction: { name?: string; category?: string } }>("SELECT conversion_action.name, conversion_action.category FROM conversion_action"),
+    gaql<Row>(`SELECT ${seg}segments.conversion_action_name, metrics.conversions FROM ${from} WHERE ${where}`),
+    gaql<{ conversionAction: { name?: string; category?: string } }>(
+      "SELECT conversion_action.name, conversion_action.category FROM conversion_action",
+    ),
   ])
-  const key = (r: Row) => (grain === "day" ? r.segments?.date : grain === "week" ? r.segments?.week : grain === "month" ? r.segments?.month : "all") ?? ""
+  const key = (r: Row) =>
+    (grain === "day" ? r.segments?.date : grain === "week" ? r.segments?.week : grain === "month" ? r.segments?.month : "all") ?? ""
   const out = new Map<string, Totals>()
   const at = (k: string) => {
     const t = out.get(k) ?? blank()
@@ -138,15 +144,19 @@ async function collect(range: DateRange, grain: Grain | null): Promise<Map<strin
 }
 
 // One row per day, week, or month of `range`, including the ones with no activity.
-export async function getSeries(range: DateRange, grain: Grain): Promise<Bucket[]> {
-  const series = await collect(range, grain)
+export async function getSeries(range: DateRange, grain: Grain, campaignId?: string): Promise<Bucket[]> {
+  const series = await collect(range, grain, campaignId)
   return bucketStarts(range, grain).map((start) => ({ ...(series.get(start) ?? blank()), start }))
 }
 
-export async function getOverview(range: DateRange): Promise<Overview> {
+export async function getOverview(range: DateRange, campaignId?: string): Promise<Overview> {
   const grain = grainFor(range)
   const prev = previousRange(range)
-  const [buckets, totals, before] = await Promise.all([getSeries(range, grain), collect(range, null), collect(prev, null)])
+  const [buckets, totals, before] = await Promise.all([
+    getSeries(range, grain, campaignId),
+    collect(range, null, campaignId),
+    collect(prev, null, campaignId),
+  ])
   return {
     grain,
     buckets,

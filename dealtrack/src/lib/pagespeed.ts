@@ -13,13 +13,14 @@ export type PageSpeed = {
   cls: number | null
   fieldLcp: "FAST" | "AVERAGE" | "SLOW" | null // real Chrome visitors, last 28 days
   slowestThirdParties: string[]
+  screenshot?: string | null // how the page looked on a phone once loaded (a data: URL); missing in older cached results
 }
 
-type Audit = { numericValue?: number; details?: { items?: { entity?: string | { text?: string }; blockingTime?: number }[] } }
+type Audit = { numericValue?: number; details?: { data?: string; items?: { entity?: string | { text?: string }; blockingTime?: number }[] } }
 
 export function getPageSpeed(url: string): Promise<PageSpeed> {
   const { PAGESPEED_API_KEY } = settings(SERVICE, ["PAGESPEED_API_KEY"] as const)
-  return cached(`psi:${url}`, 12 * HOUR, async () => {
+  return cached(`psi2:${url}`, 12 * HOUR, async () => {
     const params = new URLSearchParams({ url, strategy: "mobile", category: "performance", key: PAGESPEED_API_KEY })
     const res = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?${params}`, { cache: "no-store" })
     const body = (await res.json().catch(() => ({}))) as {
@@ -50,6 +51,7 @@ export function getPageSpeed(url: string): Promise<PageSpeed> {
         .sort((a, b) => (b.blockingTime ?? 0) - (a.blockingTime ?? 0))
         .slice(0, 3)
         .map((i) => (typeof i.entity === "string" ? i.entity : (i.entity?.text ?? "Unknown"))),
+      screenshot: audits["final-screenshot"]?.details?.data ?? null,
     }
   }, { staleMs: 7 * 24 * HOUR })
 }
@@ -61,6 +63,11 @@ export type PageCheck = {
   formFields: number | null // visible inputs across the page's forms; null when no <form>
   tapToCall: boolean
   reviews: boolean
+  // What the page says about itself, for previews. Missing in results cached before they were added.
+  title?: string
+  description?: string
+  image?: string // the page's share image (og:image)
+  images?: string[] // the first few pictures on the page
 }
 
 // Asks public DNS rather than the server's resolver, which may sit behind a proxy.
@@ -79,7 +86,7 @@ export function domainResolves(host: string): Promise<boolean> {
 // The site's firewall answers 403 to HEAD and bot-looking requests, so this is a normal GET
 // with a phone browser's user agent.
 export function checkPage(url: string): Promise<PageCheck> {
-  return cached(`page:${url}`, HOUR, async () => {
+  return cached(`page2:${url}`, HOUR, async () => {
     const empty = { h1: "", formFields: null, tapToCall: false, reviews: false }
     const host = new URL(url).hostname
     if (!(await domainResolves(host))) return { status: null, resolves: false, ...empty }
@@ -98,6 +105,23 @@ export function checkPage(url: string): Promise<PageCheck> {
       const text = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/gi, " ")
       const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]?.replace(/<[^>]+>|\s+/g, " ").trim() ?? ""
       const hasForm = /<form\b/i.test(html)
+      const base = res.url || url
+      const abs = (src: string) => {
+        try {
+          return new URL(src.replace(/&amp;/g, "&"), base).toString()
+        } catch {
+          return ""
+        }
+      }
+      const meta = (name: string) =>
+        html.match(new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]*content=["']([^"']*)["']`, "i"))?.[1] ??
+        html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:name|property)=["']${name}["']`, "i"))?.[1] ??
+        ""
+      const images = [...html.matchAll(/<img\b[^>]*?\s(?:data-src|src)=["']([^"']+)["']/gi)]
+        .map((m) => abs(m[1]))
+        .filter((u) => /^https?:/.test(u) && !/\.svg(\?|$)|pixel|spacer|gravatar|facebook\.com\/tr/i.test(u))
+      const decode = (t: string) =>
+        t.replace(/&amp;/g, "&").replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&#8211;/g, "–").replace(/&#8217;/g, "’").trim()
       const fields = html.match(/<(input|select|textarea)\b(?![^>]*type=["']?(hidden|submit|button|checkbox|radio))[^>]*>/gi) ?? []
       return {
         status: res.status,
@@ -106,6 +130,10 @@ export function checkPage(url: string): Promise<PageCheck> {
         formFields: hasForm ? fields.length : null,
         tapToCall: /href=["']tel:/i.test(html),
         reviews: /review|testimonial|\bstars?\b|rating/i.test(text),
+        title: decode(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").slice(0, 140),
+        description: decode(meta("description") || meta("og:description")).slice(0, 300),
+        image: meta("og:image") ? abs(meta("og:image")) : undefined,
+        images: [...new Set(images)].slice(0, 6),
       }
     } catch {
       return { status: null, resolves: true, ...empty } // timed out or refused: shown as unreachable
