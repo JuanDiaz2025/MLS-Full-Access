@@ -1130,7 +1130,9 @@ function redfinAddrFromUrl(url) {
 function parseRedfinHome(text) {
   const t = String(text || '').replace(/\r/g, '');
   const grab = re => { const m = t.match(re); return m ? m[1].trim() : ''; };
-  let remarks = grab(/About this home\s*\n([\s\S]{20,4000}?)\n\s*(?:Show (?:more|less)|Listed by|Redfin last checked|Source:|Hide|Read more|Home facts|Property details)/i);
+  // The description, whether Redfin lays it out on its own lines or runs it
+  // into the next section on one line (the first app run read nothing).
+  let remarks = grab(/About this home\s+([\s\S]{20,4000}?)(?=\s+(?:Show (?:more|less)|Listed by|Redfin last checked|Source:|Hide|Read more|Home facts|Property details|Built in (?:18|19|20)\d\d|\d+ days? on Redfin)\b|$)/i);
   remarks = remarks.replace(/\s+/g, ' ').trim();
   const source = grab(/Source:\s*([^\n#]{2,60}?)\s*#/i);
   const rawMls = grab(/(?:MLS\s*#|Source:[^\n#]{0,60}#)\s*([A-Z]{0,4}\d{5,12})\b/i).toUpperCase();

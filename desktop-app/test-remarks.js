@@ -106,6 +106,8 @@ const eq = (a, b, m) => {
     + 'Listed by Karyn Kambur • Coldwell Banker\nBuilt in 1914\nLot Size: 2,500 sq ft\nProperty Type: Single Family Residential\n3 days on Redfin\nSource: San Francisco MLS #426150277');
   eq([h.year, h.dom, h.agent, h.mls, h.lotSqft, h.propClass, /Renovation Opportunity/.test(h.remarks), /COMING SOON/i.test(h.status)],
     [1914, 3, 'Karyn Kambur', 'SF426150277', 2500, 'Res. Single Family', true, true], 'Redfin: home page facts, SFAR number gets SF');
+  eq(core.parseRedfinHome('About this home Beautifully remodeled top to bottom, turnkey, new kitchen. Show more Built in 1951 4 days on Redfin').remarks,
+    'Beautifully remodeled top to bottom, turnkey, new kitchen.', 'Redfin: description read when it runs on one line');
   eq(core.redfinMlsId('ML82063204', 'MLSListings'), 'ML82063204', 'Redfin: MLSListings number kept as is');
   eq([core.redfinLabel('COMING SOON'), core.redfinLabel('Early Access'), core.redfinLabel('Compass Exclusive')],
     ['Coming Soon', 'Coming Soon · Early Access', 'Private Listing'], 'Redfin: board label is coloured Coming Soon / Private');

@@ -586,12 +586,14 @@ async function readWholePage(run = js) {
         .sort((a, b) => b.scrollHeight - a.scrollHeight).slice(0, 2));
     for (const el of panels) {
       const step = Math.max(200, Math.round((el === panels[0] ? innerHeight : el.clientHeight) * 0.8));
-      for (let y = 0; y <= el.scrollHeight; y += step) { el.scrollTop = y; await wait(${pause}); }
+      // At most 40 screens: a page that loads more as it is scrolled would
+      // otherwise keep this going for ever.
+      for (let y = 0, n = 0; y <= el.scrollHeight && n < 40; y += step, n++) { el.scrollTop = y; await wait(${pause}); }
       el.scrollTop = el.scrollHeight; await wait(${pause});
     }
     for (const el of panels) el.scrollTop = 0;
     return true;
-  })()`).catch(() => false);
+  })()`, 120000).catch(() => false);
   return await run('document.body.innerText').catch(() => '');
 }
 
@@ -1199,10 +1201,29 @@ function ensureRedfinWindow() {
   rfWin.on('closed', () => { rfWin = null; });
   return rfWin;
 }
-const rfJs = code => ensureRedfinWindow().webContents.executeJavaScript(code, true);
+// Every wait on the Redfin window has a time limit. Without one, a request
+// Redfin holds open, or a page that redirects while a snippet is running, left
+// executeJavaScript waiting for ever — the "search that never stops" (2 Oct).
+const timeLimit = (p, ms, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(what + ' timed out')), ms))]);
+const rfJs = (code, ms = 30000) => timeLimit(ensureRedfinWindow().webContents.executeJavaScript(code, true), ms, 'Redfin page');
 async function rfNav(url, settle = 3500) {
-  await ensureRedfinWindow().loadURL(url).catch(() => {});
+  await timeLimit(ensureRedfinWindow().loadURL(url), 30000, 'Redfin page load').catch(() => {});
   await sleep(settle);
+}
+// What each Redfin data call returned, for checking a run that finds nothing.
+let rfDiag = [];
+const rfDiagNote = line => { rfDiag.push(new Date().toISOString().slice(11, 19) + ' ' + line); };
+/** fetch() inside the Redfin page (its own cookies), given up after 20 s. */
+async function rfFetch(url) {
+  const r = await rfJs(`(async () => {
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
+    try { const r = await fetch(${JSON.stringify(url)}, { credentials: 'include', signal: ac.signal });
+      return { status: r.status, body: await r.text() }; }
+    catch (e) { return { status: 0, body: String(e && e.message || e) }; }
+    finally { clearTimeout(t); }
+  })()`, 25000).catch(e => ({ status: 0, body: e.message }));
+  rfDiagNote(`${r.status} ${url}\n    ${String(r.body || '').slice(0, 300).replace(/\s+/g, ' ')}`);
+  return r;
 }
 
 // Every search card on the page: the box around each /home/<id> link.
@@ -1318,9 +1339,8 @@ ipcMain.handle('redfin-signin', async () => {
 });
 
 async function redfinCounty(county) {
-  const path_ = await rfJs(`fetch('/stingray/do/location-autocomplete?v=2&al=1&location=' + encodeURIComponent(${JSON.stringify(county + ' County, CA')}))
-    .then(r => r.text()).catch(() => '')`).catch(() => '');
-  return core.redfinCountyPath(path_, county);
+  const r = await rfFetch('/stingray/do/location-autocomplete?v=2&al=1&location=' + encodeURIComponent(county + ' County, CA'));
+  return core.redfinCountyPath(r.body, county);
 }
 
 ipcMain.handle('redfin-scan', async (_e, opts) => {
@@ -1334,6 +1354,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   const MAX_PAGES = 25;
   let found = 0;
   try {
+    rfDiag = [];
     log('━━━ Redfin — Coming Soon & Early Access (no MLS sign-in) ━━━', 'good');
     if (!(cfg.useAI && cfg.apiKey)) log('⚠ AI PHOTO CHECK IS OFF — every photo will be opened and looked through, but nothing judges them. Add the key in section 2 and tick "Use AI" to have renovated houses dropped from the photos.', 'error');
     await rfNav('https://www.redfin.com/', 4000);
@@ -1360,12 +1381,14 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           if (cardsSeen) break;
           for (let page = 1; page <= 10; page++) {
             if (await stopRequested()) break;
-            const body = await rfJs(`fetch(${JSON.stringify(core.redfinGisUrl({ regionId, maxk: area.maxk, page, csv, market }))}, { credentials: 'include' })
-              .then(r => r.ok ? r.text() : '').catch(() => '')`).catch(() => '');
-            const homes = (csv ? core.redfinCsvHomes(body) : core.redfinGisHomes(body)) || [];
+            const r = await rfFetch(core.redfinGisUrl({ regionId, maxk: area.maxk, page, csv, market }));
+            const homes = (r.status === 200 && (csv ? core.redfinCsvHomes(r.body) : core.redfinGisHomes(r.body))) || [];
             const add = homes.filter(h => !ids.has(h.homeId));
             add.forEach(h => { ids.add(h.homeId); if (h.early) early.push(h); });
             cardsSeen += add.length;
+            log(`  ${label}: Redfin ${csv ? 'download' : 'data'} page ${page}${market ? '' : ' (no market)'} — `
+              + (r.status === 200 ? `${homes.length} house(s), ${add.filter(h => h.early).length} Coming Soon / Early Access`
+                : `no answer (HTTP ${r.status || 'none'})`), r.status === 200 ? 'info' : 'warn');
             if (homes.length < 350 || !add.length) break;
           }
           if (cardsSeen) source = csv ? 'Redfin download data' : 'Redfin search data';
@@ -1379,6 +1402,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           if (page > 1) await rfNav(core.redfinSearchUrl(cpath, area.maxk, page), 4500);
           const raw = await rfJs(JS_REDFIN_CARDS).catch(() => []);
           const cards = (raw || []).map(core.redfinCard).filter(c => c && !ids.has(c.homeId));
+          log(`  ${label}: Redfin search page ${page} — ${cards.length} new house card(s), ${cards.filter(c => c.early).length} Coming Soon / Early Access`);
           if (!cards.length) break;
           cards.forEach(c => { ids.add(c.homeId); if (c.early) early.push(c); });
           cardsSeen += cards.length;
@@ -1503,6 +1527,11 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
     control.running = false;
     try { if (rfWin && !rfWin.isDestroyed()) rfWin.close(); } catch (_) {}
     rfWin = null;
+    try {
+      const f = path.join(app.getPath('userData'), 'redfin-last-run.txt');
+      fs.writeFileSync(f, rfDiag.join('\n') + '\n');
+      log(`What Redfin answered on each step is saved in ${f} — send it if this run found nothing.`);
+    } catch (_) {}
     const day = recordKpi(runKpi);
     if (googleReady() && googleCfg().autoSync) await rebuildBoard(day).catch(() => {});
     const line = `Redfin scan ${control.stopped ? 'STOPPED' : 'COMPLETE'} — ${runKpi.scanned} Coming Soon / Early Access found · `
@@ -1515,6 +1544,11 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           + (googleReady() ? ' (or press "↻ Refresh from sheet" on the board — the sheet already has them).' : '.'), 'good'); } catch (_) {}
     }
     send('board', board);
+    // Leads found: open the Lead Board with them already on the clipboard.
+    if (found && /^https:\/\/claude\.ai\//.test(String(cfg.boardUrl || ''))) {
+      shell.openExternal(cfg.boardUrl);
+      log(`Opened the Lead Board — click "Add scan" and paste (Ctrl+V) to add the ${found} Redfin lead(s).`, 'good');
+    }
     send('kpi', { today: day, history: kpiReport() });
     send('done', { stopped: control.stopped, summary: line, redfin: true });
   }

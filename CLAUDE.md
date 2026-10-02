@@ -646,6 +646,22 @@ no AI key the log says loudly that photos were viewed but not judged.
 opens redfin.com/login in the scan's own window (cookies persist). SF county is
 region 340. Mock-tested in Chromium; still not run against live Redfin.
 
+**v1.53 — "not pulling any leads, and the searching is non-stop" (Bryan 2
+Oct).** Every wait on the Redfin window now has a limit (`timeLimit`: page
+load 30 s, snippet 30 s, in-page `rfFetch` 20 s with AbortController): an
+`executeJavaScript` on a page that redirected, or a fetch Redfin held open,
+waited for ever. `readWholePage` scrolls at most 40 screens (a page that loads
+more as it scrolls never ended). The home description is read when Redfin runs
+it onto one line (`parseRedfinHome` — the first run read none, so a "remodeled
+top to bottom, turnkey" home stayed B). Each data page logs its count; every
+Redfin answer is saved to `<userData>/redfin-last-run.txt`; a run that finds
+leads opens the Lead Board with them on the clipboard. **End-to-end tested in
+the real Electron app under xvfb against a mock redfin.com** (scratchpad
+harness intercepting `persist:redfin` https): finds 2 of 3, opens each, steps
+15 photos, reads agent (not the Redfin decoy), drops the renovated one, writes
+the board file; with every data call held open it times out and finishes in
+~70 s.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each
