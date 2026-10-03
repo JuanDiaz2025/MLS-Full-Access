@@ -1360,7 +1360,27 @@ function redfinCsvHomes(text) {
   })).filter(Boolean);
 }
 
+/* AI model names, forgiven. The model box used to need the exact id —
+ * "gpt-4.1mini" or "GPT 4.1 mini" failed every call (Seth, 3 Oct). This writes
+ * what was typed the way the services spell it: lower case, hyphens for
+ * spaces, "gpt4o" -> "gpt-4o", "4.1mini" -> "4.1-mini". It never invents a
+ * model: a name that is still wrong after tidying fails the Test key check
+ * with the provider's own message. */
+function tidyModel(m) {
+  let s = String(m || '').trim().toLowerCase();
+  if (!s) return '';
+  // "ChatGPT 4o" means gpt-4o; the real id "chatgpt-4o-latest" stays as it is
+  if (/^chat\s*gpt\s+\d/.test(s) || /^chatgpt\d/.test(s)) s = s.replace(/^chat\s*gpt\s*/, 'gpt-');
+  s = s.replace(/[\s_]+/g, '-')
+       .replace(/^gpt(?=\d)/, 'gpt-')                       // gpt4.1 -> gpt-4.1
+       .replace(/([0-9a-z])(?=(mini|nano|turbo|pro|preview|latest)\b)/g, (x, c, _w, i, all) => /-$/.test(all.slice(0, i + 1)) ? x : c + '-')
+       .replace(/^claude-?(opus|sonnet|haiku)(?=\d)/, 'claude-$1-')   // claudeopus5-5 -> claude-opus-5-5
+       .replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return s;
+}
+
 module.exports = {
+  tidyModel,
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,

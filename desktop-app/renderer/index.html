@@ -87,8 +87,10 @@
       <label>API key — OpenAI (ChatGPT) <code>sk-…</code> or Anthropic (Claude) <code>sk-ant-…</code></label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-proj-... or sk-ant-...">
       <div id="aiProv" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
-      <label>Model</label>
-      <input id="model" type="text" value="" placeholder="gpt-4.1">
+      <label for="modelSel">Model</label>
+      <select id="modelSel" aria-label="AI model"></select>
+      <input id="model" type="text" value="" placeholder="type a model name, e.g. gpt-4.1-mini" style="display:none;margin-top:6px" aria-label="Model name">
+      <div id="modelNote" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
       <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
         <button id="aiTest" type="button">Test key</button>
         <span id="aiTestOut" style="font-size:12.5px"></span>
@@ -385,17 +387,61 @@
     $('aiProv').textContent = k ? 'Using ' + (prov === 'openai' ? 'OpenAI (ChatGPT)' : 'Anthropic (Claude)') : '';
     // a model from the other service would fail every call: swap it for this one's default
     if (k && (!m || (prov === 'openai') === /^claude/i.test(m))) $('model').value = AI_DEFAULT[prov];
-    $('model').placeholder = prov === 'openai' ? 'gpt-4.1 (or another vision model, e.g. gpt-4o)' : 'claude-opus-5-5 (or claude-sonnet-5, cheaper)';
     $('aiTestOut').textContent = '';
+    drawModels();
   }
+  // The model dropdown: the models this key can use (asked of OpenAI /
+  // Anthropic), else a built-in list; "Other" opens a box for any name, and
+  // whatever is typed is tidied ("GPT 4.1mini" -> gpt-4.1-mini).
+  const AI_MODELS = {
+    openai: [['gpt-4.1', 'gpt-4.1 — default, sharp on photos'], ['gpt-4.1-mini', 'gpt-4.1-mini — cheaper'], ['gpt-4.1-nano', 'gpt-4.1-nano — cheapest'],
+             ['gpt-4o', 'gpt-4o'], ['gpt-4o-mini', 'gpt-4o-mini — cheaper'], ['gpt-5', 'gpt-5'], ['gpt-5-mini', 'gpt-5-mini — cheaper'], ['o4-mini', 'o4-mini']],
+    anthropic: [['claude-opus-5-5', 'claude-opus-5-5 — default, best'], ['claude-sonnet-5-5', 'claude-sonnet-5-5 — cheaper'], ['claude-haiku-4-5', 'claude-haiku-4-5 — cheapest']],
+  };
+  let liveModels = { key: '', list: null };
+  function drawModels(){
+    const k = $('apiKey').value.trim(), prov = aiProvOf(k), cur = ($('model').value || '').trim();
+    const known = AI_MODELS[prov], label = {}; known.forEach(([id, t]) => { label[id] = t; });
+    let ids = liveModels.key === k && liveModels.list && liveModels.list.length ? liveModels.list.slice() : known.map(x => x[0]);
+    // the suggested ones first, in their order, then the rest A-Z
+    const first = known.map(x => x[0]).filter(id => ids.includes(id));
+    ids = first.concat(ids.filter(id => !first.includes(id)).sort());
+    const other = !!cur && !ids.includes(cur);
+    $('modelSel').innerHTML = ids.map(id => '<option value="' + id + '"' + (id === cur ? ' selected' : '') + '>' + (label[id] || id) + '</option>').join('') +
+      '<option value="__other"' + (other ? ' selected' : '') + '>Other — type a model name…</option>';
+    if (!cur) $('modelSel').value = ids[0];
+    $('model').style.display = other ? 'block' : 'none';
+    $('modelNote').textContent = liveModels.key === k && liveModels.list ? (liveModels.list.length ? liveModels.list.length + ' models this key can use' : '') :
+      k ? 'Built-in list — press Test key to load the models this key can use' : '';
+  }
+  async function loadModels(){
+    const k = $('apiKey').value.trim(); if (!k || liveModels.key === k) return;
+    const r = await window.fs.aiModels(k).catch(() => null);
+    if ($('apiKey').value.trim() !== k) return;
+    liveModels = { key: k, list: r && r.ok ? r.models : null };
+    drawModels();
+  }
+  $('modelSel').onchange = () => {
+    if ($('modelSel').value === '__other') { $('model').style.display = 'block'; $('model').value = ''; $('model').focus(); return; }
+    $('model').value = $('modelSel').value; $('model').style.display = 'none';
+    $('aiTestOut').textContent = ''; pushConfig(); saveAiFields();
+  };
+  $('model').onchange = async () => {
+    const t = await window.fs.tidyModel($('model').value).catch(() => $('model').value.trim());
+    if (t && t !== $('model').value) { $('model').value = t; $('modelNote').textContent = 'Using “' + t + '”'; }
+    pushConfig(); saveAiFields();
+  };
   function saveAiFields(){ window.fs.setConfig({ aiSave: true, useAI: $('useAI').checked, apiKey: $('apiKey').value.trim(), model: ($('model').value||'').trim() }); }
   $('apiKey').oninput = () => { aiSync(); pushConfig(); saveAiFields(); };
+  $('apiKey').onchange = loadModels;
   $('model').oninput = () => { $('aiTestOut').textContent = ''; pushConfig(); saveAiFields(); };
   $('aiTest').onclick = async () => {
     $('aiTest').disabled = true; $('aiTestOut').style.color = ''; $('aiTestOut').textContent = 'Testing…';
     pushConfig();
     const r = await window.fs.aiTest();
     $('aiTest').disabled = false;
+    if (r.ok && r.model && r.model !== $('model').value) { $('model').value = r.model; saveAiFields(); }
+    loadModels();
     $('aiTestOut').style.color = r.ok ? 'var(--strong, #1a7f37)' : 'var(--pass, #b42318)';
     $('aiTestOut').textContent = r.ok ? `✓ Works — ${r.provider} · ${r.model}` : `✗ ${r.provider || ''} ${r.model ? '· ' + r.model : ''}: ${r.error}`;
   };
@@ -406,7 +452,7 @@
     if (a.model) $('model').value = a.model;
     $('useAI').checked = !!a.useAI;
     $('aiFields').style.display = $('useAI').checked ? 'block' : 'none';
-    aiSync(); pushConfig();
+    aiSync(); pushConfig(); loadModels();
   }).catch(() => {});
   $('readSeconds').oninput = pushConfig;
   $('scrollPause').oninput = () => { try { localStorage.setItem('fs.scrollPause', $('scrollPause').value); } catch(_) {} pushConfig(); };

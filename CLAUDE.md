@@ -886,6 +886,15 @@ v1.41.0 is built from `Flip-scout-Filters` after merging `claude/inspiring-ride-
 which shipped the Sep 24 "Flip Scout Filters v1.40.0" — so the new download keeps
 that line's Lead Board hand-off, Redfin links and report scrolling.
 
+**v1.58.0 — the model is a dropdown (Seth, 3 Oct: "gpt-4.1mini" failed for a missing hyphen).**
+Section 2 lists the models the key can use — asked of OpenAI `/v1/models` or
+Anthropic `/v1/models` (`ai-models` in `main.js`; audio/realtime/image/embedding
+and dated snapshot ids filtered out) — with a built-in list as the fallback and
+"Other — type a model name…" for anything else. Every typed or saved name goes
+through `core.tidyModel()` (lower case, hyphens: "GPT 4.1 mini" → gpt-4.1-mini,
+gpt4o → gpt-4o; a real `chatgpt-4o-latest` is left alone). It never invents a
+model — a name still wrong after tidying fails Test key with the provider's message.
+
 **v1.42.0 (Seth's first live AI run, 26 Sep):**
 - *San Francisco: "280 matches → scraped 0 rows".* The grid was read ONCE, 3.5 s
   after clicking Results; a slow MLS left it empty and the area was skipped as

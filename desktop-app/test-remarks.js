@@ -220,5 +220,19 @@ const eq = (a, b, m) => {
   eq(/Key=\(\\\\d\+\)/.test(src), true, 'photo key regex is double-escaped in its template string');
 }
 
+// ---- AI model names are forgiven (Seth, 3 Oct: "gpt-4.1mini" failed) ----
+{
+  const t = require('./scan-core').tidyModel;
+  eq(t('gpt-4.1mini'), 'gpt-4.1-mini', 'model: a missing hyphen is put back');
+  eq(t('GPT 4.1 mini'), 'gpt-4.1-mini', 'model: capitals and spaces are fine');
+  eq(t('gpt4o'), 'gpt-4o', 'model: gpt4o -> gpt-4o');
+  eq(t('ChatGPT 4o mini'), 'gpt-4o-mini', 'model: "ChatGPT 4o mini" means gpt-4o-mini');
+  eq(t('chatgpt-4o-latest'), 'chatgpt-4o-latest', 'model: a real chatgpt- id is left alone');
+  eq(t('o4-mini'), 'o4-mini', 'model: o-series ids are left alone');
+  eq(t('Claude Sonnet 5'), 'claude-sonnet-5', 'model: Claude names tidy too');
+  eq(t(' gpt-4.1 '), 'gpt-4.1', 'model: a correct id is unchanged');
+  eq(t(''), '', 'model: blank stays blank (the default is used)');
+}
+
 if (fails) { console.error(`\n${fails} failing`); process.exit(1); }
 console.log('\nall board hand-off tests pass');

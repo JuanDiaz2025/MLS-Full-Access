@@ -39,7 +39,7 @@ const OPENAI_DEFAULT_MODEL = 'gpt-4.1';
 const ANTHROPIC_DEFAULT_MODEL = 'claude-opus-5-5';
 function aiProvider(key) { return /^sk-ant-/.test(String(key || '').trim()) ? 'anthropic' : 'openai'; }
 function aiModel() {
-  const prov = aiProvider(cfg.apiKey), m = String(cfg.model || '').trim();
+  const prov = aiProvider(cfg.apiKey), m = core.tidyModel(cfg.model);
   // "claude-opus-5" was never a model id; a saved setting from an older build
   // would make every AI call fail.
   if (prov === 'anthropic') return !m || m === 'claude-opus-5' || !/^claude/i.test(m) ? ANTHROPIC_DEFAULT_MODEL : m;
@@ -58,7 +58,31 @@ function saveAi() {
 }
 ipcMain.handle('ai-settings', () => {
   const j = loadAi();
-  return { apiKey: j.apiKey || '', model: j.model || '', useAI: !!j.useAI, provider: aiProvider(j.apiKey) };
+  return { apiKey: j.apiKey || '', model: core.tidyModel(j.model), useAI: !!j.useAI, provider: aiProvider(j.apiKey) };
+});
+
+// The models this key can use, for the dropdown in section 2. Asked of the
+// provider itself, so a new model shows up without a new build; when the
+// lookup fails the screen falls back to its built-in list.
+const NOT_FOR_PHOTOS = /audio|realtime|tts|transcribe|whisper|embedding|moderation|dall-e|image|search|instruct|davinci|babbage|codex|computer-use|deep-research|-\d{4}-\d{2}-\d{2}$|-\d{4}$/;
+ipcMain.handle('tidy-model', (_e, m) => core.tidyModel(m));
+ipcMain.handle('ai-models', async (_e, key) => {
+  key = String(key || '').trim();
+  if (!key) return { ok: false, models: [] };
+  const prov = aiProvider(key);
+  try {
+    if (prov === 'anthropic') {
+      const r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return { ok: false, provider: prov, models: [], error: (j.error && j.error.message) || ('HTTP ' + r.status) };
+      return { ok: true, provider: prov, models: (j.data || []).map(x => x.id).filter(id => /^claude/.test(id)) };
+    }
+    const r = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + key } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, provider: prov, models: [], error: (j.error && j.error.message) || ('HTTP ' + r.status) };
+    const ids = (j.data || []).map(x => x.id).filter(id => /^(gpt-|o\d|chatgpt-)/.test(id) && !NOT_FOR_PHOTOS.test(id));
+    return { ok: true, provider: prov, models: ids.sort() };
+  } catch (e) { return { ok: false, provider: prov, models: [], error: e.message }; }
 });
 
 ipcMain.on('set-config', (_e, c) => {

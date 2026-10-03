@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('fs', {
   setConfig: (c) => ipcRenderer.send('set-config', c),
   aiSettings: () => ipcRenderer.invoke('ai-settings'),
   aiTest: () => ipcRenderer.invoke('ai-test'),
+  aiModels: (key) => ipcRenderer.invoke('ai-models', key),
+  tidyModel: (m) => ipcRenderer.invoke('tidy-model', m),
   export: (leads) => ipcRenderer.invoke('export', { leads }),
   kpiReport: (days) => ipcRenderer.invoke('kpi-report', { days }),
   kpiExport: (days) => ipcRenderer.invoke('kpi-export', { days }),
