@@ -3,6 +3,8 @@
 // Every value comes from server environment variables (see .env.example). Nothing here runs in
 // the browser, and nothing is ever written back to Google Ads.
 
+import { countRequest, markLimitHit, operationsIn } from "@/lib/google-ads/usage"
+
 const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v22"
 const ADS_ENDPOINT = "https://googleads.googleapis.com"
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
@@ -178,6 +180,8 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
     // A path is a service under the account ("googleAds:searchStream") or a method on the
     // account itself (":generateKeywordIdeas").
     const url = `${ADS_ENDPOINT}/${API_VERSION}/customers/${cfg.customerId}${path.startsWith(":") ? "" : "/"}${path}`
+    // For the "API used today" meter in the header.
+    countRequest(operationsIn(path, payload)).catch(() => undefined)
     const res = await fetch(url, {
       method: "POST",
       headers,
@@ -226,6 +230,7 @@ async function call(cfg: AdsConfig, path: string, payload: unknown): Promise<unk
 
   if (!res.ok) {
     const errorBody = (Array.isArray(body) ? body[0] : body) as ApiErrorBody | undefined
+    if (res.status === 429 || /RESOURCE_EXHAUSTED/.test(text)) markLimitHit().catch(() => undefined)
     throw explain(res.status, errorBody ?? { error: { message: text.slice(0, 300) } })
   }
   return body

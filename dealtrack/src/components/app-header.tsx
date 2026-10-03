@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
 import { signOut } from "@/app/login/actions"
+import ApiMeter from "@/components/api-meter"
 import BrandLogo from "@/components/brand-logo"
 import LinkPending from "@/components/link-pending"
 import { cn } from "@/lib/utils"
@@ -115,6 +116,7 @@ export default function AppHeader({
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
         <BrandLogo />
         <div className="flex items-center gap-2">
+          <ApiMeter />
           {admin ? (
             <span
               className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
