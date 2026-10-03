@@ -9,7 +9,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto"
 import { existsSync } from "node:fs"
 import path from "node:path"
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 
 export const SESSION_COOKIE = "dt_session"
 export const SESSION_DAYS = 30
@@ -143,6 +143,14 @@ export async function isSignedIn() {
   if (openWithoutPassword()) return true
   if (!signInConfigured()) return false
   return (await sessionRole()) !== null
+}
+
+// Browsers throw away a "secure" cookie on a plain http:// address other than localhost, which
+// signed people out right after signing in on the office network (http://192.168.x.x:3000).
+// So cookies are marked secure only when the page really came over https (a tunnel, hosting).
+export async function secureCookies() {
+  const proto = ((await headers()).get("x-forwarded-proto") ?? "").split(",")[0].trim().toLowerCase()
+  return proto === "https"
 }
 
 export async function isAdmin() {

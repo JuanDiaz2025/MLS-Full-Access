@@ -4,7 +4,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { cookies } from "next/headers"
 
-import { googleClient, signValue, unsignValue } from "@/lib/auth"
+import { googleClient, secureCookies, signValue, unsignValue } from "@/lib/auth"
 
 const STATE_COOKIE = "dt_oauth"
 
@@ -37,7 +37,7 @@ export async function startSignIn(requestUrl: string, next: string) {
   const saved = Buffer.from(JSON.stringify({ state, verifier, next: safeNext(next) })).toString("base64url")
   ;(await cookies()).set(STATE_COOKIE, signValue(saved), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: await secureCookies(),
     sameSite: "lax",
     path: "/",
     maxAge: 600,

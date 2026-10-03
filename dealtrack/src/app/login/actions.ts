@@ -3,7 +3,7 @@
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
-import { SESSION_COOKIE, SESSION_DAYS, newSessionToken, roleForPassword } from "@/lib/auth"
+import { SESSION_COOKIE, SESSION_DAYS, newSessionToken, roleForPassword, secureCookies } from "@/lib/auth"
 import { safeNext } from "@/lib/google-signin"
 
 export type LoginState = { error?: string }
@@ -15,7 +15,7 @@ export async function signIn(_prev: LoginState, form: FormData): Promise<LoginSt
 
   ;(await cookies()).set(SESSION_COOKIE, newSessionToken(role), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: await secureCookies(),
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_DAYS * 86_400,

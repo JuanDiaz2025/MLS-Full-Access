@@ -5,7 +5,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { cookies } from "next/headers"
 
-import { signValue, unsignValue } from "@/lib/auth"
+import { secureCookies, signValue, unsignValue } from "@/lib/auth"
 import { ADS_SCOPE, DATA_MANAGER_SCOPE, GMAIL_SCOPE, SHEETS_SCOPE, saveConnection } from "@/lib/conversions/google"
 import { adsAccountConfig } from "@/lib/google-ads/client"
 import { redirectUri } from "@/lib/google-signin"
@@ -20,7 +20,7 @@ export async function startConnect(requestUrl: string, by: string) {
   const saved = Buffer.from(JSON.stringify({ state, verifier, by })).toString("base64url")
   ;(await cookies()).set(COOKIE, signValue(saved), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: await secureCookies(),
     sameSite: "lax",
     path: "/",
     maxAge: 600,
