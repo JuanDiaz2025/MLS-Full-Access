@@ -105,6 +105,10 @@ export type LeadScore = {
   unscored?: boolean
 }
 
+// Leads made from a tap on the website's phone number (call-taps.ts). The caller's number isn't
+// known until the team checks the call in the phone system, so they're never scored automatically.
+export const CALL_TAP_SOURCE = "Website · Call button"
+
 export type Lead = {
   id: string
   // Set for leads from a QR code form. Website leads have `source` instead.

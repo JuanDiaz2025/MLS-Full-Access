@@ -9,7 +9,7 @@
 // motivated seller in the message (inherited, foreclosure, repairs...) 15, coming back again 5.
 import { jsonFileStore } from "@/lib/json-file-store"
 import { hasAdClick } from "@/lib/leads/tracking"
-import type { Lead, LeadGrade, LeadScore, LeadStatus } from "@/lib/leads/types"
+import { CALL_TAP_SOURCE, type Lead, type LeadGrade, type LeadScore, type LeadStatus } from "@/lib/leads/types"
 
 export const HOT_AT = 70
 export const WARM_AT = 40
@@ -98,6 +98,11 @@ function baseScore(lead: Lead, earlier: Lead[], vouched: boolean): LeadScore {
   const phoneOk = realPhone(lead.phone)
   const email = lead.email?.trim().toLowerCase()
   const emailOk = Boolean(email && EMAIL.test(email) && !THROWAWAY.test(email))
+
+  // Someone tapped the phone number on the website: the call itself is in the phone system.
+  if (lead.source === CALL_TAP_SOURCE && !vouched) {
+    return { value: 50, grade: "warm", reasons: ["Tapped the phone number on the website: check the call in REI BlackBook, then set the status"], unscored: true }
+  }
 
   // Brought in from the website without a recognized name, phone or email: needs a person to look.
   if (name.startsWith("Website lead (check the notes)")) {

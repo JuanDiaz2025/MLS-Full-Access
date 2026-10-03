@@ -11,9 +11,14 @@ const KEYS = ["POSTHOG_API_KEY", "POSTHOG_PROJECT_ID"] as const
 type Value = string | number | boolean | null | Value[]
 
 export async function hogql(query: string): Promise<Record<string, Value>[]> {
+  return cached(`hogql:${query}`, 10 * MINUTE, () => hogqlFresh(query))
+}
+
+// The same query, always asked of PostHog (for things that must be up to the minute, like call taps).
+export async function hogqlFresh(query: string): Promise<Record<string, Value>[]> {
   const cfg = settings(SERVICE, KEYS)
   const host = (process.env.POSTHOG_HOST || "https://us.posthog.com").replace(/\/$/, "")
-  return cached(`hogql:${query}`, 10 * MINUTE, async () => {
+  {
     const res = await fetch(`${host}/api/projects/${cfg.POSTHOG_PROJECT_ID}/query/`, {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.POSTHOG_API_KEY}`, "content-type": "application/json" },
@@ -34,7 +39,7 @@ export async function hogql(query: string): Promise<Record<string, Value>[]> {
     }
     const cols = body.columns ?? []
     return (body.results ?? []).map((row) => Object.fromEntries(cols.map((c, i) => [c, row[i]])))
-  })
+  }
 }
 
 // Real prospects only: the live site, minus anyone with more than 150 pageviews (the team

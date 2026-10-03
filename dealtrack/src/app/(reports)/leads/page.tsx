@@ -143,7 +143,7 @@ export default async function LeadsPage() {
     <>
       <PageHeader
         title="Leads"
-        description="Every lead from the website forms as it comes in (from WordPress), scored the moment it arrives, with where it came from, plus phone calls from Google Ads. Good leads are sent back to Google Ads as conversions, so its bidding learns which clicks bring real sellers. The page updates on its own every few seconds. Leads are saved on this computer."
+        description="Every lead from the website forms as it comes in (from WordPress), scored the moment it arrives, with where it came from, plus taps on the website's phone number (from PostHog) and phone calls from Google Ads. Good leads are sent back to Google Ads as conversions, so its bidding learns which clicks bring real sellers. The page updates on its own every few seconds. Leads are saved on this computer."
       />
       <div className="-mt-2 flex flex-wrap items-center gap-3">
         {leads.length > 0 && (
