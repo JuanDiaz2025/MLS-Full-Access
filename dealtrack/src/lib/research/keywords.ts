@@ -6,11 +6,12 @@ import { jsonFileStore } from "@/lib/json-file-store"
 import type { ParsedKeyword } from "@/lib/research/parse"
 import { normalizeKeyword } from "@/lib/research/parse"
 
-export type KeywordSource = "ads-report" | "planner" | "suggest" | "manual"
+export type KeywordSource = "ads-report" | "planner" | "suggest" | "upload" | "manual"
 export const SOURCE_LABELS: Record<KeywordSource, string> = {
   "ads-report": "Our Google Ads keywords",
   planner: "Keyword Planner",
   suggest: "Google suggestions",
+  upload: "Uploaded file",
   manual: "Added by hand",
 }
 
@@ -36,6 +37,12 @@ const file = jsonFileStore<Store>("research-keywords.json", () => ({ keywords: {
 
 export async function getResearch() {
   const s = await file.read()
+  // Keyword lists uploaded before "Uploaded file" existed were saved as added by hand; their
+  // import's time matches the keywords' addedAt exactly.
+  const uploads = new Set((s.imports ?? []).filter((i) => i.what.startsWith("Keyword list")).map((i) => i.at))
+  for (const k of Object.values(s.keywords ?? {})) {
+    if (uploads.has(k.addedAt) && k.sources.includes("manual")) k.sources = k.sources.map((x) => (x === "manual" ? "upload" : x))
+  }
   return { keywords: Object.values(s.keywords ?? {}), imports: s.imports ?? [], volumesNote: s.volumesNote }
 }
 

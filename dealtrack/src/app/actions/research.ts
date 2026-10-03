@@ -14,7 +14,7 @@ export type ResearchState = { ok?: boolean; message?: string }
 const KINDS: Record<ParsedFile["kind"], { source: KeywordSource; what: string }> = {
   "ads-report": { source: "ads-report", what: "Google Ads keyword report (keywords only)" },
   planner: { source: "planner", what: "Keyword Planner export" },
-  list: { source: "manual", what: "Keyword list" },
+  list: { source: "upload", what: "Keyword list" },
 }
 
 export async function importKeywordsAction(file: ParsedFile & { name: string }): Promise<ResearchState> {

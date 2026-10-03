@@ -33,7 +33,7 @@ export const TOPICS = [
     id: "home-buyers",
     label: "Buying a home (not sellers)",
     match:
-      /first time|1st time|(?<!my )homes? for sale|(?<!my )houses? for sale|mortgage (rates?|calculator|lenders?|pre)|down payment|pre-?approv|home loan|buy(ing)? a (house|home)|rent to own|open house|apartments?/,
+      /first time|1st time|(first|1st) home buyers?|(?<!my )homes? for sale|(?<!my )houses? for sale|mortgage (rates?|calculator|lenders?|pre)|down payment|pre-?approv|home loan|buy(ing)? a (house|home)|rent to own|open house|apartments?/,
   },
   { id: "land", label: "Land & lots", match: /\bland\b|\blots?\b|acre|vacant/ },
   { id: "near-me", label: "Near me", match: /near me|nearby|close to me|in my area/ },
