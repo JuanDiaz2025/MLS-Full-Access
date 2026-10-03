@@ -3,6 +3,7 @@ import Link from "next/link"
 
 import { saveAlertSettings } from "@/app/actions/settings"
 import { formatDate, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
+import NotifySettings from "@/components/alerts/notify-settings"
 import { AdminLink, DataTable, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
 import SettingsForm from "@/components/settings-form"
 import { bySeverity, checkAlerts, googleAdsRules, type Fired, type RuleGroup } from "@/lib/alert-rules"
@@ -24,6 +25,7 @@ import { getClarity } from "@/lib/clarity"
 import { addDays, today, type DateRange } from "@/lib/date-range"
 import { getAdDestinations, getConversionActions, getWeekly } from "@/lib/google-ads/reports"
 import { load, type Loaded, type Problem } from "@/lib/load"
+import { getNotifySettings, sender, type NotifySettings as Notify } from "@/lib/notify"
 import { currentName } from "@/lib/people"
 import { getErrorTracking, getSiteWeeks } from "@/lib/posthog"
 import { readData, type AlertRecord, type AlertSettings } from "@/lib/store"
@@ -136,7 +138,7 @@ export default async function AlertsPage() {
   const log = checked.ok ? checked.data.log : data.data.alertLog
   const open = log.filter((r) => !r.resolvedAt).sort(bySeverity)
   const resolved = log.filter((r) => r.resolvedAt).slice(0, 50)
-  const admin = await isAdmin()
+  const [admin, personName, notify, from] = await Promise.all([isAdmin(), currentName(), getNotifySettings(), sender()])
 
   return (
     <>
@@ -189,7 +191,9 @@ export default async function AlertsPage() {
         />
       </Section>
 
-      <Rules settings={data.data.alerts} admin={admin} personName={await currentName()} />
+      <Rules settings={data.data.alerts} admin={admin} personName={personName} />
+
+      <Emails notify={notify} admin={admin} personName={personName} from={from} />
 
       <Section
         title="History"
@@ -294,6 +298,36 @@ function Rules({ settings: s, admin, personName }: { settings: AlertSettings; ad
             { name: "invalidClickRate", label: "Invalid clicks above", suffix: "%", value: String(Math.round(s.invalidClickRate * 100)), hint: "Share of the last 30 days' clicks." },
           ]}
         />
+      ) : (
+        <AdminLink />
+      )}
+    </Section>
+  )
+}
+
+const LEVEL_TEXT = { critical: "critical alerts", high: "high and critical alerts", medium: "medium, high and critical alerts", info: "every alert" } as const
+
+function Emails({ notify: n, admin, personName, from }: { notify: Notify; admin: boolean; personName: string; from: Awaited<ReturnType<typeof sender>> }) {
+  const status = n.enabled && n.emails.length ? `On: ${LEVEL_TEXT[n.minSeverity]} go to ${n.emails.join(", ")}.` : "Off: alerts only show here."
+  return (
+    <Section
+      title="Alert emails"
+      description={`When a new alert opens (on a page or in the 15-minute check), the people below get an email with what happened and a link here. The same alert is emailed at most once a day. ${status}`}
+    >
+      {n.lastError && !n.lastError.test && (!n.lastSent || n.lastError.at > n.lastSent.at) && (
+        <p className="text-sm font-medium text-destructive">
+          The last email didn&apos;t go out ({when(n.lastError.at)}): {n.lastError.message}
+        </p>
+      )}
+      {n.lastSent && (!n.lastError || n.lastSent.at > n.lastError.at) && (
+        <p className="text-xs text-muted-foreground">
+          Last {n.lastSent.test ? "test email" : `email (${n.lastSent.count} ${n.lastSent.count === 1 ? "alert" : "alerts"})`} sent {when(n.lastSent.at)} to{" "}
+          {n.lastSent.to.join(", ")}.
+          {n.updatedBy && n.updatedAt ? ` Settings changed by ${n.updatedBy} on ${when(n.updatedAt)}.` : ""}
+        </p>
+      )}
+      {admin ? (
+        <NotifySettings enabled={n.enabled} emails={n.emails} minSeverity={n.minSeverity} sender={from} personName={personName} />
       ) : (
         <AdminLink />
       )}

@@ -14,6 +14,7 @@ import { getCalls } from "@/lib/google-ads/calls"
 import { gaql } from "@/lib/google-ads/client"
 import { getSeries, type Bucket } from "@/lib/google-ads/overview"
 import { load, type Problem } from "@/lib/load"
+import { notifyNewAlerts } from "@/lib/notify"
 import { updateData, type AlertRecord, type Data } from "@/lib/store"
 
 export type Fired = Pick<AlertRecord, "key" | "severity" | "title" | "detail" | "href">
@@ -418,8 +419,13 @@ export async function checkAlerts(groups: RuleGroup[]): Promise<{ log: AlertReco
   const fired = results.flatMap((r) => (r.result.ok ? r.result.data : []))
   const evaluated = results.filter((r) => r.result.ok).map((r) => r.g.prefix)
   const problems = results.flatMap((r) => (r.result.ok ? [] : [r.result as Problem]))
+  let opened: Fired[] = []
   const saved = await updateData((d) => {
+    const wasOpen = new Set(d.alertLog.filter((r) => !r.resolvedAt).map((r) => r.key))
+    opened = fired.filter((f, i) => !wasOpen.has(f.key) && fired.findIndex((g) => g.key === f.key) === i)
     d.alertLog = recordAlerts(d.alertLog, fired, evaluated)
   })
+  // Emails the people on the Alerts page about alerts that just opened, without holding up the page.
+  if (opened.length) notifyNewAlerts(opened).catch(() => undefined)
   return { log: saved.alertLog, problems }
 }
