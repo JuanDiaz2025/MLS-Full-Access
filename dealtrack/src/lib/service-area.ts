@@ -8,7 +8,7 @@ export const BUY_AREA_STATE = "California"
 // California places that show up in searches. Word-level waste analysis never suggests blocking
 // one of their words, and the out-of-area negative rule never lists them. Not every city in the
 // state, so the location reports use Google's own names (serviceAreaStatus) instead.
-const CALIFORNIA_PLACES = [
+export const CALIFORNIA_PLACES = [
   "California", "Bay Area", "Northern California", "Southern California", "Central Valley", "Central Coast", "Inland Empire",
   "Peninsula", "East Bay", "South Bay", "North Bay", "Silicon Valley", "NorCal", "SoCal",
   // Bay Area

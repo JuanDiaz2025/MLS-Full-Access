@@ -52,6 +52,10 @@ export const navGroups = [
     ],
   },
   {
+    label: "Competitors",
+    links: [{ href: "/competitors/keywords", label: "Keyword explorer" }],
+  },
+  {
     label: "Insights",
     links: [
       { href: "/behavior", label: "Behavior" },
