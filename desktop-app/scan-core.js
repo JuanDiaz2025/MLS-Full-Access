@@ -24,7 +24,7 @@ const SEARCH_URL = 'https://search.mlslistings.com/Matrix/Search/Residential/Res
 // City '*' means the entire county, so no city list has to be maintained and
 // nothing is missed because a town was never typed in.
 //
-// Price caps follow the standing rule: San Mateo (the Peninsula) $2.0M,
+// Price caps follow the standing rule: San Mateo (the Peninsula) $2.5M (Bryan, 2 Oct; was $2.0M),
 // everywhere else $1.5M. County names are exactly as the Matrix dropdown spells
 // them — checked against the live form, not guessed.
 //
@@ -32,7 +32,7 @@ const SEARCH_URL = 'https://search.mlslistings.com/Matrix/Search/Residential/Res
 // finished completely before the next one starts, so SF reaches the sheet first.
 const DEFAULT_BUYBOX = [
   { county: 'San Francisco', city: '*', maxk: 1500 },
-  { county: 'San Mateo', city: '*', maxk: 2000 },
+  { county: 'San Mateo', city: '*', maxk: 2500 },
   { county: 'Santa Clara', city: '*', maxk: 1500 },
   { county: 'Alameda', city: '*', maxk: 1500 },
   { county: 'Contra Costa', city: '*', maxk: 1500 },
@@ -62,7 +62,7 @@ const JS_SCRAPE_GRID = `(() => {
     // Failing a column of its own, the street line often carries it.
     const inAddr = (pick('Street Address').match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '';
     out.push({ mls: pick('MLS #'), addr: pick('Street Address'), price: pick('Price'),
-      sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'),
+      sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'), cls: pick('Class'),
       zip: (zipCell.match(/9[0-5]\\d{3}/)||[''])[0] || inAddr });
   });
   // Fallback for a grid whose rows carry other class names (San Francisco read
@@ -130,13 +130,19 @@ const LIST_WINDOW_DAYS = 60;
 
 // Stage-3 filter: older SFR, on the market 45 days or less. The price screens
 // are gone; $/sqft is recorded and sorts the output but excludes nothing.
+const NOT_SFR_CLASS_RE = /condo|co-?op|town\s*house|townhome|multi|duplex|triplex|fourplex|income|land|lot\b|mobile|manufactured|floating|commercial|rental|lease/i;
+
 function filterCandidates(rowsByArea) {
   let all = [];
   for (const key of Object.keys(rowsByArea)) {
     for (const r of rowsByArea[key].rows || []) {
       const price = num(r.price), sqft = num(r.sqft);
       if (!price || !sqft) continue;
+      // The area's own price cap, never over $3M — checked here as well as
+      // in the search box, in case the search ignored it.
+      const box = DEFAULT_BUYBOX.find(a => a.county === rowsByArea[key].county);
       all.push({ ...r, _price: price, _sqft: sqft, _age: num(r.age), _dom: num(r.dom),
+        _cap: Math.min(((box && box.maxk) || 1500) * 1000, 3000000),
         _ppsf: Math.round(price/sqft),
         // "All San Francisco" is a log heading, not a city — never let it reach
         // a lead, a median key, or the vision prompt.
@@ -179,6 +185,11 @@ function filterCandidates(rowsByArea) {
     const a = String(r.addr || '').trim();
     if (isConfirmed(a)) return '';   // confirmed deal — no screen may drop it
     if (REJECTED_ADDR.some(re => re.test(a))) return 'previously rejected by Bryan — do not resurface';
+    // Single-family only, under the cap — the search asks for both, this
+    // makes sure (Bryan, 2 Oct: "filter single family home only and we don't
+    // buy 3M above").
+    if (r._cap && r._price > r._cap) return `$${Math.round(r._price / 1000).toLocaleString()}k is over the $${r._cap / 1e6}M cap`;
+    if (r.cls && NOT_SFR_CLASS_RE.test(r.cls) && !/single[\s-]*family/i.test(r.cls)) return `not a single-family home — ${r.cls}`;
     // A BLANK age field parses to 0, which used to read as "built this year" and
     // silently discarded the listing as too new. Missing is not new: let an
     // unknown age through to photo review, where the pictures settle it.
@@ -410,8 +421,9 @@ function rulesDecide(meta) {
   // Only trust a low count that came off the full photo grid. When the grid
   // fails to load the app falls back to the carousel, which only ever has ~4
   // preloaded — that dropped 844 Brunswick (29 photos) as "exterior-only".
-  // A Coming Soon listing often has only the front photo so far — that is
-  // not "no interior access", it is early. Held for the photos instead.
+  // A Coming Soon listing is not on the open market yet and usually has only
+  // its exterior shot up — few photos there is "not posted yet", not "no
+  // interior access". It goes on for a person (or the AI, once photos post).
   if (photos > 0 && photos <= 4 && meta.photosReliable !== false && !meta.comingSoon) {
     return { decision: 'drop', reason: `only ${photos} photos, likely exterior-only / no interior access` };
   }
@@ -463,10 +475,6 @@ const NEWER_BUILD = 1975;
 
 /** Do the remarks say this house needs work (or is a distressed sale)?
  *  Nothing reaches A without it — see the 28 Sep calibration above. */
-/** "Coming Soon" / "Incoming" — listed but not yet open to showings. */
-const COMING_SOON_RE = /coming\s*soon|incoming/i;
-function isComingSoon(status) { return COMING_SOON_RE.test(String(status || '')); }
-
 function saysNeedsWork(t) {
   t = String(t || '');
   return NEEDS_WORK_KW.test(t) || FIXER_KW.test(t) || COSMETIC_KW.test(t) || DISTRESSED_SALE_KW.test(t);
@@ -502,6 +510,10 @@ function qualify(m) {
   // 513 Carobe, 7160 Thorndale): an estate sale is often a well-kept house.
   if (DISTRESS_KW.test(t)) add(5, `probate / trust / estate — "${hit(DISTRESS_KW)}"`);
   if (ORIGINAL_KW.test(t)) add(10, `original / long-held — "${hit(ORIGINAL_KW)}"`);
+  // Coming Soon: ahead of the open market. Scored like any other listing —
+  // the gate's calibration is untouched — but always said, so nobody misses
+  // that showings may not have started.
+  if (m.comingSoon) signals.push({ pts: 0, what: 'Coming Soon — not on the open market yet; photos and showings may not have started' });
   // The MLS's own "Occupied By" field beats a word in the remarks.
   const occ = String(m.occupiedBy || '');
   const ten = tenantInfo(m, t);   // tenant without "vacant at close" was already a hard drop above
@@ -567,8 +579,7 @@ function qualify(m) {
   }
   // Remarks silent on condition and the reviewer asked for unsure = drop.
   if (r.decision === 'manual' && m.whenUnsure === 'drop' && bucket === 'B' && !top.length) bucket = 'C';
-  if (m.comingSoon) signals.push({ pts: 0, what: 'COMING SOON — call the agent before it goes live; photos may be incomplete' });
-  const note = signals.filter(x => x.pts === 0 && /tenant now|held at B|COMING SOON/.test(x.what)).map(x => x.what);
+  const note = signals.filter(x => x.pts === 0 && /tenant now|held at B|Coming Soon/.test(x.what)).map(x => x.what);
   const why = [...top, ...neg, ...note].join(' + ') || r.reason;
   return { bucket, label: BUCKET_LABEL[bucket], score, decision: bucket === 'C' ? 'drop' : 'keep',
     hard: false, why, signals, needsWork };
@@ -1037,8 +1048,344 @@ function rereviewPlan(ledger, rejectGrid, leadGrid, date, passedNote) {
   return { forget: Object.keys(forget), leads: Object.keys(leads) };
 }
 
+/** Is this MLS status "Coming Soon" (however the MLS spells it)? */
+const COMING_SOON_RE = /coming[\s-]*soon/i;
+const isComingSoon = s => COMING_SOON_RE.test(String(s || ''));
+
+// A private / office-exclusive listing is never on the open market. The MLS
+// marks it in the status on some boards, and agents say it in the remarks on
+// the rest. Whole phrases only: "private remarks", "private yard" and "private
+// showing" are not a private listing.
+const PRIVATE_LISTING_RE = /\b(?:private[\s-]*listing|office[\s-]*exclusive|pocket[\s-]*listing|off[\s-]*mls)\b/i;
+const isPrivateListing = s => PRIVATE_LISTING_RE.test(String(s || ''));
+
+/** The listing-type label the Lead Board colours (Team Guide: Active green,
+ *  Coming Soon blue with a ring, Private Listing grey with a dashed ring;
+ *  Pending/Contingent orange, Sold/Withdrawn/Expired red). Never blank for a
+ *  listing found in a search, so every lead on the board carries a chip. */
+function listingLabel({ status, comingSoon, remarks, privateRemarks } = {}) {
+  const st = String(status || '').trim();
+  if (/sold|withdrawn|expired|cancel|off.?market|closed|pending|contingent|under contract/i.test(st)) return st;
+  if (/^private|office[\s-]*exclusive/i.test(st) || isPrivateListing(st) || isPrivateListing(privateRemarks) || isPrivateListing(remarks)) return 'Private Listing';
+  if (comingSoon || isComingSoon(st)) return 'Coming Soon';
+  return st || 'Active';
+}
+
+// ---------- Redfin: Coming Soon / Early Access (v1.50) ----------
+// Bryan, 2 Oct: find the Coming Soon and early-access homes on Redfin too,
+// straight from redfin.com, no MLS sign-in. The app drives a Redfin window
+// from the user's own computer (Redfin refuses cloud servers), reads the
+// search cards class-agnostically (a card is the box around a /home/<id>
+// link) and keeps only cards whose badge says the home is not on the open
+// market yet. Each kept card's own page is then read and judged by the same
+// rules as an MLS listing.
+
+/** A badge that means "not on the open market yet". Read off the TOP of a
+ *  card only, so a description that mentions "coming soon" (a new roof coming
+ *  soon) does not count. */
+const REDFIN_EARLY_RE = /\b(coming[\s-]*soon|early[\s-]*access|pre[\s-]*market|private[\s-]*(?:listing|exclusive)|off[\s-]*market[\s-]*(?:listing|exclusive)|exclusive[\s-]*listing|(?:redfin|compass|zillow)[\s-]*exclusive)\b/i;
+
+/** The Redfin county page for a buy-box county, from Redfin's own location
+ *  lookup ("{}&&{json}"): "/county/343/CA/San-Francisco-County". */
+function redfinCountyPath(body, county) {
+  let j;
+  try { j = JSON.parse(String(body || '').replace(/^\{\}&&/, '')); } catch (_) { return ''; }
+  const want = String(county || '').toLowerCase().replace(/\s+county$/, '').replace(/[^a-z]+/g, '-');
+  const rows = [];
+  ((j.payload && j.payload.sections) || []).forEach(s => (s.rows || []).forEach(r => rows.push(r)));
+  if (j.payload && j.payload.exactMatch) rows.unshift(j.payload.exactMatch);
+  const hit = rows.map(r => String(r.url || '')).find(u =>
+    /^\/county\/\d+\/CA\/[A-Za-z-]+$/.test(u) && (!want || u.toLowerCase().includes('/' + want + '-county')));
+  return hit || '';
+}
+
+/** "$1.5M" → Redfin's price slug. */
+const redfinPrice = maxk => (maxk >= 1000 ? (maxk / 1000) + 'M' : maxk + 'k');
+
+/** The county's search: houses under the area's cap, newest first. Coming
+ *  Soon homes are part of Redfin's for-sale results and are told apart by
+ *  their badge, so no status slug has to be guessed. */
+function redfinSearchUrl(countyPath, maxk, page) {
+  return 'https://www.redfin.com' + countyPath + '/filter/property-type=house,max-price=' + redfinPrice(maxk)
+    + ',sort=lo-days' + (page > 1 ? '/page-' + page : '');
+}
+
+/** One search card's text → the facts on it. `top` is the badge area. */
+function redfinCard({ href, text }) {
+  const url = String(href || '').replace(/[?#].*$/, '');
+  const m = url.match(/^https:\/\/www\.redfin\.com\/[A-Z]{2}\/[^/]+\/[^/]+\/home\/(\d+)$/);
+  if (!m) return null;
+  const t = String(text || '');
+  const lines = t.split(/\n+/).map(x => x.trim()).filter(Boolean);
+  const priceAt = lines.findIndex(x => /^\$[\d,]+$/.test(x));
+  // The badge sits above the price on a Redfin card.
+  const top = (priceAt > 0 ? lines.slice(0, priceAt) : lines.slice(0, 2)).join(' · ');
+  const badge = (top.match(REDFIN_EARLY_RE) || [])[0] || '';
+  const n = re => { const x = t.match(re); return x ? Number(x[1].replace(/,/g, '')) : 0; };
+  const addr = lines.find(x => /^\d+\S*\s.+,\s*[A-Za-z .'-]+,\s*CA\s*9\d{4}$/.test(x)) || redfinAddrFromUrl(url);
+  return {
+    homeId: m[1], url, addr, badge, top,
+    price: priceAt >= 0 ? Number(lines[priceAt].replace(/[$,]/g, '')) : 0,
+    beds: n(/([\d.]+)\s*beds?\b/i), baths: n(/([\d.]+)\s*baths?\b/i), sqft: n(/([\d,]+)\s*sq\s*ft/i),
+    early: !!badge,
+  };
+}
+
+/** "/CA/San-Francisco/21-College-Ter-94112/home/1" → "21 College Ter, San Francisco, CA 94112". */
+function redfinAddrFromUrl(url) {
+  const m = String(url || '').match(/\/([A-Z]{2})\/([^/]+)\/([^/]+)-(9\d{4})\/home\/\d+$/);
+  return m ? `${m[3].replace(/-/g, ' ')}, ${m[2].replace(/-/g, ' ')}, ${m[1]} ${m[4]}` : '';
+}
+
+/** A Redfin home page's text → what the rules need. */
+function parseRedfinHome(text) {
+  const t = String(text || '').replace(/\r/g, '');
+  const grab = re => { const m = t.match(re); return m ? m[1].trim() : ''; };
+  // The description, whether Redfin lays it out on its own lines or runs it
+  // into the next section on one line (the first app run read nothing).
+  let remarks = grab(/About this home\s+([\s\S]{20,4000}?)(?=\s+(?:Show (?:more|less)|Listed by|Redfin last checked|Source:|Hide|Read more|Home facts|Property details|Built in (?:18|19|20)\d\d|\d+ days? on Redfin)\b|$)/i);
+  remarks = remarks.replace(/\s+/g, ' ').trim();
+  const source = grab(/Source:\s*([^\n#]{2,60}?)\s*#/i);
+  const rawMls = grab(/(?:MLS\s*#|Source:[^\n#]{0,60}#)\s*([A-Z]{0,4}\d{5,12})\b/i).toUpperCase();
+  const year = Number(grab(/(?:Built in|Year Built\s*:?)\s*((?:18|19|20)\d{2})\b/i)) || 0;
+  const dom = grab(/\b(\d+)\s+days?\s+on\s+Redfin/i);
+  const lot = t.match(/Lot Size\s*:?\s*([\d,.]+)\s*(sq\.?\s*ft|acres?)/i);
+  const status = (t.slice(0, 1500).match(REDFIN_EARLY_RE) || [])[0]
+    || grab(/(?:Listing |MLS )?Status\s*:?\s*([A-Za-z][A-Za-z -]{2,30})\n/i);
+  const ptype = grab(/Property Type\s*:?\s*([A-Za-z][^\n]{2,40})/i);
+  return {
+    remarks, year, dom: dom === '' ? '' : Number(dom), status,
+    agent: grab(/Listed by\s+([^•·\n]{3,80}?)\s*(?:•|·|\n|$)/i),
+    mls: redfinMlsId(rawMls, source),
+    lotSqft: lot ? Math.round(Number(lot[1].replace(/,/g, '')) * (/acre/i.test(lot[2]) ? 43560 : 1)) : 0,
+    propClass: /single/i.test(ptype) ? 'Res. Single Family' : ptype, ptype,
+  };
+}
+
+/** Redfin shows the MLS's number; turn it into the id the MLS scan uses, so
+ *  the same house is not reviewed twice. SFAR numbers appear without "SF". */
+function redfinMlsId(raw, source) {
+  const id = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!id) return '';
+  if (/^[A-Z]{2,4}\d{5,}$/.test(id)) return id;
+  if (/^\d{9}$/.test(id) && (/san francisco/i.test(source || '') || /^42\d{7}$/.test(id))) return 'SF' + id;
+  return id;
+}
+
+/** The label a Redfin find carries on the board: always reads as Coming Soon
+ *  or Private Listing, so the chip is coloured (Team Guide). */
+function redfinLabel(badge) {
+  const b = String(badge || '');
+  if (/private|exclusive/i.test(b)) return 'Private Listing';
+  if (/early[\s-]*access/i.test(b)) return 'Coming Soon · Early Access';
+  return 'Coming Soon';
+}
+
+/** The listing agent off a Redfin home page's "Listed by" block: name,
+ *  brokerage, phone and email. A phone or email outside the block is never
+ *  used — the page's own contact card belongs to a Redfin agent. */
+function parseRedfinAgent(blk) {
+  const b = blk || {};
+  const t = String(b.text || '').replace(/\s+/g, ' ').trim();
+  const fmt = p => { const d = String(p || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, ''); return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : ''; };
+  const after = t.replace(/^[\s\S]*?\b(?:listed by|listing agent:?|listing (?:provided )?courtesy of)\s*/i, '');
+  const raw = String(b.text || '').replace(/^[\s\S]*?\b(?:listed by|listing agent:?|listing (?:provided )?courtesy of)\s*/i, '');
+  const parts = raw.split(/\s*[•·|\n]\s*|\s+-\s+/)
+    .map(x => x.replace(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b|[^\s@]+@[^\s@]+/g, '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const name = (parts[0] || '').replace(/\s*(?:DRE|CalDRE|Lic)[\s\S]*$/i, '').replace(/[,(].*$/, '').trim();
+  const brokerage = (parts.slice(1).find(x => !/DRE|#|\d{3}.*\d{4}|@|^contact/i.test(x)) || '').replace(/[,(].*$/, '').trim();
+  const phone = (b.tels || []).map(fmt).find(Boolean)
+    || fmt((after.match(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b/) || [])[0]);
+  const email = ((b.mails || []).concat(after.match(/[^\s@<>"'(),;:]{1,64}@[^\s@<>"'(),;:]{1,190}\.[A-Za-z]{2,}/g) || []))
+    .map(x => String(x).trim()).find(x => /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(x) && !/redfin\.com$/i.test(x)) || '';
+  return { name: /^[A-Za-z][A-Za-z .,'-]{1,60}$/.test(name) ? name : '', brokerage: brokerage.slice(0, 80),
+    phone, email, dre: (t.match(/DRE\s*#?\s*(\d{6,9})/i) || [])[1] || '' };
+}
+
+/** Listing-photo URLs anywhere in a Redfin page (HTML, or the srcs seen while
+ *  stepping through the gallery), in order, one per photo: the same photo is
+ *  served in several sizes, so it is keyed on its file name and the big
+ *  version wins. */
+function redfinPhotoUrls(html) {
+  const re = /https:\/\/ssl\.cdn-redfin\.com\/photo\/\d+\/[a-z0-9]+\/[^"'\s)\\<>]+?\.(?:jpg|jpeg|webp)/gi;
+  const key = u => u.split('/').pop().replace(/^gen[A-Za-z]+\./, '').replace(/\.(?:jpe?g|webp)$/i, '');
+  const best = new Map();
+  let m;
+  while ((m = re.exec(String(html || '')))) {
+    const u = m[0], k = key(u), had = best.get(k);
+    if (!had) best.set(k, u);
+    else if (/\/bigphoto\//.test(u) && !/\/bigphoto\//.test(had)) best.set(k, u);
+  }
+  return [...best.values()];
+}
+
+// ---- Redfin's own listing data (v1.52) ----
+// The search page's cards gave nothing on the first live run, so the county is
+// read from the data Redfin's search page itself loads: /stingray/api/gis
+// (JSON, with each home's MLS status and its "sashes" — the COMING SOON /
+// EARLY ACCESS REDFIN COMING SOON badges) and /stingray/api/gis-csv (its
+// "Download all" file, with a STATUS column) as the fallback. region_type 5 =
+// county, uipt 1 = house, status 9 = for sale incl. coming soon.
+
+const redfinRegionId = p => (String(p || '').match(/^\/county\/(\d+)\//) || [])[1] || '';
+
+function redfinGisUrl({ regionId, maxk, page, csv, market }) {
+  return '/stingray/api/' + (csv ? 'gis-csv' : 'gis') + '?al=1&include_nearby_homes=false'
+    + (market ? '&market=' + market : '') + '&max_price=' + (maxk * 1000) + '&num_homes=350'
+    + '&ord=days-on-redfin-asc&page_number=' + (page || 1) + '&region_id=' + regionId
+    + '&region_type=5&sf=1,2,3,5,6,7&status=9&uipt=1&v=8';
+}
+
+const rv = x => (x && typeof x === 'object' && 'value' in x ? x.value : x);
+const rnum = x => { const n = Number(String(rv(x) == null ? '' : rv(x)).replace(/[$,]/g, '')); return isFinite(n) ? n : 0; };
+
+function redfinHome(o) {
+  const url = /^https?:/.test(o.url || '') ? o.url : 'https://www.redfin.com' + (o.url || '');
+  const id = (url.match(/\/home\/(\d+)/) || [])[1] || String(o.propertyId || '');
+  if (!id) return null;
+  const parts = [o.status, o.mlsStatus].concat(o.sashes || []).map(x => typeof x === 'string' ? x : x && (x.sashTypeName || x.sashText || x.text || '')).filter(Boolean);
+  const status = parts.join(' · ');
+  // The whole badge, early-access ones first: "Early Access Redfin Coming Soon".
+  const badge = parts.filter(x => REDFIN_EARLY_RE.test(x)).sort((a, b) => /early/i.test(b) - /early/i.test(a))[0] || '';
+  const street = String(rv(o.streetLine) || o.address || '').trim();
+  const addr = street && o.city ? `${street}, ${o.city}, ${o.state || 'CA'} ${o.zip || ''}`.trim() : redfinAddrFromUrl(url);
+  // House type: Redfin's uiPropertyType (1 = house) or its text label.
+  const ptype = o.uiPropertyType != null && o.uiPropertyType !== '' ? String(o.uiPropertyType) : String(rv(o.propertyType) || '');
+  return { homeId: id, url: url.replace(/[?#].*$/, ''), addr, badge, status, early: !!badge, ptype,
+    early_access: /early[\s-]*access/i.test(status),
+    price: rnum(o.price), beds: rnum(o.beds), baths: rnum(o.baths), sqft: rnum(o.sqFt || o.sqft),
+    year: rnum(o.yearBuilt), dom: rv(o.dom) == null || rv(o.dom) === '' ? '' : rnum(o.dom),
+    mls: redfinMlsId(rv(o.mlsId), o.source || ''), remarks: String(o.listingRemarks || '').trim() };
+}
+
+/** Never above this, whatever the area's cap says (Bryan, 2 Oct: "we don't
+ *  buy 3M above"). The area caps — $2.5M San Mateo, $1.5M everywhere else —
+ *  are lower still and apply first. */
+const REDFIN_PRICE_CEILING = 3000000;
+const NOT_HOUSE_RE = /condo|co-?op|town\s*house|townhome|multi[\s-]*family|duplex|triplex|fourplex|quadruplex|\d\s*units?\b|land|lot\b|mobile|manufactured|floating|houseboat|commercial|rental/i;
+
+/** The MLS scan's buy box, applied to a Redfin home by the app itself — Redfin's
+ *  own search filters are not trusted to have been honoured. Single-family
+ *  only, at or under the area's cap and never over $3M, 25+ years old when
+ *  the year is known. Returns '' to keep, else the reason. `phase` 'page'
+ *  means the home's own page has been read, so an unknown type now fails. */
+function redfinBuyBox(h, area, phase) {
+  if (isConfirmed(h.addr)) return '';
+  const cap = Math.min(((area && area.maxk) || 1500) * 1000, REDFIN_PRICE_CEILING);
+  if (h.price > cap) return `$${Math.round(h.price / 1000).toLocaleString()}k is over the $${cap / 1e6}M cap for ${area && area.county ? area.county : 'this area'}`;
+  const t = String(h.ptype || '').trim();
+  if (t === '1' || /single[\s-]*family|^house$/i.test(t)) { /* a house */ }
+  else if (/^\d+$/.test(t)) return `not a single-family home (Redfin type ${t})`;
+  else if (t && NOT_HOUSE_RE.test(t)) return `not a single-family home — ${t}`;
+  else if (phase === 'page' && t) return `not a single-family home — ${t}`;
+  const y = Number(h.year) || 0;
+  if (y > 1800 && 2026 - y < 25) return `too new — built ${y}, want 25+ years old`;
+  return '';
+}
+
+/** Fixers only, for a Redfin Coming Soon / Early Access home: kept when its
+ *  description says it needs work (as-is, fixer, original condition, "bring
+ *  your", cosmetic remodel, probate auction…) or when the AI saw wear in the
+ *  photos. A home that says nothing about its condition is not shown as a
+ *  fixer. Returns '' to keep, else the reason it is not one. */
+function redfinFixerGate({ addr, remarks, aiKept } = {}) {
+  if (isConfirmed(addr)) return '';
+  if (saysNeedsWork(remarks) || aiKept) return '';
+  return String(remarks || '').trim()
+    ? 'not a fixer — the description never says it needs work, and no AI photo check saw wear'
+    : 'not a fixer — no description yet, and no AI photo check saw wear';
+}
+
+// ---- Coming Soon / Early Access: a first look is provisional (v1.57) ----
+// A Coming Soon home is usually seen before its photos and full description
+// are posted. Judged then, it was written into the seen-ledger for good: a
+// quiet one dropped as "not a fixer" never came back once its photos went up,
+// and one kept on its first three photos never had the AI look at the rest.
+// A verdict reached WITHOUT a photo check is now a 'recheck' entry: skipped
+// for RECHECK_DAYS, then opened again, at most RECHECK_MAX times (~2 weeks),
+// after which the last verdict stands.
+const RECHECK_DAYS = 2, RECHECK_MAX = 7;
+const addDays = (day, n) => { const d = new Date(String(day) + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+/** Should a scan skip this ledger entry today? Everything is skipped except a
+ *  'recheck' whose wait is over. */
+function ledgerSkips(entry, today) {
+  if (!entry) return false;
+  if (entry.verdict !== 'recheck') return true;
+  return String(today || '') < String(entry.recheck_after || '');
+}
+
+/** The ledger verdict for a Coming Soon / Early Access home just judged.
+ *  `provisional` = no photo check decided it (too few photos posted, or no AI
+ *  verdict). Returns the fields to store. */
+function comingSoonVerdict({ prev, today, provisional, decision }) {
+  const done = decision === 'keep' ? 'kept' : 'dropped';
+  const n = ((prev && prev.rechecks) || 0) + 1;
+  if (!provisional || n > RECHECK_MAX) return { verdict: done, rechecks: n - 1, final_on: today };
+  return { verdict: 'recheck', last_verdict: done, rechecks: n, recheck_after: addDays(today, RECHECK_DAYS) };
+}
+
+/** /stingray/api/gis → homes. */
+function redfinGisHomes(body) {
+  let j;
+  try { j = JSON.parse(String(body || '').replace(/^\{\}&&/, '')); } catch (_) { return null; }
+  const homes = (j.payload && (j.payload.homes || (j.payload.searchResults && j.payload.searchResults.homes))) || j.homes;
+  if (!Array.isArray(homes)) return null;
+  return homes.map(h => redfinHome(h.homeData || h)).filter(Boolean);
+}
+
+/** /stingray/api/gis-csv → homes. */
+function redfinCsvHomes(text) {
+  const rows = [];
+  let row = [], cell = '', q = false;
+  const t = String(text || '');
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (q) { if (ch === '"') { if (t[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && t[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  const head = (rows.shift() || []).map(h => h.trim().toUpperCase());
+  if (!head.includes('ADDRESS') || !head.includes('STATUS')) return null;
+  const col = name => head.findIndex(h => h === name || h.startsWith(name + ' '));
+  const get = (r, n) => { const i = col(n); return i >= 0 ? (r[i] || '').trim() : ''; };
+  return rows.filter(r => r.length > 3 && get(r, 'ADDRESS')).map(r => redfinHome({
+    url: get(r, 'URL'), streetLine: get(r, 'ADDRESS'), city: get(r, 'CITY'), state: get(r, 'STATE OR PROVINCE'),
+    zip: get(r, 'ZIP OR POSTAL CODE'), price: get(r, 'PRICE'), beds: get(r, 'BEDS'), baths: get(r, 'BATHS'),
+    sqFt: get(r, 'SQUARE FEET'), yearBuilt: get(r, 'YEAR BUILT'), dom: get(r, 'DAYS ON MARKET'),
+    mlsStatus: get(r, 'STATUS'), mlsId: get(r, 'MLS#'), source: get(r, 'SOURCE'), propertyType: get(r, 'PROPERTY TYPE'),
+  })).filter(Boolean);
+}
+
+/* AI model names, forgiven. The model box used to need the exact id —
+ * "gpt-4.1mini" or "GPT 4.1 mini" failed every call (Seth, 3 Oct). This writes
+ * what was typed the way the services spell it: lower case, hyphens for
+ * spaces, "gpt4o" -> "gpt-4o", "4.1mini" -> "4.1-mini". It never invents a
+ * model: a name that is still wrong after tidying fails the Test key check
+ * with the provider's own message. */
+function tidyModel(m) {
+  let s = String(m || '').trim().toLowerCase();
+  if (!s) return '';
+  // "ChatGPT 4o" means gpt-4o; the real id "chatgpt-4o-latest" stays as it is
+  if (/^chat\s*gpt\s+\d/.test(s) || /^chatgpt\d/.test(s)) s = s.replace(/^chat\s*gpt\s*/, 'gpt-');
+  s = s.replace(/[\s_]+/g, '-')
+       .replace(/^gpt(?=\d)/, 'gpt-')                       // gpt4.1 -> gpt-4.1
+       .replace(/([0-9a-z])(?=(mini|nano|turbo|pro|preview|latest)\b)/g, (x, c, _w, i, all) => /-$/.test(all.slice(0, i + 1)) ? x : c + '-')
+       .replace(/^claude-?(opus|sonnet|haiku)(?=\d)/, 'claude-$1-')   // claudeopus5-5 -> claude-opus-5-5
+       .replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return s;
+}
+
 module.exports = {
-  COMING_SOON_RE, isComingSoon,
+  tidyModel,
+  REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
+  redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
+  redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
+  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX,
+  isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   boardLead,

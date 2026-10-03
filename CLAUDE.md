@@ -337,8 +337,8 @@ writing up any summary.
 what binds every analysis (see also `docs/investigation-playbook.md` for the
 headless-scrape workflow):
 
-- **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.0M max;
-  ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
+- **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.5M max** (Bryan, 2 Oct — was $2.0M);
+  **ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
   data floor only guards against garbled prices).
   **Areas = THE WHOLE BAY AREA, all nine counties, every city** (Bryan, 1 Aug):
   San Francisco · San Mateo · Santa Clara · Alameda · Contra Costa · Marin ·
@@ -555,6 +555,23 @@ reading whatever is displayed; the app skips that listing **without a ledger
 entry**, so the next run retries instead of writing it off. Never read "the
 first address on the page."
 
+**Coming Soon listings are scanned too** (v1.48, Bryan 1 Oct; the section 3
+checkbox, on by default). Each area gets a second search with Status = Coming
+Soon and **no List Date window** — a Coming Soon listing may have no list date
+yet. The rows are tagged and go through the same buy box, review and gate.
+Two rules differ: a Coming Soon listing with ≤4 photos is **not** dropped as
+"exterior-only" (its photos are usually not posted yet) and is not sent to the
+AI photo check until they are; its Why says "Coming Soon". Renovated, fire,
+structural and every other hard exclusion still apply. The single-listing
+lookup (`showGallery`, used by review AND the board refresh) now selects
+**Active + Coming Soon** explicitly — the form defaults to Active, so a Coming
+Soon MLS # came back "not found". The status picker is `selectOnly()`; if the
+MLS has no Coming Soon option the run says so instead of searching the wrong
+status. Not yet seen against the live form — check the first run's log.
+Since v1.57 a Coming Soon listing judged without an AI photo verdict is a
+**first look only** — rechecked every 2 days up to 7 times (see the CURRENT
+behaviour block below).
+
 **Both reports are scrolled top to bottom before being read** (v1.40,
 `readWholePage()` in `main.js`; the "Scroll pause per screen" setting). The
 facts-only refresh skips the scroll. Private remarks, offer due and the
@@ -570,6 +587,163 @@ email, MLS status, bucket + score, and the house's exact Redfin page — copied
 to the clipboard when a run ends, and added on the board with **Add scan**. An
 artifact's shared data can only be written from the page, hence the paste.
 The field names are the board's `scanLead()` names; change both together.
+
+**Listing-type label (v1.49).** Every board lead carries `mlsStatus` from
+`core.listingLabel()`, never blank: **Active** (green), **Coming Soon** (blue,
+solid ring), **Private Listing** (grey, dashed ring), Pending/Contingent
+(orange), Sold/Withdrawn/Expired (red) — the colours in the Team Guide doc,
+drawn by the board's `mlsStatusHTML()`. Private = a Private / Office Exclusive
+status, or "private listing" / "office exclusive" / "pocket listing" / "off-MLS"
+in the remarks (whole phrases — "private remarks", "private yard" are not).
+The Coming Soon pass also ticks a Private / Office Exclusive status when the
+search form offers one.
+
+### Coming Soon & Early Access — CURRENT behaviour (v1.57, read this first)
+
+The version notes below are history; where they disagree, this block wins.
+
+- **Two sources.** (1) the MLS scan's own Coming Soon pass (Status = Coming
+  Soon, needs the MLS sign-in); (2) **🏠 Scan Redfin** in section 3 — no MLS
+  sign-in, drives a visible Redfin window on the user's PC (Redfin 403s cloud
+  servers). "Early Access" is Redfin's label ("Early Access Redfin/Compass
+  Coming Soon") and those homes show in full only to a signed-in Redfin user —
+  **Sign in to Redfin** once (cookies persist in `persist:redfin`).
+- **Same buy box as the MLS scan, enforced by the app** (`core.redfinBuyBox`,
+  MLS grid backstop in `filterCandidates`): single-family only · San Mateo
+  **≤ $2.5M**, every other county ≤ $1.5M · **never over $3M** · 25+ years old
+  when the year is known. Search filters are never trusted.
+- **Per Redfin home, in this order:** buy box from Redfin's data → open the
+  page, scroll it, buy box again (true type/year) → skip if an MLS scan already
+  checked its MLS # → **PHOTOS FIRST**: every photo stepped through in Redfin's
+  viewer and sent to the AI; a not-a-fixer photo verdict drops it here → read
+  the listing agent ("Listed by" block only, never the Contact-agent card) →
+  text rules (`qualify`, Rule #0 still drops "remodeled/turnkey") → **fixers
+  only** (`redfinFixerGate`: AI saw wear, or with no AI verdict the description
+  must say it needs work).
+- **Memory (seen-ledger).** Ledger key `RF<homeId>` for Redfin, the MLS # for
+  the MLS pass. **A verdict reached without a photo check is a first look
+  only** (`core.comingSoonVerdict`): verdict `recheck`, opened again after
+  `RECHECK_DAYS` = 2, at most `RECHECK_MAX` = 7 times (~2 weeks), then the last
+  verdict stands. A photo verdict, a buy-box/type drop, a remarks hard
+  exclusion (renovated, fire, tenant, structural) and a confirmed deal are final
+  at once. `core.ledgerSkips()` is the only skip test; every other verdict is
+  skipped for good. A recheck that comes round is put on the re-review list
+  (`markRecheck`), so a lead already on the sheet that now fails moves to C in
+  place. Live-tested in the real app twice over (mock Redfin): first run marks
+  the two photo-less verdicts `recheck`, a run after their date opens exactly
+  those two and skips the final ones.
+- **Output.** Leads (full address, Coming Soon / Coming Soon · Early Access /
+  Private Listing label, agent name/phone/email, the house's own Redfin URL)
+  go to the sheet and to the Lead Board file; a run that finds leads opens the
+  board with them on the clipboard for **Add scan**. Every Redfin answer is in
+  `<userData>/redfin-last-run.txt`; zero homes read → `grid-debug/redfin-*`.
+- **Not yet run against live Redfin** — the first real run's log and
+  `redfin-last-run.txt` are what to ask for if it finds nothing.
+
+**Redfin Coming Soon / Early Access scan (v1.50, Bryan 2 Oct — no MLS
+sign-in).** Section 3's **🏠 Scan Redfin** button drives a visible Redfin
+window (`persist:redfin`) from the user's PC — Redfin 403s cloud servers, so it
+cannot be tested from here. Per ticked county: Redfin's location lookup →
+county page (`core.redfinCountyPath`) → `…/filter/property-type=house,
+max-price=<cap>,sort=lo-days[/page-N]` (≤25 pages) → every `/home/<id>` card
+read class-agnostically (`JS_REDFIN_CARDS`, `core.redfinCard`) → kept only when
+the badge ABOVE the price says Coming Soon / Early Access / private or broker
+exclusive (`REDFIN_EARLY_RE`; a description saying "coming soon" does not
+count). Each kept card's page is scrolled and read (`core.parseRedfinHome`:
+About this home, Built in, Listed by, days on Redfin, Source … #MLS — an SFAR
+number gets its `SF` prefix), judged by `qualify()` with `comingSoon:true`, and
+its Redfin photos (`redfinPhotoUrls`, now fetched through the Redfin window's session + nativeImage)
+go to the AI check (photos-first since v1.56). Ledger keys `RF<homeId>`; a house whose MLS #
+an MLS scan already checked is skipped. Leads carry `mlsStatus` Coming Soon /
+Coming Soon · Early Access / Private Listing and the card's own Redfin URL; MLS
+id is the MLS # when Redfin shows one, else `RF<homeId>`. Zero cards read →
+the page text + screenshot go to `<userData>/grid-debug/redfin-*` — ask for
+those before guessing at Redfin's layout. **Not yet run against live Redfin.** *(History: badge-on-card selection was replaced by Redfin's own data in v1.52.)*
+
+**Listing agent off Redfin (v1.51, Bryan 2 Oct: "open it 1 by 1, access
+contact agent by scrolling down").** After each home page is scrolled and
+read, `JS_REDFIN_AGENT` clicks only the safe "Show more / See all" toggles,
+scrolls the **"Listed by"** block into view, pauses, and widens from that line
+to its block — never into the page's **"Contact agent"** card, which is
+Redfin's own agent (its buttons are never clicked; `BAD` regex). Its text +
+tel:/mailto: links → `core.parseRedfinAgent` → name, brokerage, phone
+`(415) 555-0142`, email (never @redfin.com), DRE. They fill `Listing Agent ·
+Agent Phone · Agent Email` on the sheet and the board lead; a run ends with the
+sheet's Board tab rebuilt and the leads on the clipboard for **Add scan** (the
+board's **↻ Refresh from sheet** also picks them up). Checked in Chromium on a
+mock page with a decoy Redfin phone; not yet on live Redfin.
+
+**v1.52 — first live Redfin run found nothing** (Bryan 2 Oct: "you're just
+filtering the county, not opening them 1 by 1, not checking any image"). The
+search-card badge never matched, so no home was opened. Now the county comes
+from **Redfin's own data**, fetched inside the Redfin window after the search
+page loads: `/stingray/api/gis` JSON (`core.redfinGisHomes` — `mlsStatus` +
+`sashes[].sashTypeName`, e.g. "Early Access Redfin Coming Soon"), then the
+`gis-csv` download (`core.redfinCsvHomes`, STATUS column), then the cards
+(`JS_REDFIN_CARDS`, now widened to the whole card so the photo's badge is
+inside). `region_type=5` county · `uipt=1` house · `status=9` · `max_price` ·
+350/page; `market=sanfrancisco` tried first, then none. Each home is then
+opened ONE BY ONE: page scrolled, **every photo stepped through in Redfin's
+viewer** (`viewRedfinPhotos`: click the biggest photo, ArrowRight until no new
+photo, Escape; `redfinPhotoUrls` dedupes sizes), agent read, then judged. With
+no AI key the log says loudly that photos were viewed but not judged.
+**Early Access homes need a Redfin sign-in** — section 3's "Sign in to Redfin"
+opens redfin.com/login in the scan's own window (cookies persist). SF county is
+region 340. Mock-tested in Chromium; still not run against live Redfin.
+
+**v1.53 — "not pulling any leads, and the searching is non-stop" (Bryan 2
+Oct).** Every wait on the Redfin window now has a limit (`timeLimit`: page
+load 30 s, snippet 30 s, in-page `rfFetch` 20 s with AbortController): an
+`executeJavaScript` on a page that redirected, or a fetch Redfin held open,
+waited for ever. `readWholePage` scrolls at most 40 screens (a page that loads
+more as it scrolls never ended). The home description is read when Redfin runs
+it onto one line (`parseRedfinHome` — the first run read none, so a "remodeled
+top to bottom, turnkey" home stayed B). Each data page logs its count; every
+Redfin answer is saved to `<userData>/redfin-last-run.txt`; a run that finds
+leads opens the Lead Board with them on the clipboard. **End-to-end tested in
+the real Electron app under xvfb against a mock redfin.com** (scratchpad
+harness intercepting `persist:redfin` https): finds 2 of 3, opens each, steps
+15 photos, reads agent (not the Redfin decoy), drops the renovated one, writes
+the board file; with every data call held open it times out and finishes in
+~70 s.
+
+**v1.54 — same buy box on Redfin as on the MLS (Bryan 2 Oct: "make it the
+same command: single family home only and we don't buy 3M above").** Redfin's
+search filters are not trusted: `core.redfinBuyBox()` checks every Coming Soon
+/ Early Access home twice — from Redfin's data (before the page is opened) and
+from the home's own page (before any photo) — single-family only (Redfin
+`uiPropertyType` 1, or a "Single Family" label; condo / townhouse / multi /
+land / mobile drop), price ≤ the area cap (San Mateo $2.5M, else $1.5M) and
+**never over $3M** (`REDFIN_PRICE_CEILING`), 25+ years old when the year is
+known. Drops go to Rejected with stage *Buy-box filter*. The MLS grid got the
+same backstop: `JS_SCRAPE_GRID` now reads the **Class** column and
+`filterCandidates` drops a non-single-family class or a price over the area
+cap / $3M even if the search ignored those boxes. Confirmed deals are never
+dropped. The area caps are unchanged — $3M is a ceiling, not a new cap.
+
+**v1.55 — Redfin Coming Soon / Early Access: FIXERS ONLY (Bryan 2 Oct).** A
+Redfin find that passes the buy box and the rules is kept only when
+`core.redfinFixerGate()` sees it is a fixer: the description says it needs
+work (`saysNeedsWork` — as-is, fixer, original condition, "bring your",
+cosmetic remodel, distressed sale) **or** the AI photo check kept it (which
+already means wear was seen). A home whose description says nothing about its
+condition — or has none yet — and no AI check → C "not a fixer". Turn the AI
+check on so a quiet description with a worn interior is not lost. Confirmed
+deals are never dropped. The MLS scan's own Coming Soon pass is unchanged.
+
+**v1.56 — Peninsula cap $2.5M, and Redfin judges the PHOTOS FIRST (Bryan 2
+Oct: "maximum 2.5m for peninsula area… only fixer property, look on the photo
+first").** `DEFAULT_BUYBOX` San Mateo `maxk: 2500` (MLS search box, grid
+backstop, Redfin buy box and `scripts/mls-multi-scan.js` all follow it; $3M
+ceiling unchanged). On each Redfin home, right after the buy-box check, every
+photo is stepped through and sent to the AI **before** the agent, the
+description or the score: a "not a fixer" photo verdict drops it there (stage
+*Photo review*). A photo download that fails is **not** a verdict — it falls
+back to the description and does not count toward the 3-failures AI cut-off
+(the first test dropped every home as "no photos could be loaded"). Photos are
+fetched through the Redfin window's own session with a redfin.com referrer.
+Tested end to end with a mock AI: renovated and "dated but tidy" drop on the
+photos, the worn original house is kept.
 
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
@@ -712,6 +886,15 @@ v1.41.0 is built from `Flip-scout-Filters` after merging `claude/inspiring-ride-
 which shipped the Sep 24 "Flip Scout Filters v1.40.0" — so the new download keeps
 that line's Lead Board hand-off, Redfin links and report scrolling.
 
+**v1.58.0 — the model is a dropdown (Seth, 3 Oct: "gpt-4.1mini" failed for a missing hyphen).**
+Section 2 lists the models the key can use — asked of OpenAI `/v1/models` or
+Anthropic `/v1/models` (`ai-models` in `main.js`; audio/realtime/image/embedding
+and dated snapshot ids filtered out) — with a built-in list as the fallback and
+"Other — type a model name…" for anything else. Every typed or saved name goes
+through `core.tidyModel()` (lower case, hyphens: "GPT 4.1 mini" → gpt-4.1-mini,
+gpt4o → gpt-4o; a real `chatgpt-4o-latest` is left alone). It never invents a
+model — a name still wrong after tidying fails Test key with the provider's message.
+
 **v1.42.0 (Seth's first live AI run, 26 Sep):**
 - *San Francisco: "280 matches → scraped 0 rows".* The grid was read ONCE, 3.5 s
   after clicking Results; a slow MLS left it empty and the area was skipped as
@@ -764,15 +947,6 @@ only, so a re-review can keep a listing the old scan dropped. The scan's own
 drops are still pulled into every computer's ledger (verdict `scan-dropped`) so
 a second computer does not redo the first one's work. Tested in
 `test-google-sheets.js` §18.
-
-**v1.48 — "Also include Coming Soon / Incoming" checkbox** (section 3, Seth,
-1 Oct; remembered between runs). The search adds every Status option matching
-`core.COMING_SOON_RE` (`coming soon|incoming`) next to Active and logs what it
-picked — or, if none matches, logs every status the MLS offers so the label can
-be fixed. Such a lead gets "COMING SOON — call the agent…" in its Why; few photos
-is not a drop for it (neither the ≤4-photo rule nor an AI "insufficient photos"
-verdict — it is held at B to look at once the gallery is up). The exact Matrix
-label is **unverified** until the first live run.
 
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope

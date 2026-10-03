@@ -7,7 +7,7 @@
  * detects the dashboard. Scanning navigates the MLS window through Matrix and
  * runs the same extraction used by the headless pipeline.
  */
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, net, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
@@ -25,6 +25,7 @@ const cfg = {
   // years old, below-market $/sqft) and because the sheet reviewer rejects
   // anything wrong — with that rejection feeding straight back into the ledger.
   whenUnsure: 'keep',
+  comingSoon: true,    // also scan Coming Soon listings (section 3 checkbox)
   runComps: false,     // OFF for now — qualify on CONDITION first, comp later
   scrollPauseMs: 700,  // pause per screen while scrolling a report — reading slowly
   boardUrl: 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1',   // FlipScout Lead Board
@@ -38,7 +39,7 @@ const OPENAI_DEFAULT_MODEL = 'gpt-4.1';
 const ANTHROPIC_DEFAULT_MODEL = 'claude-opus-5-5';
 function aiProvider(key) { return /^sk-ant-/.test(String(key || '').trim()) ? 'anthropic' : 'openai'; }
 function aiModel() {
-  const prov = aiProvider(cfg.apiKey), m = String(cfg.model || '').trim();
+  const prov = aiProvider(cfg.apiKey), m = core.tidyModel(cfg.model);
   // "claude-opus-5" was never a model id; a saved setting from an older build
   // would make every AI call fail.
   if (prov === 'anthropic') return !m || m === 'claude-opus-5' || !/^claude/i.test(m) ? ANTHROPIC_DEFAULT_MODEL : m;
@@ -57,7 +58,31 @@ function saveAi() {
 }
 ipcMain.handle('ai-settings', () => {
   const j = loadAi();
-  return { apiKey: j.apiKey || '', model: j.model || '', useAI: !!j.useAI, provider: aiProvider(j.apiKey) };
+  return { apiKey: j.apiKey || '', model: core.tidyModel(j.model), useAI: !!j.useAI, provider: aiProvider(j.apiKey) };
+});
+
+// The models this key can use, for the dropdown in section 2. Asked of the
+// provider itself, so a new model shows up without a new build; when the
+// lookup fails the screen falls back to its built-in list.
+const NOT_FOR_PHOTOS = /audio|realtime|tts|transcribe|whisper|embedding|moderation|dall-e|image|search|instruct|davinci|babbage|codex|computer-use|deep-research|-\d{4}-\d{2}-\d{2}$|-\d{4}$/;
+ipcMain.handle('tidy-model', (_e, m) => core.tidyModel(m));
+ipcMain.handle('ai-models', async (_e, key) => {
+  key = String(key || '').trim();
+  if (!key) return { ok: false, models: [] };
+  const prov = aiProvider(key);
+  try {
+    if (prov === 'anthropic') {
+      const r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return { ok: false, provider: prov, models: [], error: (j.error && j.error.message) || ('HTTP ' + r.status) };
+      return { ok: true, provider: prov, models: (j.data || []).map(x => x.id).filter(id => /^claude/.test(id)) };
+    }
+    const r = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + key } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, provider: prov, models: [], error: (j.error && j.error.message) || ('HTTP ' + r.status) };
+    const ids = (j.data || []).map(x => x.id).filter(id => /^(gpt-|o\d|chatgpt-)/.test(id) && !NOT_FOR_PHOTOS.test(id));
+    return { ok: true, provider: prov, models: ids.sort() };
+  } catch (e) { return { ok: false, provider: prov, models: [], error: e.message }; }
 });
 
 ipcMain.on('set-config', (_e, c) => {
@@ -204,9 +229,10 @@ function ledgerRecord(mls, verdict, extra) {
   if (!mls) return;
   const e = loadLedger();
   const d = todayKey();
-  e[String(mls).trim().toUpperCase()] = Object.assign(
-    { first_seen: (e[mls] && e[mls].first_seen) || d }, extra || {},
-    { last_seen: d, verdict: verdict || 'checked' });
+  const k = String(mls).trim().toUpperCase();
+  const prev = e[k] || {};
+  e[k] = Object.assign({ first_seen: prev.first_seen || d }, extra || {}, { last_seen: d, verdict: verdict || 'checked' });
+  if (e[k].verdict !== 'recheck') delete e[k].recheck_after;
   saveLedger(e);
 }
 /** Bulk-mark, one write instead of N. */
@@ -277,11 +303,49 @@ const selectByLabel = (sel, label) => `(() => {
   const o = [...el.options].find(o => o.text.trim() === ${JSON.stringify(label)} || o.text.includes(${JSON.stringify(label)}));
   if(!o) return false; o.selected = true; el.dispatchEvent(new Event('change',{bubbles:true})); return true;
 })()`;
+// In-page helper: make a multi-select hold EXACTLY the options whose text
+// matches one of `patterns` (regex sources), and fire change. Returns the
+// texts it selected, so the caller can say plainly when the MLS has no such
+// status rather than silently searching the wrong one.
+const selectOnly = (sel, patterns) => `(() => {
+  const el = document.querySelector(${JSON.stringify(sel)}); if(!el) return null;
+  const res = ${JSON.stringify(patterns)}.map(p => new RegExp(p, 'i'));
+  const got = [];
+  [...el.options].forEach(o => { const on = res.some(r => r.test(o.text.trim())); o.selected = on; if (on) got.push(o.text.trim()); });
+  el.dispatchEvent(new Event('change',{bubbles:true}));
+  return got;
+})()`;
+const STATUS_ACTIVE = '^active$';
+const STATUS_COMING_SOON = '^coming[\\s-]*soon';
+// Picked up by the not-on-the-market pass when the form offers it; skipped
+// silently when it doesn't (selectOnly only ticks options that exist).
+const STATUS_PRIVATE = '^(?:private|office[\\s-]*exclusive)';
 const setInput = (sel, val) => `(() => {
   const el = document.querySelector(${JSON.stringify(sel)}); if(!el) return false;
   const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set; set.call(el, ${JSON.stringify(val)});
   el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); el.blur(); return true;
 })()`;
+
+/** A Coming Soon / Early Access home whose wait is over: say so, and put its
+ *  sheet id on the re-review list so the sheet re-judges it IN PLACE. */
+function markRecheck(ledgerKey, sheetId) {
+  const e = loadLedger()[String(ledgerKey).trim().toUpperCase()];
+  if (!e || e.verdict !== 'recheck') return false;
+  const rr = loadRereview();
+  rr.mls[String(sheetId || ledgerKey).trim().toUpperCase()] = true;
+  if (!rr.date) rr.date = 'Coming Soon recheck';
+  saveRereview(rr);
+  return true;
+}
+
+/** Record a Coming Soon / Early Access verdict: final once photos decided it,
+ *  a 'recheck' while they could not. */
+function recordComingSoon(ledgerKey, { provisional, decision, extra }) {
+  const prev = loadLedger()[String(ledgerKey).trim().toUpperCase()];
+  const v = core.comingSoonVerdict({ prev, today: todayKey(), provisional, decision });
+  ledgerRecord(ledgerKey, v.verdict, Object.assign({}, extra || {}, v));
+  if (v.verdict === 'recheck') log(`  first look only (photos not checked yet) — will open it again on ${v.recheck_after} (recheck ${v.rechecks} of ${core.RECHECK_MAX})`);
+}
 
 async function waitIfPaused() {
   while (control.paused && !control.stopped) { await sleep(400); }
@@ -327,29 +391,26 @@ ipcMain.handle('check-session', async () => {
 });
 
 // ---------- scan one area ----------
+// opts.comingSoon: search Coming Soon listings instead of Active. They are
+// not on the open market yet, so they can have no List Date — that pass skips
+// the List Date window (Coming Soon volume is small, a county is a few pages).
 async function scanArea(area, opts) {
+  const comingSoon = !!(opts && opts.comingSoon);
   const label = area.city && area.city !== '*' ? area.city : `All ${area.county}`;
   await waitIfPaused();
-  log(`Scanning ${label} (@ $${area.maxk}k)…`);
+  log(comingSoon ? `Scanning ${label} — Coming Soon (@ $${area.maxk}k)…` : `Scanning ${label} (@ $${area.maxk}k)…`);
   await nav(core.SEARCH_URL, 2500);
-  await js(selectByLabel(core.FIELDS.status, 'Active'));
-  await sleep(300);
-  // Section 3's "Include Coming Soon / Incoming": pick every status option
-  // with that wording too. The exact label differs between MLS setups, so
-  // match by pattern and say in the log what was picked (or what exists).
-  if (opts && opts.comingSoon) {
-    const got = await js(`(() => {
-      const el = document.querySelector(${JSON.stringify(core.FIELDS.status)}); if (!el) return {picked: [], all: []};
-      const re = ${core.COMING_SOON_RE.toString()};
-      const picked = [];
-      [...el.options].forEach(o => { if (re.test(o.text)) { o.selected = true; picked.push(o.text.trim()); } });
-      el.dispatchEvent(new Event('change', {bubbles: true}));
-      return {picked, all: [...el.options].map(o => o.text.trim())};
-    })()`).catch(() => ({ picked: [], all: [] }));
-    if (got.picked.length) log(`  also searching: ${got.picked.join(', ')}`);
-    else log(`  "Coming Soon" is not a status in this MLS search — statuses available: ${got.all.join(', ')}. Tell Claude which one to use.`, 'warn');
-    await sleep(300);
+  if (comingSoon) {
+    const got = await js(selectOnly(core.FIELDS.status, [STATUS_COMING_SOON, STATUS_PRIVATE])).catch(() => null);
+    if (!got || !got.length) {
+      log(`  ⚠ the MLS search has no "Coming Soon" status to pick — Coming Soon not scanned in ${label}`, 'warn');
+      return { city: label, county: area.county, count: '0', rows: [], comingSoonMissing: true };
+    }
+    log(`  statuses searched: ${got.join(', ')}`);
+  } else {
+    await js(selectByLabel(core.FIELDS.status, 'Active'));
   }
+  await sleep(300);
   await js(selectByLabel(core.FIELDS.propType, 'Single Family Home'));
   await sleep(300);
   await js(selectByLabel(core.FIELDS.county, area.county));
@@ -370,7 +431,7 @@ async function scanArea(area, opts) {
   // stays the authoritative test in filterCandidates.
   const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   const to = new Date(), from = new Date(Date.now() - core.LIST_WINDOW_DAYS * 86400000);
-  await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`));
+  if (!comingSoon) await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`));
   await sleep(1600);
   const count = await js(core.JS_MATCH_COUNT).catch(() => '?');
   log(`  ${label}: ${count} matches`);
@@ -428,6 +489,7 @@ async function scanArea(area, opts) {
       log(`  Saved what the page showed to ${base}.json and .png — send both to Claude.`, 'warn');
     } catch (e) { log('  (could not save the page: ' + e.message + ')', 'warn'); }
   }
+  if (comingSoon) all.forEach(r => { r._comingSoon = true; });
   return { city: label, county: area.county, count, rows: all };
 }
 
@@ -437,6 +499,11 @@ async function scanArea(area, opts) {
 async function showGallery(mls, opts) {
   const factsOnly = !!(opts && opts.factsOnly);
   await nav(core.SEARCH_URL, 2200);
+  // Look the MLS # up among Active AND Coming Soon listings. The form's
+  // default status is Active, so a Coming Soon house came back "not found" —
+  // at review and again on every board refresh.
+  await js(selectOnly(core.FIELDS.status, [STATUS_ACTIVE, STATUS_COMING_SOON, STATUS_PRIVATE])).catch(() => null);
+  await sleep(300);
   await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
   await sleep(2600);
@@ -554,9 +621,9 @@ async function showGallery(mls, opts) {
 // reads a listing: all of it, not the first screen. The pause per screen is
 // the "Scroll pause" setting in section 3. Only real content panels are
 // scrolled — the page and at most two tall panels — not every menu.
-async function readWholePage() {
+async function readWholePage(run = js) {
   const pause = Math.max(150, Number(cfg.scrollPauseMs != null ? cfg.scrollPauseMs : 700));
-  await js(`(async () => {
+  await run(`(async () => {
     const wait = ms => new Promise(r => setTimeout(r, ms));
     const panels = [document.scrollingElement || document.documentElement]
       .concat([...document.querySelectorAll('div, main, section')]
@@ -565,13 +632,15 @@ async function readWholePage() {
         .sort((a, b) => b.scrollHeight - a.scrollHeight).slice(0, 2));
     for (const el of panels) {
       const step = Math.max(200, Math.round((el === panels[0] ? innerHeight : el.clientHeight) * 0.8));
-      for (let y = 0; y <= el.scrollHeight; y += step) { el.scrollTop = y; await wait(${pause}); }
+      // At most 40 screens: a page that loads more as it is scrolled would
+      // otherwise keep this going for ever.
+      for (let y = 0, n = 0; y <= el.scrollHeight && n < 40; y += step, n++) { el.scrollTop = y; await wait(${pause}); }
       el.scrollTop = el.scrollHeight; await wait(${pause});
     }
     for (const el of panels) el.scrollTop = 0;
     return true;
-  })()`).catch(() => false);
-  return await js('document.body.innerText').catch(() => '');
+  })()`, 120000).catch(() => false);
+  return await run('document.body.innerText').catch(() => '');
 }
 
 // Look the kept house up on Redfin, from this computer, so the Lead Board can
@@ -731,7 +800,7 @@ async function collectPhotos(urls, max) {
 async function autoDecide(c) {
   try {
     const gal = c._gal || {};
-    const photos = await collectPhotos(gal.urls, 20);
+    const photos = gal.b64 || await collectPhotos(gal.urls, 20);
     if (!photos.length) {
       // Never guess with no pictures — Rule #2 says judge from the gallery.
       return { decision: 'drop', reason: 'no photos could be loaded — insufficient photos to judge' };
@@ -827,7 +896,17 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       log(`━━━ ${label}  (area ${ai + 1} of ${areas.length}) ━━━`, 'good');
       send('city', { label, index: ai + 1, total: areas.length, phase: 'scanning' });
 
-      const scanned = await scanArea(area, { comingSoon: !!(opts && opts.comingSoon) });
+      const scanned = await scanArea(area);
+      // Coming Soon: a second, small search per area. Same buy box, same
+      // review; the rows are tagged so the rest of the run knows.
+      if (cfg.comingSoon !== false && !control.stopped) {
+        const cs = await scanArea(area, { comingSoon: true });
+        const have = new Set(scanned.rows.map(r => r.mls));
+        const add = cs.rows.filter(r => r.mls && !have.has(r.mls));
+        scanned.rows = scanned.rows.concat(add);
+        runKpi.comingSoon = (runKpi.comingSoon || 0) + add.length;
+        if (!cs.comingSoonMissing) log(`  ${label}: ${add.length} Coming Soon listing(s) added to the scan`, add.length ? 'good' : 'info');
+      }
       byArea[label] = scanned;
       runKpi.scanned += scanned.rows.length;
 
@@ -850,7 +929,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       if (filterRejects.length) log(`[${label}] ${filterRejects.length} failed the buy-box filter — all logged with the reason`);
 
       const seen = loadLedger();
-      const fresh = cityCands.filter(c => !seen[String(c.mls || '').trim().toUpperCase()]);
+      const fresh = cityCands.filter(c => !core.ledgerSkips(seen[String(c.mls || '').trim().toUpperCase()], todayKey()));
       const skipped = cityCands.length - fresh.length;
       runKpi.skippedAlreadyChecked += skipped;
 
@@ -882,6 +961,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         if (await stopRequested()) break;   // save what was read, then stop
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
+        if (markRecheck(c.mls, c.mls)) log('  Coming Soon recheck — opened again now that its photos may be up', 'good');
         const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false }));
         // Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT
         // listing on screen. Judging that would put another property's photos,
@@ -908,17 +988,28 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const q = core.qualify({
           addr: c.addr, remarks: gal.remarks, privateRemarks: gal.privateRemarks,
           condition: gal.condition, occupiedBy: gal.occupiedBy, propClass: gal.propClass,
-          photos: n, photosReliable: gal.gridOk, comingSoon: core.isComingSoon(gal.status),
+          photos: n, photosReliable: gal.gridOk,
           dom: domOf(c), yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
           price: gal.listPrice || c._price, origPrice: gal.origPrice,
           ppsfRatio: cityMedians && cityMedians[c._cityKey] ? c._ppsf / cityMedians[c._cityKey] : 0,
           whenUnsure: cfg.whenUnsure,
+          comingSoon: !!c._comingSoon || core.isComingSoon(gal.status),
         });
+        c._comingSoon = !!c._comingSoon || core.isComingSoon(gal.status);
+        if (c._comingSoon) log('  Coming Soon listing — not on the open market yet', 'good');
+        if (core.isPrivateListing(gal.status) || core.isPrivateListing(gal.privateRemarks) || core.isPrivateListing(gal.remarks))
+          log('  Private Listing — office exclusive, not on the open market', 'good');
         if (!gal.gridOk && n) log(`  photo grid did not load — only ${n} carousel photo(s) seen, photo count not used`, 'warn');
         if (gal.privateRemarks) log(`  private remarks read (${gal.privateRemarks.length} chars)`);
         // Only A and B go to the AI: it can only move a lead DOWN, so asking
         // about a C (hard exclusion or low score) costs money and changes nothing.
-        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C') {
+        // A Coming Soon listing with only its first few photos posted cannot be
+        // judged from the pictures yet — the AI would drop it as "insufficient
+        // photos". It stays as the text scored it, and says why.
+        const csTooFew = c._comingSoon && n > 0 && n <= 4;
+        if (csTooFew) q.why += ' + AI photo check waits for the photos to post';
+        let aiJudged = false;   // a photo verdict was reached (makes a Coming Soon verdict final)
+        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C' && !csTooFew) {
           // AI vision still has the final say on condition when it is on: a
           // DROP from the photos is an auto-pass whatever the text scored.
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
@@ -927,18 +1018,12 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             aiFailStreak++;
             log(`  ${v.reason} — kept the text rules' verdict`, 'warn');
             if (aiFailStreak >= 3) log('AI vision failed 3 times in a row — turned off for the rest of this run. Check the key and model in section 2 (Test key).', 'error');
-          } else if (v.decision !== 'keep' && core.isComingSoon(gal.status) && /insufficient|no kitchen|no photos|few photos/i.test(v.reason)) {
-            // Not enough photos YET on a Coming Soon listing: keep it at B and
-            // let the team look when the full gallery is up.
-            aiFailStreak = 0;
-            if (q.bucket === 'A') { q.bucket = 'B'; q.label = core.BUCKET_LABEL.B; q.score = Math.min(q.score, 69); }
-            q.why = q.why + ' + AI (vision): not enough photos yet — check again when it goes active';
           } else if (v.decision !== 'keep') {
-            aiFailStreak = 0;
+            aiFailStreak = 0; aiJudged = true;
             Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop',
               score: Math.min(q.score, 15), why: 'AI (vision): ' + v.reason });
           } else {
-            aiFailStreak = 0;
+            aiFailStreak = 0; aiJudged = true;
             q.why = q.why + ' + AI (vision) keep: ' + v.reason;
           }
         }
@@ -979,7 +1064,12 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         }
         // Record as we go, not at the end — a crash or Stop mid-run must not
         // cost us the listings already judged.
-        ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: cityOf(c) });
+        // A Coming Soon listing judged before its photos could be checked is a
+        // first look only: it is opened again in a couple of days. A remarks
+        // hard exclusion (renovated, fire, tenant, structural) is final.
+        if (c._comingSoon) recordComingSoon(c.mls, { decision, extra: { addr: c.addr, city: cityOf(c) },
+          provisional: !aiJudged && !q.hard && !core.isConfirmed(c.addr) });
+        else ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: cityOf(c) });
       }
 
       // --- comps: OFF by default for now ---
@@ -1147,6 +1237,424 @@ function closeMlsWindow() {
 ipcMain.on('pause', () => { control.paused = true; log('Paused.', 'warn'); });
 ipcMain.on('resume', () => { control.paused = false; log('Resumed.', 'good'); });
 ipcMain.on('stop', () => { control.stopped = true; control.paused = false; });
+
+// ---------- Redfin: Coming Soon / Early Access (v1.50) ----------
+// No MLS sign-in. A visible Redfin window is driven from this computer (Redfin
+// refuses cloud servers, so this only ever runs here). For each ticked county:
+// Redfin's location lookup gives the county page, the search (houses under the
+// area's cap, newest first) is paged through, and only cards whose badge says
+// Coming Soon / Early Access / private exclusive are kept. Each one's own page
+// is read slowly, then judged by the same rules as an MLS listing — renovated
+// still drops (Rule #0) — and its photos go to the AI check when it is on.
+let rfWin = null;
+function ensureRedfinWindow() {
+  if (rfWin && !rfWin.isDestroyed()) return rfWin;
+  rfWin = new BrowserWindow({ width: 1280, height: 900, show: true, title: 'Redfin — FlipScout',
+    webPreferences: { partition: 'persist:redfin' } });
+  rfWin.on('closed', () => { rfWin = null; });
+  return rfWin;
+}
+// Every wait on the Redfin window has a time limit. Without one, a request
+// Redfin holds open, or a page that redirects while a snippet is running, left
+// executeJavaScript waiting for ever — the "search that never stops" (2 Oct).
+const timeLimit = (p, ms, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(what + ' timed out')), ms))]);
+const rfJs = (code, ms = 30000) => timeLimit(ensureRedfinWindow().webContents.executeJavaScript(code, true), ms, 'Redfin page');
+async function rfNav(url, settle = 3500) {
+  await timeLimit(ensureRedfinWindow().loadURL(url), 30000, 'Redfin page load').catch(() => {});
+  await sleep(settle);
+}
+// What each Redfin data call returned, for checking a run that finds nothing.
+let rfDiag = [];
+const rfDiagNote = line => { rfDiag.push(new Date().toISOString().slice(11, 19) + ' ' + line); };
+/** fetch() inside the Redfin page (its own cookies), given up after 20 s. */
+async function rfFetch(url) {
+  const r = await rfJs(`(async () => {
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
+    try { const r = await fetch(${JSON.stringify(url)}, { credentials: 'include', signal: ac.signal });
+      return { status: r.status, body: await r.text() }; }
+    catch (e) { return { status: 0, body: String(e && e.message || e) }; }
+    finally { clearTimeout(t); }
+  })()`, 25000).catch(e => ({ status: 0, body: e.message }));
+  rfDiagNote(`${r.status} ${url}\n    ${String(r.body || '').slice(0, 300).replace(/\s+/g, ' ')}`);
+  return r;
+}
+
+// Every search card on the page: the box around each /home/<id> link.
+const JS_REDFIN_CARDS = `(() => {
+  const out = [], seen = new Set();
+  document.querySelectorAll('a[href*="/home/"]').forEach(a => {
+    const href = a.href.split(/[?#]/)[0];
+    if (!/\\/home\\/\\d+$/.test(href) || seen.has(href)) return;
+    // Widen to the whole card (photo + badge + facts): the largest box that
+    // still holds links to this one home only.
+    let el = a;
+    const only = node => new Set([...node.querySelectorAll('a[href*="/home/"]')].map(x => x.href.split(/[?#]/)[0])).size <= 1;
+    while (el.parentElement && el.parentElement !== document.body && only(el.parentElement)) el = el.parentElement;
+    seen.add(href);
+    out.push({ href, text: (el.innerText || '').slice(0, 800) });
+  });
+  return out;
+})()`;
+
+// The listing agent's block on a Redfin home page ("Listed by …"), read the
+// way a person would: open the "Show more" toggles, scroll the block into view,
+// pause, then take its text and its tel:/mailto: links. Only that block — the
+// "Contact agent" card at the top is Redfin's own agent, never the listing
+// agent, and its buttons are never clicked.
+const JS_REDFIN_AGENT = pause => `(async () => {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const SAFE = /^(show more|see more|read more|show all|see all|more agent info|show (?:agent|contact|phone)[\\w ]*|view (?:agent|contact)[\\w ]*)$/i;
+  const BAD = /contact agent|request|tour|ask a question|schedule|message|start an offer|get pre/i;
+  for (const b of [...document.querySelectorAll('button, a[role="button"], span[role="button"]')]) {
+    const t = (b.innerText || '').trim();
+    if (t.length < 40 && SAFE.test(t) && !BAD.test(t)) { try { b.click(); await wait(300); } catch (_) {} }
+  }
+  const all = [...document.querySelectorAll('div, section, p, span')];
+  const hit = all.filter(el => /\\b(listed by|listing agent|listing provided courtesy of|listing courtesy of)\\b/i.test(el.innerText || '')
+      && (el.innerText || '').length < 1500)
+    .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length)[0];
+  if (!hit) return { text: '', tels: [], mails: [] };
+  hit.scrollIntoView({ block: 'center' }); await wait(${Math.max(600, pause * 2)});
+  // Widen from the "Listed by" line to its block — never so far that it takes
+  // in the "Contact agent" card or the rest of the page.
+  let box = hit;
+  for (let i = 0; i < 4; i++) {
+    const up = box.parentElement;
+    if (!up || up === document.body || (up.innerText || '').length > 1500 || BAD.test(up.innerText || '')) break;
+    box = up;
+  }
+  const links = sel => [...box.querySelectorAll(sel)].map(a => a.getAttribute('href') || '');
+  return { text: (box.innerText || '').slice(0, 1500),
+    tels: links('a[href^="tel:"]').map(h => h.slice(4)),
+    mails: links('a[href^="mailto:"]').map(h => h.slice(7).split('?')[0]) };
+})()`;
+
+/** Photos for the AI without going through a page: fetched here and shrunk
+ *  with nativeImage, so a CDN's CORS rules cannot stop it. */
+async function collectPhotosDirect(urls, max) {
+  const out = [];
+  for (const u of spreadPhotos(urls, max || 20)) {
+    try {
+      // Through the Redfin window's own session (its cookies, as that page
+      // would load it), with Redfin as the referrer.
+      const ses = ensureRedfinWindow().webContents.session;
+      const r = await timeLimit((ses.fetch ? ses.fetch.bind(ses) : net.fetch)(u, { headers: { Referer: 'https://www.redfin.com/' } }), 20000, 'photo');
+      if (!r.ok) continue;
+      let img = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
+      if (img.isEmpty()) continue;
+      const { width, height } = img.getSize();
+      if (Math.max(width, height) > 768) img = img.resize(width >= height ? { width: 768 } : { height: 768 });
+      const b = img.toJPEG(72).toString('base64');
+      if (b.length > 2000) out.push(b);
+    } catch (_) { /* one bad photo must not sink the listing */ }
+  }
+  return out;
+}
+
+/** Open the home's photo viewer and step through EVERY photo with the arrow
+ *  key, pausing on each, so each one actually loads (Rule #2 — never judge
+ *  from the cover). Returns every photo URL the page showed along the way. */
+async function viewRedfinPhotos(pause) {
+  const wc = ensureRedfinWindow().webContents;
+  const grab = () => rfJs(`[...document.images].map(i => i.currentSrc || i.src).filter(u => /cdn-redfin\\.com\\/photo\\//.test(u))`).catch(() => []);
+  await rfJs('window.scrollTo(0, 0)').catch(() => {});
+  const opened = await rfJs(`(() => {
+    const imgs = [...document.images].filter(i => /cdn-redfin\\.com\\/photo\\//.test(i.currentSrc || i.src));
+    const big = imgs.sort((a, b) => (b.clientWidth * b.clientHeight) - (a.clientWidth * a.clientHeight))[0];
+    if (!big) return false;
+    (big.closest('button, a, [role="button"]') || big).click();
+    return true;
+  })()`).catch(() => false);
+  if (!opened) return await grab();
+  await sleep(2000);
+  const all = new Set(await grab());
+  let still = 0;
+  for (let n = 0; n < 80 && still < 3; n++) {
+    if (control.stopped) break;
+    wc.sendInputEvent({ type: 'keyDown', keyCode: 'Right' });
+    wc.sendInputEvent({ type: 'keyUp', keyCode: 'Right' });
+    await sleep(Math.max(500, pause));
+    const before = all.size;
+    (await grab()).forEach(u => all.add(u));
+    still = all.size === before ? still + 1 : 0;
+  }
+  wc.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+  wc.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+  await sleep(500);
+  return [...all];
+}
+
+// Early Access homes are shown in full only to signed-in Redfin users. The
+// Redfin window keeps its own cookies (persist:redfin), so one sign-in lasts.
+ipcMain.handle('redfin-signin', async () => {
+  const w = ensureRedfinWindow();
+  await w.loadURL('https://www.redfin.com/login').catch(() => {});
+  w.show(); w.focus();
+  log('Redfin window opened — sign in there (optional; it lets the scan see Early Access homes). Then press 🏠 Scan Redfin.', 'good');
+  return { ok: true };
+});
+
+async function redfinCounty(county) {
+  const r = await rfFetch('/stingray/do/location-autocomplete?v=2&al=1&location=' + encodeURIComponent(county + ' County, CA'));
+  return core.redfinCountyPath(r.body, county);
+}
+
+ipcMain.handle('redfin-scan', async (_e, opts) => {
+  if (control.running) return { ok: false, error: 'already running' };
+  const picked = opts && Array.isArray(opts.areaIndexes) ? opts.areaIndexes : null;
+  const areas = (picked ? picked.map(i => core.DEFAULT_BUYBOX[i]) : core.DEFAULT_BUYBOX).filter(Boolean);
+  if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
+  control.running = true; control.stopped = false; control.paused = false;
+  aiFailStreak = 0;
+  const runKpi = Object.assign(blankKpi(), { runs: 1 });
+  const MAX_PAGES = 25;
+  let found = 0;
+  try {
+    rfDiag = [];
+    log('━━━ Redfin — Coming Soon & Early Access (no MLS sign-in) ━━━', 'good');
+    if (!(cfg.useAI && cfg.apiKey)) log('⚠ AI PHOTO CHECK IS OFF — every photo will be opened and looked through, but nothing judges them. Add the key in section 2 and tick "Use AI" to have renovated houses dropped from the photos.', 'error');
+    await rfNav('https://www.redfin.com/', 4000);
+    // The ledger knows every MLS # the MLS scans have checked; Redfin shows the
+    // same numbers, sometimes without the board's prefix — match on digits too.
+    const seen = loadLedger();
+    const seenDigits = new Set(Object.keys(seen).map(k => k.replace(/\D/g, '')).filter(d => d.length >= 6));
+    const isSeen = id => !!id && (seen[id] || seenDigits.has(id.replace(/\D/g, '')));
+    for (let ai = 0; ai < areas.length; ai++) {
+      if (await stopRequested()) break;
+      const area = areas[ai];
+      const label = `All ${area.county}`;
+      send('city', { label: 'Redfin · ' + label, index: ai + 1, total: areas.length, phase: 'scanning' });
+      const cpath = await redfinCounty(area.county);
+      if (!cpath) { log(`  ${label}: Redfin did not return the county page — skipped`, 'warn'); continue; }
+      // --- the county's homes for sale, from Redfin's own data first ---
+      const early = [], ids = new Set();
+      let cardsSeen = 0, source = '';
+      const regionId = core.redfinRegionId(cpath);
+      await rfNav(core.redfinSearchUrl(cpath, area.maxk, 1), 4500);   // the search page, as a person would open it
+      for (const csv of [false, true]) {
+        if (cardsSeen || !regionId) break;
+        for (const market of ['sanfrancisco', '']) {
+          if (cardsSeen) break;
+          for (let page = 1; page <= 10; page++) {
+            if (await stopRequested()) break;
+            const r = await rfFetch(core.redfinGisUrl({ regionId, maxk: area.maxk, page, csv, market }));
+            const homes = (r.status === 200 && (csv ? core.redfinCsvHomes(r.body) : core.redfinGisHomes(r.body))) || [];
+            const add = homes.filter(h => !ids.has(h.homeId));
+            add.forEach(h => { ids.add(h.homeId); if (h.early) early.push(h); });
+            cardsSeen += add.length;
+            log(`  ${label}: Redfin ${csv ? 'download' : 'data'} page ${page}${market ? '' : ' (no market)'} — `
+              + (r.status === 200 ? `${homes.length} house(s), ${add.filter(h => h.early).length} Coming Soon / Early Access`
+                : `no answer (HTTP ${r.status || 'none'})`), r.status === 200 ? 'info' : 'warn');
+            if (homes.length < 350 || !add.length) break;
+          }
+          if (cardsSeen) source = csv ? 'Redfin download data' : 'Redfin search data';
+        }
+      }
+      // --- fallback: the cards on the search pages ---
+      if (!cardsSeen) {
+        let page = 1;
+        for (; page <= MAX_PAGES; page++) {
+          if (await stopRequested()) break;
+          if (page > 1) await rfNav(core.redfinSearchUrl(cpath, area.maxk, page), 4500);
+          const raw = await rfJs(JS_REDFIN_CARDS).catch(() => []);
+          const cards = (raw || []).map(core.redfinCard).filter(c => c && !ids.has(c.homeId));
+          log(`  ${label}: Redfin search page ${page} — ${cards.length} new house card(s), ${cards.filter(c => c.early).length} Coming Soon / Early Access`);
+          if (!cards.length) break;
+          cards.forEach(c => { ids.add(c.homeId); if (c.early) early.push(c); });
+          cardsSeen += cards.length;
+        }
+        if (page > MAX_PAGES) log(`  ⚠ ${label}: stopped at ${MAX_PAGES} pages of Redfin results — some homes not looked at`, 'warn');
+        if (cardsSeen) source = 'Redfin search cards';
+      }
+      if (!cardsSeen) {
+        const dir = path.join(app.getPath('userData'), 'grid-debug');
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+          const f = path.join(dir, `redfin-${area.county.replace(/\W+/g, '-')}-${Date.now()}`);
+          fs.writeFileSync(f + '.txt', String(await rfJs('location.href + "\\n\\n" + document.body.innerText.slice(0, 20000)').catch(() => '')));
+          fs.writeFileSync(f + '.png', (await ensureRedfinWindow().webContents.capturePage()).toPNG());
+          log(`  ${label}: read 0 homes off Redfin — page saved to ${f}.txt/.png for checking`, 'error');
+        } catch (_) { log(`  ${label}: read 0 homes off Redfin`, 'error'); }
+        continue;
+      }
+      log(`  ${label}: read ${cardsSeen} houses for sale from ${source}`);
+      if (!early.length) log(`  ${label}: none of them is Coming Soon / Early Access on Redfin right now`
+        + ' (Early Access homes only show when signed in to Redfin — use "Sign in to Redfin" in section 3)', 'warn');
+      runKpi.scanned += early.length;
+      // The same buy box as the MLS scan, checked here on every home — not
+      // left to Redfin's search filters: single-family only, under the area's
+      // cap (never over $3M), 25+ years old.
+      const kept = [], rejects = [];
+      const rejectRow = (c, reason, stage) => ({ mls: c.mls || ('RF' + c.homeId), addr: c.addr, city: (c.addr.split(',')[1] || area.county).trim(),
+        zip: (c.addr.match(/\b(9\d{4})$/) || [])[1] || '', price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', sqft: c.sqft,
+        dom: c.dom, reason, stage, link: c.url });
+      const inBox = [];
+      early.forEach(c => {
+        const why = core.redfinBuyBox(c, area, 'list');
+        if (why) { rejects.push(rejectRow(c, why, 'Buy-box filter')); log(`  skip ${c.addr} — ${why}`); }
+        else inBox.push(c);
+      });
+      const fresh = inBox.filter(c => !core.ledgerSkips(seen['RF' + c.homeId], todayKey()));
+      log(`${label}: ${cardsSeen} houses on Redfin → ${early.length} Coming Soon / Early Access → ${inBox.length} single-family under the cap → ${fresh.length} new`, 'good');
+      // --- read each one's own page, judge it like an MLS listing ---
+      for (let i = 0; i < fresh.length; i++) {
+        if (await stopRequested()) break;
+        const c = fresh[i];
+        log(`[Redfin ${area.county}] opening ${i + 1}/${fresh.length}: ${c.addr || c.url} — ${c.badge}`, 'good');
+        if (markRecheck('RF' + c.homeId, c.mls || ('RF' + c.homeId))) log('  recheck — opened again now that its photos may be up', 'good');
+        send('review', { i: i + 1, total: fresh.length, city: area.county, mls: 'RF' + c.homeId, addr: c.addr,
+          price: c.price, sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: 0,
+          remarks: c.remarks || '', details: {}, verdict: 'reviewing', why: 'Reading the Redfin page' });
+        await rfNav(c.url, 4000);
+        const text = await readWholePage(rfJs);
+        const html = await rfJs('document.documentElement.innerHTML').catch(() => '');
+        const h = core.parseRedfinHome(text);
+        // Fill what the page did not say from Redfin's data for the home.
+        if (!h.remarks && c.remarks) h.remarks = c.remarks;
+        if (!h.year && c.year) h.year = c.year;
+        if (h.dom === '' && c.dom !== '' && c.dom != null) h.dom = c.dom;
+        if (!h.mls && c.mls) h.mls = c.mls;
+        // The page says what the list may not have: the type, the year.
+        const pageWhy = core.redfinBuyBox({ ...c, ptype: h.ptype || c.ptype, year: h.year || c.year }, area, 'page');
+        if (pageWhy) {
+          log(`  skip — ${pageWhy}`);
+          rejects.push(rejectRow(c, pageWhy, 'Buy-box filter'));
+          ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr });
+          continue;
+        }
+        if (/sign in|join or sign/i.test(text.slice(0, 3000)) && !h.remarks) log('  this Early Access home is only shown in full when signed in to Redfin', 'warn');
+        if (isSeen(h.mls)) { log(`  already checked as ${h.mls} by an MLS scan — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
+        const city = (c.addr.split(',')[1] || area.county).trim();
+        // PHOTOS FIRST (Bryan, 2 Oct: "only fixer property, look on the photo
+        // first"). Every photo is stepped through in Redfin's viewer and judged
+        // before anything else; a house the photos do not show as a fixer is
+        // dropped here, before the agent or the description is even read.
+        const seenPhotos = await viewRedfinPhotos(Number(cfg.scrollPauseMs) || 700);
+        const urls = core.redfinPhotoUrls(seenPhotos.join(' ') + ' ' + html);
+        log(`  looked through ${urls.length} photo(s)`, urls.length > 4 ? 'good' : 'warn');
+        const tooFew = urls.length <= 4;
+        let aiKept = false, aiWhy = '';
+        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !tooFew && !core.isConfirmed(c.addr)) {
+          const b64 = await collectPhotosDirect(urls, 20);
+          // Photos the AI could not be given are not a verdict on the house.
+          const v = !b64.length ? { error: true, reason: `could not download the ${urls.length} photo(s) for the AI check` }
+            : await autoDecide({ addr: c.addr, _cityKey: city, _sqft: c.sqft, _price: c.price, _gal: { b64, remarks: h.remarks } });
+          if (v.error) {
+            if (b64.length) aiFailStreak++;   // a photo download problem is not an AI failure
+            log(`  ${v.reason} — falling back to the description`, 'warn');
+            if (aiFailStreak >= 3) log('AI photo check failed 3 times in a row — off for the rest of this run. Check the key in section 2 (Test key).', 'error');
+          } else if (v.decision !== 'keep') {
+            aiFailStreak = 0;
+            const why = 'photos: not a fixer — ' + v.reason;
+            log(`  C — Auto-Pass — ${why}`);
+            runKpi.reviewed++; runKpi.bucketC++; runKpi.dropped++;
+            rejects.push(rejectRow({ ...c, mls: h.mls || c.mls }, 'Auto-pass: ' + why, 'Photo review'));
+            send('review', { i: i + 1, total: fresh.length, city: area.county, mls: h.mls || 'RF' + c.homeId, addr: c.addr, price: c.price,
+              sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: urls.length, remarks: h.remarks || '', details: {},
+              verdict: 'drop', why });
+            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, city, mls: h.mls });
+            continue;
+          } else { aiFailStreak = 0; aiKept = true; aiWhy = v.reason; log(`  photos: fixer — ${v.reason}`, 'good'); }
+        }
+        const ag = core.parseRedfinAgent(await rfJs(JS_REDFIN_AGENT(Number(cfg.scrollPauseMs) || 700)).catch(() => null));
+        log(ag.name || ag.phone || ag.email
+          ? `  listing agent: ${[ag.name, ag.brokerage, ag.phone, ag.email].filter(Boolean).join(' · ')}`
+          : '  listing agent contact not shown on Redfin — call the brokerage', ag.phone || ag.email ? 'good' : 'info');
+        const q = core.qualify({
+          addr: c.addr, remarks: h.remarks, propClass: h.propClass,
+          photos: urls.length, photosReliable: false, dom: h.dom, yearBuilt: h.year,
+          price: c.price, whenUnsure: cfg.whenUnsure, comingSoon: true,
+        });
+        q.why = 'Redfin ' + c.badge + ' · ' + q.why;
+        if (aiKept) q.why += ' + photos show a fixer: ' + aiWhy;
+        else if (!(cfg.useAI && cfg.apiKey)) q.why += ' + photos viewed but not judged (AI photo check off)';
+        if (tooFew) q.why += ' + photos not posted on Redfin yet — check them before offering';
+        // Fixers only (Bryan, 2 Oct: "on early access make sure only fixer").
+        // A Coming Soon / Early Access home stays only if its description says
+        // it needs work, or the AI saw the wear in its photos.
+        const notFixer = q.decision === 'keep' ? core.redfinFixerGate({ addr: c.addr, remarks: h.remarks, aiKept }) : '';
+        if (notFixer) Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop', score: Math.min(q.score, 30), why: q.why + ' — ' + notFixer });
+        runKpi.reviewed++; runKpi['bucket' + q.bucket]++;
+        const id = h.mls || ('RF' + c.homeId);
+        log(`  ${q.label} · score ${q.score} — ${q.why}`, q.decision === 'keep' ? 'good' : 'info');
+        send('review', { i: i + 1, total: fresh.length, city: area.county, mls: id, addr: c.addr, price: c.price, sqft: c.sqft,
+          ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: urls.length, remarks: h.remarks || '', details: {},
+          verdict: q.decision, why: `${q.label} · score ${q.score} — ${q.why}` });
+        if (q.decision === 'keep') {
+          runKpi.kept++;
+          const offer = core.offerDue(h.remarks);
+          kept.push({
+            mls: id, address: c.addr, city, zip: (c.addr.match(/\b(9\d{4})$/) || [])[1] || '',
+            beds: c.beds, baths: c.baths, sqft: c.sqft, lotSqft: h.lotSqft || '', yearBuilt: h.year || '',
+            dom: h.dom, price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '',
+            arv: 0, arvBasis: 'not comped yet', recommendation: 'Needs Comps', flipQuality: '', score: '',
+            risks: 'Found on Redfin (' + c.badge + ') — confirm on the MLS',
+            bucket: q.bucket, bucketLabel: q.label, oppScore: q.score, why: q.why,
+            listedBy: [ag.name || h.agent, ag.brokerage].filter(Boolean).join(', '), offerDue: offer, privateRemarks: '', occupiedBy: '',
+            mlsStatus: core.redfinLabel(c.badge), remarks: h.remarks, redfin: c.url,
+            agentPhone: ag.phone, agentEmail: ag.email, showing: '', disclosures: '', priceCut: '',
+            link: c.url, surface: true, needsComps: true,
+          });
+        } else {
+          runKpi.dropped++;
+          rejects.push({ mls: id, addr: c.addr, city, zip: '', price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '',
+            sqft: c.sqft, dom: h.dom, reason: `Auto-pass (score ${q.score}): ${q.why}`, score: q.score, why: q.why,
+            stage: 'Redfin review', link: c.url });
+        }
+        // No photo verdict (photos not posted, AI off or unable) = a first look
+        // only; it is opened again in a couple of days.
+        recordComingSoon('RF' + c.homeId, { decision: q.decision, extra: { addr: c.addr, city, mls: h.mls },
+          provisional: !aiKept && !q.hard && !core.isConfirmed(c.addr) });
+      }
+      found += kept.length;
+      if (kept.length || rejects.length) {
+        const rows = kept.map(toSheetRow);
+        if (googleReady() && googleCfg().autoSync) {
+          const r = await googleSync(rows, rejects);
+          if (r.ok) { runKpi.pushed += r.leads.added; log(`[Redfin ${area.county}] sheet: ${r.leads.added} new lead(s)`, 'good'); }
+          else log(`[Redfin ${area.county}] sheet write failed: ${r.error} — kept in the local backup`, 'warn');
+        }
+        writeBackup(rows, rejects);
+        if (kept.length) {
+          const b = writeBoardScan(kept);
+          log(b.ok ? `[Redfin ${area.county}] ${kept.length} lead(s) added to today's Lead Board file` : `could not write the Lead Board file: ${b.error}`, b.ok ? 'good' : 'warn');
+        }
+      }
+      send('report', { leads: kept, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
+    }
+    return { ok: true, found };
+  } catch (e) {
+    log('Redfin scan error: ' + e.message, 'error'); return { ok: false, error: e.message };
+  } finally {
+    control.running = false;
+    try { if (rfWin && !rfWin.isDestroyed()) rfWin.close(); } catch (_) {}
+    rfWin = null;
+    try {
+      const f = path.join(app.getPath('userData'), 'redfin-last-run.txt');
+      fs.writeFileSync(f, rfDiag.join('\n') + '\n');
+      log(`What Redfin answered on each step is saved in ${f} — send it if this run found nothing.`);
+    } catch (_) {}
+    const day = recordKpi(runKpi);
+    if (googleReady() && googleCfg().autoSync) await rebuildBoard(day).catch(() => {});
+    const line = `Redfin scan ${control.stopped ? 'STOPPED' : 'COMPLETE'} — ${runKpi.scanned} Coming Soon / Early Access found · `
+      + `${runKpi.reviewed} reviewed → ${runKpi.bucketA} A · ${runKpi.bucketB} B · ${runKpi.bucketC} C.`;
+    log(line, 'good');
+    const board = boardStatus();
+    if (board.count) {
+      try { clipboard.writeText(fs.readFileSync(board.file, 'utf8'));
+        log(`Today's ${board.count} lead(s) are copied — open the Lead Board, click "Add scan", and paste`
+          + (googleReady() ? ' (or press "↻ Refresh from sheet" on the board — the sheet already has them).' : '.'), 'good'); } catch (_) {}
+    }
+    send('board', board);
+    // Leads found: open the Lead Board with them already on the clipboard.
+    if (found && /^https:\/\/claude\.ai\//.test(String(cfg.boardUrl || ''))) {
+      shell.openExternal(cfg.boardUrl);
+      log(`Opened the Lead Board — click "Add scan" and paste (Ctrl+V) to add the ${found} Redfin lead(s).`, 'good');
+    }
+    send('kpi', { today: day, history: kpiReport() });
+    send('done', { stopped: control.stopped, summary: line, redfin: true });
+  }
+});
 
 // ---------- the Lead Board hand-off ----------
 // One file per day, in Documents/FlipScout, holding every lead the day's runs
@@ -1551,7 +2059,8 @@ function gateFields(c) {
     bucket: q.bucket || '', bucketLabel: q.label || '', oppScore: q.score != null ? q.score : '',
     why: q.why || '', listedBy: g.listedBy || '',
     offerDue: g.offerDue || '', privateRemarks: g.privateRemarks || '', occupiedBy: g.occupiedBy || '',
-    mlsStatus: g.status || '',
+    mlsStatus: core.listingLabel({ status: g.status, comingSoon: c._comingSoon,
+      remarks: c._remarks || g.remarks, privateRemarks: g.privateRemarks }),
     agentPhone: g.agentPhone || '', agentEmail: g.agentEmail || '', showing: g.showing || '',
     disclosures: g.disclosures || '',
     remarks: c._remarks || '', redfin: c._redfin || '',
@@ -1719,8 +2228,8 @@ ipcMain.handle('refresh-board', async () => {
         // Either it left the Active search (pending / sold / withdrawn) or
         // Matrix showed another listing. Say so; never guess.
         notFound++;
-        batch.push({ 'MLS #': mls, 'MLS Status': 'Not found in Active search — check' });
-        log('    not found in an Active search — may be pending or off market', 'warn');
+        batch.push({ 'MLS #': mls, 'MLS Status': 'Not found in Active / Coming Soon search — check' });
+        log('    not found among Active or Coming Soon listings — may be pending or off market', 'warn');
       } else {
         const list = core.num(gal.listPrice) || core.num(val(r, 'Purchase Price'));
         const orig = core.num(gal.origPrice);
@@ -1773,7 +2282,7 @@ ipcMain.handle('refresh-board', async () => {
     await flush();
     await rebuildBoard();
     const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · `
-      + `${flagged} moved to C by a red flag · ${notFound} not found in an Active search.`;
+      + `${flagged} moved to C by a red flag · ${notFound} not found among Active or Coming Soon listings.`;
     log(line, 'good');
     return { ok: true, done, scored, notFound };
   } catch (e) {

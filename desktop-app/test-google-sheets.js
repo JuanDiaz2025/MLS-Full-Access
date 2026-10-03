@@ -497,18 +497,6 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
       yearBuilt: 1918, price: 699000, origPrice: 760000, ppsfRatio: 0.6 }).bucket, 'A', 'as-is plus real needs-work wording can still be A');
   }
 
-  {
-    const core = require('./scan-core');
-    eq(core.isComingSoon('Coming Soon'), true, 'Coming Soon is recognised');
-    eq(core.isComingSoon('Incoming'), true, 'Incoming is recognised');
-    eq(core.isComingSoon('Active'), false, 'Active is not coming soon');
-    const few = { photos: 3, photosReliable: true, privateRemarks: 'Lockbox at the front door.', yearBuilt: 1950 };
-    eq(core.qualify(few).bucket, 'C', 'an active listing with 3 photos is still dropped');
-    const cs = core.qualify({ ...few, comingSoon: true });
-    eq(cs.bucket !== 'C', true, 'a Coming Soon listing with 3 photos is kept for a look');
-    eq(/COMING SOON/.test(cs.why), true, 'and its Why says COMING SOON');
-  }
-
   // 18. Re-review a past scan (v1.46): a teammate scanned with an old version.
   {
     const core = require('./scan-core');

@@ -37,7 +37,7 @@ install (creates a desktop shortcut) or run the portable exe directly.
 2. **Pick your areas, then Start scan** — tick only the areas you want in
    section 3 (All / None / San Francisco only shortcuts are there, and the choice
    is remembered). The full box is the whole Bay Area — San Francisco · San Mateo
-   @ $2M · Santa Clara · Alameda · Contra Costa · Marin · Sonoma · Napa · Solano,
+   @ $2.5M · Santa Clara · Alameda · Contra Costa · Marin · Sonoma · Napa · Solano,
    every city in each; Active ·
    Single-Family · **45 days on market or less** · 25+ years old). After the first
    pass each run is incremental — listings already checked are skipped outright,
@@ -168,3 +168,28 @@ with its public and private remarks, offer deadline, listing agent (name, phone,
 score, and its exact Redfin page (looked up from this computer). When a run finishes the leads are
 already copied: open the Lead Board, click **Add scan**, paste. The Google Sheet (section 8) is optional.
 Each report is scrolled top to bottom before it is read — "Scroll pause per screen" in section 3.
+
+## Coming Soon listings (v1.48)
+Section 3 → "Also scan Coming Soon listings" (on by default). Each area gets a second, small search for
+Coming Soon homes, reviewed like any other. A Coming Soon home with only its first few photos posted is kept
+for review (B) instead of being dropped, and its Why says "Coming Soon".
+
+## Redfin — Coming Soon & Early Access (v1.50)
+Section 3 → **🏠 Scan Redfin — Coming Soon & Early Access**. No MLS sign-in. A Redfin window opens and goes
+through each ticked area (houses under the area's price cap, newest first), keeps only the homes whose card is
+badged Coming Soon / Early Access / private exclusive, reads each one's page slowly and judges it with the same
+rules (renovated still drops; the AI photo check runs on Redfin's photos when it is on). Kept homes go to the
+Lead Board file and the sheet with their own Redfin link and a coloured Coming Soon / Private Listing label.
+Homes an MLS scan already checked are skipped. If an area reads 0 homes, the page is saved under
+`grid-debug/redfin-*` in the app's data folder — send those two files.
+**v1.51:** each Redfin home is opened one at a time and scrolled down to its **Listed by** section; the listing
+agent's name, brokerage, phone and email are read from that section only (never Redfin's own "Contact agent"
+card) and go to the sheet's Listing Agent / Agent Phone / Agent Email columns and to the Lead Board.
+**v1.52:** the county's homes now come from Redfin's own search data (status + badges such as "Early Access
+Redfin Coming Soon"), not from guessing at the page. Each Coming Soon / Early Access home is opened one at a
+time: the page is scrolled, every photo is stepped through in Redfin's photo viewer, the listing agent is read,
+then it is judged. **Sign in to Redfin** (section 3) once to let the scan see Early Access homes.
+**v1.57:** Coming Soon / Early Access homes are often seen before their photos go up. A verdict made without a
+photo check is now a first look only: the home is opened again 2 days later (up to 7 times, about two weeks), so a
+quiet listing whose worn interior is posted later is not lost, and one kept on its first few photos gets its
+photo check. Photo verdicts, renovated/fire/tenant/structural wording and buy-box drops are final straight away.

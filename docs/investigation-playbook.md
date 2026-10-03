@@ -8,7 +8,7 @@ across live sweeps of SF, San Mateo (Peninsula), Oakland, San Jose, Morgan Hill.
 | Area | Max buy | Notes |
 |---|---|---|
 | Default (SF, Oakland, San Jose, South County) | **$1.5M** | Active · SFR · any list date |
-| **Peninsula (San Mateo County)** | **$2.0M** | higher ceiling for this area |
+| **Peninsula (San Mateo County)** | **$2.5M** | higher ceiling for this area (was $2.0M until 2 Oct) |
 
 Always: Status = Active, Property Type = Single Family Home. **No List Date
 filter** — the 45-day window and the DOM > 45 drop are both lifted for now, so
