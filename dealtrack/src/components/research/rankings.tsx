@@ -1,8 +1,9 @@
 "use client"
 
-// Competitors → Google rankings: the scan form (which keywords, which places, how many searches it
-// will use), the scan under way, and the results: competitors by share of voice, each keyword's top
-// 10 and ads, and the past scans.
+// Competitors → Google rankings: the scan form (Google results, Google Maps or the brand check;
+// which keywords and places; how many credits it will use), the scan under way, and the results:
+// competitors by share of voice, each keyword's top 10, the Google Maps businesses and their
+// reviews, what people see when they look us up, and the past scans.
 
 import { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
@@ -10,26 +11,36 @@ import { useRouter } from "next/navigation"
 import { Download, LoaderCircle, Play, Search, Square, Trash2, X } from "lucide-react"
 
 import { continueScanAction, deleteScanAction, startScanAction, stopScanAction, type SerpState } from "@/app/actions/serp"
+import { BrandView, MapsView } from "@/components/research/rankings-maps"
 import { Button, buttonVariants } from "@/components/ui/button"
 import Disclosure from "@/components/ui/disclosure"
-import type { Scan, SerpEngine } from "@/lib/research/serp"
-import type { Analysis, KeywordRow, SiteRow } from "@/lib/research/serp-analysis"
+import type { PlaceReviews, Scan, ScanKind, SerpEngine, SerpResult } from "@/lib/research/serp"
+import type { Analysis, KeywordRow, MapsAnalysis, SiteRow } from "@/lib/research/serp-analysis"
 import { cn } from "@/lib/utils"
+
+type Shown<T> = { shownId: string; comparedAt: string; analysis: T | null }
+export type Tab = "sites" | "keywords" | "maps" | "brand" | "scans"
+export type Act = (fn: () => Promise<SerpState>) => void
 
 type Props = {
   admin: boolean
   engines: SerpEngine[]
   engineLabels: Record<SerpEngine, string>
+  kindLabels: Record<ScanKind, string>
   balance: number | null
   balanceError: string
   running: string | null
   scans: Scan[]
-  shownId: string
-  comparedAt: string
-  analysis: Analysis | null
+  web: Shown<Analysis>
+  maps: Shown<MapsAnalysis>
+  brand: { shownId: string; results: SerpResult[] }
+  brandQueries: string[]
+  reviews: PlaceReviews[]
+  initialTab: Tab
   topics: { id: string; label: string }[]
   places: string[]
-  keywords: { t: string; v: number | null; named: boolean }[]
+  // named: the keyword names a city ("city") or a region like "bay area" ("region").
+  keywords: { t: string; v: number | null; named: "city" | "region" | "" }[]
 }
 
 const STATEWIDE = "California"
@@ -38,11 +49,12 @@ const PAGE = 100
 const fmt = (n: number) => n.toLocaleString("en-US")
 const pct = (n: number) => `${(n * 100).toFixed(n >= 0.1 ? 0 : 1)}%`
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+const kindOf = (s: Scan): ScanKind => s.kind ?? "web"
 
 export default function Rankings(props: Props) {
-  const { running, scans, analysis, shownId } = props
+  const { running, scans, web, maps, brand } = props
   const router = useRouter()
-  const [tab, setTab] = useState<"sites" | "keywords" | "scans">("sites")
+  const [tab, setTab] = useState<Tab>(props.initialTab)
   const [message, setMessage] = useState<SerpState | null>(null)
   const [busy, start] = useTransition()
   const live = scans.find((s) => s.id === running)
@@ -54,11 +66,16 @@ export default function Rankings(props: Props) {
     return () => clearInterval(timer)
   }, [running, router])
 
-  const act = (fn: () => Promise<SerpState>) =>
+  const act: Act = (fn) =>
     start(async () => {
       setMessage(null)
       setMessage(await fn())
     })
+
+  const shown = tab === "sites" || tab === "keywords" ? web : tab === "maps" ? maps : tab === "brand" ? { ...brand, comparedAt: "" } : null
+  const none = (what: string) => (
+    <p className="rounded-2xl border bg-card p-6 text-sm text-muted-foreground">No {what} yet: run one from New scan above.</p>
+  )
 
   return (
     <div className="flex flex-col gap-5">
@@ -75,7 +92,8 @@ export default function Rankings(props: Props) {
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <p className="flex items-center gap-2">
               <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden />
-              Scanning: <b className="tabular-nums">{fmt(live.done + live.failed)}</b> of <b className="tabular-nums">{fmt(live.planned)}</b> searches
+              {props.kindLabels[kindOf(live)]} scan: <b className="tabular-nums">{fmt(live.done + live.failed)}</b> of{" "}
+              <b className="tabular-nums">{fmt(live.planned)}</b> searches
               {live.failed > 0 && <span className="text-amber-700">({fmt(live.failed)} failed, tried again on Continue)</span>}
             </p>
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(stopScanAction)}>
@@ -97,11 +115,13 @@ export default function Rankings(props: Props) {
       {scans.length > 0 && (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex gap-1 rounded-lg bg-muted p-1 text-sm font-medium" role="tablist">
+            <div className="flex flex-wrap gap-1 rounded-lg bg-muted p-1 text-sm font-medium" role="tablist">
               {(
                 [
                   ["sites", "Competitors"],
                   ["keywords", "Keywords"],
+                  ["maps", "Google Maps"],
+                  ["brand", "Brand check"],
                   ["scans", `Scans (${scans.length})`],
                 ] as const
               ).map(([id, label]) => (
@@ -117,17 +137,36 @@ export default function Rankings(props: Props) {
                 </button>
               ))}
             </div>
-            <ShownScan scans={scans} shownId={shownId} comparedAt={props.comparedAt} engineLabels={props.engineLabels} />
+            {shown && <ShownScan scans={scans} shownId={shown.shownId} comparedAt={shown.comparedAt} engineLabels={props.engineLabels} />}
           </div>
 
           {tab === "scans" ? (
             <ScanList {...props} busy={busy} act={act} />
-          ) : !analysis || !analysis.keywords.length ? (
-            <p className="rounded-2xl border bg-card p-6 text-sm text-muted-foreground">No results in this scan yet.</p>
+          ) : tab === "maps" ? (
+            maps.analysis?.rows.length ? (
+              <MapsView
+                analysis={maps.analysis}
+                compared={Boolean(maps.comparedAt)}
+                reviews={props.reviews}
+                admin={props.admin}
+                busy={busy}
+                act={act}
+              />
+            ) : (
+              none("Google Maps scan")
+            )
+          ) : tab === "brand" ? (
+            brand.results.length ? (
+              <BrandView results={brand.results} />
+            ) : (
+              none("brand check")
+            )
+          ) : !web.analysis?.keywords.length ? (
+            none("Google results scan")
           ) : tab === "sites" ? (
-            <Sites analysis={analysis} compared={Boolean(props.comparedAt)} />
+            <Sites analysis={web.analysis} compared={Boolean(web.comparedAt)} />
           ) : (
-            <Keywords analysis={analysis} compared={Boolean(props.comparedAt)} />
+            <Keywords analysis={web.analysis} compared={Boolean(web.comparedAt)} />
           )}
         </div>
       )}
@@ -135,13 +174,23 @@ export default function Rankings(props: Props) {
   )
 }
 
-function ShownScan({ scans, shownId, comparedAt, engineLabels }: Pick<Props, "scans" | "shownId" | "comparedAt" | "engineLabels">) {
+function ShownScan({
+  scans,
+  shownId,
+  comparedAt,
+  engineLabels,
+}: {
+  scans: Scan[]
+  shownId: string
+  comparedAt: string
+  engineLabels: Props["engineLabels"]
+}) {
   const s = scans.find((x) => x.id === shownId)
   if (!s) return null
   return (
     <p className="text-xs text-muted-foreground">
       Showing the scan from <b className="text-foreground">{when(s.at)}</b> ({engineLabels[s.engine]}, {fmt(s.done)} searches)
-      {comparedAt ? ` · changes compared with ${when(comparedAt)}` : " · run another scan later to see changes"}
+      {kindOf(s) !== "brand" && (comparedAt ? ` · changes compared with ${when(comparedAt)}` : " · run another scan later to see changes")}
     </p>
   )
 }
@@ -152,23 +201,30 @@ function ScanPanel({
   admin,
   engines,
   engineLabels,
+  kindLabels,
   balance,
   balanceError,
   running,
   topics,
   places,
   keywords,
+  brandQueries,
   busy,
   act,
   open,
-}: Props & { busy: boolean; act: (fn: () => Promise<SerpState>) => void; open: boolean }) {
+}: Props & { busy: boolean; act: Act; open: boolean }) {
+  const [kind, setKind] = useState<ScanKind>("web")
   const [engine, setEngine] = useState<SerpEngine>(engines[0] ?? "serper")
   const [picked, setPicked] = useState<Set<string>>(() => new Set(topics.map((t) => t.id).filter((id) => !SKIP_BY_DEFAULT.has(id))))
   const [minVolume, setMinVolume] = useState(0)
   const [max, setMax] = useState("")
   const [where, setWhere] = useState<string[]>([STATEWIDE])
   const [city, setCity] = useState("")
+  const [stars, setStars] = useState(false)
   const hasVolumes = keywords.some((k) => k.v !== null)
+  // Google Maps and the brand check only run on Serper.
+  const service: SerpEngine = kind === "web" ? engine : "serper"
+  const serperReady = engines.includes("serper")
 
   const counts = useMemo(() => {
     const m = new Map<string, number>()
@@ -182,10 +238,19 @@ function ScanPanel({
     const cap = Number(max)
     return cap > 0 ? list.slice(0, cap) : list
   }, [keywords, picked, minVolume, max])
-  const places_ = engine === "brave" ? 1 : Math.max(1, where.length)
-  // A keyword that names a city is searched there only, once.
-  const searches = engine === "brave" ? chosen.length : chosen.reduce((n, k) => n + (k.named ? 1 : places_), 0)
-  const tooMany = engine === "serper" && balance !== null && searches > balance
+  const cities = where.filter((p) => p !== STATEWIDE)
+  // A keyword that names a city is searched there only, once. Maps needs a city for the rest.
+  const searches =
+    kind === "brand"
+      ? brandQueries.length + 1
+      : service === "brave"
+        ? chosen.length
+        : kind === "maps"
+          ? chosen.reduce((n, k) => n + (k.named === "city" ? 1 : cities.length), 0)
+          : chosen.reduce((n, k) => n + (k.named ? 1 : Math.max(1, where.length)), 0)
+  const credits = kind === "brand" ? brandQueries.length + 3 : kind === "maps" && stars ? searches * 3 : searches
+  const tooMany = service === "serper" && balance !== null && credits > balance
+  const ready = kind === "brand" ? serperReady : keywords.length > 0 && (kind === "web" || serperReady)
 
   const addCity = () => {
     const match = places.find((p) => p.toLowerCase() === city.trim().toLowerCase())
@@ -198,14 +263,16 @@ function ScanPanel({
       <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 p-4">
         <span className="font-semibold">New scan</span>
         <span className="text-xs text-muted-foreground">
-          {engines.includes("serper") ? (
+          {serperReady ? (
             balanceError ? (
               <span className="text-amber-700">{balanceError}</span>
             ) : (
               <>
-                Serper searches left: <b className="text-foreground tabular-nums">{balance === null ? "–" : fmt(balance)}</b>
+                Serper credits left: <b className="text-foreground tabular-nums">{balance === null ? "–" : fmt(balance)}</b>
               </>
             )
+          ) : engines.length ? (
+            "Brave Search set up"
           ) : (
             "No search service set up yet"
           )}
@@ -217,166 +284,229 @@ function ScanPanel({
             <p className="font-medium">Add a search service key to .env.local, then restart the app:</p>
             <ul className="list-disc pl-5 text-xs">
               <li>
-                <code>SERPER_API_KEY=…</code> from serper.dev (2,500 free searches, once; real Google results, set to a city)
+                <code>SERPER_API_KEY=…</code> from serper.dev (2,500 free searches, once; real Google results and Google Maps, set to a city)
               </li>
               <li>
                 <code>BRAVE_SEARCH_API_KEY=…</code> from brave.com/search/api (free every month; regular results only, US-wide)
               </li>
             </ul>
           </div>
-        ) : !keywords.length ? (
-          <p className="text-muted-foreground">
-            Add keywords in the{" "}
-            <Link href="/competitors/keywords" className="text-primary underline">
-              Keyword explorer
-            </Link>{" "}
-            first.
-          </p>
         ) : (
           <>
-            {engines.length > 1 && (
-              <fieldset className="flex flex-wrap items-center gap-3">
-                <legend className="mb-1 text-xs font-medium text-muted-foreground">Search with</legend>
-                {engines.map((e) => (
-                  <label key={e} className="flex items-center gap-1.5">
-                    <input type="radio" name="engine" checked={engine === e} onChange={() => setEngine(e)} />
-                    {engineLabels[e]}
-                  </label>
-                ))}
-              </fieldset>
-            )}
-
-            <fieldset className="flex flex-col gap-2">
-              <legend className="mb-1 text-xs font-medium text-muted-foreground">Keywords: which topics</legend>
-              <div className="flex flex-wrap gap-1.5">
-                {topics.map((t) => (
-                  <label
-                    key={t.id}
-                    className={cn(
-                      "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-                      picked.has(t.id) ? "border-primary bg-primary/10" : "text-muted-foreground",
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={picked.has(t.id)}
-                      onChange={(e) =>
-                        setPicked((s) => {
-                          const n = new Set(s)
-                          if (e.target.checked) n.add(t.id)
-                          else n.delete(t.id)
-                          return n
-                        })
-                      }
-                    />
-                    {t.label} <span className="tabular-nums opacity-70">{fmt(counts.get(t.id) ?? 0)}</span>
-                  </label>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center gap-3 text-xs">
-                {hasVolumes && (
-                  <label className="flex items-center gap-1.5">
-                    At least
-                    <select
-                      value={minVolume}
-                      onChange={(e) => setMinVolume(Number(e.target.value))}
-                      className="h-8 rounded-md border border-input bg-background px-2"
-                    >
-                      <option value={0}>any</option>
-                      <option value={10}>10</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
-                      <option value={500}>500</option>
-                    </select>
-                    searches a month
-                  </label>
-                )}
-                <label className="flex items-center gap-1.5">
-                  At most
-                  <input
-                    type="number"
-                    min={1}
-                    value={max}
-                    onChange={(e) => setMax(e.target.value)}
-                    placeholder="all"
-                    className="h-8 w-20 rounded-md border border-input bg-background px-2"
-                  />
-                  keywords{hasVolumes ? " (most searched first)" : ""}
-                </label>
-              </div>
-            </fieldset>
-
-            {engine === "serper" ? (
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-muted-foreground">Search from</legend>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {where.map((p) => (
-                    <span key={p} className="flex items-center gap-1 rounded-full border border-primary bg-primary/10 px-2.5 py-1 text-xs">
-                      {p === STATEWIDE ? "California (whole state)" : p}
-                      <button type="button" aria-label={`Remove ${p}`} onClick={() => setWhere(where.filter((x) => x !== p))}>
-                        <X className="size-3" />
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    list="serp-places"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCity())}
-                    placeholder="Add a city…"
-                    aria-label="Add a city"
-                    className="h-8 w-44 rounded-md border border-input bg-background px-2 text-xs"
-                  />
-                  <datalist id="serp-places">
-                    {places
-                      .filter((p) => !where.includes(p))
-                      .map((p) => (
-                        <option key={p} value={p} />
-                      ))}
-                  </datalist>
-                  <Button type="button" size="sm" variant="outline" onClick={addCity} disabled={!city.trim()}>
-                    Add
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Each keyword is searched once from each place. Keywords that name a city (“sell my house fast sacramento”) are searched from that
-                  city only.
-                </p>
-              </fieldset>
-            ) : (
-              <p className="text-xs text-muted-foreground">Brave searches the whole US, so each keyword is searched once.</p>
-            )}
-
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/50 p-3">
-              <p>
-                This scan uses <b className="tabular-nums">{fmt(searches)}</b> searches ({fmt(chosen.length)} keywords)
-                {engine === "serper" && balance !== null && (
-                  <>
-                    {" "}
-                    of the <b className="tabular-nums">{fmt(balance)}</b> left
-                  </>
-                )}
-                .
-                {tooMany && (
-                  <span className="block text-xs text-amber-700">
-                    That’s more than Serper has left: pick fewer topics or places, or set “At most”.
-                  </span>
-                )}
-              </p>
-              <Button
-                type="button"
-                disabled={busy || !admin || Boolean(running) || !searches || tooMany || (engine === "serper" && !where.length)}
-                onClick={() =>
-                  act(() =>
-                    startScanAction({ engine, topics: [...picked], minVolume, max: Number(max) || 0, locations: engine === "serper" ? where : [] }),
-                  )
-                }
+            <div className="flex flex-col gap-1.5">
+              <div
+                className="flex flex-wrap gap-1 self-start rounded-lg bg-muted p-1 text-xs font-medium"
+                role="radiogroup"
+                aria-label="What to scan"
               >
-                {busy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Play data-icon="inline-start" />}
-                Start scan
-              </Button>
+                {(["web", "maps", "brand"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    role="radio"
+                    aria-checked={kind === k}
+                    onClick={() => setKind(k)}
+                    className={cn("rounded-md px-3 py-1.5", kind === k ? "bg-background shadow-xs" : "text-muted-foreground")}
+                  >
+                    {kindLabels[k]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {kind === "web"
+                  ? "The top 10 Google results for each keyword: who ranks, with which page."
+                  : kind === "maps"
+                    ? "The businesses Google Maps lists for each keyword in each city: the map box above the results, where sellers call from."
+                    : "What a seller sees when they look us up, and our own Google Maps listing with its stars."}
+              </p>
             </div>
+
+            {kind !== "web" && !serperReady ? (
+              <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">This needs SERPER_API_KEY in .env.local.</p>
+            ) : kind === "brand" ? (
+              <div className="flex flex-col gap-1 text-xs">
+                <p className="font-medium text-muted-foreground">Searches (whole state):</p>
+                <p>{brandQueries.map((q) => `“${q}”`).join(", ")}, and “twin home buyer” on Google Maps (with stars, 3 credits).</p>
+              </div>
+            ) : !keywords.length ? (
+              <p className="text-muted-foreground">
+                Add keywords in the{" "}
+                <Link href="/competitors/keywords" className="text-primary underline">
+                  Keyword explorer
+                </Link>{" "}
+                first.
+              </p>
+            ) : (
+              <>
+                {kind === "web" && engines.length > 1 && (
+                  <fieldset className="flex flex-wrap items-center gap-3">
+                    <legend className="mb-1 text-xs font-medium text-muted-foreground">Search with</legend>
+                    {engines.map((e) => (
+                      <label key={e} className="flex items-center gap-1.5">
+                        <input type="radio" name="engine" checked={engine === e} onChange={() => setEngine(e)} />
+                        {engineLabels[e]}
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
+
+                <fieldset className="flex flex-col gap-2">
+                  <legend className="mb-1 text-xs font-medium text-muted-foreground">Keywords: which topics</legend>
+                  <div className="flex flex-wrap gap-1.5">
+                    {topics.map((t) => (
+                      <label
+                        key={t.id}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+                          picked.has(t.id) ? "border-primary bg-primary/10" : "text-muted-foreground",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={picked.has(t.id)}
+                          onChange={(e) =>
+                            setPicked((s) => {
+                              const n = new Set(s)
+                              if (e.target.checked) n.add(t.id)
+                              else n.delete(t.id)
+                              return n
+                            })
+                          }
+                        />
+                        {t.label} <span className="tabular-nums opacity-70">{fmt(counts.get(t.id) ?? 0)}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-xs">
+                    {hasVolumes && (
+                      <label className="flex items-center gap-1.5">
+                        At least
+                        <select
+                          value={minVolume}
+                          onChange={(e) => setMinVolume(Number(e.target.value))}
+                          className="h-8 rounded-md border border-input bg-background px-2"
+                        >
+                          <option value={0}>any</option>
+                          <option value={10}>10</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                          <option value={500}>500</option>
+                        </select>
+                        searches a month
+                      </label>
+                    )}
+                    <label className="flex items-center gap-1.5">
+                      At most
+                      <input
+                        type="number"
+                        min={1}
+                        value={max}
+                        onChange={(e) => setMax(e.target.value)}
+                        placeholder="all"
+                        className="h-8 w-20 rounded-md border border-input bg-background px-2"
+                      />
+                      keywords{hasVolumes ? " (most searched first)" : ""}
+                    </label>
+                  </div>
+                </fieldset>
+
+                {service === "serper" ? (
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="mb-1 text-xs font-medium text-muted-foreground">Search from</legend>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {where
+                        .filter((p) => kind === "web" || p !== STATEWIDE)
+                        .map((p) => (
+                          <span key={p} className="flex items-center gap-1 rounded-full border border-primary bg-primary/10 px-2.5 py-1 text-xs">
+                            {p === STATEWIDE ? "California (whole state)" : p}
+                            <button type="button" aria-label={`Remove ${p}`} onClick={() => setWhere(where.filter((x) => x !== p))}>
+                              <X className="size-3" />
+                            </button>
+                          </span>
+                        ))}
+                      <input
+                        list="serp-places"
+                        value={city}
+                        onChange={(e) => setCity(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCity())}
+                        placeholder="Add a city…"
+                        aria-label="Add a city"
+                        className="h-8 w-44 rounded-md border border-input bg-background px-2 text-xs"
+                      />
+                      <datalist id="serp-places">
+                        {places
+                          .filter((p) => !where.includes(p) && (kind === "web" || p !== STATEWIDE))
+                          .map((p) => (
+                            <option key={p} value={p} />
+                          ))}
+                      </datalist>
+                      <Button type="button" size="sm" variant="outline" onClick={addCity} disabled={!city.trim()}>
+                        Add
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {kind === "maps"
+                        ? "Google Maps needs a city: each keyword is searched once from each city you add. Keywords that name a city (“we buy houses fresno”) are searched from that city only."
+                        : "Each keyword is searched once from each place. Keywords that name a city (“sell my house fast sacramento”) are searched from that city only."}
+                    </p>
+                    {kind === "maps" && (
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <input type="checkbox" checked={stars} onChange={(e) => setStars(e.target.checked)} />
+                        Include stars, number of reviews and category (3 credits per search instead of 1)
+                      </label>
+                    )}
+                  </fieldset>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Brave searches the whole US, so each keyword is searched once.</p>
+                )}
+              </>
+            )}
+
+            {ready && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/50 p-3">
+                <p>
+                  This scan uses <b className="tabular-nums">{fmt(searches)}</b> searches
+                  {kind !== "brand" && <> ({fmt(chosen.length)} keywords)</>}
+                  {service === "serper" && (
+                    <>
+                      {" "}
+                      = <b className="tabular-nums">{fmt(credits)}</b> credits
+                      {balance !== null && <> of the {fmt(balance)} left</>}
+                    </>
+                  )}
+                  .
+                  {tooMany && (
+                    <span className="block text-xs text-amber-700">
+                      That’s more than Serper has left: pick fewer topics or places, or set “At most”.
+                    </span>
+                  )}
+                  {kind === "maps" && !cities.length && (
+                    <span className="block text-xs text-amber-700">Add at least one city (only keywords that name a city are counted now).</span>
+                  )}
+                </p>
+                <Button
+                  type="button"
+                  disabled={busy || !admin || Boolean(running) || !searches || tooMany || (service === "serper" && kind === "web" && !where.length)}
+                  onClick={() =>
+                    act(() =>
+                      startScanAction({
+                        kind,
+                        engine: service,
+                        topics: [...picked],
+                        minVolume,
+                        max: Number(max) || 0,
+                        locations: service === "serper" ? where : [],
+                        stars: kind === "maps" && stars,
+                      }),
+                    )
+                  }
+                >
+                  {busy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Play data-icon="inline-start" />}
+                  Start scan
+                </Button>
+              </div>
+            )}
             {!admin && <p className="text-xs text-muted-foreground">Only admins can start a scan, because it uses search credits.</p>}
             {running && <p className="text-xs text-muted-foreground">A scan is running. Start another when it’s done.</p>}
           </>
@@ -713,15 +843,9 @@ function downloadCsv(rows: KeywordRow[]) {
 
 // ---- Past scans -------------------------------------------------------------------------------
 
-function ScanList({
-  scans,
-  shownId,
-  admin,
-  running,
-  engineLabels,
-  busy,
-  act,
-}: Props & { busy: boolean; act: (fn: () => Promise<SerpState>) => void }) {
+function ScanList({ scans, web, maps, brand, admin, running, engineLabels, kindLabels, busy, act }: Props & { busy: boolean; act: Act }) {
+  const shownIds = new Set([web.shownId, maps.shownId, brand.shownId])
+  const tabFor: Record<ScanKind, Tab> = { web: "sites", maps: "maps", brand: "brand" }
   return (
     <section className="overflow-x-auto rounded-2xl border bg-card shadow-xs">
       <table className="w-full min-w-[760px] text-sm">
@@ -739,10 +863,12 @@ function ScanList({
           {scans.map((s) => {
             const left = s.planned - s.done
             return (
-              <tr key={s.id} className={cn("border-t align-top", s.id === shownId && "bg-primary/5")}>
+              <tr key={s.id} className={cn("border-t align-top", shownIds.has(s.id) && "bg-primary/5")}>
                 <td className="px-3 py-2 whitespace-nowrap">
                   {when(s.at)}
-                  <div className="text-xs text-muted-foreground">{engineLabels[s.engine]}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {kindLabels[kindOf(s)]} · {engineLabels[s.engine]}
+                  </div>
                 </td>
                 <td className="px-3 py-2 text-xs">{s.what}</td>
                 <td className="max-w-48 px-3 py-2 text-xs">
@@ -758,8 +884,11 @@ function ScanList({
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex justify-end gap-1.5">
-                    {s.id !== shownId && s.done > 0 && (
-                      <Link href={`/competitors/rankings?scan=${s.id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>
+                    {!shownIds.has(s.id) && s.done > 0 && (
+                      <Link
+                        href={`/competitors/rankings?scan=${s.id}&tab=${tabFor[kindOf(s)]}`}
+                        className={buttonVariants({ size: "sm", variant: "outline" })}
+                      >
                         View
                       </Link>
                     )}

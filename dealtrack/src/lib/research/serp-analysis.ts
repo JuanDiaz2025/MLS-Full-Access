@@ -1,7 +1,7 @@
 // Turns a scan's results into what Competitors → Google rankings shows: each site's share of the
 // searches, how often it's in the top 3 and the ads, an estimate of its visits, and for each
 // keyword who ranks where (and us). No I/O, so it can be checked on its own.
-import type { SerpResult } from "@/lib/research/serp"
+import type { MapHit, SerpResult } from "@/lib/research/serp"
 
 // Of 100 people who search, about how many click each organic position (industry averages,
 // rounded). Used for share of voice and estimated visits, so both are estimates.
@@ -146,4 +146,105 @@ export function analyze(results: SerpResult[], volumes: Map<string, number>, bef
   }))
 
   return { sites: siteRows, keywords, pages, byVolume: now.byVolume, ourShare: ourSites.reduce((s, d) => s + share(now, d), 0) }
+}
+
+// ---- Google Maps ------------------------------------------------------------------------------
+// Google shows 3 businesses in the map box above the results ("the local pack"); being in the top
+// 3 is what brings calls.
+
+export type Business = {
+  key: string
+  name: string
+  site: string
+  cid: string
+  ours: boolean
+  results: number // searches it showed up in
+  top3: number
+  best: number
+  avg: number
+  rating: number | null
+  reviews: number | null
+  type: string
+  phone: string
+  cities: string[]
+  change: number | null // top-3 count now minus in the scan compared against
+}
+
+export type MapsRow = { k: string; loc: string; ours: number | null; oursBefore: number | null | undefined; top: string[]; err?: string }
+
+export type MapsAnalysis = { businesses: Business[]; rows: MapsRow[]; stars: boolean }
+
+const businessKey = (h: MapHit) => h.cid || h.n.toLowerCase()
+export const isOurBusiness = (h: Pick<MapHit, "n" | "d">, ourSites: string[]) => ourSites.includes(h.d) || /twin ?home ?buyer/i.test(h.n)
+
+function top3Counts(results: SerpResult[]) {
+  const m = new Map<string, number>()
+  for (const r of results) for (const h of r.maps ?? []) if (h.p <= 3) m.set(businessKey(h), (m.get(businessKey(h)) ?? 0) + 1)
+  return m
+}
+
+export function analyzeMaps(results: SerpResult[], before?: SerpResult[], ourSites: string[] = []): MapsAnalysis {
+  const good = results.filter((r) => !r.err && r.t === "maps")
+  const then = before ? top3Counts(before.filter((r) => !r.err && r.t === "maps")) : null
+  const map = new Map<string, Business & { posSum: number; places: Set<string> }>()
+  for (const r of good) {
+    const seen = new Set<string>()
+    for (const h of r.maps ?? []) {
+      const key = businessKey(h)
+      if (seen.has(key)) continue
+      seen.add(key)
+      let b = map.get(key)
+      if (!b) {
+        b = {
+          key,
+          name: h.n,
+          site: h.d,
+          cid: h.cid,
+          ours: isOurBusiness(h, ourSites),
+          results: 0,
+          top3: 0,
+          best: 99,
+          avg: 0,
+          rating: null,
+          reviews: null,
+          type: h.type ?? "",
+          phone: h.phone ?? "",
+          cities: [],
+          change: null,
+          posSum: 0,
+          places: new Set(),
+        }
+        map.set(key, b)
+      }
+      b.results++
+      b.posSum += h.p
+      b.best = Math.min(b.best, h.p)
+      if (h.p <= 3) b.top3++
+      if (h.r !== undefined) b.rating = h.r
+      if (h.c !== undefined) b.reviews = Math.max(b.reviews ?? 0, h.c)
+      b.places.add(r.loc)
+    }
+  }
+  const businesses: Business[] = [...map.values()]
+    .map(({ posSum, places, ...b }) => ({
+      ...b,
+      avg: Math.round((posSum / b.results) * 10) / 10,
+      cities: [...places].sort(),
+      change: then ? b.top3 - (then.get(b.key) ?? 0) : null,
+    }))
+    .sort((a, b) => b.top3 - a.top3 || b.results - a.results || a.avg - b.avg)
+
+  const ourPos = (r: SerpResult) => (r.maps ?? []).find((h) => isOurBusiness(h, ourSites))?.p ?? null
+  const old = new Map((before ?? []).filter((r) => !r.err && r.t === "maps").map((r) => [`${r.k}|${r.loc}`, ourPos(r)]))
+  const rows: MapsRow[] = results
+    .filter((r) => r.t === "maps")
+    .map((r) => ({
+      k: r.k,
+      loc: r.loc,
+      ours: ourPos(r),
+      oursBefore: before ? old.get(`${r.k}|${r.loc}`) : undefined,
+      top: (r.maps ?? []).slice(0, 3).map((h) => h.n),
+      ...(r.err ? { err: r.err } : {}),
+    }))
+  return { businesses, rows, stars: good.some((r) => r.s) }
 }

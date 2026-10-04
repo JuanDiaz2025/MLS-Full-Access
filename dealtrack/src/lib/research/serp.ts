@@ -1,11 +1,18 @@
-// Competitors → Google rankings: who shows up on Google for our keywords, city by city. A scan
-// searches each keyword (in each chosen place) once and keeps the top 10 results (and any ads
-// above them): just the site, address, title and position, never the snippets.
+// Competitors → Google rankings: who shows up on Google for our keywords, city by city. Three
+// kinds of scan:
+//   Google results  each keyword (in each chosen place) once: the top 10 results and any ads
+//                   above them, just the site, address, title and position, never the snippets.
+//   Google Maps     the businesses Google Maps lists for each keyword in each city, in order,
+//                   optionally with their stars and number of reviews.
+//   Brand check     what someone sees when they look us up ("twin home buyer reviews"...), and
+//                   our own Google Maps listing.
+// Plus the newest Google reviews of businesses picked from a Maps scan (serp-reviews.json).
 //
 // Searches come from Serper (SERPER_API_KEY: real Google results set to a city, plus ads when
-// Google shows it some, which is rare; 2,500 free once, then paid packs) or Brave (BRAVE_SEARCH_API_KEY: free every month, regular
-// results only, US-wide). One search = one keyword in one place = one credit, so a scan never
-// starts with more searches than the account has left.
+// Google shows it some, which is rare; 2,500 free once, then paid packs) or, for Google results
+// only, Brave (BRAVE_SEARCH_API_KEY: free every month, regular results only, US-wide). Serper
+// charges 1 credit per search, 3 for a Maps search with stars, 1 per 10 reviews; a scan never
+// starts with more credits than the account has left.
 //
 // Each scan is saved in .data/serp/<id>.json with its plan, so a scan stopped by hand, by running
 // out of credits or by the app closing can continue where it left off. The list of scans is in
@@ -23,17 +30,29 @@ import { DATA_DIR } from "@/lib/store"
 export type SerpEngine = "serper" | "brave"
 export const ENGINE_LABELS: Record<SerpEngine, string> = { serper: "Serper (Google)", brave: "Brave Search" }
 
+export type ScanKind = "web" | "maps" | "brand"
+export const KIND_LABELS: Record<ScanKind, string> = { web: "Google results", maps: "Google Maps", brand: "Brand check" }
+
 export type Hit = { d: string; u: string; t: string; p: number } // site, address, title, position
-export type SerpResult = { k: string; loc: string; at: string; org: Hit[]; ads: Hit[]; err?: string }
-export type Planned = { k: string; loc: string }
+// A business on Google Maps: name, position, website's site, Google's id, stars and reviews (when
+// asked for), category, phone and address.
+export type MapHit = { n: string; p: number; d: string; cid: string; r?: number; c?: number; type?: string; phone?: string; addr?: string }
+// t: "maps" for a Google Maps search; s: with stars (Serper's dearer Maps search).
+export type Planned = { k: string; loc: string; t?: "maps"; s?: boolean }
+export type SerpResult = Planned & { at: string; org: Hit[]; ads: Hit[]; maps?: MapHit[]; err?: string }
+
+const keyOf = (p: Planned) => `${p.t ?? ""}|${p.k}|${p.loc}`
+export const creditsFor = (p: Planned) => (p.t === "maps" && p.s ? 3 : 1)
 
 export type Scan = {
   id: string
   at: string
+  kind?: ScanKind // older scans are Google results
   engine: SerpEngine
   what: string // which keywords, e.g. "Sell my house, Cash & offers"
   locations: string[]
   planned: number
+  credits?: number // what the whole plan costs on Serper
   done: number
   failed: number
   status: "running" | "done" | "stopped"
@@ -71,6 +90,21 @@ const REGIONS = new Set(
 )
 const isRegion = (place: string) => REGIONS.has(place.toLowerCase())
 
+// What the brand check searches: how people look us up, and our Google Maps listing.
+export const BRAND_QUERIES = [
+  "twin home buyer",
+  "twin home buyers",
+  "twinhomebuyer",
+  "twin home buyer reviews",
+  "twin home buyer complaints",
+  "twin home buyer scam",
+]
+export const BRAND_MAPS_QUERY = "twin home buyer"
+export const brandPlan = (): Planned[] => [
+  ...BRAND_QUERIES.map((k) => ({ k, loc: STATEWIDE })),
+  { k: BRAND_MAPS_QUERY, loc: STATEWIDE, t: "maps" as const, s: true },
+]
+
 // The places a scan can search from: the whole state, or one of our cities.
 export const PLACE_CHOICES = [STATEWIDE, ...CALIFORNIA_PLACES.filter((p) => !isRegion(p))]
 
@@ -98,19 +132,23 @@ export function siteOf(url: string) {
 }
 
 // Which place a keyword is searched from: the city it names, if any; otherwise each chosen place.
-export function planSearches(keywords: string[], locations: string[]): Planned[] {
+// Google Maps needs a city, so a Maps scan searches keywords that name a region (or none) from each
+// chosen city, and never from the whole state.
+export function planSearches(keywords: string[], locations: string[], maps?: { stars: boolean }): Planned[] {
   const plan: Planned[] = []
   const seen = new Set<string>()
   const add = (k: string, loc: string) => {
-    const key = `${k}|${loc}`
-    if (seen.has(key)) return
-    seen.add(key)
-    plan.push({ k, loc })
+    const p: Planned = maps ? { k, loc, t: "maps", ...(maps.stars ? { s: true } : {}) } : { k, loc }
+    if (seen.has(keyOf(p))) return
+    seen.add(keyOf(p))
+    plan.push(p)
   }
-  const places = locations.length ? locations : [STATEWIDE]
+  const cities = locations.filter((l) => l !== STATEWIDE)
+  const places = maps ? cities : locations.length ? locations : [STATEWIDE]
   for (const k of keywords) {
     const named = placeOf(k)
-    if (named) add(k, isRegion(named) ? STATEWIDE : named)
+    if (named && !isRegion(named)) add(k, named)
+    else if (named && !maps) add(k, STATEWIDE)
     else for (const loc of places) add(k, loc)
   }
   return plan
@@ -140,33 +178,71 @@ class SearchError extends Error {
   }
 }
 
+const serperLocation = (loc: string) => `${loc === STATEWIDE ? "" : `${loc}, `}California, United States`
+
 const hit = (u: string, t: string, p: number): Hit => ({ d: siteOf(u), u: u.slice(0, 300), t: (t ?? "").slice(0, 140), p })
 
-async function serperSearch(k: string, loc: string): Promise<Pick<SerpResult, "org" | "ads">> {
-  const res = await fetch("https://google.serper.dev/search", {
+// One request to Serper; turns its errors into ones the scan knows what to do with.
+async function serper<T>(endpoint: string, payload: Record<string, unknown>): Promise<T> {
+  const res = await fetch(`https://google.serper.dev/${endpoint}`, {
     method: "POST",
     headers: { "X-API-KEY": serperKey(), "content-type": "application/json" },
-    body: JSON.stringify({ q: k, location: `${loc === STATEWIDE ? "" : `${loc}, `}California, United States`, gl: "us", hl: "en", num: 10 }),
+    body: JSON.stringify({ gl: "us", hl: "en", ...payload }),
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
   })
-  const body = (await res.json().catch(() => null)) as {
-    message?: string
-    organic?: { link?: string; title?: string; position?: number }[]
-    ads?: { link?: string; title?: string; position?: number }[]
-  } | null
+  const body = (await res.json().catch(() => null)) as (T & { message?: string }) | null
   if (res.status === 429) throw new SearchError("Too many searches at once", false, true)
   if (res.status === 401 || res.status === 403) throw new SearchError("Serper didn't accept the key in SERPER_API_KEY. Check it in .env.local.", true)
-  if (!res.ok) {
+  if (!res.ok || !body) {
     const msg = body?.message ?? `Serper answered ${res.status}`
     throw new SearchError(
       /credit|balance/i.test(msg) ? "Out of Serper searches. Buy more at serper.dev, then continue the scan." : msg,
       /credit|balance/i.test(msg),
     )
   }
+  return body
+}
+
+async function serperSearch(k: string, loc: string): Promise<Pick<SerpResult, "org" | "ads">> {
+  const body = await serper<{
+    organic?: { link?: string; title?: string; position?: number }[]
+    ads?: { link?: string; title?: string; position?: number }[]
+  }>("search", { q: k, location: serperLocation(loc), num: 10 })
   const org = (body?.organic ?? []).filter((r) => r.link).map((r, i) => hit(r.link!, r.title ?? "", r.position ?? i + 1))
   const ads = (body?.ads ?? []).filter((r) => r.link).map((r, i) => hit(r.link!, r.title ?? "", r.position ?? i + 1))
   return { org: org.slice(0, 10), ads: ads.slice(0, 8) }
+}
+
+// Google Maps: "places" lists the businesses in order (1 credit); "maps" adds their stars, number
+// of reviews and category (3 credits).
+async function mapsSearch(k: string, loc: string, stars: boolean): Promise<MapHit[]> {
+  type Place = {
+    position?: number
+    title?: string
+    website?: string
+    cid?: string
+    rating?: number
+    ratingCount?: number
+    type?: string
+    phoneNumber?: string
+    address?: string
+  }
+  const body = await serper<{ places?: Place[] }>(stars ? "maps" : "places", { q: k, location: serperLocation(loc) })
+  return (body.places ?? [])
+    .filter((pl) => pl.title)
+    .slice(0, 20)
+    .map((pl, i) => ({
+      n: pl.title!.slice(0, 120),
+      p: pl.position ?? i + 1,
+      d: pl.website ? siteOf(pl.website) : "",
+      cid: String(pl.cid ?? ""),
+      ...(typeof pl.rating === "number" ? { r: pl.rating } : {}),
+      ...(typeof pl.ratingCount === "number" ? { c: pl.ratingCount } : {}),
+      ...(pl.type ? { type: pl.type.slice(0, 60) } : {}),
+      ...(pl.phoneNumber ? { phone: pl.phoneNumber.slice(0, 30) } : {}),
+      ...(pl.address ? { addr: pl.address.slice(0, 160) } : {}),
+    }))
 }
 
 async function braveSearch(k: string): Promise<Pick<SerpResult, "org" | "ads">> {
@@ -231,22 +307,33 @@ const updateScan = (id: string, change: (s: Scan) => void) =>
   })
 
 export async function startScan(opts: {
+  kind: ScanKind
   engine: SerpEngine
   keywords: string[]
   locations: string[]
+  stars?: boolean
   what: string
 }): Promise<{ ok: boolean; message: string }> {
   if (job.id) return { ok: false, message: "A scan is already running. Wait for it or stop it first." }
-  if (!enginesReady().includes(opts.engine)) return { ok: false, message: `Add the ${ENGINE_LABELS[opts.engine]} key to .env.local first.` }
-  const locations = opts.engine === "brave" ? ["United States"] : opts.locations.length ? opts.locations : [STATEWIDE]
-  const plan = opts.engine === "brave" ? opts.keywords.map((k) => ({ k, loc: "United States" })) : planSearches(opts.keywords, locations)
-  if (!plan.length) return { ok: false, message: "No keywords picked." }
-  if (opts.engine === "serper") {
+  const engine: SerpEngine = opts.kind === "web" ? opts.engine : "serper"
+  if (!enginesReady().includes(engine)) return { ok: false, message: `Add the ${ENGINE_LABELS[engine]} key to .env.local first.` }
+  let locations = engine === "brave" ? ["United States"] : opts.locations.length ? opts.locations : [STATEWIDE]
+  if (opts.kind === "maps") locations = locations.filter((l) => l !== STATEWIDE)
+  if (opts.kind === "brand") locations = [STATEWIDE]
+  const plan =
+    opts.kind === "brand"
+      ? brandPlan()
+      : engine === "brave"
+        ? opts.keywords.map((k) => ({ k, loc: "United States" }))
+        : planSearches(opts.keywords, locations, opts.kind === "maps" ? { stars: Boolean(opts.stars) } : undefined)
+  if (!plan.length) return { ok: false, message: opts.kind === "maps" ? "Add at least one city: Google Maps needs one." : "No keywords picked." }
+  const credits = plan.reduce((n, p) => n + creditsFor(p), 0)
+  if (engine === "serper") {
     const { value } = await serperBalance(true)
-    if (value !== null && plan.length > value) {
+    if (value !== null && credits > value) {
       return {
         ok: false,
-        message: `This scan needs ${plan.length.toLocaleString("en-US")} searches and Serper has ${value.toLocaleString("en-US")} left. Pick fewer keywords or places.`,
+        message: `This scan needs ${credits.toLocaleString("en-US")} Serper credits and ${value.toLocaleString("en-US")} are left. Pick fewer keywords or places.`,
       }
     }
   }
@@ -261,16 +348,18 @@ export async function startScan(opts: {
     x.scans.unshift({
       id,
       at,
-      engine: opts.engine,
+      kind: opts.kind,
+      engine,
       what: opts.what.slice(0, 200),
       locations,
       planned: plan.length,
+      credits: engine === "serper" ? credits : undefined,
       done: 0,
       failed: 0,
       status: "running",
     })
   })
-  void run(id, opts.engine)
+  void run(id, engine)
   return { ok: true, message: `Scan started: ${plan.length.toLocaleString("en-US")} searches.` }
 }
 
@@ -281,8 +370,8 @@ export async function continueScan(id: string): Promise<{ ok: boolean; message: 
   if (!scan) return { ok: false, message: "That scan is gone." }
   if (!enginesReady().includes(scan.engine)) return { ok: false, message: `Add the ${ENGINE_LABELS[scan.engine]} key to .env.local first.` }
   const f = await scanFile(id).read()
-  const done = new Set(f.results.filter((r) => !r.err).map((r) => `${r.k}|${r.loc}`))
-  const left = f.plan.filter((p) => !done.has(`${p.k}|${p.loc}`)).length
+  const done = new Set(f.results.filter((r) => !r.err).map((r) => keyOf(r)))
+  const left = f.plan.filter((p) => !done.has(keyOf(p))).length
   if (!left) return { ok: false, message: "That scan has nothing left to search." }
   if (scan.engine === "serper") {
     const { value } = await serperBalance(true)
@@ -321,18 +410,18 @@ async function run(id: string, engine: SerpEngine) {
   let note: string | undefined
   try {
     const f = await store.read()
-    const ok = new Set(f.results.filter((r) => !r.err).map((r) => `${r.k}|${r.loc}`))
+    const ok = new Set(f.results.filter((r) => !r.err).map((r) => keyOf(r)))
     // Failed searches are tried again; their old failure is dropped once it's redone.
-    const todo = f.plan.filter((p) => !ok.has(`${p.k}|${p.loc}`))
+    const todo = f.plan.filter((p) => !ok.has(keyOf(p)))
     const fresh: SerpResult[] = []
     let next = 0
     let failedInARow = 0
     const save = async () => {
       const batch = fresh.splice(0)
       if (!batch.length) return
-      const redone = new Set(batch.map((r) => `${r.k}|${r.loc}`))
+      const redone = new Set(batch.map((r) => keyOf(r)))
       const all = await store.update((x) => {
-        x.results = [...x.results.filter((r) => !redone.has(`${r.k}|${r.loc}`)), ...batch]
+        x.results = [...x.results.filter((r) => !redone.has(keyOf(r))), ...batch]
         return x.results
       })
       await updateScan(id, (s) => {
@@ -347,7 +436,12 @@ async function run(id: string, engine: SerpEngine) {
         for (let attempt = 0; attempt < 4 && !result; attempt++) {
           const started = Date.now()
           try {
-            const found = engine === "serper" ? await serperSearch(p.k, p.loc) : await braveSearch(p.k)
+            const found =
+              p.t === "maps"
+                ? { org: [], ads: [], maps: await mapsSearch(p.k, p.loc, Boolean(p.s)) }
+                : engine === "serper"
+                  ? await serperSearch(p.k, p.loc)
+                  : await braveSearch(p.k)
             result = { ...p, at: new Date().toISOString(), ...found }
             failedInARow = 0
           } catch (e) {
@@ -388,5 +482,61 @@ async function run(id: string, engine: SerpEngine) {
     job.id = null
     job.stop = false
     balanceCache.at = 0
+  }
+}
+
+// ---- Google reviews of businesses from a Maps scan ---------------------------------------------
+// The newest reviews (stars, date, words; never the reviewer's name), 10 per credit. Saved in
+// .data/serp-reviews.json by the business's Google id, replacing what was there before.
+
+export type Review = { r: number; at: string; text: string }
+export type PlaceReviews = { cid: string; name: string; site: string; at: string; reviews: Review[] }
+
+const reviewsFile = jsonFileStore<{ places: Record<string, PlaceReviews> }>("serp-reviews.json", () => ({ places: {} }))
+
+export async function getReviews() {
+  return Object.values((await reviewsFile.read()).places ?? {}).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export async function fetchReviews(places: { cid: string; name: string; site: string }[], pages: number): Promise<{ ok: boolean; message: string }> {
+  if (!serperKey()) return { ok: false, message: "Add SERPER_API_KEY to .env.local first." }
+  const list = places.filter((p) => /^\d{1,30}$/.test(p.cid)).slice(0, 30)
+  if (!list.length) return { ok: false, message: "Pick businesses from a Google Maps scan first." }
+  const per = Math.max(1, Math.min(5, pages))
+  const { value } = await serperBalance(true)
+  if (value !== null && list.length * per > value)
+    return { ok: false, message: `That needs up to ${list.length * per} credits and ${value} are left.` }
+  type Raw = { reviews?: { rating?: number; isoDate?: string; snippet?: string }[]; nextPageToken?: string }
+  let got = 0
+  const failed: string[] = []
+  for (const place of list) {
+    const reviews: Review[] = []
+    let token = ""
+    try {
+      for (let page = 0; page < per; page++) {
+        const body = await serper<Raw>("reviews", { cid: place.cid, sortBy: "newest", ...(token ? { nextPageToken: token } : {}) })
+        for (const r of body.reviews ?? []) {
+          if (typeof r.rating !== "number") continue
+          reviews.push({ r: r.rating, at: r.isoDate ?? "", text: (r.snippet ?? "").slice(0, 600) })
+        }
+        token = body.nextPageToken ?? ""
+        if (!token) break
+        await pause(300)
+      }
+    } catch (e) {
+      if (e instanceof SearchError && e.fatal) return { ok: false, message: e.message }
+      failed.push(place.name)
+      continue
+    }
+    got++
+    await reviewsFile.update((x) => {
+      x.places ??= {}
+      x.places[place.cid] = { cid: place.cid, name: place.name.slice(0, 120), site: place.site.slice(0, 80), at: new Date().toISOString(), reviews }
+    })
+  }
+  balanceCache.at = 0
+  return {
+    ok: got > 0,
+    message: `Reviews for ${got} business${got === 1 ? "" : "es"}.${failed.length ? ` Couldn't get: ${failed.slice(0, 5).join(", ")}.` : ""}`,
   }
 }

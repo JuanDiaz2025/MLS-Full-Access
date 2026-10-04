@@ -7,15 +7,39 @@ import { refresh } from "next/cache"
 
 import { isAdmin, isSignedIn } from "@/lib/auth"
 import { TOPICS } from "@/lib/research/classify"
-import { PLACE_CHOICES, continueScan, deleteScan, pickKeywords, startScan, stopScan, type SerpEngine } from "@/lib/research/serp"
+import {
+  PLACE_CHOICES,
+  continueScan,
+  deleteScan,
+  fetchReviews,
+  pickKeywords,
+  startScan,
+  stopScan,
+  type ScanKind,
+  type SerpEngine,
+} from "@/lib/research/serp"
 
 export type SerpState = { ok?: boolean; message?: string }
 
-export type ScanRequest = { engine: SerpEngine; topics: string[]; minVolume: number; max: number; locations: string[] }
+export type ScanRequest = {
+  kind: ScanKind
+  engine: SerpEngine
+  topics: string[]
+  minVolume: number
+  max: number
+  locations: string[]
+  stars?: boolean
+}
 
 export async function startScanAction(req: ScanRequest): Promise<SerpState> {
   if (!(await isAdmin())) return { ok: false, message: "Only admins can start a scan (it uses search credits)." }
-  const engine: SerpEngine = req.engine === "brave" ? "brave" : "serper"
+  const kind: ScanKind = req.kind === "maps" || req.kind === "brand" ? req.kind : "web"
+  const engine: SerpEngine = req.engine === "brave" && kind === "web" ? "brave" : "serper"
+  if (kind === "brand") {
+    const res = await startScan({ kind, engine, keywords: [], locations: [], what: "Brand check: how people look us up" })
+    refresh()
+    return res
+  }
   const topics = (Array.isArray(req.topics) ? req.topics : []).map(String).filter((t) => TOPICS.some((x) => x.id === t))
   const keywords = await pickKeywords({ topics, minVolume: Number(req.minVolume) || 0, max: Number(req.max) || 0 })
   const locations = (Array.isArray(req.locations) ? req.locations : [])
@@ -30,7 +54,14 @@ export async function startScanAction(req: ScanRequest): Promise<SerpState> {
       : TOPICS.filter((t) => topics.includes(t.id))
           .map((t) => t.label)
           .join(", ")
-  const res = await startScan({ engine, keywords, locations, what: `${keywords.length.toLocaleString("en-US")} keywords: ${what}` })
+  const res = await startScan({
+    kind,
+    engine,
+    keywords,
+    locations,
+    stars: kind === "maps" && Boolean(req.stars),
+    what: `${keywords.length.toLocaleString("en-US")} keywords: ${what}${kind === "maps" && req.stars ? " (with stars)" : ""}`,
+  })
   refresh()
   return res
 }
@@ -54,4 +85,14 @@ export async function deleteScanAction(id: string): Promise<SerpState> {
   const ok = await deleteScan(String(id))
   refresh()
   return ok ? { ok: true, message: "Scan deleted." } : { ok: false, message: "That scan is running; stop it first." }
+}
+
+export async function fetchReviewsAction(places: { cid: string; name: string; site: string }[], pages: number): Promise<SerpState> {
+  if (!(await isAdmin())) return { ok: false, message: "Only admins can get reviews (it uses search credits)." }
+  const list = (Array.isArray(places) ? places : [])
+    .slice(0, 30)
+    .map((p) => ({ cid: String(p?.cid ?? ""), name: String(p?.name ?? ""), site: String(p?.site ?? "") }))
+  const res = await fetchReviews(list, Number(pages) || 1)
+  refresh()
+  return res
 }
