@@ -50,10 +50,12 @@ export function MapsView({
   const [pages, setPages] = useState(1)
   const [rowsShown, setRowsShown] = useState(100)
   const [missingOnly, setMissingOnly] = useState(false)
+  const [hideOutOfState, setHideOutOfState] = useState(true)
   const { businesses, rows, stars } = analysis
-  const list = businesses.filter(
-    (b) => !search || b.name.toLowerCase().includes(search.toLowerCase().trim()) || b.site.includes(search.toLowerCase().trim()),
-  )
+  const away = businesses.filter((b) => b.outOfState).length
+  const list = businesses
+    .filter((b) => !hideOutOfState || !b.outOfState)
+    .filter((b) => !search || b.name.toLowerCase().includes(search.toLowerCase().trim()) || b.site.includes(search.toLowerCase().trim()))
   const ours = businesses.find((b) => b.ours)
   const searched = rows.filter((r) => !r.err).length
   const fetched = new Set(reviews.map((r) => r.cid))
@@ -83,6 +85,12 @@ export function MapsView({
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={search} onChange={setSearch} placeholder="Find a business…" />
+          {away > 0 && (
+            <label className="flex items-center gap-1.5 text-xs">
+              <input type="checkbox" checked={hideOutOfState} onChange={(e) => setHideOutOfState(e.target.checked)} />
+              Hide businesses in other states ({fmt(away)})
+            </label>
+          )}
           {picked.size > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <select

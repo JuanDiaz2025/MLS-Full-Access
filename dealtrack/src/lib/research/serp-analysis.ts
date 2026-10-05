@@ -1,6 +1,7 @@
 // Turns a scan's results into what Competitors → Google rankings shows: each site's share of the
 // searches, how often it's in the top 3 and the ads, an estimate of its visits, and for each
 // keyword who ranks where (and us). No I/O, so it can be checked on its own.
+import { pointsOutOfState, siteOutOfState } from "@/lib/research/out-of-state"
 import type { MapHit, SerpResult } from "@/lib/research/serp"
 
 // Of 100 people who search, about how many click each organic position (industry averages,
@@ -17,6 +18,7 @@ export type SiteRow = {
   site: string
   directory: boolean
   ours: boolean
+  outOfState: boolean // its pages point outside California (see out-of-state.ts)
   results: number // searches it was in the top 10 for
   top3: number
   best: number
@@ -83,6 +85,7 @@ export function analyze(results: SerpResult[], volumes: Map<string, number>, bef
 
   const sites = new Map<string, { results: number; top3: number; best: number; posSum: number; ads: number; visits: number }>()
   const pages: Record<string, SitePage[]> = {}
+  const titles = new Map<string, { d: string; t: string }[]>()
   const get = (d: string) => {
     let s = sites.get(d)
     if (!s) sites.set(d, (s = { results: 0, top3: 0, best: 99, posSum: 0, ads: 0, visits: 0 }))
@@ -92,6 +95,7 @@ export function analyze(results: SerpResult[], volumes: Map<string, number>, bef
     const seen = new Set<string>()
     for (const h of r.org) {
       if (!h.d) continue
+      titles.set(h.d, [...(titles.get(h.d) ?? []), { d: h.d, t: h.t }])
       if (!seen.has(h.d)) {
         seen.add(h.d)
         const s = get(h.d)
@@ -113,6 +117,7 @@ export function analyze(results: SerpResult[], volumes: Map<string, number>, bef
     site,
     directory: isDirectory(site),
     ours: ourSites.includes(site),
+    outOfState: !ourSites.includes(site) && siteOutOfState(titles.get(site) ?? []),
     results: s.results,
     top3: s.top3,
     best: s.results ? s.best : 0,
@@ -158,6 +163,7 @@ export type Business = {
   site: string
   cid: string
   ours: boolean
+  outOfState: boolean // its address, name or website points outside California
   results: number // searches it showed up in
   top3: number
   best: number
@@ -201,6 +207,7 @@ export function analyzeMaps(results: SerpResult[], before?: SerpResult[], ourSit
           site: h.d,
           cid: h.cid,
           ours: isOurBusiness(h, ourSites),
+          outOfState: !isOurBusiness(h, ourSites) && pointsOutOfState(h.d, `${h.n} · ${h.addr ?? ""}`),
           results: 0,
           top3: 0,
           best: 99,

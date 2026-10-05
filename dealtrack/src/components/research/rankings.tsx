@@ -532,10 +532,15 @@ function Sites({ analysis, compared }: { analysis: Analysis; compared: boolean }
   // The search services rarely see ads, so the ad numbers only show when a scan found some.
   const hasAds = analysis.sites.some((s) => s.ads > 0)
   const [hideDirectories, setHideDirectories] = useState(true)
+  const [hideOutOfState, setHideOutOfState] = useState(true)
   const [search, setSearch] = useState("")
   const [open, setOpen] = useState("")
   const [shown, setShown] = useState(50)
-  const rows = analysis.sites.filter((s) => (!hideDirectories || !s.directory || s.ours) && (!search || s.site.includes(search.toLowerCase().trim())))
+  const rows = analysis.sites.filter(
+    (s) =>
+      (!hideDirectories || !s.directory || s.ours) && (!hideOutOfState || !s.outOfState) && (!search || s.site.includes(search.toLowerCase().trim())),
+  )
+  const outOfState = analysis.sites.filter((s) => s.outOfState).length
   const ours = analysis.sites.find((s) => s.ours)
   const searched = analysis.keywords.filter((k) => !k.err).length
 
@@ -549,8 +554,8 @@ function Sites({ analysis, compared }: { analysis: Analysis; compared: boolean }
         />
         <Tile
           label="Sites that rank"
-          value={fmt(analysis.sites.filter((s) => !s.directory).length)}
-          note={`plus ${fmt(analysis.sites.filter((s) => s.directory).length)} listing sites and directories`}
+          value={fmt(analysis.sites.filter((s) => !s.directory && !s.outOfState).length)}
+          note={`plus ${fmt(analysis.sites.filter((s) => s.directory && !s.outOfState).length)} listing sites and directories, and ${fmt(outOfState)} from other states`}
         />
         {hasAds && (
           <Tile
@@ -565,6 +570,10 @@ function Sites({ analysis, compared }: { analysis: Analysis; compared: boolean }
         <label className="flex items-center gap-1.5 text-xs">
           <input type="checkbox" checked={hideDirectories} onChange={(e) => setHideDirectories(e.target.checked)} />
           Hide listing sites and directories (Zillow, Yelp, Reddit…)
+        </label>
+        <label className="flex items-center gap-1.5 text-xs">
+          <input type="checkbox" checked={hideOutOfState} onChange={(e) => setHideOutOfState(e.target.checked)} />
+          Hide sites from other states ({fmt(outOfState)})
         </label>
       </div>
       <div className="overflow-x-auto rounded-xl border">
@@ -708,6 +717,14 @@ function Keywords({ analysis, compared }: { analysis: Analysis; compared: boolea
   const [show, setShow] = useState<"all" | "ranked" | "missing" | "ads">("all")
   const [loc, setLoc] = useState("")
   const [shown, setShown] = useState(PAGE)
+  const [hideOutOfState, setHideOutOfState] = useState(true)
+  const away = useMemo(() => new Set(analysis.sites.filter((s) => s.outOfState).map((s) => s.site)), [analysis.sites])
+  // The top 3 shown: Google's own, or the first 3 California sites with their real positions.
+  const top3 = (k: KeywordRow) =>
+    k.top
+      .map((site, i) => ({ site, p: i + 1 }))
+      .filter((t) => !hideOutOfState || !away.has(t.site))
+      .slice(0, 3)
   const places = useMemo(() => [...new Set(analysis.keywords.map((k) => k.loc))].sort(), [analysis.keywords])
   const rows = useMemo(() => {
     const terms = search.toLowerCase().split(/\s+/).filter(Boolean)
@@ -754,6 +771,10 @@ function Keywords({ analysis, compared }: { analysis: Analysis; compared: boolea
         <Button type="button" variant="outline" size="sm" onClick={() => downloadCsv(rows)}>
           <Download data-icon="inline-start" /> CSV
         </Button>
+        <label className="flex items-center gap-1.5 text-xs">
+          <input type="checkbox" checked={hideOutOfState} onChange={(e) => setHideOutOfState(e.target.checked)} />
+          Skip sites from other states
+        </label>
         <span className="text-xs text-muted-foreground">{fmt(rows.length)} searches</span>
       </div>
       <div className="overflow-x-auto rounded-xl border">
@@ -764,9 +785,17 @@ function Keywords({ analysis, compared }: { analysis: Analysis; compared: boolea
               <th className="px-3 py-2 font-medium">From</th>
               <th className="px-3 py-2 text-right font-medium">Volume</th>
               <th className="px-3 py-2 text-right font-medium">Us</th>
-              <th className="px-3 py-2 font-medium">#1</th>
-              <th className="px-3 py-2 font-medium">#2</th>
-              <th className="px-3 py-2 font-medium">#3</th>
+              {hideOutOfState ? (
+                <th colSpan={3} className="px-3 py-2 font-medium">
+                  Top California sites (position)
+                </th>
+              ) : (
+                <>
+                  <th className="px-3 py-2 font-medium">#1</th>
+                  <th className="px-3 py-2 font-medium">#2</th>
+                  <th className="px-3 py-2 font-medium">#3</th>
+                </>
+              )}
               {hasAds && <th className="px-3 py-2 font-medium">Ads</th>}
             </tr>
           </thead>
@@ -797,14 +826,24 @@ function Keywords({ analysis, compared }: { analysis: Analysis; compared: boolea
                     </span>
                   )}
                 </td>
-                {[0, 1, 2].map((i) => (
-                  <td
-                    key={i}
-                    className={cn("max-w-44 truncate px-3 py-1.5 text-xs", k.top[i] === "twinhomebuyer.com" && "font-semibold text-primary")}
-                  >
-                    {k.top[i] ?? <span className="text-muted-foreground">–</span>}
-                  </td>
-                ))}
+                {[0, 1, 2].map((i) => {
+                  const t = top3(k)[i]
+                  return (
+                    <td
+                      key={i}
+                      className={cn("max-w-44 truncate px-3 py-1.5 text-xs", t?.site === "twinhomebuyer.com" && "font-semibold text-primary")}
+                    >
+                      {t ? (
+                        <>
+                          {hideOutOfState && <span className="text-muted-foreground tabular-nums">{t.p}. </span>}
+                          {t.site}
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">–</span>
+                      )}
+                    </td>
+                  )
+                })}
                 {hasAds && (
                   <td className="max-w-56 px-3 py-1.5 text-xs">
                     {k.ads.length ? k.ads.join(", ") : <span className="text-muted-foreground">–</span>}
