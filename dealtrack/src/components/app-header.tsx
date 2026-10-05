@@ -70,6 +70,7 @@ export const navGroups = [
   {
     label: "Reports",
     links: [
+      { href: "/weekly-review", label: "Weekly review" },
       { href: "/report", label: "Weekly report" },
       { href: "/changes", label: "Changes" },
       { href: "/deals", label: "Deal History" },
