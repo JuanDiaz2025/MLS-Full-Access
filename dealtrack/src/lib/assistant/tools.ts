@@ -10,9 +10,11 @@ import { getCampaignAds, getCampaignAssets, getCampaignInfo, getCampaignKeywords
 import { GoogleAdsError, gaql } from "@/lib/google-ads/client"
 import { getOverview } from "@/lib/google-ads/overview"
 import { getAllCampaigns, getLocationData, getSearchTerms, isWaste } from "@/lib/google-ads/reports"
+import { activeAccount } from "@/lib/conversions/google"
 import { leadSource } from "@/lib/leads/source"
 import { listLeads, listQrCodes } from "@/lib/leads/store"
 import { leadChannel } from "@/lib/leads/tracking"
+import { readCombined } from "@/lib/sheets/sync"
 import { readData } from "@/lib/store"
 
 // Written once and handed to whichever AI provider is set up (see claude.ts and openai.ts).
@@ -23,6 +25,23 @@ export type ToolSpec = {
 }
 
 export const toolSpecs: ToolSpec[] = [
+  {
+    name: "deal_history",
+    description:
+      "The company's closed and pending deals from its Google Sheet (the Deal History tab: every deal from the 2024, 2025 and 2026 tabs in one list), " +
+      "with each deal's lead name, dates (lead received, contract signed, acquired), address, Google Ads campaign, keyword, ad group, lead source (PPC = Google Ads, " +
+      "Direct Mail, Realtor...), marketing fee (the deal's profit to the company) and status, plus summary tables by year and by Google Ads campaign " +
+      "(deals, marketing fees, Google Ads spend, ad spend per deal, return on ad spend). Use it for questions about deals, profit, which campaigns or keywords " +
+      "brought deals, and return on ad spend. Pass a year to see only that year's deals, or 0 for all.",
+    parameters: {
+      type: "object",
+      properties: {
+        year: { type: "integer", description: "A year like 2025 for only that year's deals, or 0 for all years." },
+      },
+      required: ["year"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "dealtrack_page",
     description:
@@ -321,6 +340,21 @@ export async function runTool(name: string, input: unknown): Promise<{ content: 
       return { content: JSON.stringify(await campaignDetail(campaign, d)).slice(0, MAX_CHARS) }
     }
     if (name === "dealtrack_status") return { content: JSON.stringify(await dealtrackStatus()).slice(0, MAX_CHARS) }
+    if (name === "deal_history") {
+      const active = await activeAccount()
+      if (!active) return { content: "Google isn't connected, so the spreadsheet can't be read.", isError: true }
+      const view = await readCombined(active.connection)
+      if (!view) return { content: "No spreadsheet is linked yet: link it on Reports → Deal History.", isError: true }
+      const year = Math.round(Number((input as { year?: unknown }).year) || 0)
+      const deals = view.deals
+        .filter((d) => !year || d[0] === String(year))
+        .map((d) => Object.fromEntries(view.header.map((h, i) => [h, d[i] ?? ""]).filter(([, v]) => v !== "")))
+      const summaries = view.tables.map((t) => ({
+        table: t.header[0],
+        rows: t.rows.map((r) => Object.fromEntries(t.header.map((h, i) => [i === 0 ? t.header[0] : h, r[i] ?? ""]).filter(([h, v]) => h && v !== ""))),
+      }))
+      return { content: `${JSON.stringify({ summaries, notes: view.notes })}\n${asResult(deals)}` }
+    }
     return { content: `Unknown tool ${name}.`, isError: true }
   } catch (error) {
     // Google's error text (e.g. a GAQL typo) helps the model fix its own query.
