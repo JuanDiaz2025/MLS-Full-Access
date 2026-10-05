@@ -89,6 +89,10 @@ export type ConversionUpload = {
   fixRetry?: boolean
   // Retried once after DealTrack learned to use its existing conversion action when Google said the name was taken.
   nameRetry?: boolean
+  // Kept only for its resend id: queued, then marked Not interested (or put back as New) before it was sent.
+  parked?: boolean
+  // Sent again matched by email/phone only, after Google refused its click ID.
+  noClick?: boolean
   // The Google Ads account it last failed in, and how often it was tried again after the account changed.
   accountId?: string
   accountResets?: number
@@ -124,6 +128,8 @@ export type Lead = {
   tracking?: LeadTracking
   // Set for leads picked up from the WordPress Lead Saver plugin ("wp:<site>:<id>"), so none is added twice.
   inboxId?: string
+  // Set for a lead made from a Google Ads phone call ("call:<start time>:<area code>"), so it's added once.
+  callId?: string
   status?: LeadStatus
   statusChangedAt?: string
   // "auto" when the app set the status from the lead's score; anything you set yourself wins.

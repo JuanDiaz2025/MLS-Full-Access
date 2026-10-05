@@ -35,3 +35,27 @@ export async function getCalls(sinceDays = 30): Promise<Call[]> {
     from: r.callView?.callTrackingDisplayLocation === "LANDING_PAGE" ? "Website" : "Ad",
   }))
 }
+
+// Whether Google Ads counts calls as conversions on its own ("Calls from ads", calls to the number
+// on your website), and from how many seconds. Asked at most once an hour.
+export type CallCounting = { name: string; seconds?: number; website: boolean; primary: boolean }[]
+let counting: { at: number; result: CallCounting | null } | null = null
+export async function callCounting(): Promise<CallCounting | null> {
+  if (counting && Date.now() - counting.at < 60 * 60_000) return counting.result
+  let result: CallCounting | null = null
+  try {
+    const rows = await gaql<{ conversionAction?: { name?: string; type?: string; phoneCallDurationSeconds?: string | number; primaryForGoal?: boolean } }>(
+      "SELECT conversion_action.name, conversion_action.type, conversion_action.phone_call_duration_seconds, conversion_action.primary_for_goal FROM conversion_action WHERE conversion_action.status = 'ENABLED' AND conversion_action.type IN ('AD_CALL', 'WEBSITE_CALL')",
+    )
+    result = rows.map((r) => ({
+      name: String(r.conversionAction?.name ?? ""),
+      seconds: r.conversionAction?.phoneCallDurationSeconds ? Number(r.conversionAction.phoneCallDurationSeconds) : undefined,
+      website: r.conversionAction?.type === "WEBSITE_CALL",
+      primary: r.conversionAction?.primaryForGoal !== false,
+    }))
+  } catch {
+    result = null // unknown this time
+  }
+  counting = { at: Date.now(), result }
+  return result
+}

@@ -11,7 +11,7 @@ import WebhookSetup from "@/components/leads/webhook-setup"
 import { KpiGrid, PageHeader, Section } from "@/components/report"
 import { buttonVariants } from "@/components/ui/button"
 import { DATA_MANAGER_LIBRARY } from "@/lib/conversions/data-manager"
-import { getCalls } from "@/lib/google-ads/calls"
+import { callCounting, getCalls } from "@/lib/google-ads/calls"
 import { leadSource } from "@/lib/leads/source"
 import { catchUp, leadsVersion } from "@/lib/leads/background"
 import { listLeads, listQrCodes } from "@/lib/leads/store"
@@ -74,14 +74,15 @@ function googleState(lead: Lead): LeadRow["google"] {
 function mainGoogleState(lead: Lead): LeadRow["google"] {
   const { invalid: _invalid, ...rest } = lead.conversions ?? {}
   void _invalid
-  const all = Object.values(rest)
+  // (A parked entry only keeps a resend id; there's nothing to show for it.)
+  const all = Object.values(rest).filter((c) => !c?.parked)
   // Taken back (or being taken back) because the lead turned out Not interested.
   const backs = all.map((c) => c?.retraction).filter(Boolean)
   if (backs.length) {
     const failed = backs.find((r) => r!.state === "failed")
     if (failed) return { state: "retract_failed", detail: failed.error }
-    if (backs.some((r) => r!.state === "pending")) return { state: "retracting", detail: "Not interested: telling Google to stop counting it." }
-    return { state: "retracted", detail: "Not interested: Google no longer counts it as a good lead." }
+    if (backs.some((r) => r!.state === "pending")) return { state: "retracting", detail: lead.status === "new" ? "Put back as New: telling Google to stop counting it." : "Not interested: telling Google to stop counting it." }
+    return { state: "retracted", detail: lead.status === "new" ? "Put back as New: Google no longer counts it as a good lead." : "Not interested: Google no longer counts it as a good lead." }
   }
   if (!all.length) return lead.googleBlockedBy ? { state: "held", detail: `Not sent: rule “${lead.googleBlockedBy}”` } : undefined
   const order = ["failed", "pending", "skipped", "sent"] as const
@@ -127,9 +128,9 @@ export default async function LeadsPage() {
   after(() => catchUp())
   // The version first: a change saved while the leads are read then still shows on the next check.
   const version = await leadsVersion()
-  const [qrCodes, leads, calls] = await Promise.all([listQrCodes(), listLeads(), load(() => getCalls(30))])
+  const [qrCodes, leads, calls, counting] = await Promise.all([listQrCodes(), listLeads(), load(() => getCalls(30)), callCounting().catch(() => null)])
   const placements = new Map(qrCodes.map((c) => [c.id, c.placement]))
-  const callResult = calls.ok ? { calls: calls.data } : { error: calls.kind === "missing" ? "Google Ads isn't connected." : calls.message }
+  const callResult = calls.ok ? { calls: calls.data, counting } : { error: calls.kind === "missing" ? "Google Ads isn't connected." : calls.message }
   const missed = calls.ok ? calls.data.filter((c) => c.missed).length : 0
   // Conversions held back by a set-up step Google needs, so the page can say what to do.
   const waiting = leads.flatMap((l) => Object.values(l.conversions ?? {})).filter((c) => c?.state === "pending" && c.waitingFor)
@@ -218,7 +219,7 @@ export default async function LeadsPage() {
         )}
       </Section>
 
-      <PhoneCalls result={callResult} />
+      <PhoneCalls result={callResult} addedCalls={leads.map((l) => l.callId).filter((id): id is string => Boolean(id))} />
 
       <WebhookSetup websiteLeads={leads.filter((l) => !l.qrCodeId).length} />
       <LiveRefresh version={version} />

@@ -60,6 +60,9 @@ export async function addLead(input: Omit<Lead, "id" | "createdAt">, createdAt?:
     const same = db.leads.find(
       (l) =>
         !l.qrCodeId &&
+        // A lead made from a phone call is its own lead: never merged with a form lead.
+        !l.callId &&
+        !input.callId &&
         Boolean(l.inboxId) !== Boolean(input.inboxId) &&
         Math.abs(Date.parse(l.createdAt) - Date.parse(at)) < SAME_LEAD_MS &&
         ((email && l.email?.toLowerCase() === email) || (phone && digits(l.phone) === phone)),

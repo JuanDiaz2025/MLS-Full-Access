@@ -27,7 +27,7 @@ export function applyStatus(lead: Lead, status: LeadStatus, by: "auto" | "you", 
       // Not sent yet: never send it. Its resend id is kept if it has one (an earlier send under the
       // usual id was taken back, so that id can't be used again).
       if (entry.state !== "sent") {
-        if (entry.transactionId) lead.conversions[kind] = { state: "skipped", at: entry.at, transactionId: entry.transactionId, error: "Marked Not interested before it was sent." }
+        if (entry.transactionId) lead.conversions[kind] = { state: "skipped", parked: true, at: entry.at, transactionId: entry.transactionId }
         else delete lead.conversions[kind]
       }
       // Google refused it anyway: nothing to take back.
@@ -35,6 +35,22 @@ export function applyStatus(lead: Lead, status: LeadStatus, by: "auto" | "you", 
     }
     reportInvalid(lead, now)
     return
+  }
+  // Put back as New (marked Interested or further by mistake): Google shouldn't keep counting it as a
+  // good lead. Take back what was sent (unless Google refused it anyway) and drop what wasn't.
+  if (status === "new") {
+    for (const kind of ["interested", "closed"] as const) {
+      const entry = lead.conversions[kind]
+      // A Google Ads rule's decision doesn't depend on the status: leave it.
+      if (!entry || entry.rule) continue
+      if (entry.state === "sent" && entry.google?.status !== "rejected") {
+        if (!entry.retraction) entry.retraction = { state: "pending", at: now }
+      } else if (entry.state !== "sent" && entry.transactionId) {
+        lead.conversions[kind] = { state: "skipped", parked: true, at: entry.at, transactionId: entry.transactionId }
+      } else if (!entry.retraction) {
+        delete lead.conversions[kind]
+      }
+    }
   }
   // Not "not interested" any more (good after all, or put back as New): an invalid report already
   // sent is taken back, one not sent yet is dropped.
