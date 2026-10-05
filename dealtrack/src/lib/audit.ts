@@ -115,7 +115,24 @@ export async function runAudit(budget: BudgetSettings, manual: Record<string, Ma
   const uploadFresh = !!lastUpload && lastUpload >= addDays(end, -30)
   const callActions = conversionActions.filter((a) => ["AD_CALL", "WEBSITE_CALL"].includes(a.conversionAction.type ?? ""))
   const shortCalls = callActions.filter((a) => num(a.conversionAction.phoneCallDurationSeconds) < 60)
+  // Main-goal lead actions that recorded nothing in 90 days: broken tags, an old site's form, or another
+  // business's action left in the account. Bidding still counts them as goals.
+  const recent = new Set(
+    conversionsByAction.filter((r) => (r.segments.date ?? "") >= addDays(end, -90) && num(r.metrics?.allConversionsByConversionDate) > 0).map((r) => r.segments.conversionAction ?? ""),
+  )
+  const silent = conversionActions.filter(
+    (a) => a.conversionAction.primaryForGoal && isLeadConversion(a.conversionAction.name ?? "", a.conversionAction.category ?? "") && !recent.has(a.conversionAction.resourceName),
+  )
   const tracking: Check[] = [
+    {
+      id: "conv-silent",
+      title: "Every main-goal conversion is recording",
+      status: silent.length ? "warn" : "pass",
+      detail: silent.length
+        ? `${silent.map((a) => a.conversionAction.name).join(", ")} ${silent.length === 1 ? "is a main goal but recorded" : "are main goals but recorded"} nothing in 90 days. Check that each one is still yours and still fires; the rest only clutter what bidding aims at.`
+        : "Every main-goal lead conversion recorded something in the last 90 days.",
+      fix: silent.length ? "In Google Ads → Goals → Conversions, test each one, and make the ones that aren't Twin Home Buyer's or no longer fire secondary (or remove them)." : undefined,
+    },
     {
       id: "conv-soft",
       title: "Only real leads count as conversions",

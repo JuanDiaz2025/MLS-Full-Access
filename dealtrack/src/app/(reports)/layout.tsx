@@ -7,6 +7,7 @@ import NavProgress from "@/components/nav-progress"
 import AssistantLauncher from "@/components/assistant/assistant-launcher"
 import { assistantProvider } from "@/lib/assistant/shared"
 import { changesEnabled, isAdmin, isSignedIn, openWithoutPassword } from "@/lib/auth"
+import { readData } from "@/lib/store"
 
 // Every report page sits behind the team password.
 export default async function ReportsLayout({ children }: { children: React.ReactNode }) {
@@ -16,6 +17,11 @@ export default async function ReportsLayout({ children }: { children: React.Reac
   }
   const admin = await isAdmin()
   const open = openWithoutPassword()
+  // The red number on Monitor → Problems: open critical and high alerts from the last check (read
+  // from this computer, no Google Ads request).
+  const problems = await readData()
+    .then((d) => d.alertLog.filter((r) => !r.resolvedAt && (r.severity === "critical" || r.severity === "high")).length)
+    .catch(() => 0)
 
   return (
     <div className="flex flex-1 flex-col">
@@ -23,7 +29,7 @@ export default async function ReportsLayout({ children }: { children: React.Reac
         <NavProgress />
       </Suspense>
       <Suspense fallback={<div className="h-28 border-b" />}>
-        <AppHeader showSignOut={!open || admin} admin={admin} canSignInAsAdmin={changesEnabled()} />
+        <AppHeader showSignOut={!open || admin} admin={admin} canSignInAsAdmin={changesEnabled()} problems={problems} />
       </Suspense>
       {open && (
         <p className="border-b bg-amber-50 px-4 py-2 text-center text-xs text-amber-900">

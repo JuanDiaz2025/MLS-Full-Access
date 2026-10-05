@@ -24,6 +24,7 @@ export const navGroups = [
   {
     label: "Monitor",
     links: [
+      { href: "/problems", label: "Problems" },
       { href: "/alerts", label: "Alerts" },
       { href: "/fraud", label: "Fraud" },
       { href: "/compliance", label: "Compliance" },
@@ -92,10 +93,12 @@ export default function AppHeader({
   showSignOut,
   admin,
   canSignInAsAdmin,
+  problems = 0,
 }: {
   showSignOut: boolean
   admin: boolean
   canSignInAsAdmin: boolean
+  problems?: number // open critical and high alerts, shown as a red number on Monitor and Problems
 }) {
   const pathname = usePathname()
   const query = useRangeQuery()
@@ -104,7 +107,13 @@ export default function AppHeader({
   const isCurrent = (href: string) => pathname === href || (!hasTab && pathname.startsWith(`${href}/`))
   const active = navGroups.find((g) => g.links.some((l) => isCurrent(l.href))) ?? navGroups[0]
 
-  const tab = (href: string, label: string, current: boolean) => (
+  const badge = (n: number) =>
+    n > 0 ? (
+      <span className="rounded-full bg-red-600 px-1.5 text-[10px] leading-4 font-semibold text-white tabular-nums" aria-label={`${n} problems`}>
+        {n}
+      </span>
+    ) : null
+  const tab = (href: string, label: string, current: boolean, count = 0) => (
     <Link
       key={href}
       href={`${href}${query}`}
@@ -115,6 +124,7 @@ export default function AppHeader({
       )}
     >
       {label}
+      {badge(count)}
       <LinkPending />
     </Link>
   )
@@ -153,11 +163,11 @@ export default function AppHeader({
         </div>
       </div>
       <nav aria-label="Sections" className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-1 text-sm sm:px-6">
-        {navGroups.map((g) => tab(g.links[0].href, g.label, g === active))}
+        {navGroups.map((g) => tab(g.links[0].href, g.label, g === active, g.label === "Monitor" ? problems : 0))}
       </nav>
       {active.links.length > 1 && (
         <nav aria-label={active.label} className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 text-xs sm:px-6">
-          {active.links.map((l) => tab(l.href, l.label, isCurrent(l.href)))}
+          {active.links.map((l) => tab(l.href, l.label, isCurrent(l.href), l.href === "/problems" ? problems : 0))}
         </nav>
       )}
     </header>
