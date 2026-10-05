@@ -306,7 +306,7 @@ export default function KeywordExplorer({
             <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
               <p>
                 <b className="tabular-nums">{fmt(visible.length)}</b> keywords
-                <span className="text-muted-foreground"> · Total volume: </span>
+                <span className="text-muted-foreground"> · Searches a month in {volumePlaces.find((p) => p.value === volumesFor)?.label ?? volumesFor}: </span>
                 <b className="tabular-nums">{withVolume ? fmt(totalVolume) : "–"}</b>
                 <span className="text-muted-foreground">
                   {withVolume
@@ -348,7 +348,7 @@ export default function KeywordExplorer({
                     </th>
                     {header("text", "Keyword")}
                     {header("topic", "Topic")}
-                    {header("place", "City")}
+                    {header("place", "City in keyword")}
                     {header("volume", "Volume", true)}
                     <th className="px-3 py-2 font-medium">Trend</th>
                     {header("cpc", "CPC (top of page)", true)}
