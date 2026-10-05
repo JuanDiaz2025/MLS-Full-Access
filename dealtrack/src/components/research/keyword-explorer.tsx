@@ -149,10 +149,28 @@ export default function KeywordExplorer({
       setMessage(await fn())
     })
 
-  async function onFile(f: File | undefined) {
-    if (!f) return
-    const parsed = parseKeywordFile(decodeFile(await f.arrayBuffer()))
-    run(() => importKeywordsAction({ ...parsed, name: f.name }))
+  // Several files at once (e.g. one Keyword Planner export per city): read and saved one after
+  // another, so each lands in the store before the next, with one line per file in the message.
+  function onFiles(list: FileList | null) {
+    const files = [...(list ?? [])]
+    if (!files.length) return
+    run(async () => {
+      const results: ResearchState[] = []
+      for (const f of files) {
+        try {
+          results.push(await importKeywordsAction({ ...parseKeywordFile(decodeFile(await f.arrayBuffer())), name: f.name }))
+        } catch {
+          results.push({ ok: false, message: "Couldn't be read." })
+        }
+      }
+      if (files.length === 1) return results[0]
+      const ok = results.filter((r) => r.ok).length
+      return {
+        ok: ok === files.length,
+        message: `${ok} of ${files.length} files added.`,
+        lines: results.map((r, i) => `${files[i].name}: ${r.message ?? ""}`),
+      }
+    })
   }
 
   const header = (key: SortKey, label: string, right = false) => (
@@ -174,7 +192,7 @@ export default function KeywordExplorer({
       <AddPanel
         empty={!rows.length}
         busy={busy}
-        onFile={onFile}
+        onFiles={onFiles}
         run={run}
         noVolume={noVolume}
         imports={imports}
@@ -434,7 +452,7 @@ function Select({ label, value, onChange, options }: { label: string; value: str
 function AddPanel({
   empty,
   busy,
-  onFile,
+  onFiles,
   run,
   noVolume,
   imports,
@@ -443,7 +461,7 @@ function AddPanel({
 }: {
   empty: boolean
   busy: boolean
-  onFile: (f: File | undefined) => void
+  onFiles: (files: FileList | null) => void
   run: (fn: () => Promise<ResearchState>) => void
   noVolume: string[]
   imports: Props["imports"]
@@ -476,14 +494,16 @@ function AddPanel({
             )}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : <FileUp className="size-4" aria-hidden />}
-            Choose a CSV file
+            Choose CSV files
             <input
               type="file"
+              multiple
               accept=".csv,.tsv,.txt,text/csv,text/plain"
               className="sr-only"
-              onChange={(e) => (onFile(e.target.files?.[0]), (e.target.value = ""))}
+              onChange={(e) => (onFiles(e.target.files), (e.target.value = ""))}
             />
           </label>
+          <p className="text-xs text-muted-foreground">Pick several at once (hold Ctrl or Shift), e.g. one Keyword Planner file per city.</p>
 
           <h3 className="mt-3 font-semibold">2. Get search volumes</h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -513,8 +533,8 @@ function AddPanel({
                 {copied && <span className="text-emerald-700"> Copied.</span>}
               </li>
               <li>Google Ads → Tools → Keyword Planner → “Get search volume and forecasts”. Paste them (up to 10,000).</li>
-              <li>Set the location to California and language English, pick the last 12 months, then open “Historical metrics”.</li>
-              <li>Download → “Historical plan metrics (.csv)”, and upload that file here under 1.</li>
+              <li>Set the location to California and language English, pick the last 12 months, and save the keywords to a plan.</li>
+              <li>On the plan’s “Saved keywords” page, click the download icon (↓) → “.csv”, and upload that file here under 1.</li>
               <li>
                 For one city’s own numbers, do it again with only that city as the location (one city per file: Google adds several together). Each
                 city keeps its own volumes; pick it under “Volumes for”.
@@ -562,6 +582,13 @@ function AddPanel({
             </p>
           )}
           {message?.message && <p className={cn("font-medium", message.ok ? "text-emerald-700" : "text-destructive")}>{message.message}</p>}
+          {message?.lines && (
+            <ul className="flex list-disc flex-col gap-1 pl-5 text-xs text-muted-foreground">
+              {message.lines.map((l, i) => (
+                <li key={i}>{l}</li>
+              ))}
+            </ul>
+          )}
           {imports.length > 0 && (
             <details className="text-xs text-muted-foreground">
               <summary className="cursor-pointer">Recent additions</summary>

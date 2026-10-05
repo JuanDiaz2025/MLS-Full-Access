@@ -9,7 +9,7 @@ import { isSignedIn } from "@/lib/auth"
 import { addKeywords, fetchVolumes, removeKeywords, suggestKeywords, type KeywordSource } from "@/lib/research/keywords"
 import type { ParsedFile } from "@/lib/research/parse"
 
-export type ResearchState = { ok?: boolean; message?: string }
+export type ResearchState = { ok?: boolean; message?: string; lines?: string[] }
 
 const KINDS: Record<ParsedFile["kind"], { source: KeywordSource; what: string }> = {
   "ads-report": { source: "ads-report", what: "Google Ads keyword report (keywords only)" },
