@@ -44,10 +44,44 @@ export function volumeLocations(keywords: ResearchKeyword[]) {
   return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([place, keywords]) => ({ place, keywords }))
 }
 
+// ---- Estimated city volumes -------------------------------------------------------------------
+// One Keyword Planner export with many cities adds their keywords together, but gives each city's
+// total searches over all the keywords. A city's share of California's total then splits each
+// keyword's California volume: an estimate for every city in one download. A file run for that city
+// alone (real numbers) always wins.
+export type PlaceTotal = { total: number; at: string }
+
+// Each city's share of California's searches, for the cities with a total and no real volumes.
+export function estimatedShares(totals: Record<string, PlaceTotal>, keywords: ResearchKeyword[]) {
+  const real = new Set(volumeLocations(keywords).map((p) => p.place))
+  // California's total from its own export; before that was kept, the sum of its keyword volumes.
+  const state = totals[STATEWIDE_VOLUMES]?.total || keywords.reduce((s, k) => s + (k.volume ?? 0), 0)
+  if (!state) return new Map<string, number>()
+  return new Map(
+    Object.entries(totals)
+      .filter(([place, t]) => !isStatewide(place) && !real.has(place) && t.total > 0)
+      .map(([place, t]) => [place, Math.min(1, t.total / state)] as const)
+      .sort((a, b) => b[1] - a[1]),
+  )
+}
+
+export function estimateVolume(k: ResearchKeyword, share: number): LocalVolume | undefined {
+  if (k.volume === undefined) return undefined
+  return {
+    volume: Math.round(k.volume * share),
+    cpcLow: k.cpcLow,
+    cpcHigh: k.cpcHigh,
+    competition: k.competition,
+    trend: k.trend?.map((n) => Math.round(n * share)),
+    at: k.volumeAt ?? "",
+  }
+}
+
 type Store = {
   keywords: Record<string, ResearchKeyword>
   imports: { at: string; what: string; added: number; updated: number }[]
   volumesNote?: string
+  placeTotals?: Record<string, PlaceTotal>
 }
 const file = jsonFileStore<Store>("research-keywords.json", () => ({ keywords: {}, imports: [] }))
 
@@ -59,18 +93,28 @@ export async function getResearch() {
   for (const k of Object.values(s.keywords ?? {})) {
     if (uploads.has(k.addedAt) && k.sources.includes("manual")) k.sources = k.sources.map((x) => (x === "manual" ? "upload" : x))
   }
-  return { keywords: Object.values(s.keywords ?? {}), imports: s.imports ?? [], volumesNote: s.volumesNote }
+  return { keywords: Object.values(s.keywords ?? {}), imports: s.imports ?? [], volumesNote: s.volumesNote, placeTotals: s.placeTotals ?? {} }
 }
 
 const MAX_KEYWORDS = 20_000
 
 // Adds keywords (and, from Keyword Planner, their volumes: California's, or a city's when the export
 // was run for one). Returns how many were new and updated.
-export async function addKeywords(rows: ParsedKeyword[], source: KeywordSource, what: string, location?: string) {
+export async function addKeywords(
+  rows: ParsedKeyword[],
+  source: KeywordSource,
+  what: string,
+  location?: string,
+  placeTotals?: Record<string, number>,
+) {
   const now = new Date().toISOString()
   return file.update((s) => {
     s.keywords ??= {}
     s.imports ??= []
+    if (placeTotals) {
+      s.placeTotals ??= {}
+      for (const [place, total] of Object.entries(placeTotals)) if (total > 0) s.placeTotals[place] = { total, at: now }
+    }
     let added = 0
     let updated = 0
     for (const r of rows.slice(0, MAX_KEYWORDS)) {

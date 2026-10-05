@@ -41,8 +41,10 @@ type Props = {
   imports: { at: string; what: string; added: number; updated: number }[]
   volumesNote: string
   volumeAt: string
-  volumePlaces: string[] // California, then each city with its own Keyword Planner volumes
+  // California first, then each city with its own Keyword Planner volumes, then the estimated ones.
+  volumePlaces: { value: string; label: string }[]
   volumesFor: string
+  estimateNote: string // set when the volumes shown are estimates
 }
 
 type SortKey = "text" | "volume" | "cpc" | "words" | "topic" | "place"
@@ -62,7 +64,17 @@ function Trend({ values }: { values: number[] }) {
   )
 }
 
-export default function KeywordExplorer({ rows, topics, sourceLabels, imports, volumesNote, volumeAt, volumePlaces, volumesFor }: Props) {
+export default function KeywordExplorer({
+  rows,
+  topics,
+  sourceLabels,
+  imports,
+  volumesNote,
+  volumeAt,
+  volumePlaces,
+  volumesFor,
+  estimateNote,
+}: Props) {
   const router = useRouter()
   const [group, setGroup] = useState<"topic" | "place">("topic")
   const [picked, setPicked] = useState("")
@@ -253,9 +265,9 @@ export default function KeywordExplorer({ rows, topics, sourceLabels, imports, v
                   label="Volumes for"
                   value={volumesFor}
                   onChange={(v) =>
-                    router.push(v === volumePlaces[0] ? "/competitors/keywords" : `/competitors/keywords?vol=${encodeURIComponent(v)}`)
+                    router.push(v === volumePlaces[0].value ? "/competitors/keywords" : `/competitors/keywords?vol=${encodeURIComponent(v)}`)
                   }
-                  options={volumePlaces.map((p) => [p, p === volumePlaces[0] ? "California (all)" : p])}
+                  options={volumePlaces.map((p) => [p.value, p.label])}
                 />
               )}
             </div>
@@ -270,6 +282,7 @@ export default function KeywordExplorer({ rows, topics, sourceLabels, imports, v
                     ? ` · volumes for ${fmt(withVolume)} of ${fmt(rows.length)}${volumeAt ? `, updated ${when(volumeAt)}` : ""}`
                     : " · no volumes yet: add them with Keyword Planner (above)"}
                 </span>
+                {estimateNote && <span className="block text-xs text-amber-800">{estimateNote}</span>}
               </p>
               {selected.size > 0 && (
                 <Button

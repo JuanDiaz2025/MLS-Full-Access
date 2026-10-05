@@ -8,7 +8,9 @@
 //   - any list with a "Keyword" column, or one keyword per line.
 
 export type ParsedKeyword = { text: string; volume?: number; cpcLow?: number; cpcHigh?: number; competition?: string; trend?: number[] }
-export type ParsedFile = { kind: "planner" | "ads-report" | "list"; rows: ParsedKeyword[]; location?: string }
+// placeTotals: each location's searches a month over all the file's keywords (Keyword Planner's
+// totals rows), the one per-city number Google gives when several cities are in one export.
+export type ParsedFile = { kind: "planner" | "ads-report" | "list"; rows: ParsedKeyword[]; location?: string; placeTotals?: Record<string, number> }
 
 // "[Sell My House]", "\"we buy houses\"", "+cash +offer" → "sell my house", "we buy houses", "cash offer".
 export function normalizeKeyword(raw: string): string | null {
@@ -79,14 +81,14 @@ export function parseKeywordFile(text: string): ParsedFile {
   const months = header.map((h, i) => (/^searches:/.test(h) ? i : -1)).filter((i) => i >= 0)
   const segmentation = col(/^segmentation$/)
   const planner = volume >= 0
-  const places = new Set<string>()
+  const places = new Map<string, number>()
   const seen = new Map<string, ParsedKeyword>()
   for (const line of lines.slice(headerAt + 1)) {
     const cells = splitLine(line, sep)
     const text = normalizeKeyword(cells[kw] ?? "")
     // Keyword Planner's totals rows: no keyword, and "All" or a location in Segmentation.
     if (!cells[kw]?.trim() && planner && segmentation >= 0 && cells[segmentation] && !/^all$/i.test(cells[segmentation])) {
-      places.add(cells[segmentation].split(",")[0].trim())
+      places.set(cells[segmentation].split(",")[0].trim(), number(cells[volume]) ?? 0)
     }
     if (!text) continue
     const row: ParsedKeyword = seen.get(text) ?? { text }
@@ -107,5 +109,7 @@ export function parseKeywordFile(text: string): ParsedFile {
   }
   const kind = planner ? "planner" : header.some((h) => /match type|campaign|ad group/.test(h)) ? "ads-report" : "list"
   // Several locations in one export are added together by Google, so they count as one place.
-  return { kind, rows: [...seen.values()], ...(places.size ? { location: [...places].join(" + ") } : {}) }
+  const names = [...places.keys()]
+  const location = names.length > 3 ? `${names.length} cities` : names.join(" + ")
+  return { kind, rows: [...seen.values()], ...(names.length ? { location, placeTotals: Object.fromEntries(places) } : {}) }
 }

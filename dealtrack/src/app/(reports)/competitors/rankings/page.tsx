@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/report"
 import Rankings, { type Tab } from "@/components/research/rankings"
 import { isAdmin } from "@/lib/auth"
 import { TOPICS, placeOf, topicOf } from "@/lib/research/classify"
-import { getResearch } from "@/lib/research/keywords"
+import { estimatedShares, getResearch } from "@/lib/research/keywords"
 import { analyze, analyzeMaps, localKey } from "@/lib/research/serp-analysis"
 import {
   BRAND_QUERIES,
@@ -65,6 +65,10 @@ export default async function RankingsPage({ searchParams }: { searchParams: Pro
   const volumes = new Map(research.keywords.filter((k) => k.volume !== undefined).map((k) => [k.text, k.volume!]))
   for (const k of research.keywords)
     for (const [place, v] of Object.entries(k.local ?? {})) if (v.volume !== undefined) volumes.set(localKey(place, k.text), v.volume)
+  // Cities with only Keyword Planner's city total: estimated from California's volume.
+  for (const [place, share] of estimatedShares(research.placeTotals, research.keywords))
+    for (const k of research.keywords)
+      if (k.volume !== undefined && !volumes.has(localKey(place, k.text))) volumes.set(localKey(place, k.text), Math.round(k.volume * share))
 
   return (
     <>

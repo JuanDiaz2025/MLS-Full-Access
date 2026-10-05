@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import { PageHeader } from "@/components/report"
 import KeywordExplorer, { type ExplorerRow } from "@/components/research/keyword-explorer"
 import { TOPICS, placeOf, topicOf } from "@/lib/research/classify"
-import { SOURCE_LABELS, STATEWIDE_VOLUMES, getResearch, volumeLocations } from "@/lib/research/keywords"
+import { SOURCE_LABELS, STATEWIDE_VOLUMES, estimateVolume, estimatedShares, getResearch, volumeLocations } from "@/lib/research/keywords"
 
 export const metadata: Metadata = { title: "Keyword explorer · DealTrack" }
 
@@ -12,11 +12,14 @@ export const metadata: Metadata = { title: "Keyword explorer · DealTrack" }
 // ?vol=San Francisco shows the volumes Keyword Planner gave for that city instead of California's.
 export default async function KeywordExplorerPage({ searchParams }: { searchParams: Promise<{ vol?: string }> }) {
   const { vol } = await searchParams
-  const { keywords, imports, volumesNote } = await getResearch()
+  const { keywords, imports, volumesNote, placeTotals } = await getResearch()
   const places = volumeLocations(keywords)
+  const shares = estimatedShares(placeTotals, keywords)
   const place = places.find((p) => p.place === vol)?.place ?? ""
+  const share = !place && vol ? shares.get(vol) : undefined
+  const estimated = share !== undefined ? vol! : ""
   const rows: ExplorerRow[] = keywords.map((k) => {
-    const v = place ? k.local?.[place] : k
+    const v = place ? k.local?.[place] : share !== undefined ? estimateVolume(k, share) : k
     return {
       text: k.text,
       topic: topicOf(k.text),
@@ -48,8 +51,17 @@ export default async function KeywordExplorerPage({ searchParams }: { searchPara
         imports={imports}
         volumesNote={volumesNote ?? ""}
         volumeAt={volumeAt}
-        volumePlaces={[STATEWIDE_VOLUMES, ...places.map((p) => p.place)]}
-        volumesFor={place || STATEWIDE_VOLUMES}
+        volumePlaces={[
+          { value: STATEWIDE_VOLUMES, label: "California (all)" },
+          ...places.map((p) => ({ value: p.place, label: p.place })),
+          ...[...shares.keys()].map((p) => ({ value: p, label: `${p} (est.)` })),
+        ]}
+        volumesFor={place || estimated || STATEWIDE_VOLUMES}
+        estimateNote={
+          share !== undefined
+            ? `Estimated: each keyword's California volume × ${estimated}'s share of California's searches (${(share * 100).toFixed(1)}%, from Keyword Planner's city totals). Upload a Keyword Planner file run for ${estimated} alone for its real numbers.`
+            : ""
+        }
       />
     </>
   )

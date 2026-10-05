@@ -35,11 +35,21 @@ export async function importKeywordsAction(file: ParsedFile & { name: string }):
   }))
   if (!rows.length) return { ok: false, message: "No keywords found in that file. It needs a “Keyword” column, or one keyword per line." }
   const location = file.kind === "planner" && typeof file.location === "string" ? file.location.slice(0, 120) : undefined
+  const cities = Object.keys(file.kind === "planner" && file.placeTotals && typeof file.placeTotals === "object" ? file.placeTotals : {}).filter(
+    (p) => p.toLowerCase() !== "california",
+  ).length
   const { added, updated } = await addKeywords(
     rows,
     kind.source,
     `${kind.what}${location ? ` (${location})` : ""}: ${String(file.name).slice(0, 80)}`,
     location,
+    file.kind === "planner" && file.placeTotals && typeof file.placeTotals === "object"
+      ? Object.fromEntries(
+          Object.entries(file.placeTotals)
+            .slice(0, 500)
+            .map(([k, v]) => [String(k).slice(0, 80), Number(v) || 0]),
+        )
+      : undefined,
   )
   refresh()
   return {
@@ -48,6 +58,10 @@ export async function importKeywordsAction(file: ParsedFile & { name: string }):
       file.kind === "planner"
         ? `Keyword Planner file${location ? ` for ${location}` : ""}: volumes for ${(added + updated).toLocaleString("en-US")} keywords (${added.toLocaleString("en-US")} new).${
             location && location.toLowerCase() !== "california" ? ` Pick “${location}” under “Volumes for” to see them.` : ""
+          }${
+            cities > 1
+              ? ` Google adds the cities together per keyword, but gives each city's total, so ${cities} cities now have estimated volumes (marked “est.” under “Volumes for”).`
+              : ""
           }`
         : `${rows.length.toLocaleString("en-US")} keywords read, ${added.toLocaleString("en-US")} new.${file.kind === "ads-report" ? " Only the keywords were kept, not the report's numbers." : ""}`,
   }
