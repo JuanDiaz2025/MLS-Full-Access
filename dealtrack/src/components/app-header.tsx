@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation"
 import { signOut } from "@/app/login/actions"
 import ApiMeter from "@/components/api-meter"
 import BrandLogo from "@/components/brand-logo"
+import ThemeToggle from "@/components/theme-toggle"
 import LinkPending from "@/components/link-pending"
 import { cn } from "@/lib/utils"
 
@@ -141,6 +142,7 @@ export default function AppHeader({
               </Link>
             )
           )}
+          <ThemeToggle />
           {showSignOut && (
             <form action={signOut}>
               <button type="submit" className="rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">

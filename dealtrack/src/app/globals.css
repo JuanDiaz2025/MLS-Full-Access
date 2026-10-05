@@ -84,38 +84,70 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.68 0.18 275);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+  /* Warm, deep plum-gray to match the brand, not flat black (from One Marketing Command Center). */
+  --background: oklch(0.17 0.015 285);
+  --foreground: oklch(0.96 0.005 285);
+  --card: oklch(0.215 0.018 285);
+  --card-foreground: oklch(0.96 0.005 285);
+  --popover: oklch(0.235 0.02 285);
+  --popover-foreground: oklch(0.96 0.005 285);
+  --primary: oklch(0.68 0.19 285);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.28 0.03 290);
+  --secondary-foreground: oklch(0.94 0.01 290);
+  --muted: oklch(0.26 0.02 285);
+  --muted-foreground: oklch(0.72 0.02 285);
+  --accent: oklch(0.29 0.04 290);
+  --accent-foreground: oklch(0.94 0.02 290);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.68 0.19 285);
+  --chart-1: oklch(0.7 0.19 285);
+  --chart-2: oklch(0.76 0.16 50);
+  --chart-3: oklch(0.75 0.13 180);
+  --chart-4: oklch(0.72 0.2 350);
+  --chart-5: oklch(0.85 0.15 90);
+  --sidebar: oklch(0.2 0.016 285);
+  --sidebar-foreground: oklch(0.96 0.005 285);
+  --sidebar-primary: oklch(0.68 0.19 285);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.29 0.04 290);
+  --sidebar-accent-foreground: oklch(0.94 0.02 290);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --sidebar-ring: oklch(0.68 0.19 285);
 }
+
+/* Dark mode: the status colors are made for a light page. Text gets light shades of the same
+   colors, and the pale boxes (bg-*-50, -100) become faint tints of them. */
+.dark :is(.text-emerald-700, .text-emerald-800, .text-emerald-900, .text-emerald-950) { color: oklch(0.845 0.143 165); }
+.dark .text-emerald-600 { color: oklch(0.765 0.177 163); }
+.dark :is(.text-amber-700, .text-amber-800, .text-amber-900, .text-amber-950) { color: oklch(0.879 0.169 92); }
+.dark .text-amber-900\/80 { color: oklch(0.879 0.169 92 / 80%); }
+.dark :is(.text-amber-600, .text-amber-500) { color: oklch(0.828 0.189 84); }
+/* ...except on a solid yellow or green badge, where dark text is what reads. */
+.dark :is(.bg-amber-400, .bg-amber-500).text-amber-950 { color: oklch(0.279 0.077 46); }
+.dark :is(.text-sky-800, .text-sky-900) { color: oklch(0.828 0.111 230); }
+.dark :is(.text-red-700, .text-red-800, .text-red-900) { color: oklch(0.808 0.114 20); }
+.dark .text-red-600 { color: oklch(0.704 0.191 22); }
+.dark :is(.text-violet-800, .text-violet-950) { color: oklch(0.811 0.111 294); }
+.dark .text-orange-800 { color: oklch(0.837 0.128 66); }
+.dark .text-neutral-800 { color: oklch(0.87 0 0); }
+.dark :is(.bg-emerald-50, .bg-emerald-100) { background-color: oklch(0.696 0.17 162 / 16%); }
+.dark :is(.bg-emerald-50\/50, .bg-emerald-50\/60) { background-color: oklch(0.696 0.17 162 / 10%); }
+.dark :is(.bg-amber-50, .bg-amber-100) { background-color: oklch(0.769 0.188 70 / 16%); }
+.dark .bg-amber-50\/60 { background-color: oklch(0.769 0.188 70 / 10%); }
+.dark :is(.bg-red-50, .bg-red-100) { background-color: oklch(0.637 0.237 25 / 16%); }
+.dark .bg-red-50\/60 { background-color: oklch(0.637 0.237 25 / 10%); }
+.dark :is(.bg-sky-50, .bg-sky-100) { background-color: oklch(0.685 0.169 237 / 18%); }
+.dark .bg-violet-50 { background-color: oklch(0.606 0.25 292 / 16%); }
+.dark .bg-orange-100 { background-color: oklch(0.705 0.213 47 / 16%); }
+.dark .bg-neutral-50 { background-color: oklch(1 0 0 / 5%); }
+.dark :is(.border-emerald-200, .border-emerald-300, .border-emerald-400) { border-color: oklch(0.696 0.17 162 / 40%); }
+.dark :is(.border-amber-300, .border-amber-400) { border-color: oklch(0.769 0.188 70 / 40%); }
+.dark :is(.border-red-200, .border-red-300) { border-color: oklch(0.637 0.237 25 / 40%); }
+.dark .border-neutral-300 { border-color: oklch(1 0 0 / 15%); }
 
 @layer base {
   * {
