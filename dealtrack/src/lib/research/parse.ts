@@ -3,11 +3,12 @@
 //   - a Google Ads keyword or search terms report (CSV): only the keyword text is kept, never the
 //     report's impressions, clicks, cost or conversions, which cover whatever dates it was run for;
 //   - a Keyword Planner export ("Get search volume and forecasts", CSV in UTF-16 with tabs):
-//     the keyword plus its monthly searches, top-of-page bid range and competition;
+//     the keyword plus its monthly searches, top-of-page bid range and competition, and the
+//     location it was run for (its "Segmentation" rows: "California", "San Francisco"...);
 //   - any list with a "Keyword" column, or one keyword per line.
 
 export type ParsedKeyword = { text: string; volume?: number; cpcLow?: number; cpcHigh?: number; competition?: string; trend?: number[] }
-export type ParsedFile = { kind: "planner" | "ads-report" | "list"; rows: ParsedKeyword[] }
+export type ParsedFile = { kind: "planner" | "ads-report" | "list"; rows: ParsedKeyword[]; location?: string }
 
 // "[Sell My House]", "\"we buy houses\"", "+cash +offer" → "sell my house", "we buy houses", "cash offer".
 export function normalizeKeyword(raw: string): string | null {
@@ -76,11 +77,17 @@ export function parseKeywordFile(text: string): ParsedFile {
   const high = col(/top of page bid \(high/)
   const competition = col(/^competition$/)
   const months = header.map((h, i) => (/^searches:/.test(h) ? i : -1)).filter((i) => i >= 0)
+  const segmentation = col(/^segmentation$/)
   const planner = volume >= 0
+  const places = new Set<string>()
   const seen = new Map<string, ParsedKeyword>()
   for (const line of lines.slice(headerAt + 1)) {
     const cells = splitLine(line, sep)
     const text = normalizeKeyword(cells[kw] ?? "")
+    // Keyword Planner's totals rows: no keyword, and "All" or a location in Segmentation.
+    if (!cells[kw]?.trim() && planner && segmentation >= 0 && cells[segmentation] && !/^all$/i.test(cells[segmentation])) {
+      places.add(cells[segmentation].split(",")[0].trim())
+    }
     if (!text) continue
     const row: ParsedKeyword = seen.get(text) ?? { text }
     if (planner) {
@@ -98,5 +105,7 @@ export function parseKeywordFile(text: string): ParsedFile {
     }
     seen.set(text, row)
   }
-  return { kind: planner ? "planner" : header.some((h) => /match type|campaign|ad group/.test(h)) ? "ads-report" : "list", rows: [...seen.values()] }
+  const kind = planner ? "planner" : header.some((h) => /match type|campaign|ad group/.test(h)) ? "ads-report" : "list"
+  // Several locations in one export are added together by Google, so they count as one place.
+  return { kind, rows: [...seen.values()], ...(places.size ? { location: [...places].join(" + ") } : {}) }
 }

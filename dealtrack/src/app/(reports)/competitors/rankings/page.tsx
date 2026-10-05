@@ -5,7 +5,7 @@ import Rankings, { type Tab } from "@/components/research/rankings"
 import { isAdmin } from "@/lib/auth"
 import { TOPICS, placeOf, topicOf } from "@/lib/research/classify"
 import { getResearch } from "@/lib/research/keywords"
-import { analyze, analyzeMaps } from "@/lib/research/serp-analysis"
+import { analyze, analyzeMaps, localKey } from "@/lib/research/serp-analysis"
 import {
   BRAND_QUERIES,
   ENGINE_LABELS,
@@ -63,6 +63,8 @@ export default async function RankingsPage({ searchParams }: { searchParams: Pro
   }
   const [web, maps, brand] = await Promise.all([load("web"), load("maps"), load("brand")])
   const volumes = new Map(research.keywords.filter((k) => k.volume !== undefined).map((k) => [k.text, k.volume!]))
+  for (const k of research.keywords)
+    for (const [place, v] of Object.entries(k.local ?? {})) if (v.volume !== undefined) volumes.set(localKey(place, k.text), v.volume)
 
   return (
     <>

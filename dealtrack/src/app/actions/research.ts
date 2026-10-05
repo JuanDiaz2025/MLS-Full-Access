@@ -34,13 +34,21 @@ export async function importKeywordsAction(file: ParsedFile & { name: string }):
       : {}),
   }))
   if (!rows.length) return { ok: false, message: "No keywords found in that file. It needs a “Keyword” column, or one keyword per line." }
-  const { added, updated } = await addKeywords(rows, kind.source, `${kind.what}: ${String(file.name).slice(0, 80)}`)
+  const location = file.kind === "planner" && typeof file.location === "string" ? file.location.slice(0, 120) : undefined
+  const { added, updated } = await addKeywords(
+    rows,
+    kind.source,
+    `${kind.what}${location ? ` (${location})` : ""}: ${String(file.name).slice(0, 80)}`,
+    location,
+  )
   refresh()
   return {
     ok: true,
     message:
       file.kind === "planner"
-        ? `Keyword Planner file: volumes for ${(added + updated).toLocaleString("en-US")} keywords (${added.toLocaleString("en-US")} new).`
+        ? `Keyword Planner file${location ? ` for ${location}` : ""}: volumes for ${(added + updated).toLocaleString("en-US")} keywords (${added.toLocaleString("en-US")} new).${
+            location && location.toLowerCase() !== "california" ? ` Pick “${location}” under “Volumes for” to see them.` : ""
+          }`
         : `${rows.length.toLocaleString("en-US")} keywords read, ${added.toLocaleString("en-US")} new.${file.kind === "ads-report" ? " Only the keywords were kept, not the report's numbers." : ""}`,
   }
 }

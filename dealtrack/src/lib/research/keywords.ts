@@ -26,6 +26,22 @@ export type ResearchKeyword = {
   trend?: number[] // monthly searches, oldest first
   volumeFrom?: "api" | "csv"
   volumeAt?: string
+  // Keyword Planner run for one city (or several added together), by that place's name: "San Francisco".
+  // The fields above are for all of California.
+  local?: Record<string, LocalVolume>
+}
+
+export type LocalVolume = { volume?: number; cpcLow?: number; cpcHigh?: number; competition?: string; trend?: number[]; at: string }
+
+export const STATEWIDE_VOLUMES = "California"
+const isStatewide = (location?: string) => !location || location.toLowerCase() === STATEWIDE_VOLUMES.toLowerCase()
+
+// The places with their own volumes, most keywords first.
+export function volumeLocations(keywords: ResearchKeyword[]) {
+  const count = new Map<string, number>()
+  for (const k of keywords)
+    for (const [place, v] of Object.entries(k.local ?? {})) if (v.volume !== undefined) count.set(place, (count.get(place) ?? 0) + 1)
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([place, keywords]) => ({ place, keywords }))
 }
 
 type Store = {
@@ -48,8 +64,9 @@ export async function getResearch() {
 
 const MAX_KEYWORDS = 20_000
 
-// Adds keywords (and, from Keyword Planner, their volumes). Returns how many were new and updated.
-export async function addKeywords(rows: ParsedKeyword[], source: KeywordSource, what: string) {
+// Adds keywords (and, from Keyword Planner, their volumes: California's, or a city's when the export
+// was run for one). Returns how many were new and updated.
+export async function addKeywords(rows: ParsedKeyword[], source: KeywordSource, what: string, location?: string) {
   const now = new Date().toISOString()
   return file.update((s) => {
     s.keywords ??= {}
@@ -66,7 +83,10 @@ export async function addKeywords(rows: ParsedKeyword[], source: KeywordSource, 
         added++
       } else if (r.volume !== undefined) updated++
       if (!k.sources.includes(source)) k.sources.push(source)
-      if (r.volume !== undefined) {
+      if (r.volume !== undefined && !isStatewide(location)) {
+        k.local ??= {}
+        k.local[location!] = { volume: r.volume, cpcLow: r.cpcLow, cpcHigh: r.cpcHigh, competition: r.competition, trend: r.trend, at: now }
+      } else if (r.volume !== undefined) {
         Object.assign(k, {
           volume: r.volume,
           cpcLow: r.cpcLow,

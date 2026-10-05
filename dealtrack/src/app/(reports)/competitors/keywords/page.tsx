@@ -3,29 +3,36 @@ import type { Metadata } from "next"
 import { PageHeader } from "@/components/report"
 import KeywordExplorer, { type ExplorerRow } from "@/components/research/keyword-explorer"
 import { TOPICS, placeOf, topicOf } from "@/lib/research/classify"
-import { SOURCE_LABELS, getResearch } from "@/lib/research/keywords"
+import { SOURCE_LABELS, STATEWIDE_VOLUMES, getResearch, volumeLocations } from "@/lib/research/keywords"
 
 export const metadata: Metadata = { title: "Keyword explorer · DealTrack" }
 
 // Our own keyword research, like Ahrefs' Keywords Explorer but for home-selling searches: every
 // keyword we track, grouped by topic and place, with search volume and bids from Keyword Planner.
-export default async function KeywordExplorerPage() {
+// ?vol=San Francisco shows the volumes Keyword Planner gave for that city instead of California's.
+export default async function KeywordExplorerPage({ searchParams }: { searchParams: Promise<{ vol?: string }> }) {
+  const { vol } = await searchParams
   const { keywords, imports, volumesNote } = await getResearch()
-  const rows: ExplorerRow[] = keywords.map((k) => ({
-    text: k.text,
-    topic: topicOf(k.text),
-    place: placeOf(k.text) ?? "",
-    words: k.text.split(" ").length,
-    volume: k.volume ?? null,
-    cpcLow: k.cpcLow ?? null,
-    cpcHigh: k.cpcHigh ?? null,
-    competition: k.competition ?? "",
-    trend: k.trend ?? [],
-    sources: k.sources,
-  }))
+  const places = volumeLocations(keywords)
+  const place = places.find((p) => p.place === vol)?.place ?? ""
+  const rows: ExplorerRow[] = keywords.map((k) => {
+    const v = place ? k.local?.[place] : k
+    return {
+      text: k.text,
+      topic: topicOf(k.text),
+      place: placeOf(k.text) ?? "",
+      words: k.text.split(" ").length,
+      volume: v?.volume ?? null,
+      cpcLow: v?.cpcLow ?? null,
+      cpcHigh: v?.cpcHigh ?? null,
+      competition: v?.competition ?? "",
+      trend: v?.trend ?? [],
+      sources: k.sources,
+    }
+  })
   const volumeAt =
     keywords
-      .map((k) => k.volumeAt ?? "")
+      .map((k) => (place ? (k.local?.[place]?.at ?? "") : (k.volumeAt ?? "")))
       .sort()
       .at(-1) ?? ""
   return (
@@ -41,6 +48,8 @@ export default async function KeywordExplorerPage() {
         imports={imports}
         volumesNote={volumesNote ?? ""}
         volumeAt={volumeAt}
+        volumePlaces={[STATEWIDE_VOLUMES, ...places.map((p) => p.place)]}
+        volumesFor={place || STATEWIDE_VOLUMES}
       />
     </>
   )

@@ -46,12 +46,18 @@ export type Analysis = { sites: SiteRow[]; keywords: KeywordRow[]; pages: Record
 
 // Keyword Planner's volume is for all of California; a keyword searched in several places counts
 // a part of it in each, so totals don't add up to more than the real searches.
+// `volumes` holds California's volume by keyword, and a city's own (from a Keyword Planner export run
+// for that city) under "city|keyword", e.g. "san francisco|sell my house as is".
+export const localKey = (place: string, keyword: string) => `${place.toLowerCase()}|${keyword}`
+const localVolume = (volumes: Map<string, number>, r: SerpResult) => volumes.get(localKey(r.loc, r.k))
+
 function weights(results: SerpResult[], volumes: Map<string, number>) {
   const places = new Map<string, number>()
   for (const r of results) places.set(r.k, (places.get(r.k) ?? 0) + 1)
-  const known = results.filter((r) => volumes.has(r.k)).length
+  const known = results.filter((r) => localVolume(volumes, r) !== undefined || volumes.has(r.k)).length
   const byVolume = results.length > 0 && known / results.length >= 0.5
-  const weight = (r: SerpResult) => (byVolume ? (volumes.get(r.k) ?? 0) / (places.get(r.k) ?? 1) : 1)
+  // A city's own volume when there is one; otherwise California's, split over the places searched.
+  const weight = (r: SerpResult) => (byVolume ? (localVolume(volumes, r) ?? (volumes.get(r.k) ?? 0) / (places.get(r.k) ?? 1)) : 1)
   return { byVolume, weight }
 }
 
@@ -142,7 +148,7 @@ export function analyze(results: SerpResult[], volumes: Map<string, number>, bef
   const keywords: KeywordRow[] = results.map((r) => ({
     k: r.k,
     loc: r.loc,
-    volume: volumes.get(r.k) ?? null,
+    volume: localVolume(volumes, r) ?? volumes.get(r.k) ?? null,
     ours: ourPos(r),
     oursBefore: before ? old.get(`${r.k}|${r.loc}`) : undefined,
     top: r.org.map((h) => h.d),

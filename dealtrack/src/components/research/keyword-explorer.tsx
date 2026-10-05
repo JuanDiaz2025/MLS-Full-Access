@@ -5,6 +5,7 @@
 // here in the browser, so only the keywords (and Keyword Planner's volumes) are sent to the app.
 
 import { useMemo, useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { Copy, FileUp, LoaderCircle, Search, Sparkles, Trash2 } from "lucide-react"
 
 import {
@@ -40,6 +41,8 @@ type Props = {
   imports: { at: string; what: string; added: number; updated: number }[]
   volumesNote: string
   volumeAt: string
+  volumePlaces: string[] // California, then each city with its own Keyword Planner volumes
+  volumesFor: string
 }
 
 type SortKey = "text" | "volume" | "cpc" | "words" | "topic" | "place"
@@ -59,7 +62,8 @@ function Trend({ values }: { values: number[] }) {
   )
 }
 
-export default function KeywordExplorer({ rows, topics, sourceLabels, imports, volumesNote, volumeAt }: Props) {
+export default function KeywordExplorer({ rows, topics, sourceLabels, imports, volumesNote, volumeAt, volumePlaces, volumesFor }: Props) {
+  const router = useRouter()
   const [group, setGroup] = useState<"topic" | "place">("topic")
   const [picked, setPicked] = useState("")
   const [search, setSearch] = useState("")
@@ -244,6 +248,16 @@ export default function KeywordExplorer({ rows, topics, sourceLabels, imports, v
                 ]}
               />
               <Select label="Source" value={source} onChange={setSource} options={[["", "All"], ...Object.entries(sourceLabels)]} />
+              {volumePlaces.length > 1 && (
+                <Select
+                  label="Volumes for"
+                  value={volumesFor}
+                  onChange={(v) =>
+                    router.push(v === volumePlaces[0] ? "/competitors/keywords" : `/competitors/keywords?vol=${encodeURIComponent(v)}`)
+                  }
+                  options={volumePlaces.map((p) => [p, p === volumePlaces[0] ? "California (all)" : p])}
+                />
+              )}
             </div>
 
             <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
@@ -486,8 +500,12 @@ function AddPanel({
                 {copied && <span className="text-emerald-700"> Copied.</span>}
               </li>
               <li>Google Ads → Tools → Keyword Planner → “Get search volume and forecasts”. Paste them (up to 10,000).</li>
-              <li>Set the location (California, or your Bay Area cities) and language English, then open “Historical metrics”.</li>
+              <li>Set the location to California and language English, pick the last 12 months, then open “Historical metrics”.</li>
               <li>Download → “Historical plan metrics (.csv)”, and upload that file here under 1.</li>
+              <li>
+                For one city’s own numbers, do it again with only that city as the location (one city per file: Google adds several together). Each
+                city keeps its own volumes; pick it under “Volumes for”.
+              </li>
             </ol>
           </details>
         </div>
