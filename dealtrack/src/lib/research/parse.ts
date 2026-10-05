@@ -89,6 +89,12 @@ export function parseKeywordFile(text: string): ParsedFile {
       row.cpcHigh = number(cells[high]) ?? row.cpcHigh
       if (competition >= 0 && cells[competition]) row.competition = cells[competition]
       if (months.length) row.trend = months.map((i) => number(cells[i]) ?? 0)
+      // An export over several years averages them all; the last 12 months say how it is now.
+      if (row.trend && row.trend.length > 12) {
+        row.trend = row.trend.slice(-12)
+        const sum = row.trend.reduce((a, b) => a + b, 0)
+        if (sum > 0) row.volume = Math.round(sum / 12)
+      }
     }
     seen.set(text, row)
   }
