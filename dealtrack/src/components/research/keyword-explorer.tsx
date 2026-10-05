@@ -4,7 +4,7 @@
 // Ahrefs' "By terms"), filters, a sortable table, and the panel for adding keywords. Files are read
 // here in the browser, so only the keywords (and Keyword Planner's volumes) are sent to the app.
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Copy, FileUp, LoaderCircle, Search, Sparkles, Trash2 } from "lucide-react"
 
@@ -14,6 +14,8 @@ import {
   removeKeywordsAction,
   suggestAction,
   volumesAction,
+  cityVolumesAction,
+  stopCityVolumesAction,
   type ResearchState,
 } from "@/app/actions/research"
 import { Button } from "@/components/ui/button"
@@ -45,6 +47,15 @@ type Props = {
   volumePlaces: { value: string; label: string }[]
   volumesFor: string
   estimateNote: string // set when the volumes shown are estimates
+  cities: CityStatus
+}
+
+// The background run that gets every targeted city's volumes from Keyword Planner.
+export type CityStatus = {
+  running: boolean
+  run?: { by: string; startedAt: string; finishedAt?: string; total: number; done: number; current?: string; failures: string[]; stopped?: boolean }
+  saved: number // places with numbers from it
+  lastAt: string
 }
 
 type SortKey = "text" | "volume" | "cpc" | "words" | "topic" | "place"
@@ -74,6 +85,7 @@ export default function KeywordExplorer({
   volumePlaces,
   volumesFor,
   estimateNote,
+  cities,
 }: Props) {
   const router = useRouter()
   const [group, setGroup] = useState<"topic" | "place">("topic")
@@ -198,6 +210,7 @@ export default function KeywordExplorer({
         imports={imports}
         volumesNote={volumesNote}
         message={message}
+        cities={cities}
       />
 
       {rows.length > 0 && (
@@ -449,6 +462,64 @@ function Select({ label, value, onChange, options }: { label: string; value: str
   )
 }
 
+function CityVolumes({ cities, busy, run }: { cities: CityStatus; busy: boolean; run: (fn: () => Promise<ResearchState>) => void }) {
+  const router = useRouter()
+  const r = cities.run
+  // While it runs, the page refreshes itself to show each city as it lands.
+  useEffect(() => {
+    if (!cities.running) return
+    const t = setInterval(() => router.refresh(), 4000)
+    return () => clearInterval(t)
+  }, [cities.running, router])
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {cities.running ? (
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => run(() => stopCityVolumesAction())}>
+            Stop
+          </Button>
+        ) : (
+          <Button type="button" size="sm" disabled={busy} onClick={() => run(() => cityVolumesAction())}>
+            Get volumes: California + every targeted city
+          </Button>
+        )}
+        <span className="text-xs text-muted-foreground">
+          From Keyword Planner (Basic access). The cities your running campaigns target, one at a time: about one API operation and a few seconds
+          each. Refreshed on its own once a month.
+        </span>
+      </div>
+      {r && (
+        <div className="flex flex-col gap-1 text-xs">
+          {cities.running ? (
+            <>
+              <span className="flex items-center gap-1.5 font-medium">
+                <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+                {r.current ? `Getting ${r.current}…` : "Starting…"} {r.done} of {r.total} done
+              </span>
+              <span className="h-1.5 overflow-hidden rounded-full bg-muted">
+                <span className="block h-full bg-primary transition-all" style={{ width: `${r.total ? (r.done / r.total) * 100 : 0}%` }} />
+              </span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">
+              Last run {r.finishedAt ? when(r.finishedAt) : when(r.startedAt)} by {r.by}: {r.done - r.failures.length} of {r.total} places
+              {r.stopped ? " (stopped)" : ""}. {cities.saved} places have their own volumes; pick one under “Volumes for”.
+            </span>
+          )}
+          {r.failures.length > 0 && (
+            <ul className="list-disc pl-5 text-destructive">
+              {r.failures.slice(0, 5).map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+              {r.failures.length > 5 && <li>…and {r.failures.length - 5} more</li>}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AddPanel({
   empty,
   busy,
@@ -458,7 +529,9 @@ function AddPanel({
   imports,
   volumesNote,
   message,
+  cities,
 }: {
+  cities: CityStatus
   empty: boolean
   busy: boolean
   onFiles: (files: FileList | null) => void
@@ -506,11 +579,12 @@ function AddPanel({
           <p className="text-xs text-muted-foreground">Pick several at once (hold Ctrl or Shift), e.g. one Keyword Planner file per city.</p>
 
           <h3 className="mt-3 font-semibold">2. Get search volumes</h3>
+          <CityVolumes cities={cities} busy={busy} run={run} />
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" disabled={busy} onClick={() => run(() => volumesAction())}>
-              Get volumes from Keyword Planner
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => run(() => volumesAction())}>
+              California only
             </Button>
-            <span className="text-xs text-muted-foreground">Needs Basic API access. Uses one API operation per 10,000 keywords.</span>
+            <span className="text-xs text-muted-foreground">Faster: one API operation.</span>
           </div>
           {volumesNote && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">{volumesNote}</p>}
           <details className="text-xs">

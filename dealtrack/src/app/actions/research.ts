@@ -6,6 +6,8 @@
 import { refresh } from "next/cache"
 
 import { isSignedIn } from "@/lib/auth"
+import { currentName } from "@/lib/people"
+import { startCityVolumes, stopCityVolumes } from "@/lib/research/city-volumes"
 import { addKeywords, fetchVolumes, removeKeywords, suggestKeywords, type KeywordSource } from "@/lib/research/keywords"
 import type { ParsedFile } from "@/lib/research/parse"
 
@@ -89,6 +91,25 @@ export async function volumesAction(): Promise<ResearchState> {
   const res = await fetchVolumes()
   refresh()
   return res
+}
+
+// California and every place running campaigns target, from Keyword Planner, in the background.
+export async function cityVolumesAction(): Promise<ResearchState> {
+  if (!(await isSignedIn())) return { ok: false, message: "Sign in first." }
+  try {
+    const res = await startCityVolumes((await currentName()) || "Someone")
+    refresh()
+    return res
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Couldn't read the campaigns' locations from Google Ads." }
+  }
+}
+
+export async function stopCityVolumesAction(): Promise<ResearchState> {
+  if (!(await isSignedIn())) return { ok: false, message: "Sign in first." }
+  stopCityVolumes()
+  refresh()
+  return { ok: true, message: "Stopping after the city in progress." }
 }
 
 export async function removeKeywordsAction(texts: string[]): Promise<ResearchState> {

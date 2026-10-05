@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { PageHeader } from "@/components/report"
 import KeywordExplorer, { type ExplorerRow } from "@/components/research/keyword-explorer"
 import { TOPICS, placeOf, topicOf } from "@/lib/research/classify"
+import { getCityVolumes } from "@/lib/research/city-volumes"
 import { SOURCE_LABELS, STATEWIDE_VOLUMES, estimateVolume, estimatedShares, getResearch, volumeLocations } from "@/lib/research/keywords"
 
 export const metadata: Metadata = { title: "Keyword explorer · DealTrack" }
@@ -12,7 +13,8 @@ export const metadata: Metadata = { title: "Keyword explorer · DealTrack" }
 // ?vol=San Francisco shows the volumes Keyword Planner gave for that city instead of California's.
 export default async function KeywordExplorerPage({ searchParams }: { searchParams: Promise<{ vol?: string }> }) {
   const { vol } = await searchParams
-  const { keywords, imports, volumesNote, placeTotals } = await getResearch()
+  const [{ keywords, imports, volumesNote, placeTotals }, city] = await Promise.all([getResearch(), getCityVolumes()])
+  const cityPlaces = Object.values(city.places)
   const places = volumeLocations(keywords)
   const shares = estimatedShares(placeTotals, keywords)
   const place = places.find((p) => p.place === vol)?.place ?? ""
@@ -57,6 +59,16 @@ export default async function KeywordExplorerPage({ searchParams }: { searchPara
           ...[...shares.keys()].map((p) => ({ value: p, label: `${p} (est.)` })),
         ]}
         volumesFor={place || estimated || STATEWIDE_VOLUMES}
+        cities={{
+          running: city.running,
+          run: city.run,
+          saved: cityPlaces.length,
+          lastAt:
+            cityPlaces
+              .map((p) => p.at)
+              .sort()
+              .at(-1) ?? "",
+        }}
         estimateNote={
           share !== undefined
             ? `Estimated: each keyword's California volume × ${estimated}'s share of California's searches (${(share * 100).toFixed(1)}%, from Keyword Planner's city totals). Upload a Keyword Planner file run for ${estimated} alone for its real numbers.`

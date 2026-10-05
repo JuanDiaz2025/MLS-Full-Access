@@ -161,7 +161,7 @@ export async function removeKeywords(texts: string[]) {
 // California, English, Google Search. Up to 10,000 keywords per request, one API operation each.
 // Needs Basic access on the developer token; with Explorer access Google refuses, and the page
 // offers the CSV route instead.
-const CALIFORNIA = "geoTargetConstants/21137"
+export const CALIFORNIA = "geoTargetConstants/21137"
 const ENGLISH = "languageConstants/1000"
 
 type Metrics = {
@@ -175,34 +175,84 @@ type Metrics = {
 const COMPETITION: Record<string, string> = { LOW: "Low", MEDIUM: "Medium", HIGH: "High" }
 const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"]
 
-export async function fetchVolumes(): Promise<{ ok: boolean; message: string }> {
-  const { keywords } = await getResearch()
-  const texts = keywords.map((k) => k.text).filter((t) => t.split(" ").length <= 10)
-  if (!texts.length) return { ok: false, message: "Add keywords first." }
-  const now = new Date().toISOString()
-  const found = new Map<string, Metrics>()
-  try {
-    for (let i = 0; i < texts.length; i += 10_000) {
-      const body = await adsPost<{ results?: { text?: string; closeVariants?: string[]; keywordMetrics?: Metrics }[] }>(
-        ":generateKeywordHistoricalMetrics",
-        {
-          keywords: texts.slice(i, i + 10_000),
-          geoTargetConstants: [CALIFORNIA],
-          language: ENGLISH,
-          keywordPlanNetwork: "GOOGLE_SEARCH",
-        },
-      )
-      for (const r of body.results ?? []) {
-        if (!r.keywordMetrics) continue
-        for (const t of [r.text, ...(r.closeVariants ?? [])]) {
-          const k = t && normalizeKeyword(t)
-          if (k && !found.has(k)) found.set(k, r.keywordMetrics)
-        }
+// Keyword Planner's numbers for these keywords in one place (California by default), keyed by
+// keyword. One API operation per 10,000 keywords.
+export async function plannerMetrics(texts: string[], geo = CALIFORNIA): Promise<Map<string, LocalVolume>> {
+  const at = new Date().toISOString()
+  const found = new Map<string, LocalVolume>()
+  const micros = (v?: string | number) => (v === undefined ? undefined : Math.round(Number(v) / 10_000) / 100)
+  for (let i = 0; i < texts.length; i += 10_000) {
+    const body = await adsPost<{ results?: { text?: string; closeVariants?: string[]; keywordMetrics?: Metrics }[] }>(
+      ":generateKeywordHistoricalMetrics",
+      {
+        keywords: texts.slice(i, i + 10_000),
+        geoTargetConstants: [geo],
+        language: ENGLISH,
+        keywordPlanNetwork: "GOOGLE_SEARCH",
+      },
+    )
+    for (const r of body.results ?? []) {
+      const m = r.keywordMetrics
+      if (!m) continue
+      const trend = (m.monthlySearchVolumes ?? [])
+        .map((v) => ({ at: Number(v.year) * 12 + MONTHS.indexOf(String(v.month)), n: Number(v.monthlySearches ?? 0) }))
+        .sort((a, b) => a.at - b.at)
+        .map((v) => v.n)
+      const v: LocalVolume = {
+        volume: Number(m.avgMonthlySearches ?? 0),
+        cpcLow: micros(m.lowTopOfPageBidMicros),
+        cpcHigh: micros(m.highTopOfPageBidMicros),
+        competition: COMPETITION[String(m.competition)] ?? undefined,
+        trend: trend.length ? trend : undefined,
+        at,
+      }
+      for (const t of [r.text, ...(r.closeVariants ?? [])]) {
+        const k = t && normalizeKeyword(t)
+        if (k && !found.has(k)) found.set(k, v)
       }
     }
+  }
+  return found
+}
+
+// The keywords Keyword Planner takes (10 words at most).
+export const plannerKeywords = (keywords: ResearchKeyword[]) => keywords.map((k) => k.text).filter((t) => t.split(" ").length <= 10)
+
+export const isExplorerRefusal = (e: unknown) =>
+  e instanceof GoogleAdsError && /explorer|basic or standard|not allowed|permission/i.test(`${e.message} ${e.detail ?? ""}`)
+
+// Saves one place's numbers: California's on the keyword itself, a city's under `local`.
+export async function saveVolumes(place: string, found: Map<string, LocalVolume>) {
+  await file.update((s) => {
+    for (const [text, v] of found) {
+      const k = s.keywords[text]
+      if (!k) continue
+      if (isStatewide(place))
+        Object.assign(k, {
+          volume: v.volume,
+          cpcLow: v.cpcLow,
+          cpcHigh: v.cpcHigh,
+          competition: v.competition,
+          trend: v.trend,
+          volumeFrom: "api",
+          volumeAt: v.at,
+        })
+      else (k.local ??= {})[place] = v
+      if (!k.sources.includes("planner")) k.sources.push("planner")
+    }
+    if (isStatewide(place)) delete s.volumesNote
+  })
+}
+
+export async function fetchVolumes(): Promise<{ ok: boolean; message: string }> {
+  const { keywords } = await getResearch()
+  const texts = plannerKeywords(keywords)
+  if (!texts.length) return { ok: false, message: "Add keywords first." }
+  let found: Map<string, LocalVolume>
+  try {
+    found = await plannerMetrics(texts)
   } catch (e) {
-    const explorer = e instanceof GoogleAdsError && /explorer|basic or standard|not allowed|permission/i.test(`${e.message} ${e.detail ?? ""}`)
-    const message = explorer
+    const message = isExplorerRefusal(e)
       ? "Google only gives Keyword Planner numbers to apps with Basic access, and ours has Explorer access for now. Use the Keyword Planner CSV instead (steps below)."
       : `Keyword Planner didn't answer: ${e instanceof Error ? e.message : String(e)}`
     await file.update((s) => {
@@ -210,28 +260,7 @@ export async function fetchVolumes(): Promise<{ ok: boolean; message: string }> 
     })
     return { ok: false, message }
   }
-  const micros = (v?: string | number) => (v === undefined ? undefined : Math.round(Number(v) / 10_000) / 100)
-  await file.update((s) => {
-    for (const [text, m] of found) {
-      const k = s.keywords[text]
-      if (!k) continue
-      const trend = (m.monthlySearchVolumes ?? [])
-        .map((v) => ({ at: Number(v.year) * 12 + MONTHS.indexOf(String(v.month)), n: Number(v.monthlySearches ?? 0) }))
-        .sort((a, b) => a.at - b.at)
-        .map((v) => v.n)
-      Object.assign(k, {
-        volume: Number(m.avgMonthlySearches ?? 0),
-        cpcLow: micros(m.lowTopOfPageBidMicros),
-        cpcHigh: micros(m.highTopOfPageBidMicros),
-        competition: COMPETITION[String(m.competition)] ?? undefined,
-        trend: trend.length ? trend : undefined,
-        volumeFrom: "api",
-        volumeAt: now,
-      })
-      if (!k.sources.includes("planner")) k.sources.push("planner")
-    }
-    delete s.volumesNote
-  })
+  await saveVolumes(STATEWIDE_VOLUMES, found)
   return {
     ok: true,
     message: `Keyword Planner returned numbers for ${found.size.toLocaleString("en-US")} of ${texts.length.toLocaleString("en-US")} keywords (California).`,

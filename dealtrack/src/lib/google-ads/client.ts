@@ -124,11 +124,13 @@ function explain(status: number, body: ApiErrorBody | undefined): GoogleAdsError
   if (code === "DEVELOPER_TOKEN_NOT_APPROVED" || code === "DEVELOPER_TOKEN_PROHIBITED") {
     return new GoogleAdsError("Google hasn't approved the developer token for this account.", detail)
   }
-  if (status === 429 || code === "RESOURCE_EXHAUSTED" || code === "RESOURCE_TEMPORARILY_EXHAUSTED") {
-    return new GoogleAdsError(
-      "The daily Google Ads API limit was reached (2,880 operations with Explorer access). Try again tomorrow.",
-      detail,
-    )
+  // Keyword Planner also has a per-minute limit; Google says RESOURCE_TEMPORARILY_EXHAUSTED or
+  // mentions "per minute" for it, and it clears within a minute.
+  if (code === "RESOURCE_TEMPORARILY_EXHAUSTED" || (status === 429 && /per.minute|temporarily|rate/i.test(detail ?? ""))) {
+    return new GoogleAdsError("Too many requests at once: Google asks to wait a minute and try again.", detail)
+  }
+  if (status === 429 || code === "RESOURCE_EXHAUSTED") {
+    return new GoogleAdsError("The daily Google Ads API limit was reached. Try again tomorrow.", detail)
   }
   if (status === 401 || status === 403) {
     return new GoogleAdsError("Google refused the request. The keys may have been reset or revoked.", detail)
@@ -289,7 +291,13 @@ export function gaqlFresh<Row>(query: string): Promise<Row[]> {
 // The configured account and its sign-in keys, for the offline conversions (lib/conversions).
 export function adsAccountConfig() {
   const cfg = config()
-  return { customerId: cfg.customerId, loginCustomerId: cfg.loginCustomerId, clientId: cfg.clientId, clientSecret: cfg.clientSecret, refreshToken: cfg.refreshToken }
+  return {
+    customerId: cfg.customerId,
+    loginCustomerId: cfg.loginCustomerId,
+    clientId: cfg.clientId,
+    clientSecret: cfg.clientSecret,
+    refreshToken: cfg.refreshToken,
+  }
 }
 
 // ---- Changes --------------------------------------------------------------------------------
