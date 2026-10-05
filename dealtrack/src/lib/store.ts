@@ -32,6 +32,7 @@ export type AlertSettings = {
   noLeadSpend: number // …once at least this much was spent in them
   monthNoLeadSpend: number // this much in a month with nothing back
   invalidClickRate: number // alert when a month's invalid-click share is above this (0–1)
+  wastedSearchSpend: Money // alert the same day when one not-a-seller search costs more than this
   updatedBy?: string
   updatedAt?: string
 }
@@ -219,6 +220,7 @@ export const DEFAULT_ALERTS: AlertSettings = {
   noLeadSpend: 1000,
   monthNoLeadSpend: 20000,
   invalidClickRate: 0.25,
+  wastedSearchSpend: 25,
 }
 
 export const DEFAULT_GRADE: GradeSettings = { leadCost: 1000, strictness: "normal" }

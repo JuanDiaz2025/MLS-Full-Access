@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
+import { buttonVariants } from "@/components/ui/button"
 import { ArrowRight } from "lucide-react"
 
 import { saveGradeSettings } from "@/app/actions/settings"
@@ -17,6 +18,7 @@ import { getPacing, type Pacing } from "@/lib/budget"
 import { isOpen } from "@/lib/compliance-rules"
 import { formatDay, parseRange, rangeQuery, today } from "@/lib/date-range"
 import { getCalls, type Call } from "@/lib/google-ads/calls"
+import { recentWastedSearches, type WastedSearch } from "@/lib/wasted-searches"
 import { daysIn, getOverview, type Bucket, type Grain } from "@/lib/google-ads/overview"
 import { getAccount, getCampaigns, getLocations, getSearchTerms, isWaste, rates, type CampaignRow } from "@/lib/google-ads/reports"
 import { lastFetchedAt } from "@/lib/google-ads/client"
@@ -47,7 +49,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
   const savedData = load(() => readData())
   // Calls Google counted in the period (it lists them by time, counted back from today).
   const callDays = Math.min(365, Math.round((Date.parse(`${today()}T00:00:00Z`) - Date.parse(`${range.from}T00:00:00Z`)) / 86_400_000))
-  const [result, saved, pacing, alerts, calls, admin, personName] = await Promise.all([
+  const [result, saved, pacing, alerts, calls, admin, personName, wasted] = await Promise.all([
     load(async () => {
       const [account, overview, campaigns, terms, locations] = await Promise.all([
         getAccount(),
@@ -64,6 +66,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
     load(async () => (await getCalls(callDays)).filter((c) => c.start.slice(0, 10) >= range.from && c.start.slice(0, 10) <= range.to)),
     isAdmin(),
     currentName(),
+    load(() => recentWastedSearches(10 * 60_000)),
   ])
 
   if (!result.ok) {
@@ -145,6 +148,8 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
       <AtAGlance grade={grade} totals={totals} before={before} range={range} leadCost={gradeSettings.leadCost} />
 
       <DoToday todos={todos} />
+
+      {wasted.ok && <NewWastedSearches list={wasted.data} />}
 
       <TrendKpis
         cols="md:grid-cols-4 xl:grid-cols-7"
@@ -424,5 +429,67 @@ function BestWorst({ campaigns, q }: { campaigns: CampaignRow[]; q: string }) {
         )}
       {leak && card("bad", "Biggest leak", leak, `${formatUsd(leak.metrics.cost)} spent and no leads.`)}
     </section>
+  )
+}
+
+// Searches that started wasting money today or yesterday, so they're seen the day they appear. The
+// block itself goes into this week's negatives batch (one push a week keeps Google's bidding steady).
+function NewWastedSearches({ list }: { list: WastedSearch[] }) {
+  const shown = list.slice(0, 6)
+  const total = list.reduce((s, w) => s + w.cost, 0)
+  const fresh = list.filter((w) => w.isNew).length
+  if (!list.length) {
+    return (
+      <p className="-mt-2 rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground shadow-xs">
+        <span className="font-medium text-emerald-700">No new wasted searches</span> today or yesterday: nothing that isn&apos;t a seller cost
+        money.
+      </p>
+    )
+  }
+  return (
+    <Section
+      title={`New wasted searches: ${formatUsd(total)} on ${formatNumber(list.length)} ${list.length === 1 ? "search" : "searches"}`}
+      description={`Today and yesterday, searches that aren't sellers (agents, buyers, renters, jobs, other states...) cost money with no lead.${fresh ? ` ${formatNumber(fresh)} showed up in the last day.` : ""} Seller searches are never listed. Add the blocks to this week's negatives.`}
+      actions={
+        <div className="flex gap-2">
+          <Link href="/negatives" className={buttonVariants({ size: "sm" })}>
+            Weekly negatives
+          </Link>
+          <Link href="/search-terms" className={buttonVariants({ size: "sm", variant: "outline" })}>
+            All search terms
+          </Link>
+        </div>
+      }
+    >
+      <div className="overflow-x-auto rounded-xl border">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">Search</th>
+              <th className="px-3 py-2 font-medium">Why</th>
+              <th className="px-3 py-2 text-right font-medium">Cost</th>
+              <th className="px-3 py-2 text-right font-medium">Clicks</th>
+              <th className="px-3 py-2 font-medium">Block with</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((w) => (
+              <tr key={w.term} className="border-t align-top">
+                <td className="px-3 py-2">
+                  <span className="font-medium">{w.term}</span>
+                  {w.isNew && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">NEW</span>}
+                  <div className="text-xs text-muted-foreground">{w.campaigns.join(", ")}</div>
+                </td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{w.reason}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatUsd(w.cost)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatNumber(w.clicks)}</td>
+                <td className="px-3 py-2 font-mono text-xs">{w.negative.startsWith("[") || !w.negative.includes(" ") ? w.negative : `"${w.negative}"`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {list.length > shown.length && <p className="text-xs text-muted-foreground">And {formatNumber(list.length - shown.length)} more on the Search terms page.</p>}
+    </Section>
   )
 }

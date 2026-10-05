@@ -266,6 +266,9 @@ function Rules({ settings: s, admin, personName }: { settings: AlertSettings; ad
     `${formatUsd(s.noLeadSpend)} or more spent over the last ${s.noLeadDays} ${s.noLeadDays === 1 ? "day" : "days"} with no leads.`,
     s.maxCostPerLead ? `Cost per lead over the last 14 days above ${formatUsd(s.maxCostPerLead)}.` : "Cost per lead limit: off until a limit is set.",
     s.clickCostAlert ? `Today: one click costing more than ${formatUsd(s.clickCostAlert)}, spend over a campaign's daily budget, or far ahead of normal for the time of day (every 15 minutes).` : "Expensive click alert: off until a line is set.",
+    s.wastedSearchSpend
+      ? `Today or yesterday: one search that isn't a seller (agents, buyers, renters, jobs, other states...) costing more than ${formatUsd(s.wastedSearchSpend)} with no lead.`
+      : "Wasted search alert: off until a line is set.",
     "Yesterday's spend, clicks, or cost per click far above the 28 days before it, or ads that spent nothing after a week of spending.",
     "Disapproved ads in running campaigns, and ads pointing at pages that don't load.",
     `More than ${formatPercent(s.invalidClickRate, 0)} of the last 30 days' clicks invalid.`,
@@ -295,6 +298,7 @@ function Rules({ settings: s, admin, personName }: { settings: AlertSettings; ad
             { name: "noLeadDays", label: "Days with no leads", value: String(s.noLeadDays), hint: "How many days in a row…" },
             { name: "noLeadSpend", label: "…while spending at least", prefix: "$", value: String(s.noLeadSpend) },
             { name: "monthNoLeadSpend", label: "Monthly spend with nothing back", prefix: "$", value: String(s.monthNoLeadSpend), hint: "Default: $20,000." },
+            { name: "wastedSearchSpend", label: "Alert when one wasted search costs more than", prefix: "$", value: s.wastedSearchSpend?.toString() ?? "", placeholder: "Off", hint: "Today and yesterday, searches that aren't sellers. Default: $25. Leave empty to turn off." },
             { name: "invalidClickRate", label: "Invalid clicks above", suffix: "%", value: String(Math.round(s.invalidClickRate * 100)), hint: "Share of the last 30 days' clicks." },
           ]}
         />

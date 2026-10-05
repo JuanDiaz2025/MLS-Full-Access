@@ -23,8 +23,9 @@ export async function register() {
     const check = async () => {
       const hour = Number(new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hourCycle: "h23" }))
       if (hour < 6 || hour >= 23) return
-      const [{ checkAlerts, todayRules }, { readData }] = await Promise.all([import("@/lib/alert-rules"), import("@/lib/store")])
-      await checkAlerts([todayRules(await readData())])
+      const [{ checkAlerts, searchRules, todayRules }, { readData }] = await Promise.all([import("@/lib/alert-rules"), import("@/lib/store")])
+      const data = await readData()
+      await checkAlerts([todayRules(data), searchRules(data)])
     }
     setTimeout(() => check().catch(() => undefined), 60_000)
     g.__dtTodayTimer = setInterval(() => check().catch(() => undefined), TODAY_EVERY_MS)

@@ -16,6 +16,7 @@ import { getSeries, type Bucket } from "@/lib/google-ads/overview"
 import { load, type Problem } from "@/lib/load"
 import { notifyNewAlerts } from "@/lib/notify"
 import { updateData, type AlertRecord, type Data } from "@/lib/store"
+import { recentWastedSearches } from "@/lib/wasted-searches"
 
 export type Fired = Pick<AlertRecord, "key" | "severity" | "title" | "detail" | "href">
 
@@ -386,11 +387,33 @@ function callRules(): RuleGroup {
 }
 
 // The Google Ads rules. The Alerts page adds its website and landing page checks on top.
+// One search that isn't a seller (agents, buyers, renters, jobs, other states...) costing more than
+// the line today or yesterday with no lead. Search terms are asked for at most once an hour, also
+// when checked in the background, to spare the daily API allowance.
+export function searchRules(data: Data): RuleGroup {
+  return {
+    prefix: "searches:",
+    run: async () => {
+      const line = data.alerts.wastedSearchSpend
+      if (!line) return []
+      return (await recentWastedSearches(60 * 60_000))
+        .filter((w) => w.cost > line)
+        .map((w) => ({
+          key: `searches:${w.term.toLowerCase()}`,
+          severity: w.cost > line * 3 ? "high" : "medium",
+          title: `“${w.term}” cost ${formatUsd(w.cost)} with no lead`,
+          detail: `${w.reason}. Block it with ${w.negative.startsWith("[") || !w.negative.includes(" ") ? w.negative : `"${w.negative}"`} in this week's negatives (${plural(w.clicks, "click")}, today and yesterday).`,
+          href: "/negatives",
+        }))
+    },
+  }
+}
+
 export function googleAdsRules(data: Data): RuleGroup[] {
   const end = today()
   let series: Promise<Bucket[]> | null = null
   const days = () => (series ??= getSeries({ from: addDays(end, -34), to: end, label: "Last 35 days" }, "day"))
-  return [budgetRules(data), todayRules(data), ...dailyRules(data, days), adRules(), callRules(), ...fraudRules(data)]
+  return [budgetRules(data), todayRules(data), searchRules(data), ...dailyRules(data, days), adRules(), callRules(), ...fraudRules(data)]
 }
 
 // ---- History --------------------------------------------------------------------------------

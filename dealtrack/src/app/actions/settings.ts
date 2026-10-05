@@ -61,7 +61,8 @@ export async function saveAlertSettings(_prev: FormState, form: FormData): Promi
   const clickCostAlert = money(form, "clickCostAlert", "The expensive click line")
   const noLeadSpend = money(form, "noLeadSpend", "The spend with no leads")
   const monthNoLeadSpend = money(form, "monthNoLeadSpend", "The monthly spend with nothing back")
-  for (const v of [maxCostPerLead, clickCostAlert, noLeadSpend, monthNoLeadSpend]) if (typeof v === "string") return { ok: false, message: v }
+  const wastedSearchSpend = money(form, "wastedSearchSpend", "The wasted search line")
+  for (const v of [maxCostPerLead, clickCostAlert, noLeadSpend, monthNoLeadSpend, wastedSearchSpend]) if (typeof v === "string") return { ok: false, message: v }
   const noLeadDays = Number(form.get("noLeadDays"))
   if (!Number.isInteger(noLeadDays) || noLeadDays < 1 || noLeadDays > 30) return { ok: false, message: "Days with no leads must be 1 to 30." }
   const invalidPct = Number(String(form.get("invalidClickRate") ?? "").replace("%", ""))
@@ -75,6 +76,7 @@ export async function saveAlertSettings(_prev: FormState, form: FormData): Promi
       noLeadSpend: (noLeadSpend as number | null) ?? 0,
       monthNoLeadSpend: (monthNoLeadSpend as number | null) ?? 0,
       invalidClickRate: invalidPct / 100,
+      wastedSearchSpend: wastedSearchSpend as number | null,
       updatedBy: name,
       updatedAt: new Date().toISOString(),
     }
