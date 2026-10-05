@@ -20,6 +20,7 @@ import {
   serperBalance,
   type Scan,
   type ScanKind,
+  type SerpResult,
 } from "@/lib/research/serp"
 
 export const metadata: Metadata = { title: "Google rankings · DealTrack" }
@@ -36,17 +37,29 @@ export default async function RankingsPage({ searchParams }: { searchParams: Pro
   const [scans, research, balance, admin, reviews] = await Promise.all([getScans(), getResearch(), serperBalance(), isAdmin(), getReviews()])
   const kindOf = (s: Scan): ScanKind => s.kind ?? "web"
 
-  // For each kind: the scan asked for, else the newest one with results; compared against the
-  // scan before it of the same kind and service.
-  const pick = (kind: ScanKind) => {
-    const shown = scans.find((s) => s.id === picked && kindOf(s) === kind) ?? scans.find((s) => kindOf(s) === kind && s.done > 0)
-    const older = shown ? scans.slice(scans.indexOf(shown) + 1).find((s) => kindOf(s) === kind && s.engine === shown.engine && s.done > 0) : undefined
-    return { shown, older }
-  }
+  // For each kind: the scan asked for, else the newest one with results. It's compared with the
+  // newest earlier scan of the same kind and service that searched mostly the same things (at
+  // least half of this scan's searches), and only on the searches both made: a scan of other
+  // keywords would make every site look like it moved.
+  const searchKey = (r: SerpResult) => `${r.t ?? ""}|${r.k}|${r.loc}`
   const load = async (kind: ScanKind) => {
-    const { shown, older } = pick(kind)
-    const [now, before] = await Promise.all([shown ? getScanResults(shown.id) : null, older ? getScanResults(older.id) : null])
-    return { shownId: shown?.id ?? "", comparedAt: older?.at ?? "", now: now?.results ?? null, before: before?.results }
+    const shown = scans.find((s) => s.id === picked && kindOf(s) === kind) ?? scans.find((s) => kindOf(s) === kind && s.done > 0)
+    const now = shown ? ((await getScanResults(shown.id))?.results ?? null) : null
+    let comparedAt = ""
+    let before: SerpResult[] | undefined
+    if (shown && now?.length && kind !== "brand") {
+      const mine = new Set(now.filter((r) => !r.err).map(searchKey))
+      const earlier = scans.slice(scans.indexOf(shown) + 1).filter((s) => kindOf(s) === kind && s.engine === shown.engine && s.done > 0)
+      for (const s of earlier.slice(0, 5)) {
+        const same = ((await getScanResults(s.id))?.results ?? []).filter((r) => !r.err && mine.has(searchKey(r)))
+        if (same.length >= mine.size / 2) {
+          comparedAt = s.at
+          before = same
+          break
+        }
+      }
+    }
+    return { shownId: shown?.id ?? "", comparedAt, now, before }
   }
   const [web, maps, brand] = await Promise.all([load("web"), load("maps"), load("brand")])
   const volumes = new Map(research.keywords.filter((k) => k.volume !== undefined).map((k) => [k.text, k.volume!]))
