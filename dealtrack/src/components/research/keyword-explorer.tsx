@@ -34,6 +34,23 @@ export type ExplorerRow = {
   competition: string
   trend: number[]
   sources: string[]
+  group: string | null // close variants Google counts together share this
+  variantOf?: string // the keyword the group's searches are counted under
+}
+
+// Searches a month for a set of keywords, each group of close variants counted once.
+function sumUnique(rows: ExplorerRow[]) {
+  const seen = new Set<string>()
+  let total = 0
+  for (const r of rows) {
+    if (r.volume === null) continue
+    if (r.group) {
+      if (seen.has(r.group)) continue
+      seen.add(r.group)
+    }
+    total += r.volume
+  }
+  return total
 }
 
 type Props = {
@@ -45,7 +62,7 @@ type Props = {
   volumeAt: string
   // California first, then each city with its own Keyword Planner volumes, then the estimated ones.
   volumePlaces: { value: string; label: string }[]
-  volumesFor: string
+  volumesFor: string[] // California alone, or the places added up
   estimateNote: string // set when the volumes shown are estimates
   cities: CityStatus
 }
@@ -115,15 +132,17 @@ export default function KeywordExplorer({
   }, [rows, search, source, minVolume, words])
 
   const groups = useMemo(() => {
-    const m = new Map<string, { count: number; volume: number }>()
+    const m = new Map<string, ExplorerRow[]>()
     for (const r of filtered) {
       const k = group === "topic" ? r.topic : r.place || "No city"
-      const g = m.get(k) ?? { count: 0, volume: 0 }
-      g.count++
-      g.volume += r.volume ?? 0
-      m.set(k, g)
+      m.set(k, [...(m.get(k) ?? []), r])
     }
-    const list = [...m.entries()].map(([id, g]) => ({ id, label: group === "topic" ? (topicLabel[id] ?? id) : id, ...g }))
+    const list = [...m.entries()].map(([id, rs]) => ({
+      id,
+      label: group === "topic" ? (topicLabel[id] ?? id) : id,
+      count: rs.length,
+      volume: sumUnique(rs),
+    }))
     return group === "topic"
       ? topics.map((t) => list.find((g) => g.id === t.id)).filter((g): g is NonNullable<typeof g> => !!g)
       : list.sort((a, b) => b.volume - a.volume || b.count - a.count)
@@ -151,7 +170,7 @@ export default function KeywordExplorer({
     })
   }, [filtered, picked, group, sort, topicLabel])
 
-  const totalVolume = visible.reduce((s, r) => s + (r.volume ?? 0), 0)
+  const totalVolume = sumUnique(visible)
   const withVolume = rows.filter((r) => r.volume !== null).length
   const noVolume = rows.filter((r) => r.volume === null).map((r) => r.text)
 
@@ -236,7 +255,7 @@ export default function KeywordExplorer({
                 <GroupButton
                   label="All keywords"
                   count={filtered.length}
-                  volume={filtered.reduce((s, r) => s + (r.volume ?? 0), 0)}
+                  volume={sumUnique(filtered)}
                   active={!picked}
                   onClick={() => setPicked("")}
                 />
@@ -292,13 +311,16 @@ export default function KeywordExplorer({
               />
               <Select label="Source" value={source} onChange={setSource} options={[["", "All"], ...Object.entries(sourceLabels)]} />
               {volumePlaces.length > 1 && (
-                <Select
-                  label="Volumes for"
-                  value={volumesFor}
-                  onChange={(v) =>
-                    router.push(v === volumePlaces[0].value ? "/competitors/keywords" : `/competitors/keywords?vol=${encodeURIComponent(v)}`)
+                <PlacePicker
+                  places={volumePlaces}
+                  chosen={volumesFor}
+                  onApply={(list) =>
+                    router.push(
+                      list.length && list[0] !== volumePlaces[0].value
+                        ? `/competitors/keywords?${list.map((v) => `vol=${encodeURIComponent(v)}`).join("&")}`
+                        : "/competitors/keywords",
+                    )
                   }
-                  options={volumePlaces.map((p) => [p.value, p.label])}
                 />
               )}
             </div>
@@ -306,13 +328,14 @@ export default function KeywordExplorer({
             <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
               <p>
                 <b className="tabular-nums">{fmt(visible.length)}</b> keywords
-                <span className="text-muted-foreground"> · Searches a month in {volumePlaces.find((p) => p.value === volumesFor)?.label ?? volumesFor}: </span>
+                <span className="text-muted-foreground"> · Searches a month in {placesLabel(volumePlaces, volumesFor)}: </span>
                 <b className="tabular-nums">{withVolume ? fmt(totalVolume) : "–"}</b>
                 <span className="text-muted-foreground">
                   {withVolume
                     ? ` · volumes for ${fmt(withVolume)} of ${fmt(rows.length)}${volumeAt ? `, updated ${when(volumeAt)}` : ""}`
                     : " · no volumes yet: add them with Keyword Planner (above)"}
                 </span>
+                <span className="block text-xs text-muted-foreground">Close variants Google counts together are counted once in the totals.</span>
                 {estimateNote && <span className="block text-xs text-amber-800">{estimateNote}</span>}
               </p>
               {selected.size > 0 && (
@@ -375,7 +398,14 @@ export default function KeywordExplorer({
                           }
                         />
                       </td>
-                      <td className="px-3 py-1.5 font-medium">{r.text}</td>
+                      <td className="px-3 py-1.5 font-medium">
+                        {r.text}
+                        {r.variantOf && (
+                          <span className="block text-[11px] font-normal text-muted-foreground" title="Google gives close variants the same numbers">
+                            counted with “{r.variantOf}”
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-1.5 text-xs text-muted-foreground">{topicLabel[r.topic] ?? r.topic}</td>
                       <td className="px-3 py-1.5 text-xs">{r.place || <span className="text-muted-foreground">–</span>}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">
@@ -405,6 +435,98 @@ export default function KeywordExplorer({
               </Button>
             ) : null}
           </section>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const placeName = (places: { value: string; label: string }[], v: string) => places.find((p) => p.value === v)?.label ?? v
+function placesLabel(places: { value: string; label: string }[], chosen: string[]) {
+  if (chosen.length <= 2) return chosen.map((v) => placeName(places, v)).join(" + ")
+  return `${placeName(places, chosen[0])} + ${chosen.length - 1} more`
+}
+
+// "Volumes for": California, or any mix of cities and counties added up, with a search box.
+function PlacePicker({
+  places,
+  chosen,
+  onApply,
+}: {
+  places: { value: string; label: string }[]
+  chosen: string[]
+  onApply: (list: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const state = places[0].value
+  const openIt = () => {
+    setPicked(new Set(chosen.filter((v) => v !== state)))
+    setQuery("")
+    setOpen(true)
+  }
+  const shown = places.slice(1).filter((p) => p.label.toLowerCase().includes(query.trim().toLowerCase()))
+  const toggle = (v: string) =>
+    setPicked((s) => {
+      const n = new Set(s)
+      if (n.has(v)) n.delete(v)
+      else n.add(v)
+      return n
+    })
+  const apply = (list: string[]) => {
+    setOpen(false)
+    onApply(list)
+  }
+  return (
+    <div className="relative flex items-center gap-1.5 text-xs text-muted-foreground">
+      Volumes for
+      <button
+        type="button"
+        onClick={() => (open ? setOpen(false) : openIt())}
+        aria-expanded={open}
+        className="flex h-9 max-w-64 items-center gap-1 truncate rounded-lg border border-input bg-background px-2 text-sm text-foreground"
+      >
+        <span className="truncate">{placesLabel(places, chosen)}</span>
+        <span aria-hidden>▾</span>
+      </button>
+      {open && (
+        <div className="absolute top-10 left-0 z-20 flex w-72 flex-col gap-2 rounded-xl border bg-popover p-2 text-sm text-foreground shadow-lg">
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search cities and counties…"
+            aria-label="Search places"
+            className="h-8 rounded-lg border border-input bg-background px-2"
+          />
+          <button type="button" onClick={() => apply([])} className="rounded-md px-2 py-1 text-left font-medium hover:bg-muted">
+            California (all)
+          </button>
+          <ul className="flex max-h-72 flex-col overflow-y-auto">
+            {shown.map((p) => (
+              <li key={p.value}>
+                <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-muted">
+                  <input type="checkbox" checked={picked.has(p.value)} onChange={() => toggle(p.value)} />
+                  {p.label}
+                </label>
+              </li>
+            ))}
+            {!shown.length && <li className="px-2 py-1 text-muted-foreground">No place matches.</li>}
+          </ul>
+          <div className="flex items-center justify-between gap-2 border-t pt-2">
+            <span className="text-xs text-muted-foreground">{picked.size ? `${picked.size} picked` : "Pick one or more"}</span>
+            <span className="flex gap-1">
+              {picked.size > 0 && (
+                <Button type="button" size="sm" variant="ghost" onClick={() => setPicked(new Set())}>
+                  Clear
+                </Button>
+              )}
+              <Button type="button" size="sm" disabled={!picked.size} onClick={() => apply([...picked])}>
+                Show
+              </Button>
+            </span>
+          </div>
         </div>
       )}
     </div>
