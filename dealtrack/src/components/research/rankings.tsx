@@ -198,6 +198,45 @@ function ShownScan({
 
 // ---- The scan form ----------------------------------------------------------------------------
 
+// What a scan costs, roughly: credits left after it, the money it would be at each service's list
+// price (Serper's free credits cover it until they run out; Brave's first ~1,000 a month are free),
+// and how long it runs at the scan's own pace (3 Serper searches at a time, about 4–5 a second;
+// Brave one a second). Prices change: check serper.dev and brave.com/search/api.
+const PRICE_PER_1000 = { serper: 1, brave: 5 } as const
+const SECONDS_PER_SEARCH = { serper: 0.22, brave: 1.1 } as const
+const BRAVE_FREE_MONTHLY = 1000
+
+function ScanCost({ service, searches, credits, balance }: { service: SerpEngine; searches: number; credits: number; balance: number | null }) {
+  const usd = (n: number) => (n < 10 ? `$${n.toFixed(2)}` : `$${Math.round(n).toLocaleString("en-US")}`)
+  const secs = searches * SECONDS_PER_SEARCH[service]
+  const time = secs < 90 ? "about a minute" : secs < 3600 ? `about ${Math.round(secs / 60)} minutes` : `about ${(secs / 3600).toFixed(1)} hours`
+  const price = (credits / 1000) * PRICE_PER_1000[service]
+  return (
+    <span className="mt-1 block text-xs text-muted-foreground">
+      {service === "serper" ? (
+        <>
+          {balance !== null && credits <= balance ? (
+            <>
+              Leaves <b className="text-foreground tabular-nums">{fmt(balance - credits)}</b> credits. Free: your credits cover it (about {usd(price)}{" "}
+              at Serper&apos;s paid price).
+            </>
+          ) : (
+            <>About {usd(price)} at Serper&apos;s paid price (roughly $1 per 1,000 credits).</>
+          )}
+        </>
+      ) : (
+        <>
+          {searches <= BRAVE_FREE_MONTHLY
+            ? "Free if it fits in Brave's ~1,000 free searches this month"
+            : `About ${usd(((searches - BRAVE_FREE_MONTHLY) / 1000) * PRICE_PER_1000.brave)} beyond Brave's ~1,000 free searches a month`}{" "}
+          ($5 per 1,000 after that).
+        </>
+      )}{" "}
+      Takes {time}; you can leave the page, or stop it and keep what it found.
+    </span>
+  )
+}
+
 // "Search from": a searchable checklist. Our targeted cities first (all at once with one click),
 // then the other California places; California itself only for Google results.
 function PlaceChecklist({
@@ -518,7 +557,7 @@ function ScanPanel({
                       {balance !== null && <> of the {fmt(balance)} left</>}
                     </>
                   )}
-                  .
+                  .{searches > 0 && <ScanCost service={service} searches={searches} credits={credits} balance={balance} />}
                   {tooMany && (
                     <span className="block text-xs text-amber-700">
                       That’s more than Serper has left: pick fewer topics or places, or set “At most”.
