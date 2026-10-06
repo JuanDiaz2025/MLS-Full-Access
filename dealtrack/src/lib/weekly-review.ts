@@ -175,7 +175,8 @@ export async function makeReview(by: string): Promise<WeeklyReview> {
     settle(getCalls(Math.max(1, Math.round((Date.parse(today()) - Date.parse(longFrom)) / 86_400_000)))),
     settle(listLeads()),
     settle(activeAccount().then((a) => (a ? readCombined(a.connection) : null))),
-    settle(getLeadData()),
+    // getLeadData throws at once when the Sheet isn't set up: through a promise, so it's a note, not a failed review.
+    settle(Promise.resolve().then(getLeadData)),
     settle(getMonthlySpend(twelveFrom, twelveTo)),
     settle(draftBatch({ from: week.from, to: week.to })),
     settle(draftIdeas({ from: longFrom, to: week.to, sources: ["proven", "phrase"], competitors: false })),
