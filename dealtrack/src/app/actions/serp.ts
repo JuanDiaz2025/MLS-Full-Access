@@ -8,7 +8,7 @@ import { refresh } from "next/cache"
 import { isAdmin, isSignedIn } from "@/lib/auth"
 import { TOPICS } from "@/lib/research/classify"
 import {
-  PLACE_CHOICES,
+  scanPlaces,
   continueScan,
   deleteScan,
   fetchReviews,
@@ -42,10 +42,11 @@ export async function startScanAction(req: ScanRequest): Promise<SerpState> {
   }
   const topics = (Array.isArray(req.topics) ? req.topics : []).map(String).filter((t) => TOPICS.some((x) => x.id === t))
   const keywords = await pickKeywords({ topics, minVolume: Number(req.minVolume) || 0, max: Number(req.max) || 0 })
+  const allowed = new Set((await scanPlaces()).all)
   const locations = (Array.isArray(req.locations) ? req.locations : [])
     .map(String)
-    .filter((l) => PLACE_CHOICES.includes(l))
-    .slice(0, 50)
+    .filter((l) => allowed.has(l))
+    .slice(0, 80)
   const left = TOPICS.filter((t) => !topics.includes(t.id)).map((t) => t.label)
   const what = !left.length
     ? "all topics"

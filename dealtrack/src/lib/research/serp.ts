@@ -108,6 +108,17 @@ export const brandPlan = (): Planned[] => [
 // The places a scan can search from: the whole state, or one of our cities.
 export const PLACE_CHOICES = [STATEWIDE, ...CALIFORNIA_PLACES.filter((p) => !isRegion(p))]
 
+// What a scan can search from: California, the places our running campaigns target (by Google's
+// names, kept by the city volumes run: "Santa Clara County", "Los Altos Hills"), and the other
+// California places we know.
+export async function scanPlaces(): Promise<{ all: string[]; targeted: string[] }> {
+  const { getCityVolumes } = await import("@/lib/research/city-volumes")
+  const targeted = Object.keys((await getCityVolumes()).places)
+    .filter((p) => p !== STATEWIDE)
+    .sort()
+  return { all: [...new Set([...PLACE_CHOICES, ...targeted])], targeted }
+}
+
 const index = jsonFileStore<{ scans: Scan[] }>("serp-scans.json", () => ({ scans: [] }))
 const scanFile = (id: string) => jsonFileStore<ScanFile>(`serp/${id}.json`, () => ({ plan: [], results: [] }))
 
