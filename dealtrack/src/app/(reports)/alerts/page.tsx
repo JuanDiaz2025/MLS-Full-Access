@@ -3,6 +3,7 @@ import Link from "next/link"
 
 import { saveAlertSettings } from "@/app/actions/settings"
 import { formatDate, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
+import ChatSettings from "@/components/alerts/chat-settings"
 import NotifySettings from "@/components/alerts/notify-settings"
 import { AdminLink, DataTable, PageHeader, Pill, ReportProblem, Section } from "@/components/report"
 import SettingsForm from "@/components/settings-form"
@@ -25,7 +26,7 @@ import { getClarity } from "@/lib/clarity"
 import { addDays, today, type DateRange } from "@/lib/date-range"
 import { getAdDestinations, getConversionActions, getWeekly } from "@/lib/google-ads/reports"
 import { load, type Loaded, type Problem } from "@/lib/load"
-import { getNotifySettings, sender, type NotifySettings as Notify } from "@/lib/notify"
+import { getNotifySettings, maskUrl, sender, type NotifySettings as Notify } from "@/lib/notify"
 import { currentName } from "@/lib/people"
 import { getErrorTracking, getSiteWeeks } from "@/lib/posthog"
 import { readData, type AlertRecord, type AlertSettings } from "@/lib/store"
@@ -194,6 +195,7 @@ export default async function AlertsPage() {
       <Rules settings={data.data.alerts} admin={admin} personName={personName} />
 
       <Emails notify={notify} admin={admin} personName={personName} from={from} />
+      <Chat notify={notify} admin={admin} personName={personName} />
 
       <Section
         title="History"
@@ -335,6 +337,30 @@ function Emails({ notify: n, admin, personName, from }: { notify: Notify; admin:
       ) : (
         <AdminLink />
       )}
+    </Section>
+  )
+}
+
+function Chat({ notify, admin, personName }: { notify: Notify; admin: boolean; personName: string }) {
+  const c = notify.chat!
+  const status = c.enabled && c.url ? `On: ${LEVEL_TEXT[c.minSeverity]} go to ${maskUrl(c.url)}.` : "Off."
+  return (
+    <Section
+      title="Google Chat alerts (through Zapier)"
+      description={`When a new alert opens, DealTrack posts it to a Zapier webhook, and the Zap sends it to your Google Chat space. Separate from the emails above, with its own switch. The same alert goes out at most once a day. ${status}`}
+    >
+      {c.lastError && !c.lastError.test && (!c.lastSent || c.lastError.at > c.lastSent.at) && (
+        <p className="text-sm font-medium text-destructive">
+          The last message didn&apos;t go out ({when(c.lastError.at)}): {c.lastError.message}
+        </p>
+      )}
+      {c.lastSent && (!c.lastError || c.lastSent.at > c.lastError.at) && (
+        <p className="text-xs text-muted-foreground">
+          Last {c.lastSent.test ? "test" : `message (${c.lastSent.count} ${c.lastSent.count === 1 ? "alert" : "alerts"})`} sent {when(c.lastSent.at)}.
+          {c.updatedBy && c.updatedAt ? ` Settings changed by ${c.updatedBy} on ${when(c.updatedAt)}.` : ""}
+        </p>
+      )}
+      {admin ? <ChatSettings enabled={c.enabled} url={c.url} minSeverity={c.minSeverity} personName={personName} /> : <AdminLink />}
     </Section>
   )
 }

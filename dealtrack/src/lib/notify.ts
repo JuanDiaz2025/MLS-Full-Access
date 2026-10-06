@@ -5,6 +5,9 @@
 //
 // Only alerts that weren't already open are sent, and the same alert at most once a day, so an
 // alert that clears and comes back quickly doesn't send a stream of emails.
+//
+// The same alerts can also go to a webhook (e.g. a Zapier "Catch Hook" that posts them to a Google
+// Chat space), with its own on/off switch and severity. See sendWebhook for what it receives.
 
 import { accessToken, AdsApiError, GMAIL_SCOPE, getConnection } from "@/lib/conversions/google"
 import { jsonFileStore } from "@/lib/json-file-store"
@@ -26,13 +29,65 @@ export type NotifySettings = {
   lastSent?: { at: string; count: number; to: string[]; test?: boolean }
   lastError?: { at: string; message: string; test?: boolean }
   sent: Record<string, string> // alert key → when it was last emailed
+  chat?: ChatSettings
+}
+
+// The webhook (Zapier → Google Chat). Kept apart from the emails: its own switch, severity and
+// once-a-day memory, so one failing doesn't hold the other back.
+export type ChatSettings = {
+  enabled: boolean
+  url: string
+  minSeverity: Severity
+  updatedBy?: string
+  updatedAt?: string
+  lastSent?: { at: string; count: number; test?: boolean }
+  lastError?: { at: string; message: string; test?: boolean }
+  sent: Record<string, string>
 }
 
 const file = jsonFileStore<NotifySettings>("alert-notify.json", () => ({ enabled: false, emails: [], minSeverity: "high", sent: {} }))
 
 export async function getNotifySettings(): Promise<NotifySettings> {
   const s = await file.read()
-  return { ...s, enabled: Boolean(s.enabled), emails: s.emails ?? [], minSeverity: s.minSeverity ?? "high", sent: s.sent ?? {} }
+  const chat = s.chat
+  return {
+    ...s,
+    enabled: Boolean(s.enabled),
+    emails: s.emails ?? [],
+    minSeverity: s.minSeverity ?? "high",
+    sent: s.sent ?? {},
+    chat: { ...chat, enabled: Boolean(chat?.enabled), url: chat?.url ?? "", minSeverity: chat?.minSeverity ?? "high", sent: chat?.sent ?? {} },
+  }
+}
+
+export async function saveChatSettings(input: Pick<ChatSettings, "enabled" | "url" | "minSeverity" | "updatedBy">) {
+  await file.update((s) => {
+    s.chat = { ...s.chat, sent: s.chat?.sent ?? {}, ...input, updatedAt: new Date().toISOString() }
+  })
+}
+
+// A webhook address, or an error message. Only https, so alert details aren't sent in the clear.
+export function parseWebhookUrl(text: string): string | { error: string } {
+  const value = text.trim()
+  if (!value) return ""
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return { error: "That doesn't look like a web address. Paste the whole webhook URL from Zapier." }
+  }
+  if (url.protocol !== "https:") return { error: "The webhook address has to start with https://" }
+  return url.toString()
+}
+
+// Shown on the Alerts page without the secret part of the address (Zapier's hook id).
+export const maskUrl = (url: string) => {
+  try {
+    const u = new URL(url)
+    return `${u.host}${u.pathname.length > 12 ? `${u.pathname.slice(0, 12)}…` : u.pathname}`
+  } catch {
+    return url
+  }
 }
 
 export async function saveNotifySettings(input: Pick<NotifySettings, "enabled" | "emails" | "minSeverity" | "updatedBy">) {
@@ -128,14 +183,21 @@ function alertsHtml(items: Item[], intro: string) {
 <p style="color:#888;font-size:12px">Sent by DealTrack (Marketing Command Center). Change who gets these on the Alerts page.</p></div>`
 }
 
-// Emails the alerts that just opened, if notifications are on and they're serious enough.
+const isDue = (a: Item & { key: string }, minSeverity: Severity, sent: Record<string, string>, now: number) =>
+  SEVERITY_RANK[a.severity] >= SEVERITY_RANK[minSeverity] && !(sent[a.key] && now - Date.parse(sent[a.key]) < RESEND_AFTER_MS)
+const keepWeek = (sent: Record<string, string>, now: number) =>
+  Object.fromEntries(Object.entries(sent).filter(([, t]) => now - Date.parse(t) < 7 * RESEND_AFTER_MS))
+
+// Sends the alerts that just opened, by email and to the webhook, to whichever is on and wants them.
 export async function notifyNewAlerts(opened: (Item & { key: string })[]) {
+  await Promise.all([emailNewAlerts(opened), chatNewAlerts(opened)])
+}
+
+async function emailNewAlerts(opened: (Item & { key: string })[]) {
   const s = await getNotifySettings()
   if (!s.enabled || !s.emails.length) return
   const now = Date.now()
-  const due = opened.filter(
-    (a) => SEVERITY_RANK[a.severity] >= SEVERITY_RANK[s.minSeverity] && !(s.sent[a.key] && now - Date.parse(s.sent[a.key]) < RESEND_AFTER_MS),
-  )
+  const due = opened.filter((a) => isDue(a, s.minSeverity, s.sent, now))
   if (!due.length) return
   const top = due.reduce((a, b) => (SEVERITY_RANK[b.severity] > SEVERITY_RANK[a.severity] ? b : a))
   const subject = due.length === 1 ? `DealTrack alert: ${top.title}` : `DealTrack: ${due.length} new alerts (${top.title})`
@@ -147,7 +209,7 @@ export async function notifyNewAlerts(opened: (Item & { key: string })[]) {
       alertsHtml(due, due.length === 1 ? "A new alert just opened:" : `${due.length} new alerts just opened:`),
     )
     await file.update((d) => {
-      d.sent = Object.fromEntries(Object.entries(d.sent ?? {}).filter(([, t]) => now - Date.parse(t) < 7 * RESEND_AFTER_MS))
+      d.sent = keepWeek(d.sent ?? {}, now)
       for (const a of due) d.sent[a.key] = at
       d.lastSent = { at, count: due.length, to: s.emails }
       delete d.lastError
@@ -156,6 +218,101 @@ export async function notifyNewAlerts(opened: (Item & { key: string })[]) {
     await file.update((d) => {
       d.lastError = { at, message: e instanceof Error ? e.message : String(e) }
     })
+  }
+}
+
+// What the webhook receives, as JSON. "text" is ready to post as a Google Chat message (Chat reads
+// *bold* and <url|label> links), so in Zapier it's the only field to map; the rest is there for
+// anyone who wants to build their own message.
+function webhookBody(items: Item[], test = false) {
+  const top = items.reduce((a, b) => (SEVERITY_RANK[b.severity] > SEVERITY_RANK[a.severity] ? b : a))
+  const title = test ? "DealTrack test: Google Chat alerts work" : items.length === 1 ? `DealTrack alert: ${top.title}` : `DealTrack: ${items.length} new alerts`
+  const lines = items.map((a) => `• *${SEVERITY_LABEL[a.severity]}:* <${siteUrl()}${a.href ?? "/alerts"}|${a.title}>\n   ${a.detail}`)
+  return {
+    source: "DealTrack",
+    event: test ? "test" : "alerts.opened",
+    sentAt: new Date().toISOString(),
+    title,
+    text: [`*${title}*`, ...lines, `<${siteUrl()}/alerts|Open Alerts in DealTrack>`].join("\n"),
+    count: items.length,
+    topSeverity: top.severity,
+    alerts: items.map((a) => ({
+      severity: a.severity,
+      severityLabel: SEVERITY_LABEL[a.severity],
+      title: a.title,
+      detail: a.detail,
+      url: `${siteUrl()}${a.href ?? "/alerts"}`,
+    })),
+    alertsPageUrl: `${siteUrl()}/alerts`,
+  }
+}
+
+export async function sendWebhook(url: string, body: unknown) {
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    })
+  } catch (e) {
+    throw new Error(`Couldn't reach the webhook (${e instanceof Error ? e.message : String(e)}). Check the address.`)
+  }
+  if (res.ok) return
+  if (res.status === 404 || res.status === 410)
+    throw new Error(`The webhook answered ${res.status}: the address is wrong or the Zap was deleted. Copy the URL from Zapier again.`)
+  const text = (await res.text().catch(() => "")).slice(0, 200)
+  throw new Error(`The webhook answered ${res.status}${text ? `: ${text}` : ""}.`)
+}
+
+async function chatNewAlerts(opened: (Item & { key: string })[]) {
+  const { chat } = await getNotifySettings()
+  if (!chat?.enabled || !chat.url) return
+  const now = Date.now()
+  const due = opened.filter((a) => isDue(a, chat.minSeverity, chat.sent, now))
+  if (!due.length) return
+  const at = new Date().toISOString()
+  try {
+    await sendWebhook(chat.url, webhookBody(due))
+    await file.update((d) => {
+      const c = d.chat!
+      c.sent = keepWeek(c.sent ?? {}, now)
+      for (const a of due) c.sent[a.key] = at
+      c.lastSent = { at, count: due.length }
+      delete c.lastError
+    })
+  } catch (e) {
+    await file.update((d) => {
+      if (d.chat) d.chat.lastError = { at, message: e instanceof Error ? e.message : String(e) }
+    })
+  }
+}
+
+// A sample message, to check the webhook and the Zap behind it work.
+export async function sendTestWebhook(url: string, by: string) {
+  const at = new Date().toISOString()
+  const sample: Item = {
+    severity: "info",
+    title: "This is a test alert",
+    detail: `${by} sent this from the Alerts page to check that alerts reach Google Chat. Nothing needs attention.`,
+    href: "/alerts",
+  }
+  try {
+    await sendWebhook(url, webhookBody([sample], true))
+    await file.update((d) => {
+      if (d.chat) {
+        d.chat.lastSent = { at, count: 1, test: true }
+        delete d.chat.lastError
+      }
+    })
+  } catch (e) {
+    await file.update((d) => {
+      if (d.chat) d.chat.lastError = { at, message: e instanceof Error ? e.message : String(e), test: true }
+    })
+    throw e
   }
 }
 
