@@ -3,7 +3,24 @@
 import { useEffect, useRef, useState } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Check, CircleCheck, Copy, Download, History, LoaderCircle, LogIn, MessageSquareText, Plus, SendHorizontal, Settings, Trash2, X } from "lucide-react"
+import {
+  Check,
+  CircleCheck,
+  Copy,
+  Download,
+  ExternalLink,
+  History,
+  LoaderCircle,
+  LogIn,
+  Maximize2,
+  MessageSquareText,
+  Minimize2,
+  Plus,
+  SendHorizontal,
+  Settings,
+  Trash2,
+  X,
+} from "lucide-react"
 
 import { ASK_EVENT } from "@/components/assistant/ask-button"
 import { Button } from "@/components/ui/button"
@@ -102,6 +119,10 @@ type AssistantProps = {
   // What the page is showing (e.g. the dashboard's dates), passed to the assistant with each question.
   context?: string
   onClose?: () => void
+  // The corner panel can grow to fill the screen; the /ask page is the chat on a page of its own.
+  expanded?: boolean
+  onExpand?: () => void
+  fullPage?: boolean
 }
 
 // Shown when the chat runs on Claude Code and it isn't installed or signed in on this computer:
@@ -110,9 +131,12 @@ function ClaudeSignIn({ onReady }: { onReady: () => void }) {
   const [state, setState] = useState<"idle" | "waiting" | "done" | "failed">("idle")
   const [message, setMessage] = useState<string | null>(null)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
-  useEffect(() => () => {
-    if (timer.current) clearInterval(timer.current)
-  }, [])
+  useEffect(
+    () => () => {
+      if (timer.current) clearInterval(timer.current)
+    },
+    [],
+  )
 
   async function start() {
     setMessage(null)
@@ -127,7 +151,9 @@ function ClaudeSignIn({ onReady }: { onReady: () => void }) {
     const started = Date.now()
     if (timer.current) clearInterval(timer.current)
     timer.current = setInterval(async () => {
-      const status = await fetch("/api/assistant/claude").then((r) => r.json()).catch(() => null)
+      const status = await fetch("/api/assistant/claude")
+        .then((r) => r.json())
+        .catch(() => null)
       if (status?.loggedIn) {
         clearInterval(timer.current!)
         setState("done")
@@ -155,8 +181,8 @@ function ClaudeSignIn({ onReady }: { onReady: () => void }) {
       </Button>
       {state === "waiting" ? (
         <p className="text-muted-foreground">
-          A black window opened. If Claude isn&apos;t installed yet it installs it first (a minute or two), then your browser opens:
-          sign in with your Claude account and click <strong>Authorize</strong>. This updates by itself when you&apos;re done.
+          A black window opened. If Claude isn&apos;t installed yet it installs it first (a minute or two), then your browser opens: sign in with your
+          Claude account and click <strong>Authorize</strong>. This updates by itself when you&apos;re done.
         </p>
       ) : (
         <p className="text-muted-foreground">Uses your Claude plan (Pro, Max, Team or Enterprise). No API key needed.</p>
@@ -166,7 +192,7 @@ function ClaudeSignIn({ onReady }: { onReady: () => void }) {
   )
 }
 
-export default function Assistant({ enabled, context, onClose }: AssistantProps) {
+export default function Assistant({ enabled, context, onClose, expanded, onExpand, fullPage }: AssistantProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [pending, setPending] = useState(false)
@@ -342,7 +368,11 @@ export default function Assistant({ enabled, context, onClose }: AssistantProps)
   }, [])
 
   return (
-    <section id="assistant" aria-label="Ask about your ads" className="flex max-h-full min-h-0 flex-col rounded-2xl border bg-card shadow-2xl">
+    <section
+      id="assistant"
+      aria-label="Ask about your ads"
+      className={cn("flex max-h-full min-h-0 flex-col rounded-2xl border bg-card", fullPage ? "h-full shadow-xs" : expanded ? "h-full shadow-2xl" : "shadow-2xl")}
+    >
       <div className="flex items-start gap-3 px-5 pt-5">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <MessageSquareText className="size-5" />
@@ -350,15 +380,41 @@ export default function Assistant({ enabled, context, onClose }: AssistantProps)
         <div>
           <h2 className="text-lg font-semibold">Ask about your ads</h2>
           <p className="text-sm text-muted-foreground">
-            Ask what&apos;s wrong, ask a question, or ask for a report. It reads your Google Ads, website
-            leads and calls.
+            Ask what&apos;s wrong, ask a question, or ask for a report. It reads your Google Ads, website leads and calls.
           </p>
         </div>
-        {onClose && (
-          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close" className="ml-auto shrink-0">
-            <X />
-          </Button>
-        )}
+        <span className="ml-auto flex shrink-0 items-center">
+          {!fullPage && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Open in its own tab"
+              title="Open in its own tab"
+              onClick={() => window.open("/ask", "_blank", "noopener")}
+            >
+              <ExternalLink />
+            </Button>
+          )}
+          {onExpand && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={onExpand}
+              aria-label={expanded ? "Make smaller" : "Full screen"}
+              title={expanded ? "Make smaller" : "Full screen"}
+              className="hidden sm:inline-flex"
+            >
+              {expanded ? <Minimize2 /> : <Maximize2 />}
+            </Button>
+          )}
+          {onClose && (
+            <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+              <X />
+            </Button>
+          )}
+        </span>
       </div>
       {enabled && (
         <div className="flex gap-2 px-5 pt-3">
@@ -415,8 +471,8 @@ export default function Assistant({ enabled, context, onClose }: AssistantProps)
               <li>At platform.openai.com, add credit under Settings → Billing.</li>
               <li>Open API keys → Create new secret key, and copy it.</li>
               <li>
-                Paste it after <code className="font-mono">OPENAI_API_KEY=</code> in{" "}
-                <code className="font-mono">.env.local</code>, then restart the app.
+                Paste it after <code className="font-mono">OPENAI_API_KEY=</code> in <code className="font-mono">.env.local</code>, then restart the
+                app.
               </li>
             </ol>
           </div>

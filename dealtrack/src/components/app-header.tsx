@@ -67,6 +67,7 @@ export const navGroups = [
     links: [
       { href: "/behavior", label: "Behavior" },
       { href: "/forecast", label: "Forecast" },
+      { href: "/ask", label: "Ask about your ads" },
     ],
   },
   {
