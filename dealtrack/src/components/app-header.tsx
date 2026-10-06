@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation"
 
 import { signOut } from "@/app/login/actions"
 import ApiMeter from "@/components/api-meter"
+import LoadAll from "@/components/load-all"
 import BrandLogo from "@/components/brand-logo"
 import ThemeToggle from "@/components/theme-toggle"
 import LinkPending from "@/components/link-pending"
@@ -79,6 +80,13 @@ export const navGroups = [
   },
 ] as const
 
+// What "Load all pages" opens: every page in the menu, plus the tabs that load their own reports.
+const PRELOAD = [
+  ...navGroups.flatMap((g) => g.links.map((l) => l.href)),
+  ...["map", "cities", "targeting"].map((v) => `/locations?view=${v}`),
+  ...["clicks", "visitors", "leads", "claim"].map((v) => `/fraud?view=${v}`),
+]
+
 // Keep the selected date range when switching pages.
 function useRangeQuery() {
   const params = useSearchParams()
@@ -136,6 +144,9 @@ export default function AppHeader({
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
         <BrandLogo />
         <div className="flex items-center gap-2">
+          <span className="hidden md:block">
+            <LoadAll pages={PRELOAD} />
+          </span>
           <ApiMeter />
           {admin ? (
             <span
