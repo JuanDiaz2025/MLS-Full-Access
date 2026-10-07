@@ -11,7 +11,7 @@ import { STATEWIDE_VOLUMES, getResearch } from "@/lib/research/keywords"
 export const metadata: Metadata = { title: "Competitor sites · DealTrack" }
 
 // Not seller searches: people buying a home, competitors' names, and everything unsorted.
-const NOT_SELLER = new Set(["home-buyers", "competitor", "other"])
+const NOT_SELLER = new Set(["home-buyers", "agents", "competitor", "other"])
 
 export default async function CompetitorSitesPage({ searchParams }: { searchParams: Promise<{ r?: string }> }) {
   const { r } = await searchParams

@@ -8,18 +8,20 @@
 import { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Download, LoaderCircle, Play, Search, Square, Trash2 } from "lucide-react"
+import { LoaderCircle, Play, Search, Square, Trash2 } from "lucide-react"
 
 import { continueScanAction, deleteScanAction, startScanAction, stopScanAction, type SerpState } from "@/app/actions/serp"
+import { KeywordTable, Overview } from "@/components/research/rankings-dashboard"
 import { BrandView, MapsView } from "@/components/research/rankings-maps"
 import { Button, buttonVariants } from "@/components/ui/button"
 import Disclosure from "@/components/ui/disclosure"
 import type { PlaceReviews, Scan, ScanKind, SerpEngine, SerpResult } from "@/lib/research/serp"
-import type { Analysis, KeywordRow, MapsAnalysis, SiteRow } from "@/lib/research/serp-analysis"
+import type { Analysis, MapsAnalysis, SiteRow } from "@/lib/research/serp-analysis"
+import { placeKind } from "@/lib/research/classify"
 import { cn } from "@/lib/utils"
 
 type Shown<T> = { shownId: string; comparedAt: string; analysis: T | null }
-export type Tab = "sites" | "keywords" | "maps" | "brand" | "scans"
+export type Tab = "overview" | "sites" | "keywords" | "maps" | "brand" | "scans"
 export type Act = (fn: () => Promise<SerpState>) => void
 
 type Props = {
@@ -45,8 +47,18 @@ type Props = {
 }
 
 const STATEWIDE = "California"
-const SKIP_BY_DEFAULT = new Set(["home-buyers", "other"])
-const PAGE = 100
+// A starting list for "Type my own": the core searches a seller makes when they want a cash buyer.
+const SELLER_STARTER = [
+  "sell my house fast",
+  "we buy houses",
+  "cash home buyers",
+  "sell my house for cash",
+  "companies that buy houses",
+  "cash for houses",
+  "sell house as is",
+  "sell inherited house",
+]
+const SKIP_BY_DEFAULT = new Set(["home-buyers", "agents", "competitor", "other"])
 const fmt = (n: number) => n.toLocaleString("en-US")
 const pct = (n: number) => `${(n * 100).toFixed(n >= 0.1 ? 0 : 1)}%`
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
@@ -73,7 +85,7 @@ export default function Rankings(props: Props) {
       setMessage(await fn())
     })
 
-  const shown = tab === "sites" || tab === "keywords" ? web : tab === "maps" ? maps : tab === "brand" ? { ...brand, comparedAt: "" } : null
+  const shown = tab === "overview" || tab === "sites" || tab === "keywords" ? web : tab === "maps" ? maps : tab === "brand" ? { ...brand, comparedAt: "" } : null
   const none = (what: string) => (
     <p className="rounded-2xl border bg-card p-6 text-sm text-muted-foreground">No {what} yet: run one from New scan above.</p>
   )
@@ -119,6 +131,7 @@ export default function Rankings(props: Props) {
             <div className="flex flex-wrap gap-1 rounded-lg bg-muted p-1 text-sm font-medium" role="tablist">
               {(
                 [
+                  ["overview", "Overview"],
                   ["sites", "Competitors"],
                   ["keywords", "Keywords"],
                   ["maps", "Google Maps"],
@@ -164,10 +177,12 @@ export default function Rankings(props: Props) {
             )
           ) : !web.analysis?.keywords.length ? (
             none("Google results scan")
+          ) : tab === "overview" ? (
+            <Overview analysis={web.analysis} onOpen={setTab} />
           ) : tab === "sites" ? (
             <Sites analysis={web.analysis} compared={Boolean(web.comparedAt)} />
           ) : (
-            <Keywords analysis={web.analysis} compared={Boolean(web.comparedAt)} />
+            <KeywordTable analysis={web.analysis} compared={Boolean(web.comparedAt)} />
           )}
         </div>
       )}
@@ -339,6 +354,12 @@ function ScanPanel({
   const [max, setMax] = useState("")
   const [where, setWhere] = useState<string[]>([STATEWIDE])
   const [stars, setStars] = useState(false)
+  const [mode, setMode] = useState<"topics" | "typed">("typed")
+  const [typedText, setTypedText] = useState("")
+  const typed = useMemo(
+    () => [...new Set(typedText.split("\n").map((k) => k.toLowerCase().replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, 100),
+    [typedText],
+  )
   const hasVolumes = keywords.some((k) => k.v !== null)
   // Google Maps and the brand check only run on Serper.
   const service: SerpEngine = kind === "web" ? engine : "serper"
@@ -352,10 +373,11 @@ function ScanPanel({
 
   // The same choice the app makes: most searched first, then the cap.
   const chosen = useMemo(() => {
+    if (mode === "typed") return typed.map((k) => ({ t: "", v: null, named: placeKind(k) }))
     const list = keywords.filter((k) => picked.has(k.t) && (!minVolume || (k.v ?? 0) >= minVolume)).sort((a, b) => (b.v ?? -1) - (a.v ?? -1))
     const cap = Number(max)
     return cap > 0 ? list.slice(0, cap) : list
-  }, [keywords, picked, minVolume, max])
+  }, [keywords, picked, minVolume, max, mode, typed])
   const cities = where.filter((p) => p !== STATEWIDE)
   // A keyword that names a city is searched there only, once. Maps needs a city for the rest.
   const searches =
@@ -368,7 +390,7 @@ function ScanPanel({
           : chosen.reduce((n, k) => n + (k.named ? 1 : Math.max(1, where.length)), 0)
   const credits = kind === "brand" ? brandQueries.length + 3 : kind === "maps" && stars ? searches * 3 : searches
   const tooMany = service === "serper" && balance !== null && credits > balance
-  const ready = kind === "brand" ? serperReady : keywords.length > 0 && (kind === "web" || serperReady)
+  const ready = kind === "brand" ? serperReady : (mode === "typed" || keywords.length > 0) && (kind === "web" || serperReady)
 
   return (
     <Disclosure className="group rounded-2xl border bg-card shadow-xs" initialOpen={open}>
@@ -440,7 +462,7 @@ function ScanPanel({
                 <p className="font-medium text-muted-foreground">Searches (whole state):</p>
                 <p>{brandQueries.map((q) => `“${q}”`).join(", ")}, and “twin home buyer” on Google Maps (with stars, 3 credits).</p>
               </div>
-            ) : !keywords.length ? (
+            ) : !keywords.length && mode === "topics" ? (
               <p className="text-muted-foreground">
                 Add keywords in the{" "}
                 <Link href="/competitors/keywords" className="text-primary underline">
@@ -462,66 +484,115 @@ function ScanPanel({
                   </fieldset>
                 )}
 
-                <fieldset className="flex flex-col gap-2">
-                  <legend className="mb-1 text-xs font-medium text-muted-foreground">Keywords: which topics</legend>
-                  <div className="flex flex-wrap gap-1.5">
-                    {topics.map((t) => (
-                      <label
-                        key={t.id}
-                        className={cn(
-                          "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-                          picked.has(t.id) ? "border-primary bg-primary/10" : "text-muted-foreground",
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          className="sr-only"
-                          checked={picked.has(t.id)}
-                          onChange={(e) =>
-                            setPicked((s) => {
-                              const n = new Set(s)
-                              if (e.target.checked) n.add(t.id)
-                              else n.delete(t.id)
-                              return n
-                            })
-                          }
-                        />
-                        {t.label} <span className="tabular-nums opacity-70">{fmt(counts.get(t.id) ?? 0)}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 text-xs">
-                    {hasVolumes && (
-                      <label className="flex items-center gap-1.5">
-                        At least
-                        <select
-                          value={minVolume}
-                          onChange={(e) => setMinVolume(Number(e.target.value))}
-                          className="h-8 rounded-md border border-input bg-background px-2"
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-muted-foreground">Keywords:</span>
+                    <div className="flex gap-1 rounded-lg bg-muted p-1 text-xs font-medium" role="radiogroup" aria-label="How to pick keywords">
+                      {(
+                        [
+                          ["typed", "Type my own"],
+                          ["topics", "By topic"],
+                        ] as const
+                      ).map(([m, label]) => (
+                        <button
+                          key={m}
+                          type="button"
+                          role="radio"
+                          aria-checked={mode === m}
+                          onClick={() => setMode(m)}
+                          className={cn("rounded-md px-3 py-1", mode === m ? "bg-background shadow-xs" : "text-muted-foreground")}
                         >
-                          <option value={0}>any</option>
-                          <option value={10}>10</option>
-                          <option value={50}>50</option>
-                          <option value={100}>100</option>
-                          <option value={500}>500</option>
-                        </select>
-                        searches a month
-                      </label>
-                    )}
-                    <label className="flex items-center gap-1.5">
-                      At most
-                      <input
-                        type="number"
-                        min={1}
-                        value={max}
-                        onChange={(e) => setMax(e.target.value)}
-                        placeholder="all"
-                        className="h-8 w-20 rounded-md border border-input bg-background px-2"
-                      />
-                      keywords{hasVolumes ? " (most searched first)" : ""}
-                    </label>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </fieldset>
+                  {mode === "typed" ? (
+                    <div className="flex flex-col gap-1.5">
+                      <textarea
+                        value={typedText}
+                        onChange={(e) => setTypedText(e.target.value)}
+                        rows={6}
+                        placeholder={"One keyword per line, e.g.\nsell my house fast\nwe buy houses\ncash home buyers"}
+                        aria-label="Keywords to search, one per line"
+                        className="resize-y rounded-lg border border-input bg-background px-2.5 py-2 text-sm"
+                      />
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <button
+                          type="button"
+                          onClick={() => setTypedText(SELLER_STARTER.join("\n"))}
+                          className="rounded-full border px-2.5 py-0.5 hover:border-primary hover:text-primary"
+                        >
+                          Fill in the core seller searches ({SELLER_STARTER.length})
+                        </button>
+                        <span>
+                          {fmt(typed.length)} keyword{typed.length === 1 ? "" : "s"}, up to 100. Exactly what you type is searched.
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <fieldset className="flex flex-col gap-2">
+                      <legend className="mb-1 text-xs font-medium text-muted-foreground">Keywords: which topics</legend>
+                      <div className="flex flex-wrap gap-1.5">
+                        {topics.map((t) => (
+                          <label
+                            key={t.id}
+                            className={cn(
+                              "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+                              picked.has(t.id) ? "border-primary bg-primary/10" : "text-muted-foreground",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              className="sr-only"
+                              checked={picked.has(t.id)}
+                              onChange={(e) =>
+                                setPicked((s) => {
+                                  const n = new Set(s)
+                                  if (e.target.checked) n.add(t.id)
+                                  else n.delete(t.id)
+                                  return n
+                                })
+                              }
+                            />
+                            {t.label} <span className="tabular-nums opacity-70">{fmt(counts.get(t.id) ?? 0)}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-xs">
+                        {hasVolumes && (
+                          <label className="flex items-center gap-1.5">
+                            At least
+                            <select
+                              value={minVolume}
+                              onChange={(e) => setMinVolume(Number(e.target.value))}
+                              className="h-8 rounded-md border border-input bg-background px-2"
+                            >
+                              <option value={0}>any</option>
+                              <option value={10}>10</option>
+                              <option value={50}>50</option>
+                              <option value={100}>100</option>
+                              <option value={500}>500</option>
+                            </select>
+                            searches a month
+                          </label>
+                        )}
+                        <label className="flex items-center gap-1.5">
+                          At most
+                          <input
+                            type="number"
+                            min={1}
+                            value={max}
+                            onChange={(e) => setMax(e.target.value)}
+                            placeholder="all"
+                            className="h-8 w-20 rounded-md border border-input bg-background px-2"
+                          />
+                          keywords{hasVolumes ? " (most searched first)" : ""}
+                        </label>
+                      </div>
+                    </fieldset>
+                  )}
+                </div>
 
                 {service === "serper" ? (
                   <fieldset className="flex flex-col gap-2">
@@ -576,6 +647,7 @@ function ScanPanel({
                         kind,
                         engine: service,
                         topics: [...picked],
+                        typed: mode === "typed" ? typed : [],
                         minVolume,
                         max: Number(max) || 0,
                         locations: service === "serper" ? where : [],
@@ -791,182 +863,11 @@ function SiteLine({
   )
 }
 
-// ---- Keywords ---------------------------------------------------------------------------------
-
-function Keywords({ analysis, compared }: { analysis: Analysis; compared: boolean }) {
-  const hasAds = analysis.keywords.some((k) => k.ads.length > 0)
-  const [search, setSearch] = useState("")
-  const [show, setShow] = useState<"all" | "ranked" | "missing" | "ads">("all")
-  const [loc, setLoc] = useState("")
-  const [shown, setShown] = useState(PAGE)
-  const [hideOutOfState, setHideOutOfState] = useState(true)
-  const away = useMemo(() => new Set(analysis.sites.filter((s) => s.outOfState).map((s) => s.site)), [analysis.sites])
-  // The top 3 shown: Google's own, or the first 3 California sites with their real positions.
-  const top3 = (k: KeywordRow) =>
-    k.top
-      .map((site, i) => ({ site, p: i + 1 }))
-      .filter((t) => !hideOutOfState || !away.has(t.site))
-      .slice(0, 3)
-  const places = useMemo(() => [...new Set(analysis.keywords.map((k) => k.loc))].sort(), [analysis.keywords])
-  const rows = useMemo(() => {
-    const terms = search.toLowerCase().split(/\s+/).filter(Boolean)
-    return analysis.keywords
-      .filter(
-        (k) =>
-          terms.every((t) => k.k.includes(t)) &&
-          (!loc || k.loc === loc) &&
-          (show === "all" || (show === "ranked" ? k.ours !== null : show === "missing" ? k.ours === null && !k.err : k.ads.length > 0)),
-      )
-      .sort((a, b) => (b.volume ?? -1) - (a.volume ?? -1) || (a.ours ?? 99) - (b.ours ?? 99) || a.k.localeCompare(b.k))
-  }, [analysis.keywords, search, loc, show])
-
-  return (
-    <section className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-xs">
-      <div className="flex flex-wrap items-center gap-2">
-        <SearchBox value={search} onChange={(v) => (setSearch(v), setShown(PAGE))} placeholder="Search keywords…" />
-        <select
-          value={show}
-          onChange={(e) => (setShow(e.target.value as typeof show), setShown(PAGE))}
-          aria-label="Show"
-          className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
-        >
-          <option value="all">All searches</option>
-          <option value="ranked">Where we’re in the top 10</option>
-          <option value="missing">Where we’re not in the top 10</option>
-          {hasAds && <option value="ads">With ads</option>}
-        </select>
-        {places.length > 1 && (
-          <select
-            value={loc}
-            onChange={(e) => (setLoc(e.target.value), setShown(PAGE))}
-            aria-label="Place"
-            className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
-          >
-            <option value="">All places</option>
-            {places.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        )}
-        <Button type="button" variant="outline" size="sm" onClick={() => downloadCsv(rows)}>
-          <Download data-icon="inline-start" /> CSV
-        </Button>
-        <label className="flex items-center gap-1.5 text-xs">
-          <input type="checkbox" checked={hideOutOfState} onChange={(e) => setHideOutOfState(e.target.checked)} />
-          Skip sites from other states
-        </label>
-        <span className="text-xs text-muted-foreground">{fmt(rows.length)} searches</span>
-      </div>
-      <div className="overflow-x-auto rounded-xl border">
-        <table className="w-full min-w-[900px] text-sm">
-          <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Keyword</th>
-              <th className="px-3 py-2 font-medium">From</th>
-              <th className="px-3 py-2 text-right font-medium">Volume</th>
-              <th className="px-3 py-2 text-right font-medium">Us</th>
-              {hideOutOfState ? (
-                <th colSpan={3} className="px-3 py-2 font-medium">
-                  Top California sites (position)
-                </th>
-              ) : (
-                <>
-                  <th className="px-3 py-2 font-medium">#1</th>
-                  <th className="px-3 py-2 font-medium">#2</th>
-                  <th className="px-3 py-2 font-medium">#3</th>
-                </>
-              )}
-              {hasAds && <th className="px-3 py-2 font-medium">Ads</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, shown).map((k) => (
-              <tr key={`${k.k}|${k.loc}`} className="border-t align-top">
-                <td className="px-3 py-1.5 font-medium">{k.k}</td>
-                <td className="px-3 py-1.5 text-xs text-muted-foreground">{k.loc}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">
-                  {k.volume === null ? <span className="text-muted-foreground">–</span> : fmt(k.volume)}
-                </td>
-                <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">
-                  {k.err ? (
-                    <span className="text-xs text-amber-700" title={k.err}>
-                      failed
-                    </span>
-                  ) : k.ours === null ? (
-                    <span className="text-muted-foreground">–</span>
-                  ) : (
-                    <b className={k.ours <= 3 ? "text-emerald-700" : ""}>{k.ours}</b>
-                  )}
-                  {compared && k.oursBefore !== undefined && !k.err && (
-                    <span className="ml-1 text-[10px]">
-                      <Change
-                        value={k.ours === null ? (k.oursBefore === null ? null : -(11 - k.oursBefore)) : (k.oursBefore ?? 11) - k.ours}
-                        points
-                      />
-                    </span>
-                  )}
-                </td>
-                {[0, 1, 2].map((i) => {
-                  const t = top3(k)[i]
-                  return (
-                    <td
-                      key={i}
-                      className={cn("max-w-44 truncate px-3 py-1.5 text-xs", t?.site === "twinhomebuyer.com" && "font-semibold text-primary")}
-                    >
-                      {t ? (
-                        <>
-                          {hideOutOfState && <span className="text-muted-foreground tabular-nums">{t.p}. </span>}
-                          {t.site}
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">–</span>
-                      )}
-                    </td>
-                  )
-                })}
-                {hasAds && (
-                  <td className="max-w-56 px-3 py-1.5 text-xs">
-                    {k.ads.length ? k.ads.join(", ") : <span className="text-muted-foreground">–</span>}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {rows.length > shown && (
-        <Button type="button" variant="outline" size="sm" className="self-center" onClick={() => setShown(shown + PAGE)}>
-          Show more ({fmt(rows.length - shown)} left)
-        </Button>
-      )}
-    </section>
-  )
-}
-
-function downloadCsv(rows: KeywordRow[]) {
-  const cell = (v: string | number | null | undefined) => {
-    const s = v === null || v === undefined ? "" : String(v)
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const head = ["Keyword", "From", "Volume", "Our position", ...Array.from({ length: 10 }, (_, i) => `#${i + 1}`), "Ads"]
-  const lines = rows.map((k) =>
-    [k.k, k.loc, k.volume, k.ours, ...Array.from({ length: 10 }, (_, i) => k.top[i]), k.ads.join(" ")].map(cell).join(","),
-  )
-  const url = URL.createObjectURL(new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" }))
-  const a = document.createElement("a")
-  a.href = url
-  a.download = "google-rankings.csv"
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 // ---- Past scans -------------------------------------------------------------------------------
 
 function ScanList({ scans, web, maps, brand, admin, running, engineLabels, kindLabels, busy, act }: Props & { busy: boolean; act: Act }) {
   const shownIds = new Set([web.shownId, maps.shownId, brand.shownId])
-  const tabFor: Record<ScanKind, Tab> = { web: "sites", maps: "maps", brand: "brand" }
+  const tabFor: Record<ScanKind, Tab> = { web: "overview", maps: "maps", brand: "brand" }
   return (
     <section className="overflow-x-auto rounded-2xl border bg-card shadow-xs">
       <table className="w-full min-w-[760px] text-sm">

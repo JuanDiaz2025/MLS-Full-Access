@@ -9,7 +9,7 @@ export const TOPICS = [
     id: "competitor",
     label: "Competitor names",
     match:
-      /open ?door|offerpad|john buys|osborne homes|^webuyhouses$|homevestors?|we buy ugly|sundae|houzeo|catapult|redfin|zillow|express ?home ?buyers|kiavi|\bknock\b|orchard|flyhomes|homelight|ibuyer|webuyhouses\.com|www\./,
+      /open ?door|offerpad|john buys|osborne homes|^webuyhouses$|homevestors?|we buy ugly|sundae|houzeo|catapult|redfin|zillow|express ?home ?buyers|kiavi|\bknock\b|orchard|flyhomes|homelight|ibuyer|webuyhouses\.com|www\.|^(?!(we|who|that|which|what|where|company|companies|investors?|cash|someone|anyone|he|she|they|it|guy|man|lady|person)\b)[a-z]+ buys (houses?|homes?|your (house|home))\b/,
   },
   {
     id: "inherited",
@@ -33,7 +33,13 @@ export const TOPICS = [
     id: "home-buyers",
     label: "Buying a home (not sellers)",
     match:
-      /first time|1st time|(first|1st) home buyers?|(?<!my )homes? for sale|(?<!my )houses? for sale|mortgage (rates?|calculator|lenders?|pre)|down payment|pre-?approv|home loan|buy(ing)? a (house|home)|rent to own|open house|apartments?/,
+      /first time|1st time|(first|1st) home buyers?|(?<!my )homes? for sale|(?<!my )houses? for sale|mortgage (rates?|calculator|lenders?|pre)|down payment|pre-?approv|home loan|buy(ing)? a (house|home)|rent to own|open house|apartments?|^for (sell|sale) (house|home)s?\b|^sale (house|home)s?\b(?!.*\b(fast|quick|cash|as[- ]?is|my)\b)|^buy(ing)? (house|home)s?\b(?!.*\b(fast|quick|cash|as[- ]?is|ugly|for)\b)/,
+  },
+  // Agents and realtors: people looking for a listing agent, not a cash buyer ("sell without a realtor" stays a seller search).
+  {
+    id: "agents",
+    label: "Realtors & agents",
+    match: /^(?!.*\b(without|no|instead of|vs|versus|or|commission)\b).*\b(realtors?|real estate agents?|listing agents?|real estate brokers?)\b/,
   },
   { id: "land", label: "Land & lots", match: /\bland\b|\blots?\b|acre|vacant/ },
   { id: "near-me", label: "Near me", match: /near me|nearby|close to me|in my area/ },
@@ -47,7 +53,7 @@ export const TOPICS = [
     id: "sell",
     label: "Sell my house",
     match:
-      /sell(ing)? (my |a |your |the |our |parents |mom'?s |dad'?s )?(house|home|property|condo|townhouse)|sal(e|ing) (a |my |your )?(house|home)|(quick|fast) (home|house) (sale|sell)|sell fast|sell quick|how to sell|selling price|sell for|without a realtor|^sell$/,
+      /sell(ing)? (my |a |your |the |our |parents |mom'?s |dad'?s )?(house|home|property|condo|townhouse)|sal(e|ing) (a |my |your )?(house|home)|(quick|fast) (home|house) (sale|sell)|sell fast|sell quick|how to sell|selling price|sell for|without a realtor/,
   },
   { id: "cash", label: "Cash & offers", match: /cash|offer|quick sale|fast sale/ },
   { id: "other", label: "Other", match: /./ },
@@ -68,4 +74,13 @@ const title = (s: string) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase())
 export function placeOf(keyword: string): string | undefined {
   const hit = PLACES.find((p) => p.re.test(keyword))
   return hit ? title(hit.name) : undefined
+}
+
+// Whether a keyword names a city ("sell my house fast sacramento") or a region ("bay area"): a scan
+// searches those from that place only, once.
+const REGION =
+  /^(california|bay area|northern california|southern california|central valley|central coast|inland empire|peninsula|east bay|south bay|north bay|silicon valley|norcal|socal|marin|contra costa|solano|orange county)$/i
+export function placeKind(keyword: string): "city" | "region" | "" {
+  const place = placeOf(keyword)
+  return !place ? "" : REGION.test(place) ? "region" : "city"
 }

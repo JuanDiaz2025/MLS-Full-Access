@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import { PageHeader } from "@/components/report"
 import Rankings, { type Tab } from "@/components/research/rankings"
 import { isAdmin } from "@/lib/auth"
-import { TOPICS, placeOf, topicOf } from "@/lib/research/classify"
+import { TOPICS, placeKind, topicOf } from "@/lib/research/classify"
 import { estimatedShares, getResearch } from "@/lib/research/keywords"
 import { analyze, analyzeMaps, localKey } from "@/lib/research/serp-analysis"
 import {
@@ -25,9 +25,7 @@ import {
 
 export const metadata: Metadata = { title: "Google rankings · DealTrack" }
 
-const TABS: Tab[] = ["sites", "keywords", "maps", "brand", "scans"]
-const REGION =
-  /^(california|bay area|northern california|southern california|central valley|central coast|inland empire|peninsula|east bay|south bay|north bay|silicon valley|norcal|socal|marin|contra costa|solano|orange county)$/i
+const TABS: Tab[] = ["overview", "sites", "keywords", "maps", "brand", "scans"]
 
 // Who shows up on Google for our keywords, city by city: like Ahrefs' or Semrush's competitor
 // reports, from our own scans. The scan form, the competitors, each keyword's top 10, Google Maps
@@ -97,14 +95,11 @@ export default async function RankingsPage({ searchParams }: { searchParams: Pro
         brand={{ shownId: brand.shownId, results: brand.now ?? [] }}
         brandQueries={BRAND_QUERIES}
         reviews={reviews}
-        initialTab={TABS.includes(tab as Tab) ? (tab as Tab) : "sites"}
+        initialTab={TABS.includes(tab as Tab) ? (tab as Tab) : "overview"}
         topics={TOPICS.map((t) => ({ id: t.id, label: t.label }))}
         places={places.all}
         targeted={places.targeted}
-        keywords={research.keywords.map((k) => {
-          const place = placeOf(k.text)
-          return { t: topicOf(k.text), v: k.volume ?? null, named: !place ? "" : REGION.test(place) ? "region" : "city" }
-        })}
+        keywords={research.keywords.map((k) => ({ t: topicOf(k.text), v: k.volume ?? null, named: placeKind(k.text) }))}
       />
     </>
   )

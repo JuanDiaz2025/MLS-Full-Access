@@ -29,6 +29,21 @@ export type ScanRequest = {
   max: number
   locations: string[]
   stars?: boolean
+  typed?: string[] // keywords typed in the form: used instead of the topics when there are any
+}
+
+const MAX_TYPED = 100
+
+// Typed keywords as Google gets them: lower case, single spaces, no duplicates.
+function cleanTyped(list: unknown): string[] {
+  if (!Array.isArray(list)) return []
+  const seen = new Set<string>()
+  for (const item of list) {
+    const k = String(item ?? "").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80)
+    if (k) seen.add(k)
+    if (seen.size >= MAX_TYPED) break
+  }
+  return [...seen]
 }
 
 export async function startScanAction(req: ScanRequest): Promise<SerpState> {
@@ -40,8 +55,9 @@ export async function startScanAction(req: ScanRequest): Promise<SerpState> {
     refresh()
     return res
   }
+  const typed = cleanTyped(req.typed)
   const topics = (Array.isArray(req.topics) ? req.topics : []).map(String).filter((t) => TOPICS.some((x) => x.id === t))
-  const keywords = await pickKeywords({ topics, minVolume: Number(req.minVolume) || 0, max: Number(req.max) || 0 })
+  const keywords = typed.length ? typed : await pickKeywords({ topics, minVolume: Number(req.minVolume) || 0, max: Number(req.max) || 0 })
   const allowed = new Set((await scanPlaces()).all)
   const locations = (Array.isArray(req.locations) ? req.locations : [])
     .map(String)
@@ -61,7 +77,7 @@ export async function startScanAction(req: ScanRequest): Promise<SerpState> {
     keywords,
     locations,
     stars: kind === "maps" && Boolean(req.stars),
-    what: `${keywords.length.toLocaleString("en-US")} keywords: ${what}${kind === "maps" && req.stars ? " (with stars)" : ""}`,
+    what: `${keywords.length.toLocaleString("en-US")} keywords: ${typed.length ? `typed (${typed.slice(0, 3).join(", ")}${typed.length > 3 ? "…" : ""})` : what}${kind === "maps" && req.stars ? " (with stars)" : ""}`,
   })
   refresh()
   return res

@@ -12,7 +12,12 @@ const ctr = (p: number) => CTR[p - 1] ?? 0
 // Listing sites, directories and articles: they rank for everything but don't buy houses.
 const DIRECTORIES =
   /^(zillow|redfin|realtor|trulia|homes|movoto|yelp|bbb|reddit|quora|facebook|instagram|youtube|tiktok|linkedin|x|twitter|nextdoor|craigslist|angi|angieslist|thumbtack|homeadvisor|houzz|yellowpages|mapquest|google|apple|wikipedia|forbes|bankrate|nerdwallet|investopedia|rocketmortgage|rocket|chase|wellsfargo|bankofamerica|usnews|nolo|lawinfo|justia|avvo|ca|nar|realtors|biggerpockets|fastexpert|clever|clevergroup|apartments|loopnet|landwatch|landsearch|indeed|glassdoor|wsj|nytimes|cnbc|latimes|sfgate|sacbee|patch)\.(com|org|net|gov|ca\.gov)$/
-export const isDirectory = (site: string) => DIRECTORIES.test(site) || site.endsWith(".gov") || site.endsWith(".edu")
+// Dictionaries, marketplaces, news and big brokerages: they show up for broad words ("sell",
+// "sale home") but aren't cash buyers either.
+const NOT_BUYERS =
+  /^(merriam-webster|cambridge|dictionary|collinsdictionary|oxfordlearnersdictionaries|etymonline|quillbot|thesaurus|vocabulary|offerup|ebay|amazon|etsy|mercari|poshmark|vinted|sell|imdb|bravotv|foxbusiness|fox40|yahoo|nypost|nj|journalrecord|businessinsider|cnn|usatoday|coldwellbanker|coldwellbankerhomes|century21|remax|exprealty|kwnyc|kw|kellerwilliams|compass|howardhanna|elliman|corcoran|sothebysrealty|raveis|atproperties|streeteasy|har|forsalebyowner|unlockmls|onekeymls|ezhomesearch|opcity|homesnap|realestate|realtytrac|auction|hubzu|xome)\.(com|org|net|co|app)$/
+export const isDirectory = (site: string) =>
+  DIRECTORIES.test(site) || NOT_BUYERS.test(site) || site.endsWith(".gov") || site.endsWith(".edu")
 
 export type SiteRow = {
   site: string
@@ -42,7 +47,64 @@ export type KeywordRow = {
 
 export type SitePage = { k: string; loc: string; p: number; u: string; ad?: boolean }
 
-export type Analysis = { sites: SiteRow[]; keywords: KeywordRow[]; pages: Record<string, SitePage[]>; byVolume: boolean; ourShare: number }
+// One keyword across every place it was searched from, the way rank trackers list keywords.
+export type KeywordSummary = {
+  k: string
+  volume: number | null // California's (or the one place's) monthly searches
+  places: number // places searched without an error
+  ranked: number // places where we're in the top 10
+  top3: number // places where we're in the top 3
+  best: number | null // our best position
+  difficulty: number // 0 to 100: how hard the top 10 is to get into (see difficultyOf)
+  leader: string | null // the site most often #1 (listing sites included)
+  leaderCount: number
+  buyers: string[] // California cash buyers and other businesses in its top 10s, most seen first
+  ads: number // places where a scan saw ads
+}
+
+export type Positions = { top3: number; top10: number; none: number } // our position, counted per search
+
+export type Analysis = {
+  sites: SiteRow[]
+  keywords: KeywordRow[]
+  pages: Record<string, SitePage[]>
+  byVolume: boolean
+  ourShare: number
+  summary: KeywordSummary[]
+  positions: Positions
+}
+
+// National buyers and iBuyers: big brands with strong websites, almost as hard to pass as Zillow.
+const NATIONAL =
+  /^(webuyhouses|homevestors|opendoor|offerpad|homelight|sellmyhousefast|buyshouses|webuyhousesrightnow|housebuyernetwork|iwillbuyyourhouseforcash|sundae|houzeo|listwithclever|markspain|jeffbuysyourhouse|webuyanyhousefast|cashforhouses|ibuyer)\.(com|co|net)$/
+export const isNational = (site: string) => NATIONAL.test(site)
+
+// Keyword difficulty, 0 to 100: who holds the top 10, weighted by how many clicks each position
+// gets. Listing sites and directories count fully, national buyers almost fully, sites from other
+// states halfway (Google may swap them for local ones), and California businesses least: they're
+// the ones we can pass. Empty spots count as easy. DealTrack's own estimate, like Ahrefs' and
+// Semrush's "KD", but from the results we saw rather than backlinks.
+export function difficultyOf(top: string[], ourSites: string[], away: Set<string>) {
+  let hard = 0
+  let total = 0
+  for (let i = 0; i < 10; i++) {
+    const w = CTR[i]
+    total += w
+    const site = top[i]
+    if (!site || ourSites.includes(site)) continue
+    hard += w * (isDirectory(site) ? 1 : isNational(site) ? 0.85 : away.has(site) ? 0.5 : 0.3)
+  }
+  return total ? Math.round((hard / total) * 100) : 0
+}
+
+export const DIFFICULTY_BANDS = [
+  { max: 29, label: "Easy" },
+  { max: 49, label: "Possible" },
+  { max: 69, label: "Difficult" },
+  { max: 84, label: "Hard" },
+  { max: 100, label: "Very hard" },
+] as const
+export const difficultyLabel = (d: number) => (DIFFICULTY_BANDS.find((b) => d <= b.max) ?? DIFFICULTY_BANDS[4]).label
 
 // Keyword Planner's volume is for all of California; a keyword searched in several places counts
 // a part of it in each, so totals don't add up to more than the real searches.
@@ -156,7 +218,55 @@ export function analyze(results: SerpResult[], volumes: Map<string, number>, bef
     ...(r.err ? { err: r.err } : {}),
   }))
 
-  return { sites: siteRows, keywords, pages, byVolume: now.byVolume, ourShare: ourSites.reduce((s, d) => s + share(now, d), 0) }
+  // Each keyword across its places.
+  const away = new Set(siteRows.filter((s) => s.outOfState).map((s) => s.site))
+  const groups = new Map<string, KeywordRow[]>()
+  for (const r of keywords) groups.set(r.k, [...(groups.get(r.k) ?? []), r])
+  const summary: KeywordSummary[] = [...groups.entries()].map(([k, rows]) => {
+    const ok = rows.filter((r) => !r.err)
+    const leaders = new Map<string, number>()
+    const buyers = new Map<string, number>()
+    for (const r of ok) {
+      if (r.top[0]) leaders.set(r.top[0], (leaders.get(r.top[0]) ?? 0) + 1)
+      for (const site of new Set(r.top))
+        if (site && !isDirectory(site) && !away.has(site) && !ourSites.includes(site)) buyers.set(site, (buyers.get(site) ?? 0) + 1)
+    }
+    const leader = [...leaders.entries()].sort((a, b) => b[1] - a[1])[0]
+    const ours = ok.map((r) => r.ours).filter((p): p is number => p !== null)
+    // The keyword's volume: California's when it was searched statewide, else its biggest place's.
+    const state = rows.find((r) => r.loc === "California")
+    const volume = state?.volume ?? rows.reduce<number | null>((m, r) => (r.volume === null ? m : Math.max(m ?? 0, r.volume)), null)
+    return {
+      k,
+      volume,
+      places: ok.length,
+      ranked: ours.length,
+      top3: ours.filter((p) => p <= 3).length,
+      best: ours.length ? Math.min(...ours) : null,
+      difficulty: ok.length ? Math.round(ok.reduce((n, r) => n + difficultyOf(r.top, ourSites, away), 0) / ok.length) : 0,
+      leader: leader?.[0] ?? null,
+      leaderCount: leader?.[1] ?? 0,
+      buyers: [...buyers.entries()].sort((a, b) => b[1] - a[1]).map(([site]) => site),
+      ads: ok.filter((r) => r.ads.length).length,
+    }
+  })
+  summary.sort((a, b) => (b.volume ?? -1) - (a.volume ?? -1) || a.k.localeCompare(b.k))
+  const searched = keywords.filter((r) => !r.err)
+  const positions: Positions = {
+    top3: searched.filter((r) => r.ours !== null && r.ours <= 3).length,
+    top10: searched.filter((r) => r.ours !== null && r.ours > 3).length,
+    none: searched.filter((r) => r.ours === null).length,
+  }
+
+  return {
+    sites: siteRows,
+    keywords,
+    pages,
+    byVolume: now.byVolume,
+    ourShare: ourSites.reduce((s, d) => s + share(now, d), 0),
+    summary,
+    positions,
+  }
 }
 
 // ---- Google Maps ------------------------------------------------------------------------------
