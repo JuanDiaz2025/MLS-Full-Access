@@ -103,8 +103,8 @@ export default async function AlertsPage() {
         return {
           key: `weekly:${source}:${o.metric}:${o.week}`,
           severity: important ? "high" : source === "ads" ? "medium" : "info",
-          title: `${o.metric} ${drop ? "dropped" : "jumped"} to ${fmt(o, o.value)} in the week of ${formatDate(o.week)}`,
-          detail: `A normal week is about ${fmt(o, o.baseline)} (${o.source}).`,
+          title: `${o.label ?? o.metric} ${drop ? "dropped" : "jumped"} to ${fmt(o, o.value)} in the week of ${formatDate(o.week)}`,
+          detail: `A normal week is about ${fmt(o, o.baseline)}, going by the ${BASELINE_WEEKS} weeks before (${o.source === "Website" ? "website" : "Google Ads"} data).`,
         }
       })
 
@@ -174,7 +174,7 @@ export default async function AlertsPage() {
           columns={[
             { key: "week", label: "Week of", render: (o) => <span className="font-medium">{formatDate(o.week)}</span> },
             { key: "source", label: "Source", render: (o) => <span className="text-muted-foreground">{o.source}</span> },
-            { key: "metric", label: "Metric", render: (o) => o.metric },
+            { key: "metric", label: "Metric", render: (o) => o.label ?? o.metric },
             {
               key: "dir",
               label: "Change",

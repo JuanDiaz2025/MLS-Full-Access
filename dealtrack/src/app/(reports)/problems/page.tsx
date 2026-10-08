@@ -57,7 +57,7 @@ export default async function ProblemsPage() {
       )) {
         items.push({
           level: c.status === "fail" ? "high" : "medium",
-          title: c.title,
+          title: c.problem ?? c.title,
           detail: c.detail,
           fix: c.fix,
           href: AREA_LINK[area.title] ?? "/audit",

@@ -105,7 +105,7 @@ export async function pageData(page: PageName, days: number): Promise<unknown> {
           grade: area.grade,
           problems: area.checks
             .filter((c) => c.status === "fail" || c.status === "warn" || (c.status === "manual" && !c.manual?.done))
-            .map((c) => ({ check: c.title, status: c.status, detail: c.detail, fix: c.fix })),
+            .map((c) => ({ check: c.title, problem: c.problem, status: c.status, detail: c.detail, fix: c.fix })),
         })),
       }
     }

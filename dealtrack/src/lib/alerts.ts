@@ -12,7 +12,8 @@ export const Z_ALERT = 3
 export type Outlier = {
   week: string
   source: "Google Ads" | "Website"
-  metric: string
+  metric: string // also part of the alert's key, so it stays the same
+  label?: string // what titles call it, when the metric's own name reads badly
   value: number
   baseline: number
   z: number
@@ -62,7 +63,7 @@ export function siteOutliers(weeks: SiteWeek[]): Outlier[] {
   return [
     ...outliers(s((w) => w.publicPageviews), { source: "Website", metric: "Visitor pageviews", unit: "number" }),
     ...outliers(s((w) => w.internalPageviews), { source: "Website", metric: "Team / staging pageviews", unit: "number" }),
-    ...outliers(s((w) => w.adLandings), { source: "Website", metric: "Ad click landings", unit: "number" }),
+    ...outliers(s((w) => w.adLandings), { source: "Website", metric: "Ad click landings", label: "Visits from ad clicks", unit: "number" }),
     ...outliers(s((w) => w.formSubmits), { source: "Website", metric: "Form submits", unit: "number" }),
   ]
 }
