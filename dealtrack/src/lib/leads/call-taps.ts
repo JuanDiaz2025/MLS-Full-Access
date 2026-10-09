@@ -8,6 +8,7 @@
 // sets a status (Interested…), they go to Google Ads like any other lead, matched by the ad click.
 import { jsonFileStore } from "@/lib/json-file-store"
 import { addLead, listLeads } from "@/lib/leads/store"
+import { realValue } from "@/lib/leads/tracking"
 import { CALL_TAP_SOURCE, type LeadTracking } from "@/lib/leads/types"
 import { hogqlFresh } from "@/lib/posthog"
 import { shared } from "@/lib/shared-state"
@@ -36,7 +37,7 @@ function trackingFrom(entry: string, current: string, referrer: string): LeadTra
   }
   const a = pick(entry)
   const b = pick(current)
-  const get = (k: string) => a?.get(k) || b?.get(k) || undefined
+  const get = (k: string) => realValue(a?.get(k)) || realValue(b?.get(k)) || undefined
   const t: LeadTracking = {
     utmSource: get("utm_source"),
     utmMedium: get("utm_medium"),

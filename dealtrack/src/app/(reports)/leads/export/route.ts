@@ -2,7 +2,7 @@ import { isSignedIn } from "@/lib/auth"
 import { gradeLabels } from "@/lib/leads/scoring"
 import { leadSource } from "@/lib/leads/source"
 import { listLeads, listQrCodes } from "@/lib/leads/store"
-import { leadChannel } from "@/lib/leads/tracking"
+import { cleanTracking, leadChannel } from "@/lib/leads/tracking"
 import { leadStatuses } from "@/lib/leads/types"
 import { formatPhone } from "@/lib/phone"
 
@@ -25,14 +25,17 @@ export async function GET() {
       "UTM term", "UTM content", "Google click ID", "Facebook click ID", "Microsoft click ID", "Landing page", "Referrer",
       "Form", "Notes",
     ],
-    ...leads.map((l) => [
-      l.createdAt, l.name,
-      l.score ? String(l.score.value) : "", l.score ? gradeLabels[l.score.grade] : "", leadStatuses.find((s) => s.id === (l.status ?? "new"))?.label,
-      l.phone && formatPhone(l.phone), l.email, l.propertyAddress, leadChannel(l),
-      l.tracking?.utmSource, l.tracking?.utmMedium, l.tracking?.utmCampaign, l.tracking?.utmTerm, l.tracking?.utmContent,
-      l.tracking?.gclid || l.tracking?.gbraid || l.tracking?.wbraid, l.tracking?.fbclid, l.tracking?.msclkid, l.tracking?.landingPage, l.tracking?.referrer,
-      leadSource(l, placements), l.notes,
-    ]),
+    ...leads.map((l) => {
+      const t = cleanTracking(l.tracking)
+      return [
+        l.createdAt, l.name,
+        l.score ? String(l.score.value) : "", l.score ? gradeLabels[l.score.grade] : "", leadStatuses.find((s) => s.id === (l.status ?? "new"))?.label,
+        l.phone && formatPhone(l.phone), l.email, l.propertyAddress, leadChannel(l),
+        t?.utmSource, t?.utmMedium, t?.utmCampaign, t?.utmTerm, t?.utmContent,
+        t?.gclid || t?.gbraid || t?.wbraid, t?.fbclid, t?.msclkid, t?.landingPage, t?.referrer,
+        leadSource(l, placements), l.notes,
+      ]
+    }),
   ]
   const csv = rows.map((r) => r.map(cell).join(",")).join("\r\n")
   const date = new Date().toISOString().slice(0, 10)

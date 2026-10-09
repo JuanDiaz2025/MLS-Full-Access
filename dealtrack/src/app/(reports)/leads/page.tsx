@@ -16,7 +16,7 @@ import { leadSource } from "@/lib/leads/source"
 import { catchUp, leadsVersion } from "@/lib/leads/background"
 import { listLeads, listQrCodes } from "@/lib/leads/store"
 import { countSince } from "@/lib/leads/time"
-import { leadChannel, pagePath } from "@/lib/leads/tracking"
+import { cleanTracking, leadChannel, pagePath } from "@/lib/leads/tracking"
 import type { Lead } from "@/lib/leads/types"
 import { load } from "@/lib/load"
 
@@ -24,7 +24,7 @@ export const metadata: Metadata = { title: "Leads · DealTrack" }
 
 // One spreadsheet row per lead, with the date in the account's time zone.
 function toRow(lead: Lead, placements: Map<string, string>): LeadRow {
-  const t = lead.tracking ?? {}
+  const t = cleanTracking(lead.tracking) ?? {}
   return {
     id: lead.id,
     receivedAt: lead.createdAt,

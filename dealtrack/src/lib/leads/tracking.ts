@@ -31,10 +31,23 @@ const fromUrl: [keyof LeadTracking, string[]][] = [
   ["msclkid", ["msclkid"]],
 ]
 
+// What some website scripts write when a tag is missing ("none", "(not set)"), and Google Ads tags
+// left unfilled because a link was opened by hand ("{keyword}"): not real values.
+const PLACEHOLDER = /^(none|\(none\)|null|undefined|\(not set\)|false|\{[^{}]*\})$/i
+export const realValue = (v?: string | null) => (v && !PLACEHOLDER.test(v.trim()) ? v : undefined)
+
+// The tracking without placeholder values.
+export function cleanTracking(t?: LeadTracking): LeadTracking | undefined {
+  if (!t) return undefined
+  const kept = Object.fromEntries(Object.entries(t).filter(([, v]) => realValue(v))) as LeadTracking
+  return Object.keys(kept).length ? kept : undefined
+}
+
 // The Google Ads click a lead came from, each id under its own name, the way Google wants it. A
 // gbraid/wbraid that an older website script copied into gclid (they start with "0AAAA") isn't sent
 // as a gclid, which Google would refuse.
-export function googleClick(t?: LeadTracking) {
+export function googleClick(tracking?: LeadTracking) {
+  const t = cleanTracking(tracking)
   if (!t) return null
   const braid = (v?: string) => Boolean(v && /^0AAAA/.test(v))
   const gbraid = t.gbraid || (braid(t.gclid) && !t.wbraid ? t.gclid : undefined)
@@ -45,7 +58,7 @@ export function googleClick(t?: LeadTracking) {
   if (wbraid) return { wbraid }
   return null
 }
-export const hasAdClick = (t?: LeadTracking) => Boolean(t?.gclid || t?.gbraid || t?.wbraid)
+export const hasAdClick = (t?: LeadTracking) => Boolean(realValue(t?.gclid) || realValue(t?.gbraid) || realValue(t?.wbraid))
 
 // Fills in anything missing from the landing page's own address (?utm_source=...&gclid=...).
 export function completeTracking(t: LeadTracking): LeadTracking | undefined {
@@ -55,15 +68,14 @@ export function completeTracking(t: LeadTracking): LeadTracking | undefined {
       const params = new URL(out.landingPage).searchParams
       for (const [key, names] of fromUrl) {
         if (out[key]) continue
-        const value = names.map((n) => params.get(n)).find(Boolean)
+        const value = names.map((n) => realValue(params.get(n))).find(Boolean)
         if (value) out[key] = value.slice(0, 300)
       }
     } catch {
       // Not a full address; keep it as sent.
     }
   }
-  const kept = Object.fromEntries(Object.entries(out).filter(([, v]) => v)) as LeadTracking
-  return Object.keys(kept).length ? kept : undefined
+  return cleanTracking(out)
 }
 
 const host = (url?: string) => {
@@ -77,7 +89,7 @@ const host = (url?: string) => {
 // The one-glance answer to "where did this lead come from?". Short names (fb, ig, meta) only count
 // as whole words, so "craigslist" or "metasearch" aren't taken for Facebook.
 export function leadChannel(lead: Lead): string {
-  const t = lead.tracking
+  const t = cleanTracking(lead.tracking)
   if (lead.qrCodeId) return "QR code"
   if (!t) return "Unknown"
   const source = t.utmSource?.toLowerCase() ?? ""

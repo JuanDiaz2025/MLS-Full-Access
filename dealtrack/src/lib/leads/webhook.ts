@@ -6,7 +6,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 
-import { completeTracking, trackingAliases } from "@/lib/leads/tracking"
+import { completeTracking, realValue, trackingAliases } from "@/lib/leads/tracking"
 import type { Lead, LeadTracking } from "@/lib/leads/types"
 import { DATA_DIR } from "@/lib/store"
 
@@ -149,7 +149,7 @@ function withSiteTracking(payload: unknown): unknown {
   const fields = payload as Record<string, unknown>
   if (!Object.keys(fields).some((k) => k.startsWith("thb_"))) return payload
   const out: Record<string, unknown> = Object.fromEntries(Object.entries(fields).filter(([k]) => !k.startsWith("thb_")))
-  const filled = (v: unknown) => typeof v === "string" && v.trim() !== ""
+  const filled = (v: unknown) => typeof v === "string" && realValue(v) !== undefined
   for (const [name, suffix] of THB_TRACKING) {
     if (filled(out[name])) continue
     const value = [fields[`thb_lt_${suffix}`], fields[`thb_ft_${suffix}`]].find(filled)
