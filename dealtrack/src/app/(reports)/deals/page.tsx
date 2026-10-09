@@ -2,17 +2,22 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { ExternalLink } from "lucide-react"
 
+import PhoneCalls from "@/components/leads/phone-calls"
 import { PageHeader, Section } from "@/components/report"
 import SheetSync from "@/components/sheets/sheet-sync"
 import { buttonVariants } from "@/components/ui/button"
 import { activeAccount } from "@/lib/conversions/google"
+import { getCalls, RECENT_CALL_DAYS } from "@/lib/google-ads/calls"
+import { listLeads } from "@/lib/leads/store"
+import { load as loadReport } from "@/lib/load"
 import { getSheetSync, readCombined, syncSheetIfDue, type CombinedView } from "@/lib/sheets/sync"
 import { cn } from "@/lib/utils"
 
 export const metadata: Metadata = { title: "Deal History · DealTrack" }
 
 // The deals in your Google Sheet (2024–2026, all in one list) and what Google Ads cost per deal,
-// read live from the "2024–2026 Combined" tab DealTrack keeps up to date. From One Marketing
+// read live from the "2024–2026 Combined" tab DealTrack keeps up to date, plus the phone calls
+// from Google Ads with their campaign (the same list as on Leads & calls). From One Marketing
 // Command Center.
 const SHOWN = ["Year", "Lead Name", "Address", "Campaign", "Lead Source", "Marketing Fee", "Contract Signed", "Status"]
 
@@ -69,7 +74,13 @@ function Table({ header, rows, wide }: { header: string[]; rows: string[][]; wid
 
 export default async function DealsPage({ searchParams }: { searchParams: Promise<{ year?: string }> }) {
   const { year } = await searchParams
-  const [{ view, error }, sheet] = await Promise.all([load(), getSheetSync()])
+  const [{ view, error }, sheet, calls, leads] = await Promise.all([
+    load(),
+    getSheetSync(),
+    loadReport(() => getCalls(RECENT_CALL_DAYS)),
+    listLeads(),
+  ])
+  const callResult = calls.ok ? { calls: calls.data } : { error: calls.kind === "missing" ? "Google Ads isn't connected." : calls.message }
   const link = sheet.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${sheet.spreadsheetId}/edit` : undefined
 
   const cols = view ? SHOWN.map((h) => view.header.findIndex((x) => x.trim().toLowerCase() === h.toLowerCase())).filter((i) => i >= 0) : []
@@ -89,7 +100,7 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
       <div className="flex flex-wrap items-end justify-between gap-3">
         <PageHeader
           title="Deal History"
-          description={`Your 2024–2026 deals in one list, next to what Google Ads cost, from ${sheet.title ? `“${sheet.title}”` : "your spreadsheet"}.`}
+          description={`Your 2024–2026 deals in one list, next to what Google Ads cost, from ${sheet.title ? `“${sheet.title}”` : "your spreadsheet"}. Below them, the phone calls from your Google Ads, with their campaign.`}
         />
         {link && (
           <a href={link} target="_blank" rel="noreferrer" className={buttonVariants({ variant: "outline" })}>
@@ -143,6 +154,8 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
       )}
 
       {error && sheet.spreadsheetId && <p className="text-sm font-medium text-destructive">Couldn&apos;t read your sheet: {error}</p>}
+
+      <PhoneCalls result={callResult} addedCalls={leads.map((l) => l.callId).filter((id): id is string => Boolean(id))} />
 
       <SheetSync open={!view || Boolean(sheet.lastError)} {...sheet} />
     </>

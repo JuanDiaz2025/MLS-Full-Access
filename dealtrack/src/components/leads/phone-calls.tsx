@@ -3,11 +3,15 @@ import { Phone, PhoneMissed } from "lucide-react"
 import { formatNumber } from "@/components/dashboard/format"
 import CallLeadButton from "@/components/leads/call-lead-button"
 import Paged from "@/components/ui/paged"
-import type { Call, CallCounting } from "@/lib/google-ads/calls"
+import { RECENT_CALL_DAYS, type Call, type CallCounting } from "@/lib/google-ads/calls"
 import { callIdOf } from "@/lib/leads/call-id"
 import { cn } from "@/lib/utils"
 
-type Props = { result: { calls: Call[]; counting?: CallCounting | null } | { error: string } | null; addedCalls?: string[] }
+type Props = {
+  result: { calls: Call[]; counting?: CallCounting | null } | { error: string } | null
+  addedCalls?: string[]
+  days?: number // how far back the calls go
+}
 
 const duration = (s: number) => (s < 60 ? `${s} sec` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} sec` : ""}`.trim())
 
@@ -19,8 +23,8 @@ function when(start: string) {
   return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })
 }
 
-// Calls from Google Ads over the last 30 days, missed calls first in the highlights.
-export default function PhoneCalls({ result, addedCalls = [] }: Props) {
+// Calls from Google Ads over the last few months, missed calls first in the highlights.
+export default function PhoneCalls({ result, addedCalls = [], days = RECENT_CALL_DAYS }: Props) {
   const counting = result && "calls" in result ? result.counting : undefined
   const countingPrimary = counting?.filter((c) => c.primary) ?? []
   const calls = result && "calls" in result ? result.calls : []
@@ -37,7 +41,8 @@ export default function PhoneCalls({ result, addedCalls = [] }: Props) {
         <div>
           <h2 className="text-lg font-semibold">Phone calls from Google Ads</h2>
           <p className="text-sm text-muted-foreground">
-            Last 30 days. Google shows the caller&apos;s area code, not the full number.
+            Last {days} days. Google Ads gives DealTrack each call&apos;s time, length, area code and campaign; the caller&apos;s full
+            number is in Google Ads&apos; Call details report.
           </p>
         </div>
       </div>
@@ -150,16 +155,18 @@ export default function PhoneCalls({ result, addedCalls = [] }: Props) {
             </div>
           ) : (
             <div className="px-5 py-4 text-sm text-muted-foreground sm:px-6">
-              <p className="font-medium text-foreground">No calls from Google Ads in the last 30 days.</p>
-              <p className="mt-1">To track calls, in Google Ads:</p>
-              <ol className="mt-1 list-decimal space-y-1 pl-5">
-                <li>Open <strong>Admin → Account settings → Call reporting</strong>, turn it on, and save.</li>
-                <li>Add your phone number as a <strong>Call asset</strong> (Campaigns → Assets → + → Call).</li>
-                <li>
-                  For calls from your website&apos;s phone number too: <strong>Goals → Conversions → New → Phone calls → Calls to a
-                  number on your website</strong>, and add Google&apos;s snippet to WordPress.
-                </li>
-              </ol>
+              <p className="font-medium text-foreground">No calls from Google Ads in the last {days} days.</p>
+              {counting?.length ? (
+                <p className="mt-1">Call tracking is set up, so calls from your ads show here once Google Ads reports them.</p>
+              ) : counting ? (
+                <>
+                  <p className="mt-1">To track calls, in Google Ads:</p>
+                  <ol className="mt-1 list-decimal space-y-1 pl-5">
+                    <li>Open <strong>Admin → Account settings → Call reporting</strong>, turn it on, and save.</li>
+                    <li>Add your phone number as a <strong>Call asset</strong> (Campaigns → Assets → + → Call).</li>
+                  </ol>
+                </>
+              ) : null}
             </div>
           )}
         </>

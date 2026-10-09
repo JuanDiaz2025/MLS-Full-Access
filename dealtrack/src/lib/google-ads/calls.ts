@@ -19,6 +19,9 @@ type Row = {
   campaign?: { name?: string }
 }
 
+// How far back Leads & calls and Deal History list calls.
+export const RECENT_CALL_DAYS = 90
+
 export async function getCalls(sinceDays = 30): Promise<Call[]> {
   const rows = await gaql<Row>(
     `SELECT call_view.start_call_date_time, call_view.call_duration_seconds, call_view.call_status, call_view.caller_area_code,

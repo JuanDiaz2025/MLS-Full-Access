@@ -11,7 +11,7 @@ import WebhookSetup from "@/components/leads/webhook-setup"
 import { KpiGrid, PageHeader, Section } from "@/components/report"
 import { buttonVariants } from "@/components/ui/button"
 import { DATA_MANAGER_LIBRARY } from "@/lib/conversions/data-manager"
-import { callCounting, getCalls } from "@/lib/google-ads/calls"
+import { callCounting, getCalls, RECENT_CALL_DAYS } from "@/lib/google-ads/calls"
 import { leadSource } from "@/lib/leads/source"
 import { catchUp, leadsVersion } from "@/lib/leads/background"
 import { listLeads, listQrCodes } from "@/lib/leads/store"
@@ -128,7 +128,7 @@ export default async function LeadsPage() {
   after(() => catchUp())
   // The version first: a change saved while the leads are read then still shows on the next check.
   const version = await leadsVersion()
-  const [qrCodes, leads, calls, counting] = await Promise.all([listQrCodes(), listLeads(), load(() => getCalls(30)), callCounting().catch(() => null)])
+  const [qrCodes, leads, calls, counting] = await Promise.all([listQrCodes(), listLeads(), load(() => getCalls(RECENT_CALL_DAYS)), callCounting().catch(() => null)])
   const placements = new Map(qrCodes.map((c) => [c.id, c.placement]))
   const callResult = calls.ok ? { calls: calls.data, counting } : { error: calls.kind === "missing" ? "Google Ads isn't connected." : calls.message }
   const missed = calls.ok ? calls.data.filter((c) => c.missed).length : 0
@@ -195,7 +195,7 @@ export default async function LeadsPage() {
           { label: "Form leads, last 7 days", value: formatNumber(countSince(leads, 7)) },
           { label: "Form leads, last 30 days", value: formatNumber(countSince(leads, 30)) },
           { label: "Form leads, all time", value: formatNumber(leads.length) },
-          { label: "Ad calls, last 30 days", value: calls.ok ? formatNumber(calls.data.length) : "—", note: calls.ok ? undefined : "Google Ads not reachable" },
+          { label: `Ad calls, last ${RECENT_CALL_DAYS} days`, value: calls.ok ? formatNumber(calls.data.length) : "—", note: calls.ok ? undefined : "Google Ads not reachable" },
           { label: "Missed calls", value: calls.ok ? formatNumber(missed) : "—", tone: missed ? "bad" : "default" },
           { label: "Calls of 60s+", value: calls.ok ? formatNumber(calls.data.filter((c) => !c.missed && c.seconds >= 60).length) : "—" },
         ]}

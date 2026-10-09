@@ -163,7 +163,7 @@ export type SiteWeek = {
   week: string // Monday, YYYY-MM-DD
   publicPageviews: number
   internalPageviews: number
-  adLandings: number
+  adLandings: number // live-site pageviews with a Google click ID, test IDs (gclid=test…) left out
   formSubmits: number
 }
 
@@ -173,7 +173,7 @@ export async function getSiteWeeks(weeks = 26): Promise<SiteWeek[]> {
     select toStartOfWeek(timestamp, 1) as week,
       countIf(event = '$pageview' and ${PUBLIC}) as public_pv,
       countIf(event = '$pageview' and not (${PUBLIC})) as internal_pv,
-      countIf(event = '$pageview' and properties.$current_url ilike '%gclid=%') as ad_landings,
+      countIf(event = '$pageview' and ${PUBLIC} and properties.$current_url ilike '%gclid=%' and not (properties.$current_url ilike '%gclid=test%')) as ad_landings,
       countIf(event = '$autocapture' and properties.$event_type = 'submit' and ${PUBLIC}) as submits
     from events
     where timestamp >= toStartOfWeek(now(), 1) - interval ${weeks} week and timestamp < toStartOfWeek(now(), 1)
