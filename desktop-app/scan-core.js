@@ -84,6 +84,7 @@ const JS_SCRAPE_GRID = `(() => {
         const street = p('Street Address') || p('Address');
         out.push({ mls, addr: street, price: p('Price') || p('List Price'), sqft: p('SqFt'),
           bds: p('Bds') || p('Beds'), city: p('Postal City') || p('City'), age: p('Age'), dom: p('DOM'),
+          cls: p('Class') || p('Property Type') || p('Prop Type'),
           zip: (street.match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '' });
       });
     }
@@ -193,7 +194,7 @@ function filterCandidates(rowsByArea) {
     // A BLANK age field parses to 0, which used to read as "built this year" and
     // silently discarded the listing as too new. Missing is not new: let an
     // unknown age through to photo review, where the pictures settle it.
-    if (r._age > 0 && r._age < 25) return `too new — built ${2026 - r._age}, want 25+ years old`;
+    if (r._age > 0 && r._age < 25) return `too new — built ${new Date().getFullYear() - r._age}, want 25+ years old`;
     // Same treatment for a missing DOM: 0 means "the MLS didn't say", not
     // "listed today", and a blank must not be read as passing the cap either
     // way — it simply isn't grounds to drop.
@@ -1159,7 +1160,7 @@ function parseRedfinHome(text) {
     mls: redfinMlsId(rawMls, source),
     lotSqft: lot ? Math.round(Number(lot[1].replace(/,/g, '')) * (/acre/i.test(lot[2]) ? 43560 : 1)) : 0,
     propClass: /single/i.test(ptype) ? 'Res. Single Family' : ptype, ptype,
-    ptypeLabelled: /Property\s*type\s*:?\s*\n?\s*[A-Za-z]/i.test(t),
+    ptypeLabelled: /^[ \t]*Property[ \t]*type[ \t]*:?[ \t]*(?:\n[ \t]*)?[A-Za-z]/im.test(t),
   };
 }
 
@@ -1218,6 +1219,33 @@ function redfinPhotoUrls(html) {
     else if (/\/bigphoto\//.test(u) && !/\/bigphoto\//.test(had)) best.set(k, u);
   }
   return [...best.values()];
+}
+
+/** Only this listing's photos. A Redfin page also shows "Nearby similar homes"
+ *  and "Recently sold" thumbnails, all on the same photo CDN; judging those
+ *  would put a neighbour's interior on this house. Redfin names each photo
+ *  after its listing number ("426150277_3_0.jpg", "genMid.426150277_1.jpg"),
+ *  so photos are grouped by that stem and only this listing's group is kept:
+ *  the stem carrying the MLS #'s digits when known, else the group seen most
+ *  while stepping through the gallery. */
+const photoStem = u => String(u || '').split('/').pop().replace(/^gen[A-Za-z]+\./, '').split(/[_.]/)[0];
+function redfinSubjectPhotos(galleryUrls, pageUrls, mls) {
+  const all = redfinPhotoUrls((galleryUrls || []).concat(pageUrls || []).join(' '));
+  if (!all.length) return [];
+  const digits = String(mls || '').replace(/\D/g, '');
+  let stem = '';
+  if (digits.length >= 6) stem = (all.map(photoStem).find(st => st.includes(digits)) || '');
+  if (!stem) {
+    const count = {};
+    redfinPhotoUrls((galleryUrls || []).join(' ')).forEach(u => { const st = photoStem(u); count[st] = (count[st] || 0) + 1; });
+    stem = Object.keys(count).sort((a, b) => count[b] - count[a])[0] || '';
+  }
+  if (!stem) {
+    const count = {};
+    all.forEach(u => { const st = photoStem(u); count[st] = (count[st] || 0) + 1; });
+    stem = Object.keys(count).sort((a, b) => count[b] - count[a])[0] || '';
+  }
+  return all.filter(u => photoStem(u) === stem);
 }
 
 // ---- Redfin's own listing data (v1.52) ----
@@ -1283,7 +1311,10 @@ const isSfrType = t => t === '1' || t === 'sfr' || t === 'propertyType:6' || /si
  *  potential" would mislead. '' when the page does not say. */
 function redfinPageType(text) {
   const t = String(text || '').replace(/\r/g, '');
-  const lab = (t.match(/Property\s*type\s*:?\s*\n?\s*([A-Za-z][^\n]{1,40})/i) || [])[1] || '';
+  // The label starts its own line ("Property type: Townhouse", or the label
+  // then the value on the next line) — a sentence in the description that
+  // happens to say "property type" is not it.
+  const lab = (t.match(/^[ \t]*Property[ \t]*type[ \t]*:?[ \t]*(?:\n[ \t]*)?([A-Za-z][^\n]{1,40}?)[ \t]*$/im) || [])[1] || '';
   if (lab) return lab.trim();
   const line = t.split('\n').map(x => x.trim()).find(x =>
     /^(single[\s-]*family(\s+(residential|home|residence))?|condo(minium)?(\/co-?op)?|co-?op|town\s*house|townhome|multi[\s-]*family(\s*\(.*\))?|duplex|triplex|fourplex|mobile\s*(\/manufactured)?\s*home|manufactured\s*home|vacant\s*land)$/i.test(x));
@@ -1306,7 +1337,7 @@ function redfinBuyBox(h, area, phase) {
   // 10 Oct: "not a single family as well on redfin scan").
   else if (phase === 'page') return t ? `not a single-family home — ${t}` : 'property type not confirmed as single-family — skipped';
   const y = Number(h.year) || 0;
-  if (y > 1800 && 2026 - y < 25) return `too new — built ${y}, want 25+ years old`;
+  if (y > 1800 && new Date().getFullYear() - y < 25) return `too new — built ${y}, want 25+ years old`;
   return '';
 }
 
@@ -1338,6 +1369,7 @@ const addDays = (day, n) => { const d = new Date(String(day) + 'T00:00:00Z'); d.
  *  'recheck' whose wait is over. */
 function ledgerSkips(entry, today) {
   if (!entry) return false;
+  if (entry.verdict === 'buybox') return false;   // outside the box last time; judged afresh if it now fits
   if (entry.verdict !== 'recheck') return true;
   return String(today || '') < String(entry.recheck_after || '');
 }
@@ -1410,7 +1442,7 @@ module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
-  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType,
+  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType, redfinSubjectPhotos, photoStem,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,

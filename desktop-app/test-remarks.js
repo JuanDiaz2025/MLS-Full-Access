@@ -223,6 +223,23 @@ const eq = (a, b, m) => {
   eq(/not a fixer/.test(P({ decision: 'DROP', reason: 'new kitchen' })), true, 'photos: an AI drop stays a drop');
 }
 
+// ---- 10 Oct bug sweep ----
+{
+  const g = ['https://ssl.cdn-redfin.com/photo/9/bigphoto/277/426150277_0.jpg', 'https://ssl.cdn-redfin.com/photo/9/bigphoto/277/426150277_1_0.jpg',
+             'https://ssl.cdn-redfin.com/photo/9/bigphoto/277/426150277_2_0.jpg'];
+  const nb = ['https://ssl.cdn-redfin.com/photo/9/mbphotov3/111/genMid.426111111_0.jpg', 'https://ssl.cdn-redfin.com/photo/9/mbphotov3/222/genMid.426122222_0.jpg'];
+  eq(core.redfinSubjectPhotos(g.concat(nb), nb, 'SF426150277').length, 3, 'photos: the similar-homes thumbnails are not this house');
+  eq(core.redfinSubjectPhotos(g.concat(nb), nb, '').length, 3, 'photos: with no MLS #, the gallery\'s own listing wins');
+  eq(core.redfinSubjectPhotos([], nb, '').length, 1, 'photos: never a mix of listings');
+  eq(core.redfinPageType('About this home\nA rare property type for this block, a detached cottage.\nSingle-family\n'), 'Single-family',
+    'type: "property type" inside a sentence is not the label');
+  eq(core.redfinPageType('Facts\nProperty type\nTownhouse\nYear built 1970'), 'Townhouse', 'type: label on its own line, value on the next');
+  eq(core.ledgerSkips({ verdict: 'buybox' }, '2026-10-10'), false, 'memory: a house outside the box last time is judged again if it now fits (price cut)');
+  const r = core.filterCandidates({ 'All Alameda': { county: 'Alameda', rows: [
+    { mls: 'BE1', addr: '1 A St', price: '$800,000', sqft: '1,000', age: '60', dom: '3', cls: 'Townhouse' }] } });
+  eq(r.rejected.length, 1, 'MLS grid: a townhouse class is dropped');
+}
+
 // ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
 {
   const A = core.parseRedfinAgent;

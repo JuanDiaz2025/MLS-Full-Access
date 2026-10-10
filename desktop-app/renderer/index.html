@@ -284,6 +284,11 @@
   function setScanButtons(running){
     $('start').disabled = running; $('pause').disabled = !running; $('resume').disabled = true; $('stop').disabled = !running;
     $('refreshBoard').disabled = running;
+    // One run at a time: the Redfin buttons are off while anything runs (a
+    // click mid-scan used to reset Start/Stop while the scan kept going, and
+    // "Sign in to Redfin" sent the scan's own window to the login page).
+    if ($('redfinScan')) $('redfinScan').disabled = running;
+    if ($('redfinSignIn')) $('redfinSignIn').disabled = running;
   }
 
   $('openLogin').onclick = async () => {
@@ -345,10 +350,11 @@
   $('redfinScan').onclick = async () => {
     const areaIndexes = selectedAreas();
     if (!areaIndexes.length) { log('Pick at least one area to scan.','warn'); return; }
-    setScanButtons(true); $('redfinScan').disabled = true;
+    setScanButtons(true);
     $('finished').style.display='none';
-    await window.fs.redfinScan({ areaIndexes });
-    setScanButtons(false); $('redfinScan').disabled = false;
+    const r = await window.fs.redfinScan({ areaIndexes });
+    if (r && r.error === 'already running') return;   // the other run still owns the buttons
+    setScanButtons(false);
   };
   $('redfinSignIn').onclick = () => window.fs.redfinSignIn();
   $('refreshBoard').onclick = async () => {

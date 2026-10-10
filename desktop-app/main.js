@@ -75,13 +75,23 @@ ipcMain.on('set-config', (_e, c) => {
  * JPEGs, `text` is the prompt. Resolves {text} or throws with the provider's
  * own error message, so a wrong key or model name says so in the log.
  */
+// One stuck AI request used to hang the whole run (and Test key): every call
+// is abandoned after AI_TIMEOUT_MS and counts as a failed call, not a verdict.
+const AI_TIMEOUT_MS = 120000;
 async function aiCall(photos, text, maxTokens) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), AI_TIMEOUT_MS);
+  try { return await aiCallOnce(photos, text, maxTokens, ac.signal); }
+  catch (e) { throw ac.signal.aborted ? new Error(`no answer from the AI within ${AI_TIMEOUT_MS / 1000} s`) : e; }
+  finally { clearTimeout(t); }
+}
+async function aiCallOnce(photos, text, maxTokens, signal) {
   const key = String(cfg.apiKey || '').trim(), model = aiModel();
   if (aiProvider(key) === 'anthropic') {
     const content = photos.map(b64 => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }));
     content.push({ type: 'text', text });
     const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
+      method: 'POST', signal,
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({ model, max_tokens: maxTokens || 1024, messages: [{ role: 'user', content }] }),
     });
@@ -94,7 +104,7 @@ async function aiCall(photos, text, maxTokens) {
     type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64, detail: 'auto' },
   })));
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
+    method: 'POST', signal,
     headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
     // max_completion_tokens, not max_tokens: the newer models refuse the old name
     body: JSON.stringify({ model, max_completion_tokens: maxTokens || 1024, messages: [{ role: 'user', content }] }),
@@ -312,6 +322,18 @@ function markRecheck(ledgerKey, sheetId) {
   if (!rr.date) rr.date = 'Coming Soon recheck';
   saveRereview(rr);
   return true;
+}
+
+/** Take ids off the re-review list again — for a recheck that ended without
+ *  a sheet write (held, or no sheet connected), which nothing else would clear;
+ *  left there, every later scan warned about it and treated it as unseen. */
+function clearRecheck(ids) {
+  const list = (ids || []).map(x => String(x || '').trim().toUpperCase()).filter(Boolean);
+  if (!list.length) return;
+  const rr = loadRereview();
+  let n = 0;
+  list.forEach(k => { if (rr.mls[k]) { delete rr.mls[k]; n++; } });
+  if (n) { if (!Object.keys(rr.mls).length) rr.date = ''; saveRereview(rr); }
 }
 
 /** Record a Coming Soon / Early Access verdict: final once photos decided it,
@@ -778,8 +800,11 @@ async function autoDecide(c) {
     const gal = c._gal || {};
     const photos = gal.b64 || await collectPhotos(gal.urls, 20);
     if (!photos.length) {
-      // Never guess with no pictures — Rule #2 says judge from the gallery.
-      return { decision: 'drop', reason: 'no photos could be loaded — insufficient photos to judge' };
+      // No pictures is no verdict (Rule #2 says judge from the gallery): the
+      // text rules stand, and a Coming Soon listing is rechecked later. It used
+      // to be a DROP, which made a Coming Soon with no photos posted yet a
+      // final C.
+      return { error: true, reason: 'no photos could be loaded for the AI check' };
     }
     log(`  analysing ${photos.length} photo(s)…`);
     let text;
@@ -905,7 +930,13 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       if (filterRejects.length) log(`[${label}] ${filterRejects.length} failed the buy-box filter — all logged with the reason`);
 
       const seen = loadLedger();
-      const fresh = cityCands.filter(c => !core.ledgerSkips(seen[String(c.mls || '').trim().toUpperCase()], todayKey()));
+      // A house the Redfin scan already kept is on the sheet under the number
+      // Redfin showed (sometimes without the board prefix, e.g. 41149486 for
+      // BE41149486) — match on digits so it is not added a second time.
+      const redfinKept = new Set(Object.keys(seen).filter(k => /^RF\d+$/.test(k) && seen[k].verdict === 'kept' && seen[k].mls)
+        .map(k => String(seen[k].mls).replace(/\D/g, '')).filter(d => d.length >= 6));
+      const fresh = cityCands.filter(c => !core.ledgerSkips(seen[String(c.mls || '').trim().toUpperCase()], todayKey())
+        && !redfinKept.has(String(c.mls || '').replace(/\D/g, '')));
       const skipped = cityCands.length - fresh.length;
       runKpi.skippedAlreadyChecked += skipped;
 
@@ -933,11 +964,12 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       // Everything rejected in this city, with its reason, for the Rejected tab.
       // Seeded with the buy-box filter failures so both stages are represented.
       const cityRejects = filterRejects.map(r => ({ ...r, stage: 'Buy-box filter' }));
+      const cityRR = [];   // Coming Soon rechecks this city put on the re-review list
       for (let i = 0; i < fresh.length; i++) {
         if (await stopRequested()) break;   // save what was read, then stop
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
-        if (markRecheck(c.mls, c.mls)) log('  Coming Soon recheck — opened again now that its photos may be up', 'good');
+        if (markRecheck(c.mls, c.mls)) { cityRR.push(c.mls); log('  Coming Soon recheck — opened again now that its photos may be up', 'good'); }
         const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false }));
         // Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT
         // listing on screen. Judging that would put another property's photos,
@@ -965,7 +997,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           addr: c.addr, remarks: gal.remarks, privateRemarks: gal.privateRemarks,
           condition: gal.condition, occupiedBy: gal.occupiedBy, propClass: gal.propClass,
           photos: n, photosReliable: gal.gridOk,
-          dom: domOf(c), yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
+          dom: domOf(c), yearBuilt: c._yearBuilt || (c._age > 0 ? new Date().getFullYear() - c._age : ''),
           price: gal.listPrice || c._price, origPrice: gal.origPrice,
           ppsfRatio: cityMedians && cityMedians[c._cityKey] ? c._ppsf / cityMedians[c._cityKey] : 0,
           whenUnsure: cfg.whenUnsure,
@@ -982,7 +1014,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         // A Coming Soon listing with only its first few photos posted cannot be
         // judged from the pictures yet — the AI would drop it as "insufficient
         // photos". It stays as the text scored it, and says why.
-        const csTooFew = c._comingSoon && n > 0 && n <= 4;
+        const csTooFew = c._comingSoon && n <= 4;   // none posted yet counts too
         if (csTooFew) q.why += ' + AI photo check waits for the photos to post';
         let aiJudged = false;   // a photo verdict was reached (makes a Coming Soon verdict final)
         if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C' && !csTooFew) {
@@ -1063,7 +1095,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             lotSqft: core.num(c.lotSqft || 0) || '',
             // The report's own year beats 2026 - Age, which reads "2026" when
             // the grid's Age column is blank.
-            yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
+            yearBuilt: c._yearBuilt || (c._age > 0 ? new Date().getFullYear() - c._age : ''),
             dom: domOf(c), price: c._price, ppsf: c._ppsf,
             arv: 0, arvBasis: 'not comped yet',
             recommendation: 'Needs Comps', flipQuality: '', score: '',
@@ -1087,7 +1119,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const deal = core.scoreDeal({ price: c._price, sqft: c._sqft, arv: comp.arv });
         cityLeads.push({ mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip, beds: c.bds, baths: c.baths || '',
           sqft: c._sqft, lotSqft: core.num(c.lotSqft || 0) || '',
-          yearBuilt: c._yearBuilt || (c._age > 0 ? 2026 - c._age : ''), dom: domOf(c), price: c._price,
+          yearBuilt: c._yearBuilt || (c._age > 0 ? new Date().getFullYear() - c._age : ''), dom: domOf(c), price: c._price,
           arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
           arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
           link: core.mlsUrl(c.mls),
@@ -1137,6 +1169,9 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           else log(`[${label}] could not write the Lead Board file: ${b.error}`, 'warn');
         }
       }
+      // Whatever the sheet did not re-judge (a skipped mismatch, a Stop, no sheet
+      // connected) comes off the re-review list; what it did is already off.
+      clearRecheck(cityRR);
       const cityA = cityLeads.filter(l => l.bucket === 'A').length;
       log(`━━━ ${label} done: ${cityA} A — Work Now · ${cityLeads.length - cityA} B — AI Review · `
         + `${cityRejects.filter(r => r.stage !== 'Buy-box filter').length} C — Auto-Pass ━━━`, 'good');
@@ -1314,9 +1349,12 @@ async function collectPhotosDirect(urls, max) {
       // Through the Redfin window's own session (its cookies, as that page
       // would load it), with Redfin as the referrer.
       const ses = ensureRedfinWindow().webContents.session;
-      const r = await timeLimit((ses.fetch ? ses.fetch.bind(ses) : net.fetch)(u, { headers: { Referer: 'https://www.redfin.com/' } }), 20000, 'photo');
-      if (!r.ok) continue;
-      let img = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
+      const buf = await timeLimit((async () => {
+        const r = await (ses.fetch ? ses.fetch.bind(ses) : net.fetch)(u, { headers: { Referer: 'https://www.redfin.com/' } });
+        return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
+      })(), 20000, 'photo');
+      if (!buf) continue;
+      let img = nativeImage.createFromBuffer(buf);
       if (img.isEmpty()) continue;
       const { width, height } = img.getSize();
       if (Math.max(width, height) > 768) img = img.resize(width >= height ? { width: 768 } : { height: 768 });
@@ -1392,6 +1430,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
   const MAX_PAGES = 25;
   let found = 0;
+  const runRR = [];   // re-review keys this run added; cleared again even if the run fails
   try {
     rfDiag = [];
     log('━━━ Redfin — Coming Soon & Early Access (no MLS sign-in) ━━━', 'good');
@@ -1399,8 +1438,10 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
     // The ledger knows every MLS # the MLS scans have checked; Redfin shows the
     // same numbers, sometimes without the board's prefix — match on digits too.
     const seen = loadLedger();
-    const seenDigits = new Set(Object.keys(seen).map(k => k.replace(/\D/g, '')).filter(d => d.length >= 6));
-    const isSeen = id => !!id && (seen[id] || seenDigits.has(id.replace(/\D/g, '')));
+    // Redfin's own entries (RF<homeId>) are left out: a home id is not an MLS #.
+    const mlsKeys = Object.keys(seen).filter(k => !/^RF\d+$/.test(k));
+    const seenDigits = new Set(mlsKeys.map(k => k.replace(/\D/g, '')).filter(d => d.length >= 6));
+    const isSeen = id => !!id && !/^RF\d+$/.test(id) && ((seen[id] && !/^RF/.test(id)) || seenDigits.has(id.replace(/\D/g, '')));
     for (let ai = 0; ai < areas.length; ai++) {
       if (await stopRequested()) break;
       const area = areas[ai];
@@ -1448,13 +1489,14 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         if (page > MAX_PAGES) log(`  ⚠ ${label}: stopped at ${MAX_PAGES} pages of Redfin results — some homes not looked at`, 'warn');
         if (cardsSeen) source = 'Redfin search cards';
       }
+      if (control.stopped) break;   // a Stop is not "Redfin returned nothing"
       if (!cardsSeen) {
         const dir = path.join(app.getPath('userData'), 'grid-debug');
         try {
           fs.mkdirSync(dir, { recursive: true });
           const f = path.join(dir, `redfin-${area.county.replace(/\W+/g, '-')}-${Date.now()}`);
           fs.writeFileSync(f + '.txt', String(await rfJs('location.href + "\\n\\n" + document.body.innerText.slice(0, 20000)').catch(() => '')));
-          fs.writeFileSync(f + '.png', (await ensureRedfinWindow().webContents.capturePage()).toPNG());
+          fs.writeFileSync(f + '.png', (await timeLimit(ensureRedfinWindow().webContents.capturePage(), 15000, 'screenshot')).toPNG());
           log(`  ${label}: read 0 homes off Redfin — page saved to ${f}.txt/.png for checking`, 'error');
         } catch (_) { log(`  ${label}: read 0 homes off Redfin`, 'error'); }
         continue;
@@ -1467,27 +1509,45 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
       // left to Redfin's search filters: single-family only, under the area's
       // cap (never over $3M), 25+ years old.
       const kept = [], rejects = [];
-      const rejectRow = (c, reason, stage) => ({ mls: c.mls || ('RF' + c.homeId), addr: c.addr, city: (c.addr.split(',')[1] || area.county).trim(),
+      // Keyed on the MLS # only for a PHOTO verdict; a buy-box skip judged from
+      // Redfin's data is keyed RF<homeId>, so it can never stop the MLS scan
+      // from judging that listing itself (every Rejected MLS # is pulled into
+      // the MLS scan's ledger).
+      const rejectRow = (c, reason, stage) => ({ mls: stage === 'Photo review' && c.mls ? c.mls : ('RF' + c.homeId), addr: c.addr, city: (c.addr.split(',')[1] || area.county).trim(),
         zip: (c.addr.match(/\b(9\d{4})$/) || [])[1] || '', price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', sqft: c.sqft,
         dom: c.dom, reason, stage, link: c.url });
       const inBox = [];
       early.forEach(c => {
         const why = core.redfinBuyBox(c, area, 'list');
-        if (why) { rejects.push(rejectRow(c, why, 'Buy-box filter')); log(`  skip ${c.addr} — ${why}`); }
-        else inBox.push(c);
+        if (!why) { inBox.push(c); return; }
+        log(`  skip ${c.addr} — ${why}`);
+        const prev = seen['RF' + c.homeId];
+        // Logged to the sheet once per reason, not on every run.
+        if (!(prev && prev.verdict === 'buybox' && prev.reason === why)) {
+          rejects.push(rejectRow(c, why, 'Buy-box filter'));
+          ledgerRecord('RF' + c.homeId, 'buybox', { addr: c.addr, reason: why });
+        }
       });
       const fresh = inBox.filter(c => !core.ledgerSkips(seen['RF' + c.homeId], todayKey()));
+      const rrIds = runRR;   // re-review keys this run put on the list
       log(`${label}: ${cardsSeen} houses on Redfin → ${early.length} Coming Soon / Early Access → ${inBox.length} single-family under the cap → ${fresh.length} new`, 'good');
       // --- read each one's own page, judge it like an MLS listing ---
       for (let i = 0; i < fresh.length; i++) {
         if (await stopRequested()) break;
         const c = fresh[i];
         log(`[Redfin ${area.county}] opening ${i + 1}/${fresh.length}: ${c.addr || c.url} — ${c.badge}`, 'good');
-        if (markRecheck('RF' + c.homeId, c.mls || ('RF' + c.homeId))) log('  recheck — opened again now that its photos may be up', 'good');
+        const isRecheck = !!(seen['RF' + c.homeId] && seen['RF' + c.homeId].verdict === 'recheck');
+        if (isRecheck) log('  recheck — opened again now that its photos may be up', 'good');
         send('review', { i: i + 1, total: fresh.length, city: area.county, mls: 'RF' + c.homeId, addr: c.addr,
           price: c.price, sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: 0,
           remarks: c.remarks || '', details: {}, verdict: 'reviewing', why: 'Reading the Redfin page' });
         await rfNav(c.url, 4000);
+        // Redfin sends a removed or moved listing somewhere else; judging that
+        // page would put another house's facts under this address. Skip without
+        // a ledger entry, so the next run tries again.
+        const onHome = u => new RegExp('/home/' + c.homeId + '(?:$|[/?#])').test(String(u || ''));
+        const at = String(await rfJs('location.href').catch(() => '')).split(/[?#]/)[0];
+        if (!onHome(at)) { log(`  skipped — Redfin opened ${at || 'nothing'} instead of this home; will try again next run`, 'warn'); continue; }
         const text = await readWholePage(rfJs);
         const html = await rfJs('document.documentElement.innerHTML').catch(() => '');
         const h = core.parseRedfinHome(text);
@@ -1510,12 +1570,24 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         if (/sign in|join or sign/i.test(text.slice(0, 3000)) && !h.remarks) log('  this Early Access home is only shown in full when signed in to Redfin', 'warn');
         if (isSeen(h.mls)) { log(`  already checked as ${h.mls} by an MLS scan — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
         const city = (c.addr.split(',')[1] || area.county).trim();
+        const sheetId = String(h.mls || ('RF' + c.homeId)).toUpperCase();
+        if (isRecheck) {
+          const rr = loadRereview(); rr.mls[sheetId] = true; if (!rr.date) rr.date = 'Coming Soon recheck'; saveRereview(rr);
+          rrIds.push(sheetId);
+        }
         // PHOTOS FIRST (Bryan, 2 Oct: "only fixer property, look on the photo
         // first"). Every photo is stepped through in Redfin's viewer and judged
         // before anything else; a house the photos do not show as a fixer is
         // dropped here, before the agent or the description is even read.
         const seenPhotos = await viewRedfinPhotos(Number(cfg.scrollPauseMs) || 700);
-        const urls = core.redfinPhotoUrls(seenPhotos.join(' ') + ' ' + html);
+        // Clicking the big photo can lead off the page (street view, a tour);
+        // come back before anything else is read, or the agent would be the
+        // wrong page's.
+        const after = String(await rfJs('location.href').catch(() => '')).split(/[?#]/)[0];
+        const galleryOk = onHome(after);   // photos seen off-page are not this house's
+        if (!galleryOk) await rfNav(c.url, 3000);
+        // This listing's photos only — never the "similar homes" thumbnails.
+        const urls = core.redfinSubjectPhotos(galleryOk ? seenPhotos : [], core.redfinPhotoUrls(html), h.mls);
         log(`  looked through ${urls.length} photo(s)`, urls.length > 4 ? 'good' : 'warn');
         const tooFew = urls.length <= 4;
         let aiKept = false, aiWhy = '';
@@ -1549,6 +1621,18 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // not download): the house cannot be shown to be a fixer, so it is NOT
         // a lead. It is held and opened again in a couple of days.
         if (!aiKept && !core.isConfirmed(c.addr)) {
+          // The description alone can still rule a house OUT for good (renovated,
+          // fire, tenant, structural) — no point rechecking those.
+          const pre = core.qualify({ addr: c.addr, remarks: h.remarks, propClass: h.propClass, photos: urls.length,
+            photosReliable: false, dom: h.dom, yearBuilt: h.year, price: c.price, whenUnsure: cfg.whenUnsure, comingSoon: true });
+          if (pre.hard) {
+            log(`  C — Auto-Pass — ${pre.why}`);
+            runKpi.reviewed++; runKpi.bucketC++; runKpi.dropped++;
+            rejects.push({ mls: sheetId, addr: c.addr, city, zip: '', price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '',
+              sqft: c.sqft, dom: h.dom, reason: 'Auto-pass: ' + pre.why, score: pre.score, why: pre.why, stage: 'Qualification gate', link: c.url });
+            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, city, mls: h.mls });
+            continue;
+          }
           const why = tooFew ? `only ${urls.length} photo(s) posted so far` : 'photos could not be judged';
           log(`  held — ${why}; not added until the photos show it is a fixer`, 'warn');
           runKpi.reviewed++;
@@ -1556,6 +1640,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
             sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: urls.length, remarks: h.remarks || '', details: {},
             verdict: 'drop', why: 'held — ' + why });
           recordComingSoon('RF' + c.homeId, { provisional: true, decision: 'drop', extra: { addr: c.addr, city, mls: h.mls } });
+          clearRecheck([sheetId]);
           continue;
         }
         const ag = core.parseRedfinAgent(await rfJs(JS_REDFIN_AGENT(Number(cfg.scrollPauseMs) || 700)).catch(() => null));
@@ -1574,6 +1659,13 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // Fixers only (Bryan, 2 Oct: "on early access make sure only fixer").
         // A Coming Soon / Early Access home stays only if its description says
         // it needs work, or the AI saw the wear in its photos.
+        // The photos showed a fixer: the text score can no longer drop it — only
+        // a hard exclusion (renovated wording, fire, tenant, structural) can. A
+        // low score from "staged" or "newer build" used to make it a final C.
+        if (aiKept && !q.hard && q.decision !== 'keep') {
+          Object.assign(q, { bucket: 'B', label: core.BUCKET_LABEL.B, decision: 'keep', score: Math.max(q.score, 35),
+            why: q.why + ' (kept: the photos show a fixer)' });
+        }
         const notFixer = q.decision === 'keep' ? core.redfinFixerGate({ addr: c.addr, remarks: h.remarks, aiKept }) : '';
         if (notFixer) Object.assign(q, { bucket: 'C', label: core.BUCKET_LABEL.C, decision: 'drop', score: Math.min(q.score, 30), why: q.why + ' — ' + notFixer });
         runKpi.reviewed++; runKpi['bucket' + q.bucket]++;
@@ -1609,11 +1701,12 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           provisional: !aiKept && !q.hard && !core.isConfirmed(c.addr) });
       }
       found += kept.length;
+      let synced = false;
       if (kept.length || rejects.length) {
         const rows = kept.map(toSheetRow);
         if (googleReady() && googleCfg().autoSync) {
           const r = await googleSync(rows, rejects);
-          if (r.ok) { runKpi.pushed += r.leads.added; log(`[Redfin ${area.county}] sheet: ${r.leads.added} new lead(s)`, 'good'); }
+          if (r.ok) { synced = true; runKpi.pushed += r.leads.added; log(`[Redfin ${area.county}] sheet: ${r.leads.added} new lead(s)`, 'good'); }
           else log(`[Redfin ${area.county}] sheet write failed: ${r.error} — kept in the local backup`, 'warn');
         }
         writeBackup(rows, rejects);
@@ -1622,6 +1715,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           log(b.ok ? `[Redfin ${area.county}] ${kept.length} lead(s) added to today's Lead Board file` : `could not write the Lead Board file: ${b.error}`, b.ok ? 'good' : 'warn');
         }
       }
+      clearRecheck(rrIds);   // idempotent: what the sheet took is already off
       send('report', { leads: kept, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
     }
     return { ok: true, found };
@@ -1629,6 +1723,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
     log('Redfin scan error: ' + e.message, 'error'); return { ok: false, error: e.message };
   } finally {
     control.running = false;
+    clearRecheck(runRR);
     try { if (rfWin && !rfWin.isDestroyed()) rfWin.close(); } catch (_) {}
     rfWin = null;
     try {

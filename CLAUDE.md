@@ -598,7 +598,7 @@ in the remarks (whole phrases — "private remarks", "private yard" are not).
 The Coming Soon pass also ticks a Private / Office Exclusive status when the
 search form offers one.
 
-### Coming Soon & Early Access — CURRENT behaviour (v1.58, read this first)
+### Coming Soon & Early Access — CURRENT behaviour (v1.59, read this first)
 
 The version notes below are history; where they disagree, this block wins.
 
@@ -652,6 +652,26 @@ The version notes below are history; where they disagree, this block wins.
   go to the sheet and to the Lead Board file; a run that finds leads opens the
   board with them on the clipboard for **Add scan**. Every Redfin answer is in
   `<userData>/redfin-last-run.txt`; zero homes read → `grid-debug/redfin-*`.
+- **v1.59 bug sweep (Bryan 10 Oct: "make sure to fix all the bugs"; 12
+  findings from an independent review, all fixed):** only THIS listing's
+  photos are judged (`core.redfinSubjectPhotos` — Redfin's "similar homes" /
+  "recently sold" thumbnails share the CDN and used to be sent to the AI and
+  counted toward the ≤4 rule; grouped by the listing-number file stem); a
+  photo-confirmed fixer can't be dropped by the text score (only a hard
+  exclusion can; it becomes at least B); an MLS Coming Soon with 0 photos is
+  held, not a final C (`autoDecide` with no photos = no verdict); Redfin
+  buy-box skips are keyed `RF<homeId>` (an MLS # on Rejected blocks the MLS
+  scan) and logged once per reason (ledger `buybox`, which never blocks a
+  later price cut); re-review keys always cleared (`clearRecheck`, also on a
+  failed run); "property type" only read as a label at the start of a line;
+  exact `/home/<id>` match; the window must be on the home before reading
+  (redirect = skip, retry next run) and again after the photo viewer; AI calls
+  time out after 120 s, photo downloads 20 s incl. the body; Redfin buttons
+  disabled during any run; MLS fallback grid reads Class; the MLS scan skips a
+  house the Redfin scan already kept (digits match, e.g. 41149486 vs
+  BE41149486); the year is the current year, not 2026; a held home whose
+  description has a hard exclusion is dropped at once. Re-tested end to end in
+  the real app (mock Redfin + mock AI, 13 homes, two runs).
 - **Not yet run against live Redfin** — the first real run's log and
   `redfin-last-run.txt` are what to ask for if it finds nothing.
 
