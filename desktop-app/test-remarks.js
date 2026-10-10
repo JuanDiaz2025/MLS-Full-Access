@@ -132,11 +132,22 @@ const eq = (a, b, m) => {
     const b3 = core.buildBoard([H, ['EB41149866', '1559 Grand Ave, San Leandro, CA 94577', 'B — AI Review', 'Active', '', '', '50', ''],
       ['RF120807', '1559 Grand Ave, San Leandro, CA 94577', 'B — AI Review', 'Coming Soon', '', '', '50', '']], {}, new Date()).map(r => r.join('|')).join('\n');
     eq([/EB41149866/.test(b3), /RF120807/.test(b3)], [true, false], 'board: the MLS copy of a house beats its Redfin copy');
+    const b4 = core.buildBoard([H, ['X5', '100 Oak St, Oakland, CA 94601', 'B — AI Review', 'Active', '', '', '50', ''],
+      ['X6', '100 Oak Ct, Oakland, CA 94601', 'B — AI Review', 'Active', '', '', '50', '']], {}, new Date()).map(r => r.join('|')).join('\n');
+    eq([/X5/.test(b4), /X6/.test(b4)], [true, true], 'board: Oak St and Oak Ct are different houses');
     eq([/X1/.test(b2), /X2/.test(b2), /X3/.test(b2), /X4/.test(b2)], [true, true, false, true], 'board: different streets never merge; "Avenue" vs none still match');
   }
   eq(core.fullAddress('7423 Monique Place', 'Rohnert Park', '94928.'), '7423 Monique Place, Rohnert Park, CA 94928', 'address: zip loses a stray full stop');
   eq(core.filterCandidates({ k: { county: 'Napa', rows: [{ mls: 'BA326082043', addr: '6003 Wragg Canyon Road', price: '210000', sqft: '1', dom: '3', age: '50' }] } }).candidates.length,
     0, 'a 1 sqft listing is not read as $210,000/sqft');
+  {
+    const f = core.filterCandidates({ k: { county: 'Napa', rows: [{ mls: 'BA326082043', addr: '6003 Wragg Canyon Road', price: '210000', sqft: '1', dom: '3', age: '50' },
+      { mls: 'X9', addr: '5 Elm St', price: '500000', sqft: '1000', dom: '3', age: '60' }] } });
+    eq([f.rejected.length, /1 sqft/.test(f.rejected[0]._reason), f.medians.k || f.medians.Napa || Object.values(f.medians)[0]], [1, true, 500],
+      'a placeholder sqft is rejected WITH a reason and kept out of the $/sqft median');
+    eq(core.filterCandidates({ k: { county: 'San Francisco', rows: [{ mls: 'SF426150277', addr: '21 College Terrace', price: '995000', sqft: '', dom: '3', age: '112' }] } }).candidates.length,
+      1, 'the confirmed deal goes through even with no sqft listed');
+  }
   eq([core.redfinLabel('COMING SOON'), core.redfinLabel('Early Access'), core.redfinLabel('Compass Exclusive')],
     ['Coming Soon', 'Coming Soon · Early Access', 'Private Listing'], 'Redfin: board label is coloured Coming Soon / Private');
   eq(core.redfinPhotoUrls('<img src="https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_0.jpg"> "https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_1_0.jpg" https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_0.jpg').length,

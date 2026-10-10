@@ -926,7 +926,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       // than no number at all.
       const filterRejects = (cityFiltered || []).map(r => ({
         mls: r.mls, addr: r.addr, city: cityOf(r), zip: r.zip || '',
-        price: r._price, ppsf: r._ppsf, sqft: r._sqft, dom: r._dom, reason: r._reason,
+        price: r._price, ppsf: r._ppsf || '', sqft: r._sqftRaw || r._sqft || '', dom: r._dom, reason: r._reason,
         link: core.mlsUrl(r.mls),
       }));
       if (filterRejects.length) log(`[${label}] ${filterRejects.length} failed the buy-box filter — all logged with the reason`);
@@ -1440,7 +1440,8 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
     // The board's own leads and the Rejected tab first, as the MLS scan does:
     // a Redfin home already on the sheet (1559 Grand Ave was EB41149866 there
     // and came back as "41149866") must not be added a second time.
-    await syncRejectedIntoLedger().catch(e => log(`  could not read the sheet first: ${e.message}`, 'warn'));
+    { const sr = await syncRejectedIntoLedger().catch(e => ({ ok: false, error: e.message }));
+      if (sr && !sr.ok && !sr.unconfigured) log(`  could not read the sheet first: ${sr.error}`, 'warn'); }
     // The ledger knows every MLS # the MLS scans have checked; Redfin shows the
     // same numbers, sometimes without the board's prefix — match on digits too.
     const seen = loadLedger();
@@ -1629,7 +1630,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         const galleryOk = onHome(after);   // photos seen off-page are not this house's
         if (!galleryOk) await rfNav(c.url, 3000);
         // This listing's photos only — never the "similar homes" thumbnails.
-        const urls = core.redfinSubjectPhotos(galleryOk ? seenPhotos : [], core.redfinPhotoUrls(html), h.mls);
+        const urls = core.redfinSubjectPhotos(galleryOk ? seenPhotos : [], core.redfinPhotoUrls(html), h.mls || h.mlsDigits);
         log(`  looked through ${urls.length} photo(s)`, urls.length > 4 ? 'good' : 'warn');
         const tooFew = urls.length <= 4;
         let aiKept = false, aiWhy = '';
@@ -2251,8 +2252,12 @@ async function syncRejectedIntoLedger() {
       // listings a "Re-review a past scan" freed are left alone until the scan
       // re-judges them, and only a PERSON's rejection is permanent on the sheet.
       const rrSet = loadRereview().mls;
+      // RF<homeId> ids are left to the Redfin scan's own ledger: its buy-box
+      // skips must stay re-checkable after a price cut, and 🧹 frees them to be
+      // judged again — a blanket "scan-dropped" here would lock them out.
+      const isRF = k => /^RF\d+$/.test(k);
       const ids = rgrid.slice(1).map(r => String((r && r[iM]) || '').trim().toUpperCase())
-        .filter(k => k && !rrSet[k]);
+        .filter(k => k && !rrSet[k] && !isRF(k));
       const seen = loadLedger();
       const fresh = ids.filter(m => m && !seen[String(m).trim().toUpperCase()]);
       if (fresh.length) {
@@ -2266,7 +2271,7 @@ async function syncRejectedIntoLedger() {
       const onBoard = info.tabs.indexOf(g.leadTab) < 0 ? []
         : await gsheets.readCol(token, g.sheetId, g.leadTab, `${lcol}2:${lcol}`);
       const seen2 = loadLedger(), rr = loadRereview().mls;
-      const freshBoard = onBoard.filter(m => m && !seen2[String(m).trim().toUpperCase()] && !rr[String(m).trim().toUpperCase()]);
+      const freshBoard = onBoard.filter(m => m && !isRF(String(m).trim().toUpperCase()) && !seen2[String(m).trim().toUpperCase()] && !rr[String(m).trim().toUpperCase()]);
       const rrLeft = Object.keys(rr).length;
       if (rrLeft) log(`Re-review: ${rrLeft} listing(s) from ${loadRereview().date} will be judged again by this scan (if they are still in the areas you picked).`, 'warn');
       if (freshBoard.length) {

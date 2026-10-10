@@ -837,6 +837,16 @@ carry a bogus 2026). The Board's relisted-house key is the whole street line
 house beats its Redfin copy. Checked against the live board: 15 duplicate
 rows hidden, all true twins.
 
+**v1.64 — independent review of v1.62/1.63, all fixed.** The sheet→ledger
+sync skips `RF<homeId>` ids (a blanket `scan-dropped`/`on-board` locked out
+the homes 🧹 frees and the buy-box skips a price cut should bring back);
+Redfin photo filtering anchors on `h.mls || h.mlsDigits` (a bare bridgeMLS
+number lost its anchor and "similar homes" thumbnails could win again); a
+sqft under 300 (or blank) is rejected WITH a reason, kept out of the
+medians, and never stops a confirmed deal; Board dedupe maps suffixes to one
+spelling (Oak St ≠ Oak Ct; "Avenal" = "Avenal Avenue") and takes the last
+zip; `scripts/mls-sf-scan.js` passes `yearBuilt` like the app.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

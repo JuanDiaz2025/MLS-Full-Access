@@ -132,12 +132,12 @@ function recordLedger(items) {
       continue;
     }
     const v = core.rulesDecide({ addr: c.addr, photos: detail.photos,
-      remarks: detail.remarks, condition: detail.condition, propClass: detail.propClass });
+      remarks: detail.remarks, condition: detail.condition, propClass: detail.propClass, yearBuilt: detail.yearBuilt });
     const rec = {
       mls: c.mls,
       address: core.fullAddress(detail.address || c.addr, c.city, detail.zip),
       price: c._price, ppsf: c._ppsf, sqft: c._sqft, beds: c.bds, dom: c._dom,
-      yearBuilt: detail.yearBuilt || (c._age > 0 ? 2026 - c._age : ''),
+      yearBuilt: detail.yearBuilt || (c._age > 0 ? new Date().getFullYear() - c._age : ''),
       photos: detail.photos, reason: v.reason,
       remarks: (detail.remarks || '').slice(0, 300),
       link: core.mlsUrl(c.mls),

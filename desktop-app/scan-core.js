@@ -138,22 +138,25 @@ function filterCandidates(rowsByArea) {
   for (const key of Object.keys(rowsByArea)) {
     for (const r of rowsByArea[key].rows || []) {
       const price = num(r.price), sqft = num(r.sqft);
-      // A living area under 300 sqft is a placeholder, not a house: "1" made
-      // 6003 Wragg Canyon Rd read $210,000/sqft — 35,533% of the median.
-      if (!price || !sqft || sqft < 300) continue;
+      if (!price) continue;
+      // A living area under 300 sqft (or none) is a placeholder, not a house:
+      // "1" made 6003 Wragg Canyon Rd read $210,000/sqft — 35,533% of the
+      // median. Kept out of $/sqft and the medians, and rejected below WITH a
+      // reason (a confirmed deal still goes through).
+      const realSqft = sqft >= 300 ? sqft : 0;
       // The area's own price cap, never over $3M — checked here as well as
       // in the search box, in case the search ignored it.
       const box = DEFAULT_BUYBOX.find(a => a.county === rowsByArea[key].county);
-      all.push({ ...r, _price: price, _sqft: sqft, _age: num(r.age), _dom: num(r.dom),
+      all.push({ ...r, _price: price, _sqft: realSqft, _sqftRaw: sqft, _age: num(r.age), _dom: num(r.dom),
         _cap: Math.min(((box && box.maxk) || 1500) * 1000, 3000000),
-        _ppsf: Math.round(price/sqft),
+        _ppsf: realSqft ? Math.round(price / realSqft) : 0,
         // "All San Francisco" is a log heading, not a city — never let it reach
         // a lead, a median key, or the vision prompt.
         _cityKey: r.city || String(key).replace(/^All\s+/i, '') });
     }
   }
   const byCity = {}, bySq = {};
-  all.forEach(r => { (byCity[r._cityKey]=byCity[r._cityKey]||[]).push(r._ppsf); (bySq[r._cityKey]=bySq[r._cityKey]||[]).push(r._sqft); });
+  all.filter(r => r._ppsf).forEach(r => { (byCity[r._cityKey]=byCity[r._cityKey]||[]).push(r._ppsf); (bySq[r._cityKey]=bySq[r._cityKey]||[]).push(r._sqft); });
   const med = {}, medSq = {};
   Object.keys(byCity).forEach(c => { med[c]=median(byCity[c]); medSq[c]=median(bySq[c]); });
   // Say WHY each listing failed, not just that it did. This is the first place
@@ -188,6 +191,7 @@ function filterCandidates(rowsByArea) {
     const a = String(r.addr || '').trim();
     if (isConfirmed(a)) return '';   // confirmed deal — no screen may drop it
     if (REJECTED_ADDR.some(re => re.test(a))) return 'previously rejected by Bryan — do not resurface';
+    if (!r._sqft) return r._sqftRaw ? `living area listed as ${r._sqftRaw} sqft — not a real figure; check by hand` : 'no living area (sqft) listed — check by hand';
     // Single-family only, under the cap — the search asks for both, this
     // makes sure (Bryan, 2 Oct: "filter single family home only and we don't
     // buy 3M above").
@@ -210,7 +214,8 @@ function filterCandidates(rowsByArea) {
     if (reason) rejected.push({ ...r, _reason: reason, _nearness: r._ppsf / (med[r._cityKey] || 1) });
     else cands.push(r);
   }
-  cands.sort((a, b) => (a._ppsf / med[a._cityKey]) - (b._ppsf / med[b._cityKey]));
+  const near = r => r._ppsf ? r._ppsf / (med[r._cityKey] || 1) : 9;
+  cands.sort((a, b) => near(a) - near(b));
   // Near-misses first: those are the ones worth questioning. A full dump of
   // every listing in the county would bury the tab in noise.
   rejected.sort((a, b) => a._nearness - b._nearness);
@@ -875,11 +880,23 @@ function buildBoard(leadRows, today, now) {
   // row added last, which is the live listing.
   // Key: the whole street line (suffix and punctuation ignored) + zip, so
   // "100 N Main St" and "100 N Oak St" never collide.
-  const SUFFIX = /\b(?:street|st|avenue|ave|road|rd|drive|dr|court|ct|lane|ln|way|boulevard|blvd|place|pl|terrace|ter|circle|cir)\b/g;
-  const houseKey = r => { const a = cell(r, 'Address').toLowerCase();
-    const z = (a.match(/\b(9\d{4})\b/) || [])[1] || '';
-    const st = a.split(',')[0].replace(/[^a-z0-9 ]+/g, ' ').replace(SUFFIX, ' ').replace(/\s+/g, ' ').trim();
-    return /^\d+[a-z]?\s+\S/.test(st) && z ? `${st} ${z}` : ''; };
+  // Suffixes are mapped to one spelling, never removed ("Oak St" and "Oak Ct"
+  // are different houses); the zip is the last one in the address.
+  const SUFFIX = { street: 'st', avenue: 'ave', road: 'rd', drive: 'dr', court: 'ct', lane: 'ln', boulevard: 'blvd',
+    place: 'pl', terrace: 'ter', terrance: 'ter', circle: 'cir', parkway: 'pkwy' };
+  const SUF = new Set(Object.values(SUFFIX).concat(['way', 'cir', 'hwy', 'sq', 'loop', 'aly']));
+  const parts = r => { const a = cell(r, 'Address').toLowerCase();
+    const z = (a.match(/\b9\d{4}\b/g) || []).pop() || '';
+    const w = a.split(',')[0].replace(/[^a-z0-9 ]+/g, ' ').replace(/[a-z]+/g, x => SUFFIX[x] || x).trim().split(/\s+/);
+    if (!/^\d+[a-z]?$/.test(w[0] || '') || w.length < 2 || !z) return null;
+    const suf = w.length > 2 && SUF.has(w[w.length - 1]) ? w.pop() : '';
+    return { base: w.join(' ') + ' ' + z, suf }; };
+  // "5826 Avenal" and "5826 Avenal Avenue" are one house; "Oak St" and "Oak Ct" are two.
+  const sufs = {};
+  notPassed.forEach(r => { const p = parts(r); if (p && p.suf) (sufs[p.base] = sufs[p.base] || new Set()).add(p.suf); });
+  const houseKey = r => { const p = parts(r); if (!p) return '';
+    const only = sufs[p.base] && sufs[p.base].size === 1 ? [...sufs[p.base]][0] : '';
+    return p.base + '|' + (p.suf || only || '?'); };
   // A real MLS # beats a Redfin-only id (it has the MLS link and a refresh
   // can look it up); between equals, the row added last wins.
   const realMls = r => { const m = cell(r, 'MLS #').toUpperCase(); return /^[A-Z]{2,6}\d{5,}$/.test(m) && !/^RF\d/.test(m) ? 1 : 0; };
