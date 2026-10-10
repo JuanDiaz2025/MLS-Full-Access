@@ -847,6 +847,15 @@ medians, and never stops a confirmed deal; Board dedupe maps suffixes to one
 spelling (Oak St ≠ Oak Ct; "Avenal" = "Avenal Avenue") and takes the last
 zip; `scripts/mls-sf-scan.js` passes `yearBuilt` like the app.
 
+**v1.65 — "I don't see Redfin scanning" (Bryan 10 Oct).** Every way the
+Redfin scan can refuse to start now says so in red in the status box, not
+only in the log: AI photo check off (the scan needs it), no area ticked, or
+another run still finishing (that one used to do nothing at all and grey out
+the buttons). The Redfin window is brought to the front when a scan starts,
+and the log says "Opening redfin.com…" / "Reading the sheet first…" (that
+read is capped at 90 s). Checked in the real app: AI off → red message,
+button usable; AI on → full mock run unchanged.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

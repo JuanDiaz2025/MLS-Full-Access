@@ -355,7 +355,11 @@
     setScanButtons(true);
     $('finished').style.display='none';
     const r = await window.fs.redfinScan({ areaIndexes });
-    if (r && r.error === 'already running') return;   // the other run still owns the buttons
+    if (r && r.error === 'already running') {
+      // the other run still owns the buttons; say so where it can't be missed
+      const box = $('finished'); box.style.display = 'block'; box.className = 'status warn'; box.textContent = r.message;
+      return;
+    }
     setScanButtons(false);
   };
   $('redfinSignIn').onclick = () => window.fs.redfinSignIn();
@@ -552,7 +556,8 @@
     $('funnel').textContent = p.neverStarted ? 'Idle.' : 'Finished.';
     const box = $('finished');
     box.style.display = 'block';
-    box.className = 'status ' + (p.stopped || p.neverStarted ? 'warn' : 'good');
+    box.className = 'status ' + (p.failed ? 'error' : p.stopped || p.neverStarted ? 'warn' : 'good');
+    if (p.failed) box.scrollIntoView({ block: 'center' });
     box.innerHTML = (p.neverStarted ? '' : (p.stopped ? '⏹ ' : '✓ ')) + p.summary
       + (p.neverStarted ? '' : '<br>The ' + (p.redfin ? 'Redfin' : 'MLS') + ' window is closed and nothing is running.');
   });

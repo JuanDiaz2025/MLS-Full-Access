@@ -1416,16 +1416,21 @@ async function redfinCounty(county) {
 }
 
 ipcMain.handle('redfin-scan', async (_e, opts) => {
-  if (control.running) return { ok: false, error: 'already running' };
+  // Every refusal says so out loud — in the log AND the status box — so a
+  // click that cannot start is never mistaken for a scan that is running.
+  const refuse = msg => { log(msg, 'error'); send('done', { neverStarted: true, failed: true, summary: msg }); return { ok: false, error: msg }; };
+  if (control.running) {
+    const msg = 'Redfin scan NOT started — another run is still finishing. Wait for its "Finished" message, then click 🏠 Scan Redfin again.';
+    log(msg, 'error'); return { ok: false, error: 'already running', message: msg };
+  }
   const picked = opts && Array.isArray(opts.areaIndexes) ? opts.areaIndexes : null;
   const areas = (picked ? picked.map(i => core.DEFAULT_BUYBOX[i]) : core.DEFAULT_BUYBOX).filter(Boolean);
-  if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
+  if (!areas.length) return refuse('Redfin scan NOT started — no area ticked. Tick at least one area in section 3.');
   // Fixers are decided on the PHOTOS here; with no AI check nothing could
   // ever qualify, and the old fallback to the description is what let
   // good-condition houses through (Bryan, 10 Oct).
   if (!(cfg.useAI && cfg.apiKey)) {
-    log('The Redfin scan judges every home on its PHOTOS, so it needs the AI photo check: add the key in section 2, tick "Use AI", press Test key, then start the scan again.', 'error');
-    return { ok: false, error: 'AI photo check is off' };
+    return refuse('Redfin scan NOT started — it judges every home on its PHOTOS, so it needs the AI photo check: in section 2 tick "Use AI", paste the key, press Test key, then click 🏠 Scan Redfin again.');
   }
   control.running = true; control.stopped = false; control.paused = false;
   aiFailStreak = 0;
@@ -1436,11 +1441,16 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   try {
     rfDiag = [];
     log('━━━ Redfin — Coming Soon & Early Access (no MLS sign-in) ━━━', 'good');
+    // Bring the Redfin window to the front so the run can be watched — it
+    // used to open behind the app and the scan looked like it never started.
+    { const w = ensureRedfinWindow(); if (w.isMinimized()) w.restore(); w.show(); w.focus(); }
+    log('Opening redfin.com…');
     await rfNav('https://www.redfin.com/', 4000);
+    log('Reading the sheet first so homes already on it are not added twice…');
     // The board's own leads and the Rejected tab first, as the MLS scan does:
     // a Redfin home already on the sheet (1559 Grand Ave was EB41149866 there
     // and came back as "41149866") must not be added a second time.
-    { const sr = await syncRejectedIntoLedger().catch(e => ({ ok: false, error: e.message }));
+    { const sr = await timeLimit(syncRejectedIntoLedger(), 90000, 'Reading the sheet').catch(e => ({ ok: false, error: e.message }));
       if (sr && !sr.ok && !sr.unconfigured) log(`  could not read the sheet first: ${sr.error}`, 'warn'); }
     // The ledger knows every MLS # the MLS scans have checked; Redfin shows the
     // same numbers, sometimes without the board's prefix — match on digits too.
