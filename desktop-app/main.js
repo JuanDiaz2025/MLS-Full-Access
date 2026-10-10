@@ -353,6 +353,7 @@ async function stopRequested() {
 
 // ---------- login ----------
 ipcMain.handle('login', async (_e, { user, pass }) => {
+  if (control.running) { log('A run is going — sign in again after it finishes (it would take over the scan\'s MLS window).', 'warn'); return { ok: false, error: 'already running' }; }
   ensureMlsWindow();
   log('Opening MLS sign-in…');
   await nav('https://prodashboard.mlslistings.com/', 3500);
@@ -1138,7 +1139,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       if (cityWinners.length || cityRejects.length) {
         const rows = cityWinners.map(toSheetRow);
         // Primary path: write into the spreadsheet over the Sheets API, using
-        // the Google account signed in at section 7. The rows are in the sheet
+        // the Google account signed in at section 8. The rows are in the sheet
         // by the time this line logs — nothing to refresh, nothing to wait for.
         if (googleReady() && googleCfg().autoSync) {
           const s = await googleSync(rows, cityRejects);
@@ -1186,12 +1187,15 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
     log('Scan error: ' + e.message, 'error'); return { ok: false, error: e.message };
   } finally {
-    control.running = false;
+    // The run stays "running" until its shutdown (Board rebuild, window close,
+    // "done") is over: clearing it first let a new run start underneath and
+    // have its window closed by this one's finishRun.
+    try {
     // Record even a stopped or failed run — partial work still consumed effort,
     // and a day with three aborted runs should look different from a quiet one.
     const day = recordKpi(runKpi);
     send('kpi', { today: day, history: kpiReport() });
-    if (started && googleReady() && googleCfg().autoSync) await rebuildBoard(day);
+    if (started && googleReady() && googleCfg().autoSync) await rebuildBoard(day).catch(e => log('Board rebuild failed: ' + e.message, 'warn'));
     // Only attempt the KPI push when a sheet is actually connected — an
     // unconfigured app must not log a failure after every single run.
     // FINISH, VISIBLY. The run used to just stop making noise — the MLS window
@@ -1199,6 +1203,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     // and there was no way to tell a finished scan from a stalled one.
     // Everything now shuts down on its own and says so.
     finishRun(runKpi, day, started);
+    } finally { control.running = false; }
   }
 });
 
@@ -1435,6 +1440,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
   const MAX_PAGES = 25;
   let found = 0;
+  const allKept = [];   // every county's leads — the report/Export/Send cover the whole run, not the last county
   const runRR = [];   // re-review keys this run added; cleared again even if the run fails
   try {
     rfDiag = [];
@@ -1768,14 +1774,15 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         }
       }
       clearRecheck(rrIds);   // idempotent: what the sheet took is already off
-      send('report', { leads: kept, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
+      allKept.push(...kept);
+      send('report', { leads: allKept.slice(), generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
     }
     return { ok: true, found };
   } catch (e) {
     log('Redfin scan error: ' + e.message, 'error'); return { ok: false, error: e.message };
   } finally {
     cfg.useAI = useAiBefore;
-    control.running = false;
+    try {
     clearRecheck(runRR);
     try { if (rfWin && !rfWin.isDestroyed()) rfWin.close(); } catch (_) {}
     rfWin = null;
@@ -1803,6 +1810,8 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
     }
     send('kpi', { today: day, history: kpiReport() });
     send('done', { stopped: control.stopped, summary: line, redfin: true });
+    } catch (e) { log('Redfin wrap-up: ' + e.message, 'warn'); send('done', { stopped: control.stopped, summary: 'Redfin scan finished (wrap-up error: ' + e.message + ')', redfin: true }); }
+    finally { control.running = false; }   // only now — see the MLS scan's finally
   }
 });
 
@@ -1958,7 +1967,7 @@ function saveGoogle(patch) {
  *  rather than a Google error string when there is nothing to refresh from. */
 async function googleToken() {
   const g = googleCfg();
-  if (!g.refreshToken) throw new Error('not signed in to Google yet — section 7');
+  if (!g.refreshToken) throw new Error('not signed in to Google yet — section 8');
   if (g.accessToken && g.expiresAt > Date.now() + 60000) return g.accessToken;
   const t = await gsheets.refresh({
     clientId: g.clientId, clientSecret: g.clientSecret, refreshToken: g.refreshToken,
@@ -2053,8 +2062,8 @@ function personRejections(grid) {
  *  own tabs; both are append-or-backfill, so nothing on the sheet is destroyed. */
 async function googleSync(leads, rejects) {
   const g = googleCfg();
-  if (!g.refreshToken) return { ok: false, unconfigured: true, error: 'not signed in to Google — section 7' };
-  if (!g.sheetId) return { ok: false, unconfigured: true, error: 'no spreadsheet URL yet — section 7' };
+  if (!g.refreshToken) return { ok: false, unconfigured: true, error: 'not signed in to Google — section 8' };
+  if (!g.sheetId) return { ok: false, unconfigured: true, error: 'no spreadsheet URL yet — section 8' };
   try {
     const token = await googleToken();
     const blank = { added: 0, updated: 0, filled: 0 };
@@ -2290,7 +2299,7 @@ async function syncRejectedIntoLedger() {
       return { ok: true, total: ids.length, added: fresh.length, onBoard: freshBoard.length };
     } catch (e) { return { ok: false, error: e.message }; }
   }
-  return { ok: false, unconfigured: true, error: 'connect your Google Sheet in section 7 first' };
+  return { ok: false, unconfigured: true, error: 'connect your Google Sheet in section 8 first' };
 }
 
 
@@ -2325,8 +2334,8 @@ ipcMain.handle('board-rebuild', () => rebuildBoard());
 // updates the listing's own columns. Notes and anything typed by hand are
 // never touched. Rows that were never scored get a bucket and score too.
 ipcMain.handle('refresh-board', async () => {
-  if (control.running) return { ok: false, error: 'a scan is already running' };
-  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 7 first' };
+  if (control.running) return { ok: false, error: 'already running', message: 'Refresh NOT started — another run is still finishing. Wait for its "Finished" message, then try again.' };
+  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 8 first' };
   control.running = true; control.stopped = false; control.paused = false;
   let done = 0, notFound = 0, scored = 0, flagged = 0, started = false;
   try {
@@ -2451,9 +2460,11 @@ ipcMain.handle('refresh-board', async () => {
     log('Refresh error: ' + e.message, 'error');
     return { ok: false, error: e.message };
   } finally {
-    control.running = false;
     if (started) closeMlsWindow();
-    send('done', { stopped: control.stopped, summary: `Refresh finished — ${done} updated, ${notFound} not found.` });
+    send('done', started
+      ? { stopped: control.stopped, summary: `Refresh finished — ${done} updated, ${notFound} not found.` }
+      : { neverStarted: true, summary: 'Refresh NOT started — sign in to the MLS first (section 1), then press ↻ Refresh again.' });
+    control.running = false;
   }
 });
 
@@ -2481,7 +2492,7 @@ async function clearBrowserCaches() {
 }
 
 ipcMain.handle('clear-cache', async () => {
-  if (control.running) return { ok: false, error: 'a scan is running — stop it first' };
+  if (control.running) return { ok: false, error: 'already running', message: 'Clean up NOT started — another run is still finishing. Wait for its "Finished" message, then try again.' };
   control.running = true;
   const out = { cache: false, ledger: 0, rereview: 0, boardFile: 0, sheet: 0, sheetChecked: 0 };
   try {
@@ -2547,7 +2558,7 @@ ipcMain.handle('ledger-clear', async () => {
 ipcMain.handle('rereview', async (_e, date) => {
   date = String(date || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: 'pick the date of the scan to re-review' };
-  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 7 first' };
+  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 8 first' };
   try {
     const g = googleCfg(), token = await googleToken();
     const info = await gsheets.listTabs(token, g.sheetId);

@@ -864,6 +864,21 @@ With no key at all, the red message carries a **🔑 Set up the AI key**
 button that ticks Use AI, opens the fields and puts the cursor in the key
 box. Both cases checked in the real app.
 
+**v1.68 — UI bug sweep (independent review, Bryan 10 Oct "lots of bugs").**
+A run owns the buttons until its `done` arrives: Stop only disables
+Stop/Pause/Resume (it used to re-enable Start while the old run was still
+shutting down), `control.running` is cleared LAST in every finally (a new run
+could start under the old one's Board rebuild and have its window closed),
+"Check session" no longer re-enables Start mid-run, "Open MLS sign-in" is
+disabled during a run and `login` refuses while running. Every "already
+running" refusal says so (`busy()` in the renderer). Redfin homes being opened
+show "… reviewing", not "✕ DROP". The Redfin report/Export/Send cover every
+county (`allKept`), not the last. Refresh / Clean up failures are logged;
+Refresh when not signed in says so instead of "✓ finished". "No new
+qualifying listings" instead of an empty report. Backup + ledger lines
+refresh after each run. Section refs fixed (Google Sheet is section 8). Text
+from listings / the sheet is escaped before it goes into the page (`escH`).
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each
