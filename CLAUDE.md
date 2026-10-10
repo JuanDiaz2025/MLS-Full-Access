@@ -488,6 +488,10 @@ web app, no deployment and no shared secret any more. Three tabs:
   Sep): "Offers **will be accepted** Monday Sept 28th", and a day with no month
   — "Offers Due Wednesday **the 23rd**" takes the month where the 23rd is a
   Wednesday. Open-house / broker-tour dates (OH, SOH, BT) are never read as one.
+  **TBD wins over any date after it** (v1.59, Seth 10 Oct): "Offer date TBD after
+  first weekend of open houses, open Sat 10/10 2-4 PM" alerted as due Sat 4 PM, and
+  "to be determined after 10/11" as due 10/11 — the date after a TBD is an open
+  house or a "not before". `offerDue()` now tests TBD/TBA/to be determined first.
 - **`Board`** — **owned by the app, rebuilt from `Leads` after every scan and
   every refresh** (nothing on it is typed by hand; notes belong on `Leads`).
   Top: today's funnel (Scanned · Auto-Pass C · AI Review B · Work Now A · New)

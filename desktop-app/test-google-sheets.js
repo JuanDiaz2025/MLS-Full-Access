@@ -366,6 +366,15 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     'open house and broker tour dates are not an offer deadline');
   eq(OD('7534 Adrian Dr. in Rohnert Park offers a compelling opportunity for buyers.'), '',
     '"offers a compelling opportunity" is not about offers');
+  //     Seth's alert, 10 Oct: a date AFTER a TBD is an open house or a "not before".
+  eq(OD('Offer date TBD after first weekend of open houses, open Sat 10/10 + Sun 10/11 2-4 PM. Disclosures: x'), 'TBD',
+    '"Offer date TBD after … open Sat 10/10 2-4 PM" is TBD, not Sat 4 PM (6120 N Arlington)');
+  eq(OD('Additional two lots included. Offer date to be determined after 10/11. When writing an offer, use CAR forms.'), 'TBD',
+    '"Offer date to be determined after 10/11" is TBD, not 10/11 (164 Filbert)');
+  eq(OD('Thank You for Showing! *Offer date Tues 13th by 12pm*'), '2026-10-13 (Tue) 12:00 PM',
+    'a real date still reads (2615 Alhambra)');
+  eq(OD('Open Sat & Sun, Oct 10th & 11th, 2 - 4:00 pm Offers due by Tuesday, Oct 13th by noon.'), '2026-10-13 (Tue) 12:00 PM',
+    'an open house BEFORE the offer sentence is not the deadline (2556 Carisbrook)');
 
   // 14. The Board — work order and the numbers on top.
   const { buildBoard } = require('./scan-core');

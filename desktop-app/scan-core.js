@@ -751,9 +751,13 @@ function offerDue(text, today) {
   let m;
   while ((m = OFFER_CUE.exec(t))) {
     const w = t.slice(m.index, m.index + 110);
+    // TBD is read FIRST: "Offer date TBD after first weekend of open houses,
+    // open Sat 10/10 2-4 PM" alerted as due Sat 4 PM, and "Offer date to be
+    // determined after 10/11" as due 10/11 (Seth, 10 Oct). A date after a TBD
+    // is an open house or a "not before", never the deadline.
+    if (/\bT\.?B\.?[DA]\b|to be (?:determined|announced)/i.test(w.slice(0, 40))) return 'TBD';
     const date = findDate(w, now);
     if (date) return date + findTime(w);
-    if (/\bT\.?B\.?D\b|to be determined|to be announced|\bTBA\b/i.test(w.slice(0, 40))) return 'TBD';
   }
   return '';
 }
