@@ -253,6 +253,21 @@ const eq = (a, b, m) => {
     'price: $2.75M on the Peninsula is over the $2.5M cap');
 }
 
+// ---- 🧹 cleaning up Redfin leads an older build put on the sheet ----
+{
+  const P = core.oldRedfinLeadProblem;
+  eq([core.capForAddress('223 Oakdale St, Redwood City, CA 94062'), core.capForAddress('2741 Judah St, San Francisco, CA 94122'),
+      core.capForAddress('2707 Illinois St, East Palo Alto, CA 94303'), core.capForAddress('1 A St, Palo Alto, CA 94303')],
+     [2500000, 1500000, 2500000, 1500000], 'cleanup: San Mateo zips get $2.5M, everywhere else $1.5M (94303 by city)');
+  eq(/over the \$1.5M cap/.test(P({ addr: '1001 Vallejo St, San Francisco, CA 94133', price: 25000000, year: 1907, why: 'Redfin · photos show a fixer' })), true, 'cleanup: $25M in SF goes');
+  eq(/a unit/.test(P({ addr: '1129 Avenida Sevilla Unit 5A, Walnut Creek, CA 94595', price: 620000, why: 'Redfin · photos show a fixer' })), true, 'cleanup: a unit goes');
+  eq(/too new/.test(P({ addr: '215 Winding Way, San Carlos, CA 94070', price: 2499000, why: 'Redfin EARLY ACCESS · newer build (2003)' })), true, 'cleanup: a 2003 build goes');
+  eq(/never shown by its photos/.test(P({ addr: '2741 Judah St, San Francisco, CA 94122', price: 1190000, year: 1947, why: 'Redfin · photos viewed but not judged (AI photo check off)' })), true,
+    'cleanup: a lead never photo-checked goes');
+  eq(P({ addr: '223 Oakdale St, Redwood City, CA 94062', price: 2488000, year: 1925, why: 'Redfin · photos show a fixer: worn carpet' }), '', 'cleanup: a photo-confirmed Peninsula fixer under $2.5M stays');
+  eq(P({ addr: '21 College Terrace, San Francisco, CA 94112', price: 995000, why: 'Redfin' }), '', 'cleanup: the confirmed deal is never touched');
+}
+
 // ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
 {
   const A = core.parseRedfinAgent;

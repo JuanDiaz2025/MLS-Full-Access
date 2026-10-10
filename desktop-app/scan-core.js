@@ -1421,6 +1421,34 @@ function redfinPhotoFixer(o) {
   return 'photos: dated but in good condition — no real wear to fix';
 }
 
+// ---- cleaning up leads an older build let through (v1.61) ----
+// San Mateo County (the Peninsula, $2.5M cap) by zip; everywhere else $1.5M.
+// 94303 is split between East Palo Alto (San Mateo) and Palo Alto (Santa
+// Clara), so the city name settles it.
+const SAN_MATEO_ZIPS = new Set(['94002', '94005', '94010', '94011', '94014', '94015', '94016', '94017', '94018', '94019', '94020',
+  '94021', '94025', '94026', '94027', '94028', '94030', '94037', '94038', '94044', '94060', '94061', '94062', '94063', '94064',
+  '94065', '94066', '94070', '94074', '94080', '94083', '94128', '94401', '94402', '94403', '94404', '94497']);
+function capForAddress(addr) {
+  const a = String(addr || '');
+  const zip = (a.match(/\b(9\d{4})(?:-\d{4})?\s*$/) || [])[1] || '';
+  const sm = SAN_MATEO_ZIPS.has(zip) || (zip === '94303' && /east palo alto/i.test(a));
+  return Math.min((sm ? 2500 : 1500) * 1000, REDFIN_PRICE_CEILING);
+}
+
+/** What is wrong, under today's rules, with a Redfin lead already on the sheet
+ *  (written by an older build): over the cap, a unit, too new, or never shown
+ *  by its photos to be a fixer. '' when it still qualifies. */
+function oldRedfinLeadProblem({ addr, price, year, why }) {
+  if (isConfirmed(addr)) return '';
+  const cap = capForAddress(addr), p = Number(price) || 0, y = Number(year) || 0, w = String(why || '');
+  if (p > cap) return `$${Math.round(p / 1000).toLocaleString()}k is over the $${cap / 1e6}M cap`;
+  if (UNIT_ADDR_RE.test(String(addr || '').split(',')[0])) return 'not a single-family home — a unit';
+  if (y > 1800 && new Date().getFullYear() - y < 25) return `too new — built ${y}`;
+  if (/newer build \((\d{4})\)/.test(w) && new Date().getFullYear() - Number(RegExp.$1) < 25) return `too new — built ${RegExp.$1}`;
+  if (!/photos show a fixer|AI \(vision\) keep/i.test(w)) return 'never shown by its photos to be a fixer (added by an older version)';
+  return '';
+}
+
 /** /stingray/api/gis → homes. */
 function redfinGisHomes(body) {
   let j;
@@ -1460,7 +1488,7 @@ module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
-  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType, redfinSubjectPhotos, photoStem, parsePrice,
+  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType, redfinSubjectPhotos, photoStem, parsePrice, capForAddress, oldRedfinLeadProblem, SAN_MATEO_ZIPS,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,

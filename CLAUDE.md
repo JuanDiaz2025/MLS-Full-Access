@@ -598,7 +598,7 @@ in the remarks (whole phrases — "private remarks", "private yard" are not).
 The Coming Soon pass also ticks a Private / Office Exclusive status when the
 search form offers one.
 
-### Coming Soon & Early Access — CURRENT behaviour (v1.60, read this first)
+### Coming Soon & Early Access — CURRENT behaviour (v1.61, read this first)
 
 The version notes below are history; where they disagree, this block wins.
 
@@ -684,6 +684,28 @@ The version notes below are history; where they disagree, this block wins.
   the photo walk + AI. `core.parsePrice` reads "$2.7M"/"$950K" (a "$2.7M" card
   was $0 and passed every cap). If the AI fails 3 times the run stops opening
   homes instead of holding the rest.
+- **v1.61 — 🧹 Clear cache & clean up (Bryan 10 Oct: "clear a cache all
+  the bugs").** The live board held **62 Redfin leads from older builds**
+  ($25M 1001 Vallejo, $7.85M Hillsborough, Woodside $4–5.5M, units #306/#805/
+  Unit 5A/Unit CU1, 2018–2025 builds, most "photos viewed but not judged").
+  Section 3's **🧹** button: clears browser caches for the app, MLS and Redfin
+  windows (cookies/sign-ins kept); forgets `RF*`, `recheck` and `buybox`
+  ledger entries; empties rereview.json; takes Redfin leads failing a hard
+  fact (price/unit/age) out of today's Lead Board file; on the sheet, every
+  Redfin lead (Why starts "Redfin", not C, not passed) failing
+  `core.oldRedfinLeadProblem` (cap by zip via `capForAddress` — San Mateo
+  zips $2.5M, 94303 by city — unit, < 25 yrs, never photo-checked) moves to C
+  with "(cleanup <date>: why)". Dry-run on the live data: 54 of 62 move, 8
+  photo-confirmed stay. Browser caches are also cleared automatically the
+  first time a new version starts (`last-version.txt`). A Redfin lead's Why now
+  starts with "photos show a fixer" (the board file clips Why at 240 chars).
+- **Refresh "Not found" bug (v1.48–v1.60).** `showGallery` searched only
+  Active + Coming Soon, so leads gone Pending / Contingent / Sold couldn't be
+  found by their own MLS # and "↻ Refresh leads on the board" stamped **572**
+  "Not found…" (over 142 Pending, 39 Contingent). The lookup now selects EVERY
+  status (`selectOnly(…, ['.'])`) and the refresh skips Redfin-only ids
+  (RF…/Redfin listing ids — nothing to look up). The next refresh restores the
+  real statuses.
 - **Not yet run against live Redfin** — the first real run's log and
   `redfin-last-run.txt` are what to ask for if it finds nothing.
 

@@ -198,3 +198,8 @@ photo check. Photo verdicts, renovated/fire/tenant/structural wording and buy-bo
 (heavy wear, or some wear on original finishes). Tidy "dated but fine" homes, 2000s refreshes and new finishes are
 dropped on the photos whatever the description says; a home whose photos could not be judged is held and rechecked,
 never added. The Redfin scan needs the AI photo check on (section 2) and will say so if it is off.
+**v1.61:** section 3 has **🧹 Clear cache & clean up** — clears stored pages (sign-ins kept), lets Redfin homes be
+judged again by today's rules, and moves Redfin leads an older version put on the sheet (over the cap, a unit, too
+new, never photo-checked) to C with the reason. Browser caches are also cleared the first time a new version starts.
+"↻ Refresh leads on the board" now finds Pending / Contingent / Sold leads by their MLS # again (v1.48–1.60 stamped
+them "Not found") and skips Redfin-only leads.

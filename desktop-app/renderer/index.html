@@ -116,6 +116,7 @@
     <div class="row" style="margin-top:8px">
       <button id="redfinScan">🏠 Scan Redfin — Coming Soon &amp; Early Access</button>
       <button id="redfinSignIn" class="ghost">Sign in to Redfin (for Early Access)</button>
+      <button id="clearCache" class="ghost">🧹 Clear cache &amp; clean up</button>
     </div>
     <div class="hint"><b>No MLS sign-in needed.</b> Opens redfin.com, goes through each ticked area (houses under
       the area's price cap, newest first) and picks out the homes badged <b>Coming Soon</b> / <b>Early Access</b> /
@@ -289,6 +290,7 @@
     // "Sign in to Redfin" sent the scan's own window to the login page).
     if ($('redfinScan')) $('redfinScan').disabled = running;
     if ($('redfinSignIn')) $('redfinSignIn').disabled = running;
+    if ($('clearCache')) $('clearCache').disabled = running;
   }
 
   $('openLogin').onclick = async () => {
@@ -357,6 +359,12 @@
     setScanButtons(false);
   };
   $('redfinSignIn').onclick = () => window.fs.redfinSignIn();
+  $('clearCache').onclick = async () => {
+    if (!confirm('Clear the cache and clean up?\n\n• clears stored pages (your MLS and Redfin sign-ins stay)\n• Redfin homes are judged again by today\'s rules\n• Redfin leads on the sheet that are over the cap, a unit, too new or never photo-checked move to C, with the reason')) return;
+    setScanButtons(true);
+    await window.fs.clearCache();
+    setScanButtons(false);
+  };
   $('refreshBoard').onclick = async () => {
     setScanButtons(true);
     $('finished').style.display='none';

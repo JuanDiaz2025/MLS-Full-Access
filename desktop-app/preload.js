@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('fs', {
   startScan: (cfg) => ipcRenderer.invoke('start-scan', cfg),
   redfinScan: (cfg) => ipcRenderer.invoke('redfin-scan', cfg),
   redfinSignIn: () => ipcRenderer.invoke('redfin-signin'),
+  clearCache: () => ipcRenderer.invoke('clear-cache'),
   pause: () => ipcRenderer.send('pause'),
   resume: () => ipcRenderer.send('resume'),
   stop: () => ipcRenderer.send('stop'),

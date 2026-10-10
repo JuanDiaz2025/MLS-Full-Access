@@ -7,7 +7,7 @@
  * detects the dashboard. Scanning navigates the MLS window through Matrix and
  * runs the same extraction used by the headless pipeline.
  */
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, net, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, net, nativeImage, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
@@ -497,10 +497,12 @@ async function scanArea(area, opts) {
 async function showGallery(mls, opts) {
   const factsOnly = !!(opts && opts.factsOnly);
   await nav(core.SEARCH_URL, 2200);
-  // Look the MLS # up among Active AND Coming Soon listings. The form's
-  // default status is Active, so a Coming Soon house came back "not found" —
-  // at review and again on every board refresh.
-  await js(selectOnly(core.FIELDS.status, [STATUS_ACTIVE, STATUS_COMING_SOON, STATUS_PRIVATE])).catch(() => null);
+  // Look the MLS # up in EVERY status. v1.48 narrowed this to Active + Coming
+  // Soon, so a lead that had gone Pending, Contingent or Sold could no longer
+  // be found by its own number, and "↻ Refresh leads on the board" stamped
+  // 572 of them "Not found" — over 142 Pending and 39 Contingent (10 Oct).
+  // An MLS # names one listing; its status is something to READ, not filter on.
+  await js(selectOnly(core.FIELDS.status, ['.'])).catch(() => null);
   await sleep(300);
   await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
@@ -1687,9 +1689,10 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           photos: urls.length, photosReliable: false, dom: h.dom, yearBuilt: h.year,
           price: c.price, whenUnsure: cfg.whenUnsure, comingSoon: true,
         });
-        q.why = 'Redfin ' + c.badge + ' · ' + q.why;
-        if (aiKept) q.why += ' + photos show a fixer: ' + aiWhy;
-        else if (!(cfg.useAI && cfg.apiKey)) q.why += ' + photos viewed but not judged (AI photo check off)';
+        // The photo verdict goes FIRST: the Lead Board shortens the why to 240
+        // characters, and a verdict at the end was cut off.
+        q.why = 'Redfin ' + c.badge + ' · ' + (aiKept ? 'photos show a fixer: ' + String(aiWhy).slice(0, 90) + ' · ' : '') + q.why;
+        if (!aiKept && !(cfg.useAI && cfg.apiKey)) q.why += ' + photos viewed but not judged (AI photo check off)';
         if (tooFew) q.why += ' + photos not posted on Redfin yet — check them before offering';
         // Fixers only (Bryan, 2 Oct: "on early access make sure only fixer").
         // A Coming Soon / Early Access home stays only if its description says
@@ -2328,13 +2331,17 @@ ipcMain.handle('refresh-board', async () => {
     // (Sorting on First Added alone put the day's SF leads at #59: every row
     // carried the same Aug 1 date.) C leads are auto-passed; skip them.
     const rankOf = r => ({ A: 0, B: 1 })[(val(r, 'Bucket').match(/^[ABC]/) || ['?'])[0]] ?? 2;
+    // A Redfin-only lead (RF<homeId>, or Redfin's own long listing id) has no
+    // MLS # to look up — it would only ever come back "Not found".
+    const isMlsId = m => /^[A-Z]{2,6}\d{5,}$/.test(String(m || '').trim().toUpperCase());
+    const redfinOnly = all.filter(x => !isMlsId(val(x.r, 'MLS #'))).length;
     const todo = all
-      .filter(x => !core.PASSED_NOTE.test(val(x.r, 'Notes')) && !core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))
+      .filter(x => isMlsId(val(x.r, 'MLS #')) && !core.PASSED_NOTE.test(val(x.r, 'Notes')) && !core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))
         && !/^C/.test(val(x.r, 'Bucket')))
       .sort((a, b) => rankOf(a.r) - rankOf(b.r) || b.i - a.i)
       .map(x => x.r);
     log(`Refreshing ${todo.length} lead(s), A first then B (reports only, no photos) — `
-      + `skipping ${closedN} closed and ${passedN} passed in Notes…`, 'good');
+      + `skipping ${closedN} closed, ${passedN} passed in Notes and ${redfinOnly} Redfin-only (no MLS # to look up)…`, 'good');
 
     let batch = [];
     // Old broken Portal.aspx links on the rows we are NOT re-reading (closed,
@@ -2360,8 +2367,8 @@ ipcMain.handle('refresh-board', async () => {
         // Either it left the Active search (pending / sold / withdrawn) or
         // Matrix showed another listing. Say so; never guess.
         notFound++;
-        batch.push({ 'MLS #': mls, 'MLS Status': 'Not found in Active / Coming Soon search — check' });
-        log('    not found among Active or Coming Soon listings — may be pending or off market', 'warn');
+        batch.push({ 'MLS #': mls, 'MLS Status': 'Not found in the MLS — check' });
+        log('    not found in the MLS by its number — check it by hand', 'warn');
       } else {
         const list = core.num(gal.listPrice) || core.num(val(r, 'Purchase Price'));
         const orig = core.num(gal.origPrice);
@@ -2433,6 +2440,74 @@ ipcMain.handle('ledger-stats', () => {
   const byVerdict = {};
   Object.keys(e).forEach(k => { const v = e[k].verdict || '?'; byVerdict[v] = (byVerdict[v] || 0) + 1; });
   return { total: Object.keys(e).length, byVerdict, file: LEDGER_FILE() };
+});
+
+// ---------- 🧹 Clear cache & clean up (v1.61, Bryan 10 Oct) ----------
+// Stored pages and old verdicts from earlier builds were carrying their bugs
+// forward. This clears the browser caches (sign-ins kept), forgets the Redfin
+// verdicts and leftover re-review entries so those homes are judged again by
+// today's rules, takes old Redfin leads out of today's Lead Board file, and
+// moves every Redfin lead on the sheet that today's rules reject to C — with
+// the reason — instead of leaving it on the board.
+async function clearBrowserCaches() {
+  const parts = [session.defaultSession, session.fromPartition('persist:mls'), session.fromPartition('persist:redfin')];
+  for (const ses of parts) {
+    try { await ses.clearCache(); } catch (_) {}
+    // Everything but cookies: the MLS and Redfin sign-ins stay.
+    try { await ses.clearStorageData({ storages: ['shadercache', 'serviceworkers', 'cachestorage', 'filesystem', 'indexdb', 'localstorage', 'websql'] }); } catch (_) {}
+  }
+}
+
+ipcMain.handle('clear-cache', async () => {
+  if (control.running) return { ok: false, error: 'a scan is running — stop it first' };
+  control.running = true;
+  const out = { cache: false, ledger: 0, rereview: 0, boardFile: 0, sheet: 0, sheetChecked: 0 };
+  try {
+    log('🧹 Clearing the cache and cleaning up…', 'good');
+    await clearBrowserCaches(); out.cache = true;
+    log('  browser caches cleared for the app, the MLS and the Redfin windows (sign-ins kept)');
+    // Old Redfin verdicts and every pending recheck: judged again by today's rules.
+    const e = loadLedger();
+    Object.keys(e).forEach(k => { if (/^RF\d+$/.test(k) || ['recheck', 'buybox'].includes(e[k].verdict)) { delete e[k]; out.ledger++; } });
+    saveLedger(e);
+    log(`  forgot ${out.ledger} old Redfin / recheck verdict(s) — those homes will be judged again`);
+    const rr = loadRereview(); out.rereview = Object.keys(rr.mls).length; saveRereview({ date: '', mls: {} });
+    if (out.rereview) log(`  cleared ${out.rereview} leftover re-review entr${out.rereview === 1 ? 'y' : 'ies'}`);
+    // Today's Lead Board file: Redfin leads made by an older build come out.
+    const bs = readBoardScan();
+    if (bs) {
+      // Hard facts only here (price, unit, age): this file shortens the why, so
+      // "never photo-checked" is judged on the sheet, where the why is whole.
+      const keep = bs.leads.filter(l => !/^(?:[ABC][^·]*· score \d+ · )?Redfin/i.test(String(l.why || ''))
+        || !core.oldRedfinLeadProblem({ addr: l.addr, price: l.price, year: l.year, why: 'photos show a fixer · ' + String(l.why || '') }));
+      out.boardFile = bs.leads.length - keep.length;
+      if (out.boardFile) { bs.leads = keep; fs.writeFileSync(BOARD_FILE(), JSON.stringify(bs, null, 1)); }
+      log(`  took ${out.boardFile} old Redfin lead(s) out of today's Lead Board file`);
+    }
+    // The sheet: every Redfin lead today's rules reject goes to C, with why.
+    if (googleReady()) {
+      const g = googleCfg(), token = await googleToken();
+      const rows = await gsheets.readAll(token, g.sheetId, g.leadTab);
+      const head = (rows[0] || []).map(h => String(h).trim());
+      const val = (r, h) => { const i = head.indexOf(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); };
+      const down = [];
+      rows.slice(1).forEach(r => {
+        const why = val(r, 'Why');
+        if (!/^Redfin/i.test(why) || /^C/.test(val(r, 'Bucket')) || core.PASSED_NOTE.test(val(r, 'Notes'))) return;
+        out.sheetChecked++;
+        const bad = core.oldRedfinLeadProblem({ addr: val(r, 'Address'), price: core.num(val(r, 'Purchase Price')), year: core.num(val(r, 'Year Built')), why });
+        if (bad) down.push({ 'MLS #': val(r, 'MLS #'), 'Bucket': core.BUCKET_LABEL.C, 'Opportunity Score': 0, 'Why': `${why} (cleanup ${todayKey()}: ${bad})` });
+      });
+      if (down.length) await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', down, { overwrite: ['Bucket', 'Opportunity Score', 'Why'] });
+      out.sheet = down.length;
+      log(`  checked ${out.sheetChecked} Redfin lead(s) on the sheet — moved ${out.sheet} to C (over the cap, a unit, too new, or never photo-checked); the rest still qualify`, 'good');
+      await rebuildBoard().catch(() => {});
+      log('  On the Lead Board, press "↻ Refresh from sheet" to pick the cleanup up.', 'good');
+    } else log('  Google Sheet not connected — the sheet was not cleaned (connect it in section 8 and run this again).', 'warn');
+    log('🧹 Done.', 'good');
+    return { ok: true, ...out };
+  } catch (err) { log('Clean-up failed: ' + err.message, 'error'); return { ok: false, error: err.message, ...out }; }
+  finally { control.running = false; }
 });
 
 ipcMain.handle('ledger-clear', async () => {
@@ -2518,6 +2593,15 @@ ipcMain.handle('export', async (_e, { leads }) => {
   return { ok: true, filePath };
 });
 
-app.whenReady().then(createControlWindow);
+app.whenReady().then(async () => {
+  // A new version starts with clean browser caches, so pages stored by an
+  // older build can't carry its bugs forward. Sign-ins (cookies) are kept.
+  try {
+    const f = path.join(app.getPath('userData'), 'last-version.txt');
+    const last = fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim() : '';
+    if (last !== app.getVersion()) { await clearBrowserCaches(); fs.writeFileSync(f, app.getVersion()); }
+  } catch (_) {}
+  createControlWindow();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createControlWindow(); });
