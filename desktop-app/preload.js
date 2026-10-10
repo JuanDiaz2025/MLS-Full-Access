@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('fs', {
   setConfig: (c) => ipcRenderer.send('set-config', c),
   aiSettings: () => ipcRenderer.invoke('ai-settings'),
   openClaudeKeys: () => ipcRenderer.invoke('open-claude-keys'),
+  claudeSignIn: () => ipcRenderer.invoke('claude-signin'),
   aiTest: () => ipcRenderer.invoke('ai-test'),
   export: (leads) => ipcRenderer.invoke('export', { leads }),
   kpiReport: (days) => ipcRenderer.invoke('kpi-report', { days }),

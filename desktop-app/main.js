@@ -52,6 +52,50 @@ const aiReady = () => !!(cfg.useAI && isClaudeKey(cfg.apiKey));
 const NOT_CLAUDE_KEY = 'That is not a Claude key — Claude keys start with "sk-ant-". Get one at console.anthropic.com → API Keys (ChatGPT keys are no longer used).';
 ipcMain.handle('open-claude-keys', () => { shell.openExternal(ANTHROPIC_KEYS_URL); return { ok: true }; });
 
+// "Sign in to Claude" (Bryan, 10 Oct: "just log in to Claude, no key"). The app
+// may not use a claude.ai chat login, so this signs in to Claude's developer
+// site (console.anthropic.com — same email) in the app's own window and picks
+// up the key there by itself: the user clicks Create Key, then Copy, and the
+// app sees it on the clipboard, saves it, tests it and closes the window.
+// Nothing to paste. Sign-in cookies persist in 'persist:anthropic'.
+let claudeWin = null;
+ipcMain.handle('claude-signin', async () => {
+  if (claudeWin && !claudeWin.isDestroyed()) { claudeWin.focus(); return { ok: true, already: true }; }
+  claudeWin = new BrowserWindow({ width: 1150, height: 850, title: 'Sign in to Claude — FlipScout',
+    webPreferences: { partition: 'persist:anthropic' } });
+  claudeWin.on('closed', () => { claudeWin = null; });
+  claudeWin.loadURL(ANTHROPIC_KEYS_URL).catch(() => {});
+  log('Sign in to Claude in the window that opened. Then click "Create Key", name it FlipScout, and click "Copy" — the app picks the key up by itself.', 'good');
+  const before = String(clipboard.readText() || '').trim();
+  const started = Date.now();
+  return await new Promise(resolve => {
+    const tick = setInterval(async () => {
+      const t = String(clipboard.readText() || '').trim();
+      const done = r => { clearInterval(tick); resolve(r); };
+      if (!claudeWin || claudeWin.isDestroyed()) {
+        if (!isClaudeKey(cfg.apiKey)) log('Claude sign-in window closed before a key was copied — click "Sign in to Claude" to try again.', 'warn');
+        return done({ ok: isClaudeKey(cfg.apiKey) });
+      }
+      if (Date.now() - started > 20 * 60000) { try { claudeWin.close(); } catch (_) {} return done({ ok: false, error: 'timed out' }); }
+      if (t === before || !/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(t)) return;
+      clearInterval(tick);
+      Object.assign(cfg, { apiKey: t, useAI: true }); cfg.model = aiModel(); saveAi();
+      try { clipboard.writeText(''); } catch (_) {}   // the key does not linger on the clipboard
+      let test = { ok: true };
+      try { await aiCall([], 'Reply with the single word: ready', 20); }
+      catch (e) { test = { ok: false, error: e.message }; }
+      if (test.ok) {
+        log('✓ Signed in to Claude — the key is saved on this computer and the photo check is on. Click 🏠 Scan Redfin.', 'good');
+        try { claudeWin.close(); } catch (_) {}
+      } else {
+        log('The key was picked up but Claude refused it: ' + test.error + ' — if it mentions credit, add a payment method on the page that is still open, then try again.', 'error');
+      }
+      send('ai-key', { ok: test.ok, key: cfg.apiKey, model: cfg.model, error: test.error || '' });
+      resolve(test);
+    }, 1000);
+  });
+});
+
 // The key and model survive a restart (they used to be retyped every launch).
 // Kept on this computer only, next to the Google sign-in.
 const AI_FILE = () => path.join(app.getPath('userData'), 'ai-settings.json');
@@ -1454,8 +1498,8 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   if (isClaudeKey(cfg.apiKey) && !cfg.useAI) { cfg.useAI = true; log('Using your saved AI key for the Redfin photo check ("Use AI" is unticked — that only switches it off for the MLS scan).'); }
   if (!aiReady()) {
     return refuse(cfg.apiKey && !isClaudeKey(cfg.apiKey)
-      ? 'Redfin scan NOT started — the saved key is not a Claude key (ChatGPT keys are no longer used). Click "Set up the Claude key" below, paste a key that starts with "sk-ant-", press Test key, then click 🏠 Scan Redfin again.'
-      : 'Redfin scan NOT started — it judges every home on its PHOTOS with Claude, and no Claude key is set yet. Click "Set up the Claude key" below, then click 🏠 Scan Redfin again.', { needsAi: true });
+      ? 'Redfin scan NOT started — the saved key is not a Claude key (ChatGPT keys are no longer used). Click "Sign in to Claude" below, then click 🏠 Scan Redfin again.'
+      : 'Redfin scan NOT started — it judges every home on its PHOTOS with Claude. Click "Sign in to Claude" below (one time), then click 🏠 Scan Redfin again.', { needsAi: true });
   }
   control.running = true; control.stopped = false; control.paused = false;
   aiFailStreak = 0;

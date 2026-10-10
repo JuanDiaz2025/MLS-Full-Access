@@ -901,6 +901,16 @@ the photo walk judges nothing and pays no AI call; a buy-box skip never
 overwrites a final verdict; homes the MLS already checked are skipped BEFORE
 opening; a held home whose description turns "remodeled" is closed out.
 
+**v1.70 — 🔑 Sign in to Claude (Bryan 10 Oct, third ask: "just log in to Claude,
+no key").** A claude.ai chat login still can NOT be used by the app
+(Anthropic does not allow it) — so the button signs in to Claude's developer
+site, console.anthropic.com (same email), in the app's own window
+(`persist:anthropic`) on the API Keys page; the user clicks Create Key → Copy,
+the app watches the clipboard for `sk-ant-…`, saves it, ticks Use AI, tests it
+with one tiny call, clears the clipboard and closes the window. Nothing to
+paste. The button is in section 2 and on the Redfin "NOT started" message.
+Billing is the console's pay-as-you-go API credit, not a claude.ai plan.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

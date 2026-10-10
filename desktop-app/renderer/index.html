@@ -83,8 +83,12 @@
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:12px">
       <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — Claude reads every photo (needs a Claude key)
     </label>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
+      <button id="claudeSignIn" type="button">🔑 Sign in to Claude</button>
+      <span id="claudeSignInOut" style="font-size:12.5px;color:var(--muted)">Opens Claude's sign-in page. After signing in click <b>Create Key</b>, then <b>Copy</b> — the app saves it by itself.</span>
+    </div>
     <div id="aiFields" style="display:none;margin-top:10px">
-      <label>Claude key <code>sk-ant-…</code> — <a href="#" id="getClaudeKey">get one at console.anthropic.com → API Keys</a></label>
+      <label>Claude key <code>sk-ant-…</code> (filled in by "Sign in to Claude") — <a href="#" id="getClaudeKey">or get one at console.anthropic.com → API Keys</a></label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
       <div id="aiProv" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
       <label>Model</label>
@@ -429,6 +433,18 @@
   }
   function saveAiFields(){ window.fs.setConfig({ aiSave: true, useAI: $('useAI').checked, apiKey: $('apiKey').value.trim(), model: ($('model').value||'').trim() }); }
   $('getClaudeKey').onclick = e => { e.preventDefault(); window.fs.openClaudeKeys(); };
+  async function claudeSignIn(){
+    $('claudeSignInOut').style.color = ''; $('claudeSignInOut').textContent = 'Sign in in the window that opened, click Create Key, then Copy…';
+    await window.fs.claudeSignIn();
+  }
+  $('claudeSignIn').onclick = claudeSignIn;
+  window.fs.on('ai-key', p => {
+    $('apiKey').value = p.key || ''; if (p.model) $('model').value = p.model;
+    $('useAI').checked = true; $('aiFields').style.display = 'block'; aiSync();
+    $('claudeSignInOut').style.color = p.ok ? 'var(--strong, #1a7f37)' : 'var(--pass, #b42318)';
+    $('claudeSignInOut').textContent = p.ok ? '✓ Signed in to Claude — photo check is on. Click 🏠 Scan Redfin.' : '✗ Claude refused the key: ' + p.error;
+    if (p.ok) { const box = $('finished'); if (box.querySelector('button')) { box.className = 'status good'; box.textContent = '✓ Signed in to Claude — click 🏠 Scan Redfin again.'; } }
+  });
   $('apiKey').oninput = () => { aiSync(); pushConfig(); saveAiFields(); };
   $('model').oninput = () => { $('aiTestOut').textContent = ''; pushConfig(); saveAiFields(); };
   $('aiTest').onclick = async () => {
@@ -584,13 +600,9 @@
     refreshBackup().catch(() => {}); refreshLedger().catch(() => {});
     if (p.needsAi) {
       // one click to the fix: open section 2's AI fields, tick Use AI, put the cursor in the key box
-      const b = document.createElement('button'); b.type = 'button'; b.textContent = '🔑 Set up the Claude key';
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = '🔑 Sign in to Claude';
       b.style.marginTop = '8px'; b.style.display = 'block';
-      b.onclick = () => {
-        if (!$('useAI').checked) { $('useAI').checked = true; $('useAI').onchange(); }
-        $('aiFields').style.display = 'block';
-        $('apiKey').scrollIntoView({ block: 'center' }); $('apiKey').focus();
-      };
+      b.onclick = claudeSignIn;
       box.appendChild(b);
     }
     if (p.failed) box.scrollIntoView({ block: 'center' });
