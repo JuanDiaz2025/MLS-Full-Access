@@ -1437,6 +1437,10 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
     rfDiag = [];
     log('━━━ Redfin — Coming Soon & Early Access (no MLS sign-in) ━━━', 'good');
     await rfNav('https://www.redfin.com/', 4000);
+    // The board's own leads and the Rejected tab first, as the MLS scan does:
+    // a Redfin home already on the sheet (1559 Grand Ave was EB41149866 there
+    // and came back as "41149866") must not be added a second time.
+    await syncRejectedIntoLedger().catch(e => log(`  could not read the sheet first: ${e.message}`, 'warn'));
     // The ledger knows every MLS # the MLS scans have checked; Redfin shows the
     // same numbers, sometimes without the board's prefix — match on digits too.
     const seen = loadLedger();
@@ -1592,6 +1596,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         if (!h.year && c.year) h.year = c.year;
         if (h.dom === '' && c.dom !== '' && c.dom != null) h.dom = c.dom;
         if (!h.mls && c.mls) h.mls = c.mls;
+        if (!h.mlsDigits && c.mlsDigits) h.mlsDigits = c.mlsDigits;
         // The page says what the list may not have: the type, the year.
         // The page's "Property type" label wins; a type the page only shows on a
         // line of its own counts when Redfin's data has not already said house.
@@ -1605,7 +1610,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           continue;
         }
         if (/sign in|join or sign/i.test(text.slice(0, 3000)) && !h.remarks) log('  this Early Access home is only shown in full when signed in to Redfin', 'warn');
-        if (isSeen(h.mls)) { log(`  already checked as ${h.mls} by an MLS scan — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
+        if (isSeen(h.mls) || (h.mlsDigits && seenDigits.has(h.mlsDigits))) { log(`  already checked as ${h.mls || h.mlsDigits} by an MLS scan or on the board — skipped`); ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr }); continue; }
         const city = (c.addr.split(',')[1] || area.county).trim();
         const sheetId = String(h.mls || ('RF' + c.homeId)).toUpperCase();
         if (isRecheck) {
@@ -1650,7 +1655,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
             send('review', { i: i + 1, total: fresh.length, city: area.county, mls: h.mls || 'RF' + c.homeId, addr: c.addr, price: c.price,
               sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: urls.length, remarks: h.remarks || '', details: {},
               verdict: 'drop', why });
-            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, city, mls: h.mls });
+            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, city, mls: h.mls || h.mlsDigits || '' });
             continue;
           } else { aiFailStreak = 0; aiKept = true; aiWhy = v.reason; log(`  photos: fixer — ${v.reason}`, 'good'); }
         }
@@ -1667,7 +1672,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
             runKpi.reviewed++; runKpi.bucketC++; runKpi.dropped++;
             rejects.push({ mls: sheetId, addr: c.addr, city, zip: '', price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '',
               sqft: c.sqft, dom: h.dom, reason: 'Auto-pass: ' + pre.why, score: pre.score, why: pre.why, stage: 'Qualification gate', link: c.url });
-            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, city, mls: h.mls });
+            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, city, mls: h.mls || h.mlsDigits || '' });
             continue;
           }
           const why = tooFew ? `only ${urls.length} photo(s) posted so far` : 'photos could not be judged';
@@ -1676,7 +1681,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           send('review', { i: i + 1, total: fresh.length, city: area.county, mls: h.mls || 'RF' + c.homeId, addr: c.addr, price: c.price,
             sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: urls.length, remarks: h.remarks || '', details: {},
             verdict: 'drop', why: 'held — ' + why });
-          recordComingSoon('RF' + c.homeId, { provisional: true, decision: 'drop', extra: { addr: c.addr, city, mls: h.mls } });
+          recordComingSoon('RF' + c.homeId, { provisional: true, decision: 'drop', extra: { addr: c.addr, city, mls: h.mls || h.mlsDigits || '' } });
           clearRecheck([sheetId]);
           continue;
         }
@@ -1735,7 +1740,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         }
         // No photo verdict (photos not posted, AI off or unable) = a first look
         // only; it is opened again in a couple of days.
-        recordComingSoon('RF' + c.homeId, { decision: q.decision, extra: { addr: c.addr, city, mls: h.mls },
+        recordComingSoon('RF' + c.homeId, { decision: q.decision, extra: { addr: c.addr, city, mls: h.mls || h.mlsDigits || '' },
           provisional: !aiKept && !q.hard && !core.isConfirmed(c.addr) });
       }
       found += kept.length;
@@ -2391,7 +2396,8 @@ ipcMain.handle('refresh-board', async () => {
         const hard = val(r, 'Bucket') && !/^C/.test(val(r, 'Bucket')) && !core.isConfirmed(gal.address || val(r, 'Address'))
           ? core.rulesDecide({ addr: gal.address || val(r, 'Address'), photos: 0,
               remarks: [gal.remarks, gal.privateRemarks].filter(Boolean).join(' '),
-              condition: gal.condition, propClass: gal.propClass, occupiedBy: gal.occupiedBy || val(r, 'Occupied By') })
+              condition: gal.condition, propClass: gal.propClass, occupiedBy: gal.occupiedBy || val(r, 'Occupied By'),
+              yearBuilt: gal.yearBuilt || val(r, 'Year Built') })
           : null;
         if (hard && hard.decision === 'drop') {
           Object.assign(rec, { 'Bucket': core.BUCKET_LABEL.C, 'Opportunity Score': 15,

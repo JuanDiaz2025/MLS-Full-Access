@@ -109,6 +109,26 @@ const eq = (a, b, m) => {
   eq(core.parseRedfinHome('About this home Beautifully remodeled top to bottom, turnkey, new kitchen. Show more Built in 1951 4 days on Redfin').remarks,
     'Beautifully remodeled top to bottom, turnkey, new kitchen.', 'Redfin: description read when it runs on one line');
   eq(core.redfinMlsId('ML82063204', 'MLSListings'), 'ML82063204', 'Redfin: MLSListings number kept as is');
+  eq([core.redfinMlsId('2199662030468543705'), core.redfinMlsId('120807'), core.redfinMlsId('41149866'), core.redfinMlsId('326084425')],
+    ['', '', '', 'BA326084425'], 'Redfin: its own listing ids and an unprefixed bridgeMLS number are not used as MLS #s');
+  eq([core.redfinMlsDigits('41149866'), core.redfinMlsDigits('EB41149866'), core.redfinMlsDigits('2199662030468543705'), core.redfinMlsDigits('120807')],
+    ['41149866', '41149866', '', ''], 'Redfin: MLS digits kept for matching the board, Redfin ids are not');
+  eq(core.parseRedfinHome('About this home Original 1950s home, needs work. Show more Built in 1955 Source: bridgeMLS #41149866').mlsDigits,
+    '41149866', 'Redfin: page source number kept as digits');
+  eq([core.qualify({ addr: '4105 Byrne Street, Dublin, CA 94568', yearBuilt: 2026, remarks: 'vacant, quick close' }).bucket,
+      core.rulesDecide({ addr: 'x', yearBuilt: 2018, remarks: 'as-is fixer' }).decision,
+      core.qualify({ addr: 'x', yearBuilt: 1990, remarks: 'sold as-is, needs work' }).bucket === 'C',
+      core.qualify({ addr: '21 College Terrace, San Francisco, CA 94112', yearBuilt: 2020 }).bucket],
+    ['C', 'drop', false, 'A'], 'new construction (built 2026) is a hard C; 1990 is not; the confirmed deal is untouched');
+  {
+    const H = ['MLS #', 'Address', 'Bucket', 'MLS Status', 'Notes', 'Offer Due', 'Opportunity Score', 'First Added'];
+    const b = core.buildBoard([H, ['CC41137475', '278 6th St, Richmond, CA 94801', 'B — AI Review', 'Active', '', '', '50', '2026-08-01'],
+      ['CC41150273', '278 6th St, Richmond, CA 94801', 'B — AI Review', 'Active', '', '', '50', '2026-10-05']], {}, new Date()).map(r => r.join('|')).join('\n');
+    eq([/CC41137475/.test(b), /CC41150273/.test(b)], [false, true], 'board: a relisted house is listed once, under its newest MLS #');
+  }
+  eq(core.fullAddress('7423 Monique Place', 'Rohnert Park', '94928.'), '7423 Monique Place, Rohnert Park, CA 94928', 'address: zip loses a stray full stop');
+  eq(core.filterCandidates({ k: { county: 'Napa', rows: [{ mls: 'BA326082043', addr: '6003 Wragg Canyon Road', price: '210000', sqft: '1', dom: '3', age: '50' }] } }).candidates.length,
+    0, 'a 1 sqft listing is not read as $210,000/sqft');
   eq([core.redfinLabel('COMING SOON'), core.redfinLabel('Early Access'), core.redfinLabel('Compass Exclusive')],
     ['Coming Soon', 'Coming Soon · Early Access', 'Private Listing'], 'Redfin: board label is coloured Coming Soon / Private');
   eq(core.redfinPhotoUrls('<img src="https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_0.jpg"> "https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_1_0.jpg" https://ssl.cdn-redfin.com/photo/1/bigphoto/277/426150277_0.jpg').length,

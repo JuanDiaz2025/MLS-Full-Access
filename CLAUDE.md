@@ -814,6 +814,22 @@ fetched through the Redfin window's own session with a redfin.com referrer.
 Tested end to end with a mock AI: renovated and "dated but tidy" drop on the
 photos, the worn original house is kept.
 
+**v1.62 — wrong-data audit of the live board (Bryan 10 Oct: "make sure you're
+not pulling wrong data").** All 1,608 rows checked field by field. Fixed:
+new construction built 2026 (Meritage, SummerHill, "Lot 778") reached the
+board as B — the grid's Age reads 0 for a new house, which passes as
+"unknown"; `rulesDecide` now drops a report year under 25 years old as a hard
+exclusion, and Refresh re-checks it. Redfin's own listing ids
+(`2199662030468543705`, `120807`) and unprefixed bridgeMLS numbers
+(`41149866`) are no longer used as MLS #s — `redfinMlsId` keeps only real
+ones (SF/BA prefixes it can be sure of), the lead keeps `RF<homeId>`, and
+`redfinMlsDigits` still matches the MLS / board. The Redfin scan now pulls
+the sheet into the ledger first (1559 Grand Ave was on twice). A sqft under
+300 is a placeholder ("1" read $210,000/sqft). A zip loses stray punctuation.
+The Board lists a relisted house once, under its newest MLS #. Left as the
+MLS has it: agents' typos ("an ff" as an address, Benicia 90045) and
+@redfin.com emails on MLS leads (Redfin's own agents listing those homes).
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

@@ -138,7 +138,9 @@ function filterCandidates(rowsByArea) {
   for (const key of Object.keys(rowsByArea)) {
     for (const r of rowsByArea[key].rows || []) {
       const price = num(r.price), sqft = num(r.sqft);
-      if (!price || !sqft) continue;
+      // A living area under 300 sqft is a placeholder, not a house: "1" made
+      // 6003 Wragg Canyon Rd read $210,000/sqft — 35,533% of the median.
+      if (!price || !sqft || sqft < 300) continue;
       // The area's own price cap, never over $3M — checked here as well as
       // in the search box, in case the search ignored it.
       const box = DEFAULT_BUYBOX.find(a => a.county === rowsByArea[key].county);
@@ -385,6 +387,13 @@ function rulesDecide(meta) {
   const photos = meta.photos || 0;
   if (isConfirmed(meta.addr)) return { decision: 'keep', reason: 'confirmed deal — Bryan wants this one' };
   if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
+  // The grid's Age column reads 0 for a brand-new house, which passes the
+  // buy-box screen as "unknown". The report's Age/Yr Blt is the real year:
+  // new construction (Meritage, SummerHill, "Lot 778") reached the board as B.
+  const yb = Number(meta.yearBuilt) || 0;
+  if (yb > 1800 && new Date().getFullYear() - yb < 25) {
+    return { decision: 'drop', reason: `too new — built ${yb}, want 25+ years old (hard exclusion)` };
+  }
   const ten = tenantInfo(meta, t);
   if (ten.tenant && !ten.vacantAtClose) {
     return { decision: 'drop', reason: 'tenant occupied — we don’t buy tenant-occupied houses (hard exclusion)' };
@@ -626,7 +635,8 @@ function aiVerdict(o, remarksText) {
 function fullAddress(street, city, zip) {
   const esc = t => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let s = String(street || '').trim();
-  let z = String(zip || '').trim();
+  // Five digits only: "94928." reached the sheet with its full stop.
+  let z = (String(zip || '').match(/\b(\d{5})\b/) || [])[1] || '';
 
   const mz = s.match(/\b(9[0-5]\d{3})(?:-\d{4})?[\s,]*$/);
   if (mz) { z = z || mz[1]; s = s.slice(0, mz.index); }
@@ -860,7 +870,16 @@ function buildBoard(leadRows, today, now) {
   const closed = notPassed.filter(r => CLOSED_STATUS.test(cell(r, 'MLS Status')));
   const isC = r => /^C/.test(cell(r, 'Bucket'));
   const autoPass = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && isC(r));
-  const live = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r));
+  // A relisted house carries a new MLS # and lands on Leads a second time
+  // (278 6th St, Richmond: CC41137475 and CC41150273). List it once — the
+  // row added last, which is the live listing.
+  const houseKey = r => { const a = cell(r, 'Address').toLowerCase();
+    const m = a.match(/^\s*(\d+[a-z]?)\s+([a-z0-9]+)/); const z = (a.match(/\b(9\d{4})\b/) || [])[1] || '';
+    return m && z ? `${m[1]} ${m[2]} ${z}` : ''; };
+  const lastFor = {};
+  notPassed.forEach((r, i) => { const k = houseKey(r); if (k && !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r)) lastFor[k] = i; });
+  const live = notPassed.filter((r, i) => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r)
+    && (!houseKey(r) || lastFor[houseKey(r)] === i));
   const isPending = r => PENDING_STATUS.test(cell(r, 'MLS Status'));
   const bucketOf = r => (cell(r, 'Bucket').match(/^[ABC]/) || ['?'])[0];
   const due = r => offerDueToDate(cell(r, 'Offer Due'));
@@ -1172,7 +1191,7 @@ function parseRedfinHome(text) {
   return {
     remarks, year, dom: dom === '' ? '' : Number(dom), status, price: pagePrice,
     agent: grab(/Listed by\s+([^•·\n]{3,80}?)\s*(?:•|·|\n|$)/i),
-    mls: redfinMlsId(rawMls, source),
+    mls: redfinMlsId(rawMls, source), mlsDigits: redfinMlsDigits(rawMls),
     lotSqft: lot ? Math.round(Number(lot[1].replace(/,/g, '')) * (/acre/i.test(lot[2]) ? 43560 : 1)) : 0,
     propClass: /single/i.test(ptype) ? 'Res. Single Family' : ptype, ptype,
     ptypeLabelled: /^[ \t]*Property[ \t]*type[ \t]*:?[ \t]*(?:\n[ \t]*)?[A-Za-z]/im.test(t),
@@ -1185,8 +1204,22 @@ function redfinMlsId(raw, source) {
   const id = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!id) return '';
   if (/^[A-Z]{2,4}\d{5,}$/.test(id)) return id;
-  if (/^\d{9}$/.test(id) && (/san francisco/i.test(source || '') || /^42\d{7}$/.test(id))) return 'SF' + id;
-  return id;
+  if (/^42\d{7}$/.test(id) || (/^\d{9}$/.test(id) && /san francisco/i.test(source || ''))) return 'SF' + id;
+  if (/^32\d{7}$/.test(id)) return 'BA' + id;   // Bay Area Real Estate Information Services
+  // Anything else is not an MLS # the board can use: an Early Access home has
+  // no MLS listing, and Redfin puts its own listing id there instead
+  // ("2199662030468543705", "120807"); a bare bridgeMLS "41149866" may be EB,
+  // BE or CC on MLSListings, so its prefix cannot be guessed. Those leads keep
+  // RF<homeId> as their id; redfinMlsDigits() still matches them against the
+  // MLS #s already checked or on the board.
+  return '';
+}
+
+/** The digits of a Redfin "MLS #" worth matching against MLS #s (8–10 digits:
+ *  real MLS numbers are 8–10 digits; Redfin's own listing ids are not). '' when there is nothing to match on. */
+function redfinMlsDigits(raw) {
+  const d = String(raw || '').trim().replace(/^[A-Za-z]{2,4}(?=\d)/, '');
+  return /^\d{8,10}$/.test(d) ? d : '';
 }
 
 /** The label a Redfin find carries on the board: always reads as Coming Soon
@@ -1301,7 +1334,7 @@ function redfinHome(o) {
     early_access: /early[\s-]*access/i.test(status),
     price: rnum(o.price), beds: rnum(o.beds), baths: rnum(o.baths), sqft: rnum(o.sqFt || o.sqft),
     year: rnum(o.yearBuilt), dom: rv(o.dom) == null || rv(o.dom) === '' ? '' : rnum(o.dom),
-    mls: redfinMlsId(rv(o.mlsId), o.source || ''), remarks: String(o.listingRemarks || '').trim() };
+    mls: redfinMlsId(rv(o.mlsId), o.source || ''), mlsDigits: redfinMlsDigits(rv(o.mlsId)), remarks: String(o.listingRemarks || '').trim() };
 }
 
 /** Never above this, whatever the area's cap says (Bryan, 2 Oct: "we don't
@@ -1486,7 +1519,7 @@ function redfinCsvHomes(text) {
 
 module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
-  redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
+  redfinMlsId, redfinMlsDigits, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
   ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType, redfinSubjectPhotos, photoStem, parsePrice, capForAddress, oldRedfinLeadProblem, SAN_MATEO_ZIPS,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
