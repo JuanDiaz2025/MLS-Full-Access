@@ -1111,6 +1111,16 @@ function redfinSearchUrl(countyPath, maxk, page) {
     + ',sort=lo-days' + (page > 1 ? '/page-' + page : '');
 }
 
+/** "$1,250,000", "$1.25M", "$950K", "1250000" → dollars (0 when unreadable).
+ *  A "$2.7M" read as 0 used to pass every price cap. */
+function parsePrice(x) {
+  const m = String(x == null ? '' : x).replace(/\s+/g, '').match(/\$?([\d,]*\.?\d+)([MmKk])?/);
+  if (!m) return 0;
+  const n = Number(m[1].replace(/,/g, ''));
+  if (!isFinite(n)) return 0;
+  return Math.round(m[2] && /m/i.test(m[2]) ? n * 1e6 : m[2] && /k/i.test(m[2]) ? n * 1e3 : n);
+}
+
 /** One search card's text → the facts on it. `top` is the badge area. */
 function redfinCard({ href, text }) {
   const url = String(href || '').replace(/[?#].*$/, '');
@@ -1118,7 +1128,7 @@ function redfinCard({ href, text }) {
   if (!m) return null;
   const t = String(text || '');
   const lines = t.split(/\n+/).map(x => x.trim()).filter(Boolean);
-  const priceAt = lines.findIndex(x => /^\$[\d,]+$/.test(x));
+  const priceAt = lines.findIndex(x => /^\$[\d,]+(?:\.\d+)?[MmKk]?\+?$/.test(x));
   // The badge sits above the price on a Redfin card.
   const top = (priceAt > 0 ? lines.slice(0, priceAt) : lines.slice(0, 2)).join(' · ');
   const badge = (top.match(REDFIN_EARLY_RE) || [])[0] || '';
@@ -1126,7 +1136,7 @@ function redfinCard({ href, text }) {
   const addr = lines.find(x => /^\d+\S*\s.+,\s*[A-Za-z .'-]+,\s*CA\s*9\d{4}$/.test(x)) || redfinAddrFromUrl(url);
   return {
     homeId: m[1], url, addr, badge, top,
-    price: priceAt >= 0 ? Number(lines[priceAt].replace(/[$,]/g, '')) : 0,
+    price: priceAt >= 0 ? parsePrice(lines[priceAt]) : 0,
     beds: n(/([\d.]+)\s*beds?\b/i), baths: n(/([\d.]+)\s*baths?\b/i), sqft: n(/([\d,]+)\s*sq\s*ft/i),
     early: !!badge,
   };
@@ -1151,11 +1161,16 @@ function parseRedfinHome(text) {
   const year = Number(grab(/(?:Built in|Year Built\s*:?)\s*((?:18|19|20)\d{2})\b/i)) || 0;
   const dom = grab(/\b(\d+)\s+days?\s+on\s+Redfin/i);
   const lot = t.match(/Lot Size\s*:?\s*([\d,.]+)\s*(sq\.?\s*ft|acres?)/i);
+  // The asking price: the first dollar figure at the top of the page that is
+  // not the Redfin Estimate, a monthly payment or a price per sq ft.
+  const top = t.slice(0, 2500).split('\n');
+  const priceLine = top.find(x => /\$\s?[\d,.]+\s*[MmKk]?/.test(x) && !/estimate|est\.|\/mo|per month|\/sq|sq\.?\s*ft|payment|rent|sold for|last sold/i.test(x)) || '';
+  const pagePrice = parsePrice((priceLine.match(/\$\s?[\d,.]+\s*[MmKk]?/) || [''])[0]);
   const status = (t.slice(0, 1500).match(REDFIN_EARLY_RE) || [])[0]
     || grab(/(?:Listing |MLS )?Status\s*:?\s*([A-Za-z][A-Za-z -]{2,30})\n/i);
   const ptype = redfinPageType(t);
   return {
-    remarks, year, dom: dom === '' ? '' : Number(dom), status,
+    remarks, year, dom: dom === '' ? '' : Number(dom), status, price: pagePrice,
     agent: grab(/Listed by\s+([^•·\n]{3,80}?)\s*(?:•|·|\n|$)/i),
     mls: redfinMlsId(rawMls, source),
     lotSqft: lot ? Math.round(Number(lot[1].replace(/,/g, '')) * (/acre/i.test(lot[2]) ? 43560 : 1)) : 0,
@@ -1266,7 +1281,7 @@ function redfinGisUrl({ regionId, maxk, page, csv, market }) {
 }
 
 const rv = x => (x && typeof x === 'object' && 'value' in x ? x.value : x);
-const rnum = x => { const n = Number(String(rv(x) == null ? '' : rv(x)).replace(/[$,]/g, '')); return isFinite(n) ? n : 0; };
+const rnum = x => { const v = rv(x); if (typeof v === 'number') return isFinite(v) ? v : 0; return /[MmKk]\s*$/.test(String(v || '')) ? parsePrice(v) : (Number(String(v == null ? '' : v).replace(/[$,]/g, '')) || 0); };
 
 function redfinHome(o) {
   const url = /^https?:/.test(o.url || '') ? o.url : 'https://www.redfin.com' + (o.url || '');
@@ -1324,6 +1339,9 @@ function redfinPageType(text) {
 function redfinBuyBox(h, area, phase) {
   if (isConfirmed(h.addr)) return '';
   const cap = Math.min(((area && area.maxk) || 1500) * 1000, REDFIN_PRICE_CEILING);
+  // Once the page has been read the price must be known: an unreadable price
+  // used to count as $0 and pass every cap.
+  if (phase === 'page' && !(h.price > 0)) return 'asking price not shown — cannot confirm it is under the cap';
   if (h.price > cap) return `$${Math.round(h.price / 1000).toLocaleString()}k is over the $${cap / 1e6}M cap for ${area && area.county ? area.county : 'this area'}`;
   // A unit number in the address is a condo / apartment, whatever else says so.
   if (UNIT_ADDR_RE.test(String(h.addr || '').split(',')[0])) return `not a single-family home — a unit (${String(h.addr).split(',')[0]})`;
@@ -1442,7 +1460,7 @@ module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
-  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType, redfinSubjectPhotos, photoStem,
+  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType, redfinSubjectPhotos, photoStem, parsePrice,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,

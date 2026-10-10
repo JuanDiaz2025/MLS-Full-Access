@@ -598,7 +598,7 @@ in the remarks (whole phrases — "private remarks", "private yard" are not).
 The Coming Soon pass also ticks a Private / Office Exclusive status when the
 search form offers one.
 
-### Coming Soon & Early Access — CURRENT behaviour (v1.59, read this first)
+### Coming Soon & Early Access — CURRENT behaviour (v1.60, read this first)
 
 The version notes below are history; where they disagree, this block wins.
 
@@ -672,6 +672,18 @@ The version notes below are history; where they disagree, this block wins.
   BE41149486); the year is the current year, not 2026; a held home whose
   description has a hard exclusion is dropped at once. Re-tested end to end in
   the real app (mock Redfin + mock AI, 13 homes, two runs).
+- **v1.60 — cheap checks before any navigating or photos (Bryan 10 Oct:
+  "they keep navigating property that has already renovated… 2.5M up and not
+  single family").** Order per home: (1) **before opening** — buy box on
+  Redfin's data + Rule #0/fire/tenant/structural wording in Redfin's data
+  description (`listingRemarks`) → dropped, never opened; (2) **page opened,
+  no scrolling** — price (page asking price, never the Redfin Estimate or a
+  /mo payment), type, renovated wording → dropped in seconds; (3) full read →
+  single-family must be confirmed, **asking price must be known** (unknown =
+  skip; it used to read as $0 and pass), hard text exclusions; (4) only then
+  the photo walk + AI. `core.parsePrice` reads "$2.7M"/"$950K" (a "$2.7M" card
+  was $0 and passed every cap). If the AI fails 3 times the run stops opening
+  homes instead of holding the rest.
 - **Not yet run against live Redfin** — the first real run's log and
   `redfin-last-run.txt` are what to ask for if it finds nothing.
 

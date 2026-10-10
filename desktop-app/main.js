@@ -1516,10 +1516,29 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
       const rejectRow = (c, reason, stage) => ({ mls: stage === 'Photo review' && c.mls ? c.mls : ('RF' + c.homeId), addr: c.addr, city: (c.addr.split(',')[1] || area.county).trim(),
         zip: (c.addr.match(/\b(9\d{4})$/) || [])[1] || '', price: c.price, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', sqft: c.sqft,
         dom: c.dom, reason, stage, link: c.url });
+      // Already-renovated wording (Rule #0), fire, tenant, structural: a final
+      // drop, read from whatever description we have — no need to open the
+      // home or step through its photos for a house the listing itself says
+      // is done (Bryan, 10 Oct: "they keep navigating property that has already
+      // renovated").
+      const textHard = (c, remarks, h) => {
+        if (!remarks || core.isConfirmed(c.addr)) return null;
+        const q0 = core.qualify({ addr: c.addr, remarks, propClass: (h && h.propClass) || '', photos: 20, photosReliable: false,
+          dom: '', yearBuilt: (h && h.year) || c.year || '', price: c.price, whenUnsure: cfg.whenUnsure, comingSoon: true });
+        return q0.hard ? q0 : null;
+      };
       const inBox = [];
       early.forEach(c => {
         const why = core.redfinBuyBox(c, area, 'list');
-        if (!why) { inBox.push(c); return; }
+        if (!why) {
+          const hard = textHard(c, c.remarks);
+          if (!hard) { inBox.push(c); return; }
+          if (seen['RF' + c.homeId]) return;   // dropped on an earlier run already
+          log(`  skip ${c.addr} — ${hard.why} (from Redfin's description; not opened)`);
+          rejects.push(rejectRow(c, 'Auto-pass: ' + hard.why, 'Qualification gate'));
+          ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, reason: hard.why });
+          return;
+        }
         log(`  skip ${c.addr} — ${why}`);
         const prev = seen['RF' + c.homeId];
         // Logged to the sheet once per reason, not on every run.
@@ -1534,6 +1553,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
       // --- read each one's own page, judge it like an MLS listing ---
       for (let i = 0; i < fresh.length; i++) {
         if (await stopRequested()) break;
+        if (aiFailStreak >= 3) { log('  AI photo check is down — not opening the rest; they stay unchecked and are tried next run.', 'error'); break; }
         const c = fresh[i];
         log(`[Redfin ${area.county}] opening ${i + 1}/${fresh.length}: ${c.addr || c.url} — ${c.badge}`, 'good');
         const isRecheck = !!(seen['RF' + c.homeId] && seen['RF' + c.homeId].verdict === 'recheck');
@@ -1548,6 +1568,20 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         const onHome = u => new RegExp('/home/' + c.homeId + '(?:$|[/?#])').test(String(u || ''));
         const at = String(await rfJs('location.href').catch(() => '')).split(/[?#]/)[0];
         if (!onHome(at)) { log(`  skipped — Redfin opened ${at || 'nothing'} instead of this home; will try again next run`, 'warn'); continue; }
+        // Quick look first (no scrolling, no photos): a price over the cap, a
+        // non-house, or "remodeled / turnkey" wording ends it here.
+        {
+          const h0 = core.parseRedfinHome(String(await rfJs('document.body.innerText').catch(() => '')));
+          const pt0 = h0.ptypeLabelled ? h0.ptype : (core.isSfrType(c.ptype) ? c.ptype : (h0.ptype || c.ptype));
+          const why0 = core.redfinBuyBox({ ...c, price: Math.max(c.price || 0, h0.price || 0), ptype: pt0, year: h0.year || c.year }, area, 'list')
+            || ((textHard(c, h0.remarks || c.remarks, h0) || {}).why || '');
+          if (why0) {
+            log(`  skip — ${why0}`);
+            rejects.push(rejectRow(c, why0, 'Buy-box filter'));
+            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, reason: why0 });
+            continue;
+          }
+        }
         const text = await readWholePage(rfJs);
         const html = await rfJs('document.documentElement.innerHTML').catch(() => '');
         const h = core.parseRedfinHome(text);
@@ -1560,7 +1594,8 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // The page's "Property type" label wins; a type the page only shows on a
         // line of its own counts when Redfin's data has not already said house.
         const ptype = h.ptypeLabelled ? h.ptype : (core.isSfrType(c.ptype) ? c.ptype : (h.ptype || c.ptype));
-        const pageWhy = core.redfinBuyBox({ ...c, ptype, year: h.year || c.year }, area, 'page');
+        const pageWhy = core.redfinBuyBox({ ...c, price: Math.max(c.price || 0, h.price || 0), ptype, year: h.year || c.year }, area, 'page')
+          || ((textHard(c, h.remarks, h) || {}).why || '');
         if (pageWhy) {
           log(`  skip — ${pageWhy}`);
           rejects.push(rejectRow(c, pageWhy, 'Buy-box filter'));

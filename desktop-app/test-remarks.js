@@ -240,6 +240,19 @@ const eq = (a, b, m) => {
   eq(r.rejected.length, 1, 'MLS grid: a townhouse class is dropped');
 }
 
+// ---- price in every format, and a page price must exist (10 Oct) ----
+{
+  eq(['$1,250,000', '$1.25M', '$2.7M', '$950K', '1250000'].map(core.parsePrice), [1250000, 1250000, 2700000, 950000, 1250000], 'price: $2.7M is 2,700,000, not 0');
+  eq(core.redfinCard({ href: 'https://www.redfin.com/CA/X/1-A-St-94601/home/5', text: 'COMING SOON\n$2.7M\n3 beds\n1 A St, X, CA 94601' }).price, 2700000,
+    'price: a card showing $2.7M is over the cap');
+  eq(core.parseRedfinHome('1 A St\nRedfin Estimate $2,900,000\n$1,195,000\nEst. $7,800/mo\n3 beds').price, 1195000,
+    'price: the asking price, never the Redfin Estimate or a monthly payment');
+  eq(/asking price not shown/.test(core.redfinBuyBox({ addr: '1 A St, X, CA 94601', price: 0, ptype: '1', year: 1950 }, { maxk: 1500 }, 'page')), true,
+    'price: unknown after reading the page is skipped, not $0');
+  eq(/over the \$2.5M cap/.test(core.redfinBuyBox({ addr: '1 A St, X, CA 94401', price: 2750000, ptype: '1', year: 1950 }, { county: 'San Mateo', maxk: 2500 }, 'page')), true,
+    'price: $2.75M on the Peninsula is over the $2.5M cap');
+}
+
 // ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
 {
   const A = core.parseRedfinAgent;
