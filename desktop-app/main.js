@@ -1418,7 +1418,7 @@ async function redfinCounty(county) {
 ipcMain.handle('redfin-scan', async (_e, opts) => {
   // Every refusal says so out loud — in the log AND the status box — so a
   // click that cannot start is never mistaken for a scan that is running.
-  const refuse = msg => { log(msg, 'error'); send('done', { neverStarted: true, failed: true, summary: msg }); return { ok: false, error: msg }; };
+  const refuse = (msg, extra) => { log(msg, 'error'); send('done', Object.assign({ neverStarted: true, failed: true, summary: msg }, extra)); return { ok: false, error: msg }; };
   if (control.running) {
     const msg = 'Redfin scan NOT started — another run is still finishing. Wait for its "Finished" message, then click 🏠 Scan Redfin again.';
     log(msg, 'error'); return { ok: false, error: 'already running', message: msg };
@@ -1429,8 +1429,13 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   // Fixers are decided on the PHOTOS here; with no AI check nothing could
   // ever qualify, and the old fallback to the description is what let
   // good-condition houses through (Bryan, 10 Oct).
+  // The photo check is required here, so a key saved earlier is used even when
+  // "Use AI" is unticked (the screen's checkbox only governs the MLS scan).
+  if (!cfg.apiKey) { const j = loadAi(); if (j.apiKey) { cfg.apiKey = j.apiKey; if (j.model) cfg.model = j.model; cfg.model = aiModel(); } }
+  const useAiBefore = cfg.useAI;
+  if (cfg.apiKey && !cfg.useAI) { cfg.useAI = true; log('Using your saved AI key for the Redfin photo check ("Use AI" is unticked — that only switches it off for the MLS scan).'); }
   if (!(cfg.useAI && cfg.apiKey)) {
-    return refuse('Redfin scan NOT started — it judges every home on its PHOTOS, so it needs the AI photo check: in section 2 tick "Use AI", paste the key, press Test key, then click 🏠 Scan Redfin again.');
+    return refuse('Redfin scan NOT started — it judges every home on its PHOTOS, so no AI key is set yet. Click "Set up the AI key" below (or section 2: tick "Use AI", paste an OpenAI or Anthropic key, press Test key), then click 🏠 Scan Redfin again.', { needsAi: true });
   }
   control.running = true; control.stopped = false; control.paused = false;
   aiFailStreak = 0;
@@ -1776,6 +1781,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   } catch (e) {
     log('Redfin scan error: ' + e.message, 'error'); return { ok: false, error: e.message };
   } finally {
+    cfg.useAI = useAiBefore;
     control.running = false;
     clearRecheck(runRR);
     try { if (rfWin && !rfWin.isDestroyed()) rfWin.close(); } catch (_) {}

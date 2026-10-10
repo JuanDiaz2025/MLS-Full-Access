@@ -557,9 +557,20 @@
     const box = $('finished');
     box.style.display = 'block';
     box.className = 'status ' + (p.failed ? 'error' : p.stopped || p.neverStarted ? 'warn' : 'good');
-    if (p.failed) box.scrollIntoView({ block: 'center' });
     box.innerHTML = (p.neverStarted ? '' : (p.stopped ? '⏹ ' : '✓ ')) + p.summary
       + (p.neverStarted ? '' : '<br>The ' + (p.redfin ? 'Redfin' : 'MLS') + ' window is closed and nothing is running.');
+    if (p.needsAi) {
+      // one click to the fix: open section 2's AI fields, tick Use AI, put the cursor in the key box
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = '🔑 Set up the AI key';
+      b.style.marginTop = '8px'; b.style.display = 'block';
+      b.onclick = () => {
+        if (!$('useAI').checked) { $('useAI').checked = true; $('useAI').onchange(); }
+        $('aiFields').style.display = 'block';
+        $('apiKey').scrollIntoView({ block: 'center' }); $('apiKey').focus();
+      };
+      box.appendChild(b);
+    }
+    if (p.failed) box.scrollIntoView({ block: 'center' });
   });
 
   window.fs.on('log', p => log(p.msg, p.level));

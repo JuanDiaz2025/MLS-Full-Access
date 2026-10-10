@@ -856,6 +856,14 @@ and the log says "Opening redfin.com…" / "Reading the sheet first…" (that
 read is capped at 90 s). Checked in the real app: AI off → red message,
 button usable; AI on → full mock run unchanged.
 
+**v1.66 — "Redfin scan NOT started" (Bryan 10 Oct, screenshot).** The
+Redfin scan now uses an AI key saved earlier even when "Use AI" is unticked
+(that box only governs the MLS scan; the flag is restored after the run),
+and reads the key from `ai-settings.json` if the screen had not pushed it.
+With no key at all, the red message carries a **🔑 Set up the AI key**
+button that ticks Use AI, opens the fields and puts the cursor in the key
+box. Both cases checked in the real app.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each
