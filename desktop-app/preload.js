@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('fs', {
   stop: () => ipcRenderer.send('stop'),
   setConfig: (c) => ipcRenderer.send('set-config', c),
   aiSettings: () => ipcRenderer.invoke('ai-settings'),
+  openClaudeKeys: () => ipcRenderer.invoke('open-claude-keys'),
   aiTest: () => ipcRenderer.invoke('ai-test'),
   export: (leads) => ipcRenderer.invoke('export', { leads }),
   kpiReport: (days) => ipcRenderer.invoke('kpi-report', { days }),

@@ -991,7 +991,7 @@ live-verified with `scripts/mls-photos.js`.
 AI vision would have failed on its first call. It is now `claude-opus-5-5`
 (`claude-sonnet-5` is the cheaper option), and a saved old value is migrated.
 
-**OpenAI works too (v1.41.0, Seth, 26 Sep — the team has a ChatGPT key).** The
+**⚠ v1.67: Claude ONLY — OpenAI support removed (Bryan, 10 Oct: "do not use ChatGPT, use Claude itself").** A non-`sk-ant-` key is refused with a message, never sent; `aiReady()` = Use AI + a Claude key; old `gpt-*` / `claude-opus-5` / `claude-sonnet-5` model names map to valid Claude ids; section 2 links to console.anthropic.com → API Keys. A claude.ai sign-in can NOT replace the key (Anthropic does not allow apps to use a claude.ai login) — Bryan asked, and was told so. History below. **(was) OpenAI works too (v1.41.0, Seth, 26 Sep — the team has a ChatGPT key).** The
 provider comes from the key: `sk-ant-…` = Anthropic, anything else = OpenAI
 Chat Completions (`gpt-4.1` by default; photos go as `image_url` data URLs;
 `max_completion_tokens`, which the newer models require). Same prompt, same

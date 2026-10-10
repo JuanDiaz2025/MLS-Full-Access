@@ -31,21 +31,26 @@ const cfg = {
   boardUrl: 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1',   // FlipScout Lead Board
 };
 
-// ---------- AI provider: Anthropic or OpenAI, told apart by the key ----------
-// Anthropic keys start "sk-ant-"; any other key is treated as OpenAI (ChatGPT).
-// The photo prompt and the KEEP/DROP rules are the same for both — only the
-// request and response shapes differ (see aiCall).
-const OPENAI_DEFAULT_MODEL = 'gpt-4.1';
+// ---------- AI: Claude (Anthropic) only ----------
+// Bryan, 10 Oct: "do not use ChatGPT, use Claude itself". Claude keys start
+// "sk-ant-"; any other key is refused with a message saying so, never sent
+// anywhere. The photo prompt and the KEEP/DROP rules are unchanged.
 const ANTHROPIC_DEFAULT_MODEL = 'claude-opus-5-5';
-function aiProvider(key) { return /^sk-ant-/.test(String(key || '').trim()) ? 'anthropic' : 'openai'; }
+const ANTHROPIC_KEYS_URL = 'https://console.anthropic.com/settings/keys';
+const isClaudeKey = key => /^sk-ant-/.test(String(key || '').trim());
+function aiProvider(key) { return isClaudeKey(key) ? 'anthropic' : 'other'; }
+// Old saved names that are not model ids ("claude-opus-5", "claude-sonnet-5")
+// or a ChatGPT model left over from an OpenAI key would fail every call.
+const OLD_MODELS = { 'claude-opus-5': 'claude-opus-5-5', 'claude-sonnet-5': 'claude-sonnet-5-5' };
 function aiModel() {
-  const prov = aiProvider(cfg.apiKey), m = String(cfg.model || '').trim();
-  // "claude-opus-5" was never a model id; a saved setting from an older build
-  // would make every AI call fail.
-  if (prov === 'anthropic') return !m || m === 'claude-opus-5' || !/^claude/i.test(m) ? ANTHROPIC_DEFAULT_MODEL : m;
-  // a Claude model name sent to OpenAI would fail every call
-  return !m || /^claude/i.test(m) ? OPENAI_DEFAULT_MODEL : m;
+  const m = String(cfg.model || '').trim();
+  if (OLD_MODELS[m]) return OLD_MODELS[m];
+  return /^claude-/i.test(m) ? m : ANTHROPIC_DEFAULT_MODEL;
 }
+// The AI photo check is on only with "Use AI" ticked AND a Claude key.
+const aiReady = () => !!(cfg.useAI && isClaudeKey(cfg.apiKey));
+const NOT_CLAUDE_KEY = 'That is not a Claude key — Claude keys start with "sk-ant-". Get one at console.anthropic.com → API Keys (ChatGPT keys are no longer used).';
+ipcMain.handle('open-claude-keys', () => { shell.openExternal(ANTHROPIC_KEYS_URL); return { ok: true }; });
 
 // The key and model survive a restart (they used to be retyped every launch).
 // Kept on this computer only, next to the Google sign-in.
@@ -87,42 +92,28 @@ async function aiCall(photos, text, maxTokens) {
 }
 async function aiCallOnce(photos, text, maxTokens, signal) {
   const key = String(cfg.apiKey || '').trim(), model = aiModel();
-  if (aiProvider(key) === 'anthropic') {
-    const content = photos.map(b64 => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }));
-    content.push({ type: 'text', text });
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', signal,
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model, max_tokens: maxTokens || 1024, messages: [{ role: 'user', content }] }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.type === 'error') throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
-    return { text: (j.content || []).filter(b => b.type === 'text').map(b => b.text).join(' '), model, provider: 'Anthropic' };
-  }
-  // OpenAI Chat Completions: images go in as data URLs.
-  const content = [{ type: 'text', text }].concat(photos.map(b64 => ({
-    type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64, detail: 'auto' },
-  })));
-  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+  if (!isClaudeKey(key)) throw new Error(NOT_CLAUDE_KEY);
+  const content = photos.map(b64 => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }));
+  content.push({ type: 'text', text });
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', signal,
-    headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
-    // max_completion_tokens, not max_tokens: the newer models refuse the old name
-    body: JSON.stringify({ model, max_completion_tokens: maxTokens || 1024, messages: [{ role: 'user', content }] }),
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: maxTokens || 1024, messages: [{ role: 'user', content }] }),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.error) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
-  const msg = j.choices && j.choices[0] && j.choices[0].message;
-  return { text: (msg && typeof msg.content === 'string' ? msg.content : '') || '', model, provider: 'OpenAI' };
+  if (!r.ok || j.type === 'error') throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  return { text: (j.content || []).filter(b => b.type === 'text').map(b => b.text).join(' '), model, provider: 'Claude' };
 }
 
 // "Test key" in section 2: a tiny text-only call, so a bad key or model name
 // shows up before a scan, not as a run full of failed reviews.
 ipcMain.handle('ai-test', async () => {
-  if (!cfg.apiKey) return { ok: false, error: 'Paste an API key first.' };
+  if (!cfg.apiKey) return { ok: false, provider: 'Claude', error: 'Paste your Claude key first (it starts with "sk-ant-").' };
+  if (!isClaudeKey(cfg.apiKey)) return { ok: false, provider: 'Claude', error: NOT_CLAUDE_KEY };
   try {
     const r = await aiCall([], 'Reply with the single word: ready', 20);
     return { ok: true, provider: r.provider, model: r.model, reply: (r.text || '').trim().slice(0, 40) };
-  } catch (e) { return { ok: false, provider: aiProvider(cfg.apiKey) === 'anthropic' ? 'Anthropic' : 'OpenAI', model: aiModel(), error: e.message }; }
+  } catch (e) { return { ok: false, provider: 'Claude', model: aiModel(), error: e.message }; }
 });
 
 // ---------- daily KPIs ----------
@@ -810,7 +801,7 @@ async function autoDecide(c) {
     }
     log(`  analysing ${photos.length} photo(s)…`);
     let text;
-    try { text = (await aiCall(photos, rulesPrompt(c, photos.length, gal), aiProvider(cfg.apiKey) === 'openai' ? 4000 : 1024)).text; }
+    try { text = (await aiCall(photos, rulesPrompt(c, photos.length, gal), 1024)).text; }
     // A failed CALL is not a verdict on the house: say so, and let the text
     // rules stand. (It used to return DROP, so a typo in the model name
     // auto-passed every listing in the run.)
@@ -868,8 +859,8 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     // Seth, 1 Oct: a 204-lead East Bay scan ran with the photo check off (1 of
     // 204 had an AI verdict) and refurbished houses with "as-is" boilerplate
     // landed in A. Say it loudly at the start, not silently.
-    if (!(cfg.useAI && cfg.apiKey)) {
-      log('⚠ AI PHOTO CHECK IS OFF — no API key / "Use AI" not ticked in section 2. Leads will be judged on the remarks only, so refurbished houses WILL get through. Stop now and add the key unless that is intended.', 'error');
+    if (!(aiReady())) {
+      log('⚠ AI PHOTO CHECK IS OFF — no Claude key / "Use AI" not ticked in section 2. Leads will be judged on the remarks only, so refurbished houses WILL get through. Stop now and add the key unless that is intended.', 'error');
     }
 
     // Pull the reviewer's rejections down first, so anything she deleted is
@@ -1019,7 +1010,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const csTooFew = c._comingSoon && n <= 4;   // none posted yet counts too
         if (csTooFew) q.why += ' + AI photo check waits for the photos to post';
         let aiJudged = false;   // a photo verdict was reached (makes a Coming Soon verdict final)
-        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C' && !csTooFew) {
+        if (aiReady() && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C' && !csTooFew) {
           // AI vision still has the final say on condition when it is on: a
           // DROP from the photos is an auto-pass whatever the text scored.
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
@@ -1431,11 +1422,13 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   // good-condition houses through (Bryan, 10 Oct).
   // The photo check is required here, so a key saved earlier is used even when
   // "Use AI" is unticked (the screen's checkbox only governs the MLS scan).
-  if (!cfg.apiKey) { const j = loadAi(); if (j.apiKey) { cfg.apiKey = j.apiKey; if (j.model) cfg.model = j.model; cfg.model = aiModel(); } }
+  if (!isClaudeKey(cfg.apiKey)) { const j = loadAi(); if (isClaudeKey(j.apiKey)) { cfg.apiKey = j.apiKey; if (j.model) cfg.model = j.model; cfg.model = aiModel(); } }
   const useAiBefore = cfg.useAI;
-  if (cfg.apiKey && !cfg.useAI) { cfg.useAI = true; log('Using your saved AI key for the Redfin photo check ("Use AI" is unticked — that only switches it off for the MLS scan).'); }
-  if (!(cfg.useAI && cfg.apiKey)) {
-    return refuse('Redfin scan NOT started — it judges every home on its PHOTOS, so no AI key is set yet. Click "Set up the AI key" below (or section 2: tick "Use AI", paste an OpenAI or Anthropic key, press Test key), then click 🏠 Scan Redfin again.', { needsAi: true });
+  if (isClaudeKey(cfg.apiKey) && !cfg.useAI) { cfg.useAI = true; log('Using your saved AI key for the Redfin photo check ("Use AI" is unticked — that only switches it off for the MLS scan).'); }
+  if (!aiReady()) {
+    return refuse(cfg.apiKey && !isClaudeKey(cfg.apiKey)
+      ? 'Redfin scan NOT started — the saved key is not a Claude key (ChatGPT keys are no longer used). Click "Set up the Claude key" below, paste a key that starts with "sk-ant-", press Test key, then click 🏠 Scan Redfin again.'
+      : 'Redfin scan NOT started — it judges every home on its PHOTOS with Claude, and no Claude key is set yet. Click "Set up the Claude key" below, then click 🏠 Scan Redfin again.', { needsAi: true });
   }
   control.running = true; control.stopped = false; control.paused = false;
   aiFailStreak = 0;
@@ -1649,7 +1642,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         log(`  looked through ${urls.length} photo(s)`, urls.length > 4 ? 'good' : 'warn');
         const tooFew = urls.length <= 4;
         let aiKept = false, aiWhy = '';
-        if (cfg.useAI && cfg.apiKey && aiFailStreak < 3 && !tooFew && !core.isConfirmed(c.addr)) {
+        if (aiReady() && aiFailStreak < 3 && !tooFew && !core.isConfirmed(c.addr)) {
           const b64 = await collectPhotosDirect(urls, 20);
           // Photos the AI could not be given are not a verdict on the house.
           const v = !b64.length ? { error: true, reason: `could not download the ${urls.length} photo(s) for the AI check` }
@@ -1713,7 +1706,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // The photo verdict goes FIRST: the Lead Board shortens the why to 240
         // characters, and a verdict at the end was cut off.
         q.why = 'Redfin ' + c.badge + ' · ' + (aiKept ? 'photos show a fixer: ' + String(aiWhy).slice(0, 90) + ' · ' : '') + q.why;
-        if (!aiKept && !(cfg.useAI && cfg.apiKey)) q.why += ' + photos viewed but not judged (AI photo check off)';
+        if (!aiKept && !(aiReady())) q.why += ' + photos viewed but not judged (AI photo check off)';
         if (tooFew) q.why += ' + photos not posted on Redfin yet — check them before offering';
         // Fixers only (Bryan, 2 Oct: "on early access make sure only fixer").
         // A Coming Soon / Early Access home stays only if its description says

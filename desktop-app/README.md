@@ -54,9 +54,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
    is delivered vacant at close — then it stays, with "confirm with the agent" in
    the Why. The run never
    stops to ask. With an API key and **Use AI vision** ticked, the AI also judges
-   the photos and can turn a keep into a C. Either an **OpenAI (ChatGPT)** key
-   (`sk-…`, default model `gpt-4.1`) or an **Anthropic (Claude)** key (`sk-ant-…`,
-   default `claude-opus-5-5`) works — the app tells them apart by the key. Press
+   the photos and can turn a keep into a C. **Claude only**: a Claude key
+   (`sk-ant-…`, from console.anthropic.com → API Keys; default model
+   `claude-opus-5-5`, `claude-sonnet-5-5` is cheaper). ChatGPT keys are refused. Press
    **Test key** before a scan. The key is saved on this computer only. A failed
    AI call never drops a listing: the text rules decide and the log says why,
    and after 3 failures in a row the run carries on without AI.
