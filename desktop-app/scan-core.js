@@ -54,6 +54,9 @@ const JS_SCRAPE_GRID = `(() => {
   // by display, so find it by pattern rather than by exact name. Anchored so
   // "Postal City" cannot match it.
   const zipKey = Object.keys(idx).find(h => /^(zip|zip code|postal code|postal)$/i.test(h));
+  // "5,000" sqft or "0.11 Acres" — the sheet's Lot SqFt is square feet.
+  const lotOf = t => { const m = String(t||'').replace(/,/g,'').match(/([\\d.]+)\\s*(ac)?/i); if (!m) return '';
+    const n = Number(m[1]); return n ? Math.round(m[2] || /acre/i.test(t) ? n * 43560 : n) : ''; };
   const out = [];
   document.querySelectorAll('tr.DisplayRegRow, tr.DisplayAltRow').forEach(tr => {
     const cells = Array.from(tr.children).map(c => clean(c.innerText));
@@ -62,7 +65,8 @@ const JS_SCRAPE_GRID = `(() => {
     // Failing a column of its own, the street line often carries it.
     const inAddr = (pick('Street Address').match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '';
     out.push({ mls: pick('MLS #'), addr: pick('Street Address'), price: pick('Price'),
-      sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'), cls: pick('Class'),
+      sqft: pick('SqFt'), bds: pick('Bds'), baths: pick('Bths'), lotSqft: lotOf(pick('Lot Size')),
+      city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'), cls: pick('Class'),
       zip: (zipCell.match(/9[0-5]\\d{3}/)||[''])[0] || inAddr });
   });
   // Fallback for a grid whose rows carry other class names (San Francisco read
@@ -83,7 +87,8 @@ const JS_SCRAPE_GRID = `(() => {
         if (!/^[A-Z]{2,6}\\d{5,}$/.test(mls)) return;
         const street = p('Street Address') || p('Address');
         out.push({ mls, addr: street, price: p('Price') || p('List Price'), sqft: p('SqFt'),
-          bds: p('Bds') || p('Beds'), city: p('Postal City') || p('City'), age: p('Age'), dom: p('DOM'),
+          bds: p('Bds') || p('Beds'), baths: p('Bths') || p('Baths'), lotSqft: lotOf(p('Lot Size')),
+          city: p('Postal City') || p('City'), age: p('Age'), dom: p('DOM'),
           cls: p('Class') || p('Property Type') || p('Prop Type'),
           zip: (street.match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '' });
       });
@@ -1242,6 +1247,19 @@ function redfinMlsId(raw, source) {
 
 /** The digits of a Redfin "MLS #" worth matching against MLS #s (8–10 digits:
  *  real MLS numbers are 8–10 digits; Redfin's own listing ids are not). '' when there is nothing to match on. */
+/**
+ * Which type to judge a Redfin home on. The page's "Property type" label wins
+ * only when it is decisive — single-family, or clearly not a house. A generic
+ * "Residential" (MLS wording, with the subtype elsewhere) or a label too long to
+ * read must not overrule Redfin's own data saying house (uiPropertyType 1).
+ */
+function resolveRedfinType(pageType, pageLabelled, dataType) {
+  const p = String(pageType || '').trim();
+  if (pageLabelled && p && (isSfrType(p) || NOT_HOUSE_RE.test(p))) return p;
+  if (isSfrType(dataType)) return dataType;
+  return p || dataType || '';
+}
+
 function redfinMlsDigits(raw) {
   const d = String(raw || '').trim().replace(/^[A-Za-z]{2,4}(?=\d)/, '');
   return /^\d{8,10}$/.test(d) ? d : '';
@@ -1544,7 +1562,7 @@ function redfinCsvHomes(text) {
 
 module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
-  redfinMlsId, redfinMlsDigits, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
+  redfinMlsId, redfinMlsDigits, resolveRedfinType, NOT_HOUSE_RE, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
   ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType, redfinSubjectPhotos, photoStem, parsePrice, capForAddress, oldRedfinLeadProblem, SAN_MATEO_ZIPS,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,

@@ -879,6 +879,28 @@ qualifying listings" instead of an empty report. Backup + ledger lines
 refresh after each run. Section refs fixed (Google Sheet is section 8). Text
 from listings / the sheet is escaped before it goes into the page (`escH`).
 
+**v1.69 — full bug sweep, MLS + sheet + Redfin (three independent reviews).**
+MLS: a listing whose report did not load / window closed / number not found
+is SKIPPED with no ledger entry (`showGallery` returns `failed` / `notFound`;
+it used to be scored on nothing and written off); `nav()` reopens a closed MLS
+window; an AI answer that does not parse is an error, not a DROP; photos that
+won't download don't count toward the 3-AI-failures cut-off; a person's
+rejection replaces a `recheck` in the ledger and is never re-written by a
+re-review (its By stayed an email) nor added to the Lead Board file; refresh /
+re-review / cleanup sheet writes are `patchOnly` (a row deleted mid-refresh
+never comes back as a skeleton); sheet dates are the local day (UTC stamped
+evening scans tomorrow); Baths + Lot SqFt are read off the grid (`lotOf`,
+double-escaped regex!); MLS buy-box rejects sync as `buybox` (re-checkable
+after a price cut). Refresh leaves a row alone when its report fails to load.
+Redfin: `core.resolveRedfinType` — the page label wins only when decisive
+(single-family or clearly not a house), so "Property Type: Residential" no
+longer drops a house Redfin's data calls house; page-phase buy-box skips are
+`buybox` not final; each home is in its own try/catch (one error no longer
+loses the area's leads), a closed window ends the area cleanly; Stop during
+the photo walk judges nothing and pays no AI call; a buy-box skip never
+overwrites a final verdict; homes the MLS already checked are skipped BEFORE
+opening; a held home whose description turns "remodeled" is closed out.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

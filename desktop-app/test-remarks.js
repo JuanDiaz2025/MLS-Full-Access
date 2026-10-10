@@ -137,6 +137,11 @@ const eq = (a, b, m) => {
     eq([/X5/.test(b4), /X6/.test(b4)], [true, true], 'board: Oak St and Oak Ct are different houses');
     eq([/X1/.test(b2), /X2/.test(b2), /X3/.test(b2), /X4/.test(b2)], [true, true, false, true], 'board: different streets never merge; "Avenue" vs none still match');
   }
+  eq([core.resolveRedfinType('Residential', true, '1'), core.resolveRedfinType('', true, '1'), core.resolveRedfinType('Condo', true, '1'),
+      core.resolveRedfinType('Single Family Residential', true, '2')],
+    ['1', '1', 'Condo', 'Single Family Residential'], 'Redfin type: a generic "Residential" label never overrules Redfin data saying house; a clear condo does');
+  eq(core.redfinBuyBox({ addr: '5 Elm St, San Francisco, CA 94112', price: 900000, ptype: core.resolveRedfinType('Residential', true, '1'), year: 1950 },
+      core.DEFAULT_BUYBOX[0], 'page'), '', 'Redfin: "Property Type: Residential" on a house is not dropped');
   eq(core.fullAddress('7423 Monique Place', 'Rohnert Park', '94928.'), '7423 Monique Place, Rohnert Park, CA 94928', 'address: zip loses a stray full stop');
   eq(core.filterCandidates({ k: { county: 'Napa', rows: [{ mls: 'BA326082043', addr: '6003 Wragg Canyon Road', price: '210000', sqft: '1', dom: '3', age: '50' }] } }).candidates.length,
     0, 'a 1 sqft listing is not read as $210,000/sqft');

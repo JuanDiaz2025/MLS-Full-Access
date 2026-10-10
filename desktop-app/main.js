@@ -270,7 +270,10 @@ function ensureMlsWindow() {
 // 'persist:mls' partition, so reopening keeps the MLS session.
 const js = code => ensureMlsWindow().webContents.executeJavaScript(code, true);
 async function nav(url, settle = 1800) {
-  await mlsWin.loadURL(url).catch(() => {}); // Matrix keeps sockets open; loadURL resolves on load event
+  // ensureMlsWindow, not mlsWin: if the window was closed mid-run, mlsWin is
+  // null and every later step used to throw (and each listing was then
+  // judged on nothing).
+  await ensureMlsWindow().loadURL(url).catch(() => {}); // Matrix keeps sockets open; loadURL resolves on load event
   await sleep(settle);
 }
 
@@ -503,8 +506,13 @@ async function showGallery(mls, opts) {
   // The Client Full report is the only place the full address, the zip, the
   // year built and the real remarks exist — the results grid has none of them.
   let meta = { remarks: '', condition: '', zip: '', address: '', yearBuilt: '', propClass: '', mismatch: false };
+  // Whether the report was actually read. A listing judged on a report that
+  // never loaded (no remarks, no photos) used to be scored and written off
+  // for good; now the caller skips it and the next run tries again.
+  let reportRead = false, notFound = false;
   try {
-    await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); })()`);
+    const hasRow = await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); return !!cb; })()`);
+    if (!hasRow) notFound = true;
     await sleep(400);
     const selId = await js(`(() => { const s=[...document.querySelectorAll('select')].find(se=>[...se.options].some(o=>/Client Full - All Photos/i.test(o.text))); return s?s.id:null; })()`);
     if (selId) {
@@ -515,6 +523,7 @@ async function showGallery(mls, opts) {
       const raw = factsOnly ? await js('document.body.innerText').catch(() => '') : await readWholePage();
       meta = core.parseDetail(raw, mls);
       saveReportSample(mls, 'client', raw);
+      reportRead = !!String(raw || '').trim() && !meta.mismatch;
     }
   } catch (_) {}
 
@@ -597,6 +606,7 @@ async function showGallery(mls, opts) {
   if (dwell) await sleep(dwell);
 
   return { count: urls.length, urls: urls, gridOk: gridOk,
+    notFound: notFound && !meta.mismatch, failed: !reportRead && !notFound && !meta.mismatch,
     remarks: meta.remarks || '', condition: meta.condition || '',
     zip: meta.zip || '', address: meta.address || '', yearBuilt: meta.yearBuilt || '',
     propClass: meta.propClass || '',
@@ -798,7 +808,7 @@ async function autoDecide(c) {
       // text rules stand, and a Coming Soon listing is rechecked later. It used
       // to be a DROP, which made a Coming Soon with no photos posted yet a
       // final C.
-      return { error: true, reason: 'no photos could be loaded for the AI check' };
+      return { error: true, noPhotos: true, reason: 'no photos could be loaded for the AI check' };
     }
     log(`  analysing ${photos.length} photo(s)…`);
     let text;
@@ -811,7 +821,8 @@ async function autoDecide(c) {
     // can spend its whole budget before writing anything).
     if (!/\{[\s\S]*"decision"[\s\S]*\}/.test(text || '')) return { error: true, reason: 'AI gave no usable answer' + (text ? ': "' + String(text).trim().slice(0, 80) + '"' : ' (empty reply)') };
     let o = {}; const m = text.match(/\{[\s\S]*\}/);
-    try { o = JSON.parse(m ? m[0] : text); } catch (_) {}
+    // An answer that does not parse is not a verdict (an empty object used to read as DROP).
+    try { o = JSON.parse(m ? m[0] : text); } catch (_) { return { error: true, reason: 'AI answer was not valid JSON: "' + String(text).trim().slice(0, 80) + '"' }; }
     // The model's KEEP is not taken on trust: with no wear seen and no
     // needs-work wording in the remarks, it is "dated but in good condition".
     const av = core.aiVerdict(o, [gal.remarks, gal.privateRemarks].filter(Boolean).join(' '));
@@ -964,7 +975,13 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const c = fresh[i];
         log(`[${label}] Photo-review ${i + 1}/${fresh.length}: ${c.addr}`);
         if (markRecheck(c.mls, c.mls)) { cityRR.push(c.mls); log('  Coming Soon recheck — opened again now that its photos may be up', 'good'); }
-        const gal = await showGallery(c.mls).catch(() => ({ count: 0, remarks: '', condition: '', zip: '', mismatch: false }));
+        const gal = await showGallery(c.mls).catch(e => ({ count: 0, failed: true, error: e.message }));
+        // Nothing read (report did not load, window closed, number not found):
+        // not a verdict — skip WITHOUT a ledger entry so the next run retries.
+        if (gal.failed || gal.notFound) {
+          log(`  SKIPPED ${c.addr} — ${gal.notFound ? 'the MLS found no listing under ' + c.mls : 'its report could not be read' + (gal.error ? ' (' + gal.error + ')' : '')}; will retry next run`, 'warn');
+          continue;
+        }
         // Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT
         // listing on screen. Judging that would put another property's photos,
         // remarks and address onto this lead, so skip it — deliberately without
@@ -1017,7 +1034,8 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
           if (v.error) {
             // the text verdict stands; three failures in a row = stop asking this run
-            aiFailStreak++;
+            // (photos that would not download are not the AI failing)
+            if (!v.noPhotos) aiFailStreak++;
             log(`  ${v.reason} — kept the text rules' verdict`, 'warn');
             if (aiFailStreak >= 3) log('AI vision failed 3 times in a row — turned off for the rest of this run. Check the key and model in section 2 (Test key).', 'error');
           } else if (v.decision !== 'keep') {
@@ -1135,7 +1153,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
 
       // Hand this city's winners to the sheet now, so finished work is visible
       // even if a later city fails or you stop the run.
-      const cityWinners = cityLeads.filter(l => l.surface);
+      let cityWinners = cityLeads.filter(l => l.surface);
       if (cityWinners.length || cityRejects.length) {
         const rows = cityWinners.map(toSheetRow);
         // Primary path: write into the spreadsheet over the Sheets API, using
@@ -1143,6 +1161,8 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         // by the time this line logs — nothing to refresh, nothing to wait for.
         if (googleReady() && googleCfg().autoSync) {
           const s = await googleSync(rows, cityRejects);
+          // a listing a person rejected stays off the Lead Board file too
+          if (s.ok && s.dead) cityWinners = cityWinners.filter(l => !s.dead[String(l.mls || '').trim().toUpperCase()]);
           if (s.ok) {
             runKpi.pushed += s.leads.added;
             runKpi.pushSkipped += s.leads.updated;
@@ -1382,7 +1402,7 @@ async function viewRedfinPhotos(pause) {
   const all = new Set(await grab());
   let still = 0;
   for (let n = 0; n < 80 && still < 3; n++) {
-    if (control.stopped) break;
+    if (control.stopped || wc.isDestroyed()) break;
     wc.sendInputEvent({ type: 'keyDown', keyCode: 'Right' });
     wc.sendInputEvent({ type: 'keyUp', keyCode: 'Right' });
     await sleep(Math.max(500, pause));
@@ -1390,8 +1410,10 @@ async function viewRedfinPhotos(pause) {
     (await grab()).forEach(u => all.add(u));
     still = all.size === before ? still + 1 : 0;
   }
-  wc.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
-  wc.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+  if (!wc.isDestroyed()) {
+    wc.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+    wc.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+  }
   await sleep(500);
   return [...all];
 }
@@ -1553,8 +1575,16 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         const why = core.redfinBuyBox(c, area, 'list');
         if (!why) {
           const hard = textHard(c, c.remarks);
-          if (!hard) { inBox.push(c); return; }
-          if (seen['RF' + c.homeId]) return;   // dropped on an earlier run already
+          if (!hard) {
+            // Already checked by an MLS scan or on the board: skip BEFORE opening the page.
+            if (isSeen(c.mls) || (c.mlsDigits && seenDigits.has(c.mlsDigits))) {
+              if (!seen['RF' + c.homeId]) ledgerRecord('RF' + c.homeId, 'on-mls', { addr: c.addr });
+              return;
+            }
+            inBox.push(c); return;
+          }
+          // dropped on an earlier run already — but a held ("recheck") home is closed out now
+          if (seen['RF' + c.homeId] && seen['RF' + c.homeId].verdict !== 'recheck') return;
           log(`  skip ${c.addr} — ${hard.why} (from Redfin's description; not opened)`);
           rejects.push(rejectRow(c, 'Auto-pass: ' + hard.why, 'Qualification gate'));
           ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, reason: hard.why });
@@ -1562,8 +1592,10 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         }
         log(`  skip ${c.addr} — ${why}`);
         const prev = seen['RF' + c.homeId];
-        // Logged to the sheet once per reason, not on every run.
-        if (!(prev && prev.verdict === 'buybox' && prev.reason === why)) {
+        // Logged to the sheet once per reason, not on every run — and never over
+        // a final verdict (a kept lead whose price went up stays kept; a held
+        // home keeps its recheck count).
+        if (!prev || (prev.verdict === 'buybox' && prev.reason !== why)) {
           rejects.push(rejectRow(c, why, 'Buy-box filter'));
           ledgerRecord('RF' + c.homeId, 'buybox', { addr: c.addr, reason: why });
         }
@@ -1576,6 +1608,9 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         if (await stopRequested()) break;
         if (aiFailStreak >= 3) { log('  AI photo check is down — not opening the rest; they stay unchecked and are tried next run.', 'error'); break; }
         const c = fresh[i];
+        // One home failing (window closed, page error) must not lose the
+        // area's other leads: they are written after this loop.
+        try {
         log(`[Redfin ${area.county}] opening ${i + 1}/${fresh.length}: ${c.addr || c.url} — ${c.badge}`, 'good');
         const isRecheck = !!(seen['RF' + c.homeId] && seen['RF' + c.homeId].verdict === 'recheck');
         if (isRecheck) log('  recheck — opened again now that its photos may be up', 'good');
@@ -1593,13 +1628,14 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // non-house, or "remodeled / turnkey" wording ends it here.
         {
           const h0 = core.parseRedfinHome(String(await rfJs('document.body.innerText').catch(() => '')));
-          const pt0 = h0.ptypeLabelled ? h0.ptype : (core.isSfrType(c.ptype) ? c.ptype : (h0.ptype || c.ptype));
-          const why0 = core.redfinBuyBox({ ...c, price: Math.max(c.price || 0, h0.price || 0), ptype: pt0, year: h0.year || c.year }, area, 'list')
-            || ((textHard(c, h0.remarks || c.remarks, h0) || {}).why || '');
+          const pt0 = core.resolveRedfinType(h0.ptype, h0.ptypeLabelled, c.ptype);
+          const box0 = core.redfinBuyBox({ ...c, price: Math.max(c.price || 0, h0.price || 0), ptype: pt0, year: h0.year || c.year }, area, 'list');
+          const why0 = box0 || ((textHard(c, h0.remarks || c.remarks, h0) || {}).why || '');
           if (why0) {
             log(`  skip — ${why0}`);
-            rejects.push(rejectRow(c, why0, 'Buy-box filter'));
-            ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, reason: why0 });
+            rejects.push(rejectRow(c, why0, box0 ? 'Buy-box filter' : 'Qualification gate'));
+            // a buy-box skip stays re-checkable (price cut, page fixed); renovated wording is final
+            ledgerRecord('RF' + c.homeId, box0 ? 'buybox' : 'dropped', { addr: c.addr, reason: why0 });
             continue;
           }
         }
@@ -1615,13 +1651,13 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // The page says what the list may not have: the type, the year.
         // The page's "Property type" label wins; a type the page only shows on a
         // line of its own counts when Redfin's data has not already said house.
-        const ptype = h.ptypeLabelled ? h.ptype : (core.isSfrType(c.ptype) ? c.ptype : (h.ptype || c.ptype));
-        const pageWhy = core.redfinBuyBox({ ...c, price: Math.max(c.price || 0, h.price || 0), ptype, year: h.year || c.year }, area, 'page')
-          || ((textHard(c, h.remarks, h) || {}).why || '');
+        const ptype = core.resolveRedfinType(h.ptype, h.ptypeLabelled, c.ptype);
+        const pageBox = core.redfinBuyBox({ ...c, price: Math.max(c.price || 0, h.price || 0), ptype, year: h.year || c.year }, area, 'page');
+        const pageWhy = pageBox || ((textHard(c, h.remarks, h) || {}).why || '');
         if (pageWhy) {
           log(`  skip — ${pageWhy}`);
-          rejects.push(rejectRow(c, pageWhy, 'Buy-box filter'));
-          ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr });
+          rejects.push(rejectRow(c, pageWhy, pageBox ? 'Buy-box filter' : 'Qualification gate'));
+          ledgerRecord('RF' + c.homeId, pageBox ? 'buybox' : 'dropped', { addr: c.addr, reason: pageWhy });
           continue;
         }
         if (/sign in|join or sign/i.test(text.slice(0, 3000)) && !h.remarks) log('  this Early Access home is only shown in full when signed in to Redfin', 'warn');
@@ -1637,6 +1673,9 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // before anything else; a house the photos do not show as a fixer is
         // dropped here, before the agent or the description is even read.
         const seenPhotos = await viewRedfinPhotos(Number(cfg.scrollPauseMs) || 700);
+        // Stopped mid-walk: a partial gallery is not judged (Rule #2) and no AI
+        // call is paid for — no ledger entry, so the next run opens it again.
+        if (control.stopped) { log('  stopped during the photo walk — this home is tried again next run', 'warn'); break; }
         // Clicking the big photo can lead off the page (street view, a tour);
         // come back before anything else is read, or the agent would be the
         // wrong page's.
@@ -1757,6 +1796,10 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // only; it is opened again in a couple of days.
         recordComingSoon('RF' + c.homeId, { decision: q.decision, extra: { addr: c.addr, city, mls: h.mls || h.mlsDigits || '' },
           provisional: !aiKept && !q.hard && !core.isConfirmed(c.addr) });
+        } catch (e) {
+          log(`  ${c.addr || c.url}: ${e.message} — skipped, tried again next run`, 'warn');
+          if (!rfWin || rfWin.isDestroyed()) { log('  the Redfin window was closed — stopping here; what was found so far is saved', 'warn'); break; }
+        }
       }
       found += kept.length;
       let synced = false;
@@ -2015,7 +2058,7 @@ const REJECT_HEADERS = [
 // tab with its date and stage, so one source counts both numbers and they cannot
 // disagree.
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayKey();   // local day, like the ledger (toISOString is UTC: an evening scan was stamped tomorrow)
 const fullAddress = core.fullAddress;
 
 /** A finished lead (already through toSheetRow) as a sheet record. */
@@ -2087,7 +2130,8 @@ async function googleSync(leads, rejects) {
     // IN PLACE — bucket C, the new score and why — so the Board stops listing it.
     // Its Rejected row takes the new date, reason and stage.
     const rr = loadRereview(), isRR = r => r && rr.mls[String(r.mls || '').trim().toUpperCase()];
-    const rrRejects = (rejects || []).filter(isRR);
+    // A listing a PERSON rejected is never re-written (its By would become FlipScout).
+    const rrRejects = (rejects || []).filter(r => isRR(r) && !dead[String(r.mls || '').trim().toUpperCase()]);
     if (rrRejects.length) {
       const lcol = gsheets.colName(LEAD_HEADERS.indexOf('MLS #'));
       const onLeads = {};
@@ -2098,7 +2142,7 @@ async function googleSync(leads, rejects) {
         'Why': (r.why || r.reason || 'dropped') + ' (re-review ' + today() + ')',
       }));
       if (down.length) {
-        await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', down, { overwrite: ['Bucket', 'Opportunity Score', 'Why'] });
+        await gsheets.syncRows(token, g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', down, { overwrite: ['Bucket', 'Opportunity Score', 'Why'], patchOnly: true });
         log(`${down.length} lead(s) already on the sheet failed the re-review — moved to C.`, 'warn');
       }
     }
@@ -2114,7 +2158,7 @@ async function googleSync(leads, rejects) {
       doneRR.forEach(r => { delete rr.mls[String(r.mls).trim().toUpperCase()]; });
       saveRereview(rr);
     }
-    return { ok: true, leads: L, rejects: R, blocked };
+    return { ok: true, leads: L, rejects: R, blocked, dead };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
@@ -2276,10 +2320,18 @@ async function syncRejectedIntoLedger() {
       const isRF = k => /^RF\d+$/.test(k);
       const ids = rgrid.slice(1).map(r => String((r && r[iM]) || '').trim().toUpperCase())
         .filter(k => k && !rrSet[k] && !isRF(k));
+      // A scan's buy-box drop (over the cap, no real sqft…) is not final: a
+      // price cut or a corrected sqft must let it back in. Ledgered "buybox",
+      // which ledgerSkips never treats as checked.
+      const iS = ((rgrid[0]) || []).indexOf('Stage'), buyBox = {};
+      rgrid.slice(1).forEach(r => { const k = String((r && r[iM]) || '').trim().toUpperCase();
+        if (k && iS >= 0 && /buy-?box/i.test(String(r[iS] || ''))) buyBox[k] = true; });
       const seen = loadLedger();
-      const fresh = ids.filter(m => m && !seen[String(m).trim().toUpperCase()]);
+      // A PERSON's rejection also replaces a verdict already in the ledger that
+      // is not one (a Coming Soon "recheck" would otherwise re-open it later).
+      const fresh = ids.filter(m => { const e = seen[String(m).trim().toUpperCase()]; return m && (!e || (people[m] && e.verdict !== 'reviewer-rejected')); });
       if (fresh.length) {
-        ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: people[m] ? 'reviewer-rejected' : 'scan-dropped' })));
+        ledgerRecordMany(fresh.map(m => ({ mls: m, verdict: people[m] ? 'reviewer-rejected' : buyBox[m] ? 'buybox' : 'scan-dropped' })));
         log(`Rejections synced: ${fresh.length} new (won't be checked again unless you re-review their scan).`);
       }
       // Leads already on the board are not re-reviewed by a scan either — that
@@ -2378,7 +2430,7 @@ ipcMain.handle('refresh-board', async () => {
     const flush = async () => {
       if (!batch.length) return;
       await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', batch,
-        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link'] });
+        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link'], patchOnly: true });
       batch = [];
     };
     if (skipped.length) {
@@ -2390,8 +2442,13 @@ ipcMain.handle('refresh-board', async () => {
       if (await stopRequested()) break;   // flush + Board rebuild below still run
       const r = todo[i], mls = val(r, 'MLS #');
       log(`  [${i + 1}/${todo.length}] ${val(r, 'Address') || mls}`);
-      const gal = await showGallery(mls, { factsOnly: true }).catch(() => ({ mismatch: true }));
-      if (gal.mismatch) {
+      const gal = await showGallery(mls, { factsOnly: true }).catch(e => ({ failed: true, error: e.message }));
+      if (gal.failed) {
+        // The page did not load — that says nothing about the listing. Leave the row as it is.
+        log(`    could not read its report${gal.error ? ' (' + gal.error + ')' : ''} — row left as is`, 'warn');
+        continue;
+      }
+      if (gal.mismatch || gal.notFound) {
         // Either it left the Active search (pending / sold / withdrawn) or
         // Matrix showed another listing. Say so; never guess.
         notFound++;
@@ -2531,7 +2588,7 @@ ipcMain.handle('clear-cache', async () => {
         const bad = core.oldRedfinLeadProblem({ addr: val(r, 'Address'), price: core.num(val(r, 'Purchase Price')), year: core.num(val(r, 'Year Built')), why });
         if (bad) down.push({ 'MLS #': val(r, 'MLS #'), 'Bucket': core.BUCKET_LABEL.C, 'Opportunity Score': 0, 'Why': `${why} (cleanup ${todayKey()}: ${bad})` });
       });
-      if (down.length) await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', down, { overwrite: ['Bucket', 'Opportunity Score', 'Why'] });
+      if (down.length) await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', down, { overwrite: ['Bucket', 'Opportunity Score', 'Why'], patchOnly: true });
       out.sheet = down.length;
       log(`  checked ${out.sheetChecked} Redfin lead(s) on the sheet — moved ${out.sheet} to C (over the cap, a unit, too new, or never photo-checked); the rest still qualify`, 'good');
       await rebuildBoard().catch(() => {});
