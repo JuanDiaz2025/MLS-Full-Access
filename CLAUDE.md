@@ -830,6 +830,13 @@ The Board lists a relisted house once, under its newest MLS #. Left as the
 MLS has it: agents' typos ("an ff" as an address, Benicia 90045) and
 @redfin.com emails on MLS leads (Redfin's own agents listing those homes).
 
+**v1.63 — bug check of v1.62 (Bryan 10 Oct).** Refresh judges "too new" on
+the MLS report's year only, never the sheet's Year Built (older rows can
+carry a bogus 2026). The Board's relisted-house key is the whole street line
++ zip ("100 N Main" and "100 N Oak" never merge), and the MLS copy of a
+house beats its Redfin copy. Checked against the live board: 15 duplicate
+rows hidden, all true twins.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

@@ -2397,7 +2397,9 @@ ipcMain.handle('refresh-board', async () => {
           ? core.rulesDecide({ addr: gal.address || val(r, 'Address'), photos: 0,
               remarks: [gal.remarks, gal.privateRemarks].filter(Boolean).join(' '),
               condition: gal.condition, propClass: gal.propClass, occupiedBy: gal.occupiedBy || val(r, 'Occupied By'),
-              yearBuilt: gal.yearBuilt || val(r, 'Year Built') })
+              // The report's own year only: older sheet rows can carry a bogus
+              // "2026" (age read blank), which would drop an old house as new.
+              yearBuilt: gal.yearBuilt || '' })
           : null;
         if (hard && hard.decision === 'drop') {
           Object.assign(rec, { 'Bucket': core.BUCKET_LABEL.C, 'Opportunity Score': 15,
@@ -2409,7 +2411,7 @@ ipcMain.handle('refresh-board', async () => {
           const q = core.qualify({
             addr: gal.address || val(r, 'Address'), remarks: gal.remarks, privateRemarks: gal.privateRemarks,
             condition: gal.condition, occupiedBy: gal.occupiedBy, propClass: gal.propClass, photos: 0,
-            dom: val(r, 'DOM'), yearBuilt: gal.yearBuilt || val(r, 'Year Built'),
+            dom: val(r, 'DOM'), yearBuilt: gal.yearBuilt || '',
             price: list, origPrice: gal.origPrice, whenUnsure: cfg.whenUnsure,
           });
           Object.assign(rec, { 'Bucket': q.label, 'Opportunity Score': q.score,

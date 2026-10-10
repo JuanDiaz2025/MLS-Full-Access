@@ -125,6 +125,14 @@ const eq = (a, b, m) => {
     const b = core.buildBoard([H, ['CC41137475', '278 6th St, Richmond, CA 94801', 'B — AI Review', 'Active', '', '', '50', '2026-08-01'],
       ['CC41150273', '278 6th St, Richmond, CA 94801', 'B — AI Review', 'Active', '', '', '50', '2026-10-05']], {}, new Date()).map(r => r.join('|')).join('\n');
     eq([/CC41137475/.test(b), /CC41150273/.test(b)], [false, true], 'board: a relisted house is listed once, under its newest MLS #');
+    const b2 = core.buildBoard([H, ['X1', '100 N Main St, Oakland, CA 94601', 'B — AI Review', 'Active', '', '', '50', ''],
+      ['X2', '100 N Oak St, Oakland, CA 94601', 'B — AI Review', 'Active', '', '', '50', ''],
+      ['X3', '5826 Avenal Avenue, Oakland, CA 94605', 'B — AI Review', 'Active', '', '', '50', ''],
+      ['X4', '5826 Avenal, Oakland, CA 94605', 'A — Work Now', 'Active', '', '', '80', '']], {}, new Date()).map(r => r.join('|')).join('\n');
+    const b3 = core.buildBoard([H, ['EB41149866', '1559 Grand Ave, San Leandro, CA 94577', 'B — AI Review', 'Active', '', '', '50', ''],
+      ['RF120807', '1559 Grand Ave, San Leandro, CA 94577', 'B — AI Review', 'Coming Soon', '', '', '50', '']], {}, new Date()).map(r => r.join('|')).join('\n');
+    eq([/EB41149866/.test(b3), /RF120807/.test(b3)], [true, false], 'board: the MLS copy of a house beats its Redfin copy');
+    eq([/X1/.test(b2), /X2/.test(b2), /X3/.test(b2), /X4/.test(b2)], [true, true, false, true], 'board: different streets never merge; "Avenue" vs none still match');
   }
   eq(core.fullAddress('7423 Monique Place', 'Rohnert Park', '94928.'), '7423 Monique Place, Rohnert Park, CA 94928', 'address: zip loses a stray full stop');
   eq(core.filterCandidates({ k: { county: 'Napa', rows: [{ mls: 'BA326082043', addr: '6003 Wragg Canyon Road', price: '210000', sqft: '1', dom: '3', age: '50' }] } }).candidates.length,

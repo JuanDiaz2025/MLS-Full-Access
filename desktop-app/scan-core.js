@@ -873,11 +873,19 @@ function buildBoard(leadRows, today, now) {
   // A relisted house carries a new MLS # and lands on Leads a second time
   // (278 6th St, Richmond: CC41137475 and CC41150273). List it once — the
   // row added last, which is the live listing.
+  // Key: the whole street line (suffix and punctuation ignored) + zip, so
+  // "100 N Main St" and "100 N Oak St" never collide.
+  const SUFFIX = /\b(?:street|st|avenue|ave|road|rd|drive|dr|court|ct|lane|ln|way|boulevard|blvd|place|pl|terrace|ter|circle|cir)\b/g;
   const houseKey = r => { const a = cell(r, 'Address').toLowerCase();
-    const m = a.match(/^\s*(\d+[a-z]?)\s+([a-z0-9]+)/); const z = (a.match(/\b(9\d{4})\b/) || [])[1] || '';
-    return m && z ? `${m[1]} ${m[2]} ${z}` : ''; };
+    const z = (a.match(/\b(9\d{4})\b/) || [])[1] || '';
+    const st = a.split(',')[0].replace(/[^a-z0-9 ]+/g, ' ').replace(SUFFIX, ' ').replace(/\s+/g, ' ').trim();
+    return /^\d+[a-z]?\s+\S/.test(st) && z ? `${st} ${z}` : ''; };
+  // A real MLS # beats a Redfin-only id (it has the MLS link and a refresh
+  // can look it up); between equals, the row added last wins.
+  const realMls = r => { const m = cell(r, 'MLS #').toUpperCase(); return /^[A-Z]{2,6}\d{5,}$/.test(m) && !/^RF\d/.test(m) ? 1 : 0; };
   const lastFor = {};
-  notPassed.forEach((r, i) => { const k = houseKey(r); if (k && !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r)) lastFor[k] = i; });
+  notPassed.forEach((r, i) => { const k = houseKey(r); if (!k || CLOSED_STATUS.test(cell(r, 'MLS Status')) || isC(r)) return;
+    if (lastFor[k] == null || realMls(r) >= realMls(notPassed[lastFor[k]])) lastFor[k] = i; });
   const live = notPassed.filter((r, i) => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r)
     && (!houseKey(r) || lastFor[houseKey(r)] === i));
   const isPending = r => PENDING_STATUS.test(cell(r, 'MLS Status'));
