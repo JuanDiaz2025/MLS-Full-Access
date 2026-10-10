@@ -803,7 +803,7 @@ async function autoDecide(c) {
       o.kitchen && ('kitchen: ' + o.kitchen), o.bathroom && ('bath: ' + o.bathroom),
       o.quickFlip && ('rehab: ' + o.quickFlip)].filter(Boolean).join(' | ');
     const reason = [av.why, (o.reason || text || '').trim(), seen].filter(Boolean).join(' — ');
-    return { decision, reason: reason.slice(0, 300), photos: photos.length };
+    return { decision, reason: reason.slice(0, 300), photos: photos.length, raw: o };
   } catch (e) { return { error: true, reason: 'AI call failed: ' + e.message }; }
 }
 
@@ -1380,6 +1380,13 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   const picked = opts && Array.isArray(opts.areaIndexes) ? opts.areaIndexes : null;
   const areas = (picked ? picked.map(i => core.DEFAULT_BUYBOX[i]) : core.DEFAULT_BUYBOX).filter(Boolean);
   if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
+  // Fixers are decided on the PHOTOS here; with no AI check nothing could
+  // ever qualify, and the old fallback to the description is what let
+  // good-condition houses through (Bryan, 10 Oct).
+  if (!(cfg.useAI && cfg.apiKey)) {
+    log('The Redfin scan judges every home on its PHOTOS, so it needs the AI photo check: add the key in section 2, tick "Use AI", press Test key, then start the scan again.', 'error');
+    return { ok: false, error: 'AI photo check is off' };
+  }
   control.running = true; control.stopped = false; control.paused = false;
   aiFailStreak = 0;
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
@@ -1388,7 +1395,6 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   try {
     rfDiag = [];
     log('━━━ Redfin — Coming Soon & Early Access (no MLS sign-in) ━━━', 'good');
-    if (!(cfg.useAI && cfg.apiKey)) log('⚠ AI PHOTO CHECK IS OFF — every photo will be opened and looked through, but nothing judges them. Add the key in section 2 and tick "Use AI" to have renovated houses dropped from the photos.', 'error');
     await rfNav('https://www.redfin.com/', 4000);
     // The ledger knows every MLS # the MLS scans have checked; Redfin shows the
     // same numbers, sometimes without the board's prefix — match on digits too.
@@ -1491,7 +1497,10 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         if (h.dom === '' && c.dom !== '' && c.dom != null) h.dom = c.dom;
         if (!h.mls && c.mls) h.mls = c.mls;
         // The page says what the list may not have: the type, the year.
-        const pageWhy = core.redfinBuyBox({ ...c, ptype: h.ptype || c.ptype, year: h.year || c.year }, area, 'page');
+        // The page's "Property type" label wins; a type the page only shows on a
+        // line of its own counts when Redfin's data has not already said house.
+        const ptype = h.ptypeLabelled ? h.ptype : (core.isSfrType(c.ptype) ? c.ptype : (h.ptype || c.ptype));
+        const pageWhy = core.redfinBuyBox({ ...c, ptype, year: h.year || c.year }, area, 'page');
         if (pageWhy) {
           log(`  skip — ${pageWhy}`);
           rejects.push(rejectRow(c, pageWhy, 'Buy-box filter'));
@@ -1515,13 +1524,17 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
           // Photos the AI could not be given are not a verdict on the house.
           const v = !b64.length ? { error: true, reason: `could not download the ${urls.length} photo(s) for the AI check` }
             : await autoDecide({ addr: c.addr, _cityKey: city, _sqft: c.sqft, _price: c.price, _gal: { b64, remarks: h.remarks } });
+          // The photos must SHOW a fixer — heavy wear, or some wear on original
+          // finishes. The AI's KEEP alone is not enough (a quiet "bring your
+          // vision" used to rescue a house the photos showed in good shape).
+          const notFixerPhotos = !v.error && v.decision === 'keep' ? core.redfinPhotoFixer(v.raw) : '';
           if (v.error) {
             if (b64.length) aiFailStreak++;   // a photo download problem is not an AI failure
-            log(`  ${v.reason} — falling back to the description`, 'warn');
+            log(`  ${v.reason} — no photo verdict, so it is held (not added as a lead)`, 'warn');
             if (aiFailStreak >= 3) log('AI photo check failed 3 times in a row — off for the rest of this run. Check the key in section 2 (Test key).', 'error');
-          } else if (v.decision !== 'keep') {
+          } else if (v.decision !== 'keep' || notFixerPhotos) {
             aiFailStreak = 0;
-            const why = 'photos: not a fixer — ' + v.reason;
+            const why = notFixerPhotos || ('photos: not a fixer — ' + v.reason);
             log(`  C — Auto-Pass — ${why}`);
             runKpi.reviewed++; runKpi.bucketC++; runKpi.dropped++;
             rejects.push(rejectRow({ ...c, mls: h.mls || c.mls }, 'Auto-pass: ' + why, 'Photo review'));
@@ -1531,6 +1544,19 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
             ledgerRecord('RF' + c.homeId, 'dropped', { addr: c.addr, city, mls: h.mls });
             continue;
           } else { aiFailStreak = 0; aiKept = true; aiWhy = v.reason; log(`  photos: fixer — ${v.reason}`, 'good'); }
+        }
+        // No photo verdict (too few photos posted, AI off / failed, photos would
+        // not download): the house cannot be shown to be a fixer, so it is NOT
+        // a lead. It is held and opened again in a couple of days.
+        if (!aiKept && !core.isConfirmed(c.addr)) {
+          const why = tooFew ? `only ${urls.length} photo(s) posted so far` : 'photos could not be judged';
+          log(`  held — ${why}; not added until the photos show it is a fixer`, 'warn');
+          runKpi.reviewed++;
+          send('review', { i: i + 1, total: fresh.length, city: area.county, mls: h.mls || 'RF' + c.homeId, addr: c.addr, price: c.price,
+            sqft: c.sqft, ppsf: c.sqft ? Math.round(c.price / c.sqft) : '', photos: urls.length, remarks: h.remarks || '', details: {},
+            verdict: 'drop', why: 'held — ' + why });
+          recordComingSoon('RF' + c.homeId, { provisional: true, decision: 'drop', extra: { addr: c.addr, city, mls: h.mls } });
+          continue;
         }
         const ag = core.parseRedfinAgent(await rfJs(JS_REDFIN_AGENT(Number(cfg.scrollPauseMs) || 700)).catch(() => null));
         log(ag.name || ag.phone || ag.email

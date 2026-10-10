@@ -1152,13 +1152,14 @@ function parseRedfinHome(text) {
   const lot = t.match(/Lot Size\s*:?\s*([\d,.]+)\s*(sq\.?\s*ft|acres?)/i);
   const status = (t.slice(0, 1500).match(REDFIN_EARLY_RE) || [])[0]
     || grab(/(?:Listing |MLS )?Status\s*:?\s*([A-Za-z][A-Za-z -]{2,30})\n/i);
-  const ptype = grab(/Property Type\s*:?\s*([A-Za-z][^\n]{2,40})/i);
+  const ptype = redfinPageType(t);
   return {
     remarks, year, dom: dom === '' ? '' : Number(dom), status,
     agent: grab(/Listed by\s+([^•·\n]{3,80}?)\s*(?:•|·|\n|$)/i),
     mls: redfinMlsId(rawMls, source),
     lotSqft: lot ? Math.round(Number(lot[1].replace(/,/g, '')) * (/acre/i.test(lot[2]) ? 43560 : 1)) : 0,
     propClass: /single/i.test(ptype) ? 'Res. Single Family' : ptype, ptype,
+    ptypeLabelled: /Property\s*type\s*:?\s*\n?\s*[A-Za-z]/i.test(t),
   };
 }
 
@@ -1250,7 +1251,9 @@ function redfinHome(o) {
   const street = String(rv(o.streetLine) || o.address || '').trim();
   const addr = street && o.city ? `${street}, ${o.city}, ${o.state || 'CA'} ${o.zip || ''}`.trim() : redfinAddrFromUrl(url);
   // House type: Redfin's uiPropertyType (1 = house) or its text label.
-  const ptype = o.uiPropertyType != null && o.uiPropertyType !== '' ? String(o.uiPropertyType) : String(rv(o.propertyType) || '');
+  const pt = String(rv(o.propertyType) == null ? '' : rv(o.propertyType));
+  const ptype = o.uiPropertyType != null && o.uiPropertyType !== '' ? String(o.uiPropertyType)
+    : /^\d+$/.test(pt) ? (pt === '6' ? 'propertyType:6' : 'propertyType:' + pt) : pt;
   return { homeId: id, url: url.replace(/[?#].*$/, ''), addr, badge, status, early: !!badge, ptype,
     early_access: /early[\s-]*access/i.test(status),
     price: rnum(o.price), beds: rnum(o.beds), baths: rnum(o.baths), sqft: rnum(o.sqFt || o.sqft),
@@ -1269,15 +1272,39 @@ const NOT_HOUSE_RE = /condo|co-?op|town\s*house|townhome|multi[\s-]*family|duple
  *  only, at or under the area's cap and never over $3M, 25+ years old when
  *  the year is known. Returns '' to keep, else the reason. `phase` 'page'
  *  means the home's own page has been read, so an unknown type now fails. */
+const UNIT_ADDR_RE = /(?:#\s*[\w-]+|\b(?:unit|apt|apartment|ste|suite|spc|space|lot)\s*#?\s*(?:[\w-]*\d[\w-]*|[A-Za-z]))\s*$/i;
+/** A Redfin type that means a single-family house: uiPropertyType 1, the
+ *  propertyType code 6, or a "Single Family" / "Single-family" label. */
+const isSfrType = t => t === '1' || t === 'sfr' || t === 'propertyType:6' || /single[\s-]*family|^house$/i.test(String(t || '').trim());
+
+/** The house type a Redfin home page states, read only where Redfin states it
+ *  (a "Property Type" label, or the type on a line of its own in the key
+ *  details) — never from the description, where "unlike a condo" or "duplex
+ *  potential" would mislead. '' when the page does not say. */
+function redfinPageType(text) {
+  const t = String(text || '').replace(/\r/g, '');
+  const lab = (t.match(/Property\s*type\s*:?\s*\n?\s*([A-Za-z][^\n]{1,40})/i) || [])[1] || '';
+  if (lab) return lab.trim();
+  const line = t.split('\n').map(x => x.trim()).find(x =>
+    /^(single[\s-]*family(\s+(residential|home|residence))?|condo(minium)?(\/co-?op)?|co-?op|town\s*house|townhome|multi[\s-]*family(\s*\(.*\))?|duplex|triplex|fourplex|mobile\s*(\/manufactured)?\s*home|manufactured\s*home|vacant\s*land)$/i.test(x));
+  return line || '';
+}
+
 function redfinBuyBox(h, area, phase) {
   if (isConfirmed(h.addr)) return '';
   const cap = Math.min(((area && area.maxk) || 1500) * 1000, REDFIN_PRICE_CEILING);
   if (h.price > cap) return `$${Math.round(h.price / 1000).toLocaleString()}k is over the $${cap / 1e6}M cap for ${area && area.county ? area.county : 'this area'}`;
+  // A unit number in the address is a condo / apartment, whatever else says so.
+  if (UNIT_ADDR_RE.test(String(h.addr || '').split(',')[0])) return `not a single-family home — a unit (${String(h.addr).split(',')[0]})`;
   const t = String(h.ptype || '').trim();
-  if (t === '1' || /single[\s-]*family|^house$/i.test(t)) { /* a house */ }
-  else if (/^\d+$/.test(t)) return `not a single-family home (Redfin type ${t})`;
+  if (isSfrType(t)) { /* a house */ }
+  else if (/^(?:propertyType:)?\d+$/.test(t)) return `not a single-family home (Redfin type ${t.replace('propertyType:', '')})`;
   else if (t && NOT_HOUSE_RE.test(t)) return `not a single-family home — ${t}`;
-  else if (phase === 'page' && t) return `not a single-family home — ${t}`;
+  // Once the page has been read, single-family must be CONFIRMED. An unknown
+  // type used to pass, which is how condos and multi-units reached the board
+  // when neither Redfin's data nor the page said what the house was (Bryan,
+  // 10 Oct: "not a single family as well on redfin scan").
+  else if (phase === 'page') return t ? `not a single-family home — ${t}` : 'property type not confirmed as single-family — skipped';
   const y = Number(h.year) || 0;
   if (y > 1800 && 2026 - y < 25) return `too new — built ${y}, want 25+ years old`;
   return '';
@@ -1325,6 +1352,25 @@ function comingSoonVerdict({ prev, today, provisional, decision }) {
   return { verdict: 'recheck', last_verdict: done, rechecks: n, recheck_after: addDays(today, RECHECK_DAYS) };
 }
 
+/** Photos decide whether a Redfin Coming Soon / Early Access home is a fixer
+ *  (Bryan, 10 Oct: good-condition homes were reaching the board). `o` is the
+ *  AI's raw answer. A fixer = the AI kept it AND saw HEAVY wear, or SOME wear
+ *  on ORIGINAL finishes. "Dated but fine", a prior update, a new kitchen, or a
+ *  structural job is not — and no description can overrule the photos here.
+ *  Returns '' for a fixer, else the reason it is not. */
+function redfinPhotoFixer(o) {
+  o = o || {};
+  const keep = /^keep$/i.test(String(o.decision || '').trim());
+  const wear = String(o.wear || '').trim().toLowerCase();
+  const era = String(o.era || '').trim().toLowerCase();
+  if (!keep) return 'photos: not a fixer' + (o.reason ? ' — ' + String(o.reason).slice(0, 160) : '');
+  if (/^structural/i.test(String(o.quickFlip || ''))) return 'photos: structural job, not a quick cosmetic flip';
+  if (/^heavy/.test(wear)) return '';
+  if (/^some/.test(wear) && (!era || /^original/.test(era))) return '';
+  if (/^(prior|new)/.test(era)) return `photos: ${era.startsWith('new') ? 'recently renovated finishes' : 'prior update — work already done'}`;
+  return 'photos: dated but in good condition — no real wear to fix';
+}
+
 /** /stingray/api/gis → homes. */
 function redfinGisHomes(body) {
   let j;
@@ -1364,7 +1410,7 @@ module.exports = {
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
   redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
-  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX,
+  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,

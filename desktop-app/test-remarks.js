@@ -198,6 +198,31 @@ const eq = (a, b, m) => {
   eq(V({ prev: null, today: '2026-10-02', provisional: false, decision: 'drop' }).verdict, 'dropped', 'memory: a photo verdict is final first time');
 }
 
+// ---- Redfin: single-family must be CONFIRMED, and only the photos make a fixer (10 Oct) ----
+{
+  const B = core.redfinBuyBox, A = { county: 'San Francisco', maxk: 1500 };
+  const H = o => Object.assign({ addr: '1 A St, San Francisco, CA 94112', price: 900000, year: 1950 }, o);
+  eq(/not confirmed/.test(B(H({ ptype: '' }), A, 'page')), true, 'type: unknown after reading the page is dropped, not let through');
+  eq(B(H({ ptype: '' }), A, 'list'), '', 'type: unknown in the list waits for the page');
+  eq(B(H({ ptype: 'propertyType:6' }), A, 'page'), '', 'type: Redfin propertyType 6 is a single-family house');
+  eq(/not a single-family/.test(B(H({ ptype: 'propertyType:3' }), A, 'list')), true, 'type: any other Redfin propertyType code is dropped');
+  eq(/a unit/.test(B(H({ addr: '5 Oak St #3, San Francisco, CA 94112', ptype: '1' }), A, 'list')), true, 'type: a #3 unit is a condo, dropped');
+  eq(/a unit/.test(B(H({ addr: '5 Oak St Unit B, San Francisco, CA 94112', ptype: '1' }), A, 'list')), true, 'type: Unit B is dropped');
+  eq(B(H({ addr: '12 Parking Lot Ave, San Francisco, CA 94112', ptype: '1' }), A, 'list'), '', 'type: a street named "Lot Ave" is not a unit');
+  eq([core.redfinPageType('Key details\nCondo\nBuilt in 1960'), core.redfinPageType('Unlike a condo, a house.\nSingle-family\n'),
+      core.redfinPageType('Property type: Townhouse'), core.redfinPageType('Duplex potential, bring your ideas.')],
+     ['Condo', 'Single-family', 'Townhouse', ''], 'type: read only where Redfin states it, never from the description');
+  const homes = core.redfinGisHomes('{}&&' + JSON.stringify({ payload: { homes: [{ url: '/CA/X/1-A-St-94601/home/9', propertyType: 6, mlsStatus: 'Coming Soon' }] } }));
+  eq(homes[0].ptype, 'propertyType:6', 'type: Redfin data with only propertyType carries it');
+  const P = core.redfinPhotoFixer;
+  eq(P({ decision: 'KEEP', wear: 'heavy', era: 'original' }), '', 'photos: heavy wear on original finishes is a fixer');
+  eq(P({ decision: 'KEEP', wear: 'some', era: 'original' }), '', 'photos: some wear on original finishes is a fixer');
+  eq(/good condition/.test(P({ decision: 'KEEP', wear: 'none', era: 'original' })), true, 'photos: dated but in good condition is NOT a fixer, whatever the description says');
+  eq(/prior update/.test(P({ decision: 'KEEP', wear: 'some', era: 'prior-update' })), true, 'photos: a 2000s refresh with some wear is NOT a fixer');
+  eq(/structural/.test(P({ decision: 'KEEP', wear: 'heavy', era: 'original', quickFlip: 'structural' })), true, 'photos: a structural job is not a quick flip');
+  eq(/not a fixer/.test(P({ decision: 'DROP', reason: 'new kitchen' })), true, 'photos: an AI drop stays a drop');
+}
+
 // ---- Redfin: the listing agent's contact, from the "Listed by" block only ----
 {
   const A = core.parseRedfinAgent;

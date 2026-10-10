@@ -193,3 +193,8 @@ then it is judged. **Sign in to Redfin** (section 3) once to let the scan see Ea
 photo check is now a first look only: the home is opened again 2 days later (up to 7 times, about two weeks), so a
 quiet listing whose worn interior is posted later is not lost, and one kept on its first few photos gets its
 photo check. Photo verdicts, renovated/fire/tenant/structural wording and buy-box drops are final straight away.
+**v1.58:** the Redfin scan only ever adds a home that is **confirmed single-family** (Redfin's data or the page's own
+"Property type" — an unknown type, or a unit address like "#3", is skipped) and that the **photos show is a fixer**
+(heavy wear, or some wear on original finishes). Tidy "dated but fine" homes, 2000s refreshes and new finishes are
+dropped on the photos whatever the description says; a home whose photos could not be judged is held and rechecked,
+never added. The Redfin scan needs the AI photo check on (section 2) and will say so if it is off.

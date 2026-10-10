@@ -598,7 +598,7 @@ in the remarks (whole phrases — "private remarks", "private yard" are not).
 The Coming Soon pass also ticks a Private / Office Exclusive status when the
 search form offers one.
 
-### Coming Soon & Early Access — CURRENT behaviour (v1.57, read this first)
+### Coming Soon & Early Access — CURRENT behaviour (v1.58, read this first)
 
 The version notes below are history; where they disagree, this block wins.
 
@@ -612,14 +612,29 @@ The version notes below are history; where they disagree, this block wins.
   MLS grid backstop in `filterCandidates`): single-family only · San Mateo
   **≤ $2.5M**, every other county ≤ $1.5M · **never over $3M** · 25+ years old
   when the year is known. Search filters are never trusted.
+- **Single-family must be CONFIRMED (v1.58, Bryan 10 Oct: "not a single
+  family as well on redfin scan").** Redfin `uiPropertyType` 1 or
+  `propertyType` 6 (`isSfrType`), or the page's own "Property type" label /
+  key-details line (`core.redfinPageType` — never the description). Once the
+  page is read, an unknown type is DROPPED (it used to pass). An address with a
+  unit (`#3`, `Unit B`, `Apt 12`, `Spc 44` — `UNIT_ADDR_RE`) is a condo/unit.
+  A stray page line only counts when Redfin's data has not already said house.
 - **Per Redfin home, in this order:** buy box from Redfin's data → open the
   page, scroll it, buy box again (true type/year) → skip if an MLS scan already
   checked its MLS # → **PHOTOS FIRST**: every photo stepped through in Redfin's
   viewer and sent to the AI; a not-a-fixer photo verdict drops it here → read
   the listing agent ("Listed by" block only, never the Contact-agent card) →
   text rules (`qualify`, Rule #0 still drops "remodeled/turnkey") → **fixers
-  only** (`redfinFixerGate`: AI saw wear, or with no AI verdict the description
-  must say it needs work).
+  only, decided by the PHOTOS** (v1.58, Bryan 10 Oct: "I'm getting a good
+  property"): `core.redfinPhotoFixer(raw AI answer)` — a fixer only with
+  **heavy** wear, or **some** wear on **original** finishes; "dated but in
+  good condition", a prior 1995–2015 update, new finishes or a structural job
+  drop, and **no description can overrule the photos** (a "bring your vision"
+  used to rescue tidy houses through `aiVerdict`). **No photo verdict** (too
+  few photos posted, AI failed, photos would not download) = **held**, never a
+  lead: a `recheck` entry, opened again later. **The Redfin scan will not start
+  with the AI photo check off** — that fallback to the description is how good
+  houses got through.
 - **Memory (seen-ledger).** Ledger key `RF<homeId>` for Redfin, the MLS # for
   the MLS pass. **A verdict reached without a photo check is a first look
   only** (`core.comingSoonVerdict`): verdict `recheck`, opened again after
