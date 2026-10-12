@@ -81,13 +81,13 @@
       <option value="drop">Drop it and carry on</option>
     </select>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:12px">
-      <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — Claude reads every photo (needs a Claude key)
+      <input id="useAI" type="checkbox" style="width:auto"> Optional: let Claude look at every photo (not needed — without it, leads are picked from their descriptions and you check the photos)
     </label>
-    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
+    <div id="aiFields" style="display:none;margin-top:10px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
       <button id="claudeSignIn" type="button">🔑 Sign in to Claude</button>
       <span id="claudeSignInOut" style="font-size:12.5px;color:var(--muted)">Opens Claude's sign-in page. After signing in click <b>Create Key</b>, then <b>Copy</b> — the app saves it by itself.</span>
     </div>
-    <div id="aiFields" style="display:none;margin-top:10px">
       <label>Claude key <code>sk-ant-…</code> (filled in by "Sign in to Claude") — <a href="#" id="getClaudeKey">or get one at console.anthropic.com → API Keys</a></label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
       <div id="aiProv" style="color:var(--muted);font-size:12px;margin-top:4px"></div>

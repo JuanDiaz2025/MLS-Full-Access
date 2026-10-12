@@ -916,7 +916,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     // 204 had an AI verdict) and refurbished houses with "as-is" boilerplate
     // landed in A. Say it loudly at the start, not silently.
     if (!(aiReady())) {
-      log('⚠ AI PHOTO CHECK IS OFF — no Claude key / "Use AI" not ticked in section 2. Leads will be judged on the remarks only, so refurbished houses WILL get through. Stop now and add the key unless that is intended.', 'error');
+      log('Photo check is off — leads are judged on the remarks only, so look at each lead\'s photos before calling.', 'warn');
     }
 
     // Pull the reviewer's rejections down first, so anything she deleted is
@@ -1496,11 +1496,12 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   if (!isClaudeKey(cfg.apiKey)) { const j = loadAi(); if (isClaudeKey(j.apiKey)) { cfg.apiKey = j.apiKey; if (j.model) cfg.model = j.model; cfg.model = aiModel(); } }
   const useAiBefore = cfg.useAI;
   if (isClaudeKey(cfg.apiKey) && !cfg.useAI) { cfg.useAI = true; log('Using your saved AI key for the Redfin photo check ("Use AI" is unticked — that only switches it off for the MLS scan).'); }
-  if (!aiReady()) {
-    return refuse(cfg.apiKey && !isClaudeKey(cfg.apiKey)
-      ? 'Redfin scan NOT started — the saved key is not a Claude key (ChatGPT keys are no longer used). Click "Sign in to Claude" below, then click 🏠 Scan Redfin again.'
-      : 'Redfin scan NOT started — it judges every home on its PHOTOS with Claude. Click "Sign in to Claude" below (one time), then click 🏠 Scan Redfin again.', { needsAi: true });
-  }
+  // No key needed (Bryan, 12 Oct: "I don't need a key, please remove that").
+  // Without Claude nothing can judge the photos, so a home is kept only when
+  // its own description says it needs work, and every lead says its photos
+  // were NOT checked — look at them before calling.
+  const noAI = !aiReady();
+  if (noAI) log('Redfin scan without the Claude photo check: homes are kept only when their description says they need work (as-is, fixer, original condition…). Each lead says "photos not checked" — look at its photos before calling.', 'warn');
   control.running = true; control.stopped = false; control.paused = false;
   aiFailStreak = 0;
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
@@ -1757,10 +1758,11 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
             continue;
           } else { aiFailStreak = 0; aiKept = true; aiWhy = v.reason; log(`  photos: fixer — ${v.reason}`, 'good'); }
         }
-        // No photo verdict (too few photos posted, AI off / failed, photos would
+        // No photo verdict (too few photos posted, AI failed, photos would
         // not download): the house cannot be shown to be a fixer, so it is NOT
-        // a lead. It is held and opened again in a couple of days.
-        if (!aiKept && !core.isConfirmed(c.addr)) {
+        // a lead. It is held and opened again in a couple of days. With no
+        // Claude at all (noAI) the description decides instead (fixer gate below).
+        if (!aiKept && !noAI && !core.isConfirmed(c.addr)) {
           // The description alone can still rule a house OUT for good (renovated,
           // fire, tenant, structural) — no point rechecking those.
           const pre = core.qualify({ addr: c.addr, remarks: h.remarks, propClass: h.propClass, photos: urls.length,
@@ -1795,7 +1797,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
         // The photo verdict goes FIRST: the Lead Board shortens the why to 240
         // characters, and a verdict at the end was cut off.
         q.why = 'Redfin ' + c.badge + ' · ' + (aiKept ? 'photos show a fixer: ' + String(aiWhy).slice(0, 90) + ' · ' : '') + q.why;
-        if (!aiKept && !(aiReady())) q.why += ' + photos viewed but not judged (AI photo check off)';
+        if (!aiKept && noAI) q.why += ' + photos NOT checked (no Claude) — look at them before calling';
         if (tooFew) q.why += ' + photos not posted on Redfin yet — check them before offering';
         // Fixers only (Bryan, 2 Oct: "on early access make sure only fixer").
         // A Coming Soon / Early Access home stays only if its description says

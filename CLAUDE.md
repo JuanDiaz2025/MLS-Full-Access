@@ -911,6 +911,18 @@ with one tiny call, clears the clipboard and closes the window. Nothing to
 paste. The button is in section 2 and on the Redfin "NOT started" message.
 Billing is the console's pay-as-you-go API credit, not a claude.ai plan.
 
+**v1.71 — NO KEY NEEDED (Bryan 12 Oct: "I don't need a key, please remove
+that").** The Redfin scan no longer refuses to start without Claude. With no
+key (`noAI`), a home is kept only when its own description says it needs work
+(`redfinFixerGate` → `saysNeedsWork`), never "held"; every lead's Why ends
+"photos NOT checked (no Claude) — look at them before calling". The key /
+🔑 Sign in to Claude controls sit behind the now-optional "let Claude look at
+every photo" box in section 2. The MLS scan's no-AI warning is a plain
+reminder, not a red alarm. Bryan asked again for a claude.ai sign-in instead —
+still not possible (Anthropic does not allow apps to use a claude.ai login).
+Trade-off to remember: without the photo check, "bring your vision" houses
+that are tidy inside can reach the sheet again — the reviewer is the backstop.
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each
