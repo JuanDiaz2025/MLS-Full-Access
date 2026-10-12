@@ -80,6 +80,9 @@
       <option value="keep">Keep it and carry on (default)</option>
       <option value="drop">Drop it and carry on</option>
     </select>
+    <!-- Removed from the screen (Bryan, 12 Oct: "please remove the key here").
+         Kept hidden only so the page's script still finds its elements. -->
+    <div id="aiSection" hidden>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:12px">
       <input id="useAI" type="checkbox" style="width:auto"> Optional: let Claude look at every photo (not needed — without it, leads are picked from their descriptions and you check the photos)
     </label>
@@ -99,6 +102,7 @@
       </div>
       <div style="color:var(--muted);font-size:12px;margin-top:6px">The key and model are saved on this computer only. If the AI can't be reached,
         the text rules decide and the log says why; after 3 failures in a row the run carries on without AI.</div>
+    </div>
     </div>
   </div>
 
@@ -458,11 +462,10 @@
   // the saved key, model and on/off come back on launch
   window.fs.aiSettings().then(a => {
     if (!a) return;
-    if (a.apiKey) $('apiKey').value = a.apiKey;
-    if (a.model) $('model').value = a.model;
-    $('useAI').checked = !!a.useAI;
-    $('aiFields').style.display = $('useAI').checked ? 'block' : 'none';
-    aiSync(); pushConfig();
+    // No key is used any more: the photo check stays off, whatever was saved before.
+    $('apiKey').value = ''; $('useAI').checked = false;
+    $('aiFields').style.display = 'none';
+    pushConfig();
   }).catch(() => {});
   $('readSeconds').oninput = pushConfig;
   $('scrollPause').oninput = () => { try { localStorage.setItem('fs.scrollPause', $('scrollPause').value); } catch(_) {} pushConfig(); };

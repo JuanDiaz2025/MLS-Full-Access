@@ -1493,9 +1493,7 @@ ipcMain.handle('redfin-scan', async (_e, opts) => {
   // good-condition houses through (Bryan, 10 Oct).
   // The photo check is required here, so a key saved earlier is used even when
   // "Use AI" is unticked (the screen's checkbox only governs the MLS scan).
-  if (!isClaudeKey(cfg.apiKey)) { const j = loadAi(); if (isClaudeKey(j.apiKey)) { cfg.apiKey = j.apiKey; if (j.model) cfg.model = j.model; cfg.model = aiModel(); } }
-  const useAiBefore = cfg.useAI;
-  if (isClaudeKey(cfg.apiKey) && !cfg.useAI) { cfg.useAI = true; log('Using your saved AI key for the Redfin photo check ("Use AI" is unticked — that only switches it off for the MLS scan).'); }
+  const useAiBefore = cfg.useAI;   // no key is picked up any more (Bryan, 12 Oct)
   // No key needed (Bryan, 12 Oct: "I don't need a key, please remove that").
   // Without Claude nothing can judge the photos, so a home is kept only when
   // its own description says it needs work, and every lead says its photos
