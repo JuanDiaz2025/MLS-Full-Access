@@ -261,7 +261,9 @@ async function syncRows(token, id, tab, headers, keyHeader, records, opts) {
     const key = String(rec[keyHeader] || '').trim().toUpperCase();
     const row = headers.map(h => (rec[h] == null ? '' : rec[h]));
     if (key && rowOf[key]) toPatch.push({ row: rowOf[key], values: row });
-    else toAppend.push(row);
+    // patchOnly: update rows that are there, never re-add one — a row the
+    // reviewer deleted or rejected mid-refresh must not come back as a skeleton.
+    else if (!(opts && opts.patchOnly)) toAppend.push(row);
   }
 
   let filled = 0;

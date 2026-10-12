@@ -81,16 +81,18 @@
       <option value="drop">Drop it and carry on</option>
     </select>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin-top:12px">
-      <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — reads every photo (needs an OpenAI or Anthropic API key)
+      <input id="useAI" type="checkbox" style="width:auto"> Use AI vision — Claude reads every photo (needs a Claude key)
     </label>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
+      <button id="claudeSignIn" type="button">🔑 Sign in to Claude</button>
+      <span id="claudeSignInOut" style="font-size:12.5px;color:var(--muted)">Opens Claude's sign-in page. After signing in click <b>Create Key</b>, then <b>Copy</b> — the app saves it by itself.</span>
+    </div>
     <div id="aiFields" style="display:none;margin-top:10px">
-      <label>API key — OpenAI (ChatGPT) <code>sk-…</code> or Anthropic (Claude) <code>sk-ant-…</code></label>
-      <input id="apiKey" type="password" autocomplete="off" placeholder="sk-proj-... or sk-ant-...">
+      <label>Claude key <code>sk-ant-…</code> (filled in by "Sign in to Claude") — <a href="#" id="getClaudeKey">or get one at console.anthropic.com → API Keys</a></label>
+      <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
       <div id="aiProv" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
-      <label for="modelSel">Model</label>
-      <select id="modelSel" aria-label="AI model"></select>
-      <input id="model" type="text" value="" placeholder="type a model name, e.g. gpt-4.1-mini" style="display:none;margin-top:6px" aria-label="Model name">
-      <div id="modelNote" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
+      <label>Model</label>
+      <input id="model" type="text" value="" placeholder="claude-opus-5-5">
       <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
         <button id="aiTest" type="button">Test key</button>
         <span id="aiTestOut" style="font-size:12.5px"></span>
@@ -118,6 +120,7 @@
     <div class="row" style="margin-top:8px">
       <button id="redfinScan">🏠 Scan Redfin — Coming Soon &amp; Early Access</button>
       <button id="redfinSignIn" class="ghost">Sign in to Redfin (for Early Access)</button>
+      <button id="clearCache" class="ghost">🧹 Clear cache &amp; clean up</button>
     </div>
     <div class="hint"><b>No MLS sign-in needed.</b> Opens redfin.com, goes through each ticked area (houses under
       the area's price cap, newest first) and picks out the homes badged <b>Coming Soon</b> / <b>Early Access</b> /
@@ -280,12 +283,24 @@
 
 <script>
   const $ = id => document.getElementById(id);
+  // Text from listings, Redfin pages and the sheet is never trusted as markup.
+  const escH = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let runActive = false;   // a run (scan, refresh, cleanup) owns the buttons until its "done" arrives
   const money = n => '$' + Math.round(n||0).toLocaleString();
   let currentMls = null, lastLeads = [];
 
   function setScanButtons(running){
+    runActive = running;
     $('start').disabled = running; $('pause').disabled = !running; $('resume').disabled = true; $('stop').disabled = !running;
     $('refreshBoard').disabled = running;
+    // One run at a time: the Redfin buttons are off while anything runs (a
+    // click mid-scan used to reset Start/Stop while the scan kept going, and
+    // "Sign in to Redfin" sent the scan's own window to the login page).
+    if ($('redfinScan')) $('redfinScan').disabled = running;
+    if ($('redfinSignIn')) $('redfinSignIn').disabled = running;
+    if ($('clearCache')) $('clearCache').disabled = running;
+    // Signing in again mid-run sends the scan's own MLS window to the dashboard.
+    $('openLogin').disabled = running;
   }
 
   $('openLogin').onclick = async () => {
@@ -297,6 +312,7 @@
     const r = await window.fs.checkSession();
     $('loginStatus').textContent = r.loggedIn ? ('Signed in ✓ — ' + (r.title||'')) : ('Not signed in yet' + (r.title? ' ('+r.title+')':''));
     $('loginStatus').className = 'status ' + (r.loggedIn ? 'good' : 'warn');
+    if (runActive) return;   // a run owns the buttons; never re-enable Start under it
     $('start').disabled = !r.loggedIn;
     $('refreshBoard').disabled = !r.loggedIn;
   };
@@ -341,31 +357,55 @@
     setScanButtons(true);
     $('reportCard').style.display='none';
     $('finished').style.display='none';
-    await window.fs.startScan({ areaIndexes });
+    const r = await window.fs.startScan({ areaIndexes });
+    if (busy(r)) return;
     setScanButtons(false);
   };
   $('redfinScan').onclick = async () => {
     const areaIndexes = selectedAreas();
     if (!areaIndexes.length) { log('Pick at least one area to scan.','warn'); return; }
-    setScanButtons(true); $('redfinScan').disabled = true;
+    setScanButtons(true);
     $('finished').style.display='none';
-    await window.fs.redfinScan({ areaIndexes });
-    setScanButtons(false); $('redfinScan').disabled = false;
+    const r = await window.fs.redfinScan({ areaIndexes });
+    if (busy(r)) return;
+    setScanButtons(false);
   };
+  // Another run is still going (or still finishing after Stop): it owns the
+  // buttons, so leave them alone and say so where it can't be missed.
+  function busy(r){
+    if (!(r && r.error === 'already running')) return false;
+    const box = $('finished'); box.style.display = 'block'; box.className = 'status warn';
+    box.textContent = r.message || 'Not started — another run is still finishing. Wait for its "Finished" message, then try again.';
+    return true;
+  }
   $('redfinSignIn').onclick = () => window.fs.redfinSignIn();
+  $('clearCache').onclick = async () => {
+    if (!confirm('Clear the cache and clean up?\n\n• clears stored pages (your MLS and Redfin sign-ins stay)\n• Redfin homes are judged again by today\'s rules\n• Redfin leads on the sheet that are over the cap, a unit, too new or never photo-checked move to C, with the reason')) return;
+    setScanButtons(true);
+    const r = await window.fs.clearCache();
+    if (busy(r)) return;
+    if (r && !r.ok && r.error) log('Clean up: ' + r.error, 'warn');
+    setScanButtons(false);
+  };
   $('refreshBoard').onclick = async () => {
     setScanButtons(true);
     $('finished').style.display='none';
-    await window.fs.refreshBoard();
+    const r = await window.fs.refreshBoard();
+    if (busy(r)) return;
+    if (r && !r.ok && r.error && !r.stopped) log('Refresh: ' + r.error, 'warn');
     setScanButtons(false);
   };
   $('rebuildBoard').onclick = async () => {
     const r = await window.fs.rebuildBoard();
-    if (r && r.unconfigured) log('Connect your Google Sheet in section 7 first.', 'warn');
+    if (r && r.unconfigured) log('Connect your Google Sheet in section 8 first.', 'warn');
   };
   $('pause').onclick = () => { window.fs.pause(); $('pause').disabled=true; $('resume').disabled=false; };
   $('resume').onclick = () => { window.fs.resume(); $('pause').disabled=false; $('resume').disabled=true; };
-  $('stop').onclick = () => { window.fs.stop(); setScanButtons(false); };
+  // Stop is cooperative: the run saves what it has and then sends "done", which
+  // re-enables the buttons. Re-enabling them here let a second run start under
+  // the first one's shutdown.
+  $('stop').onclick = () => { window.fs.stop(); $('stop').disabled = true; $('pause').disabled = true; $('resume').disabled = true;
+    log('Stopping — saving what was read; the buttons come back when it has finished.', 'warn'); };
   $('export').onclick = async () => { const r = await window.fs.export(lastLeads); if(r.ok) log('Exported → '+r.filePath,'good'); };
 
   function pushConfig(){ window.fs.setConfig({
@@ -380,68 +420,38 @@
   }); }
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); saveAiFields(); };
   // which service the key belongs to, and a model that suits it
-  const AI_DEFAULT = { openai: 'gpt-4.1', anthropic: 'claude-opus-5-5' };
-  function aiProvOf(k){ return /^sk-ant-/.test(k) ? 'anthropic' : 'openai'; }
+  // Claude only (Bryan, 10 Oct: "do not use ChatGPT, use Claude itself").
+  const AI_DEFAULT = 'claude-opus-5-5';
   function aiSync(){
-    const k = $('apiKey').value.trim(), prov = aiProvOf(k), m = $('model').value.trim();
-    $('aiProv').textContent = k ? 'Using ' + (prov === 'openai' ? 'OpenAI (ChatGPT)' : 'Anthropic (Claude)') : '';
-    // a model from the other service would fail every call: swap it for this one's default
-    if (k && (!m || (prov === 'openai') === /^claude/i.test(m))) $('model').value = AI_DEFAULT[prov];
+    const k = $('apiKey').value.trim(), m = $('model').value.trim(), claude = /^sk-ant-/.test(k);
+    $('aiProv').textContent = !k ? '' : claude ? 'Using Claude' : '✗ Not a Claude key — Claude keys start with "sk-ant-" (ChatGPT keys are not used).';
+    $('aiProv').style.color = k && !claude ? 'var(--pass, #b42318)' : '';
+    // a ChatGPT model name left from an old key would fail every call
+    if (!m || !/^claude-/i.test(m)) $('model').value = AI_DEFAULT;
+    $('model').placeholder = 'claude-opus-5-5 (or claude-sonnet-5-5, cheaper)';
     $('aiTestOut').textContent = '';
-    drawModels();
   }
-  // The model dropdown: the models this key can use (asked of OpenAI /
-  // Anthropic), else a built-in list; "Other" opens a box for any name, and
-  // whatever is typed is tidied ("GPT 4.1mini" -> gpt-4.1-mini).
-  const AI_MODELS = {
-    openai: [['gpt-4.1', 'gpt-4.1 — default, sharp on photos'], ['gpt-4.1-mini', 'gpt-4.1-mini — cheaper'], ['gpt-4.1-nano', 'gpt-4.1-nano — cheapest'],
-             ['gpt-4o', 'gpt-4o'], ['gpt-4o-mini', 'gpt-4o-mini — cheaper'], ['gpt-5', 'gpt-5'], ['gpt-5-mini', 'gpt-5-mini — cheaper'], ['o4-mini', 'o4-mini']],
-    anthropic: [['claude-opus-5-5', 'claude-opus-5-5 — default, best'], ['claude-sonnet-5-5', 'claude-sonnet-5-5 — cheaper'], ['claude-haiku-4-5', 'claude-haiku-4-5 — cheapest']],
-  };
-  let liveModels = { key: '', list: null };
-  function drawModels(){
-    const k = $('apiKey').value.trim(), prov = aiProvOf(k), cur = ($('model').value || '').trim();
-    const known = AI_MODELS[prov], label = {}; known.forEach(([id, t]) => { label[id] = t; });
-    let ids = liveModels.key === k && liveModels.list && liveModels.list.length ? liveModels.list.slice() : known.map(x => x[0]);
-    // the suggested ones first, in their order, then the rest A-Z
-    const first = known.map(x => x[0]).filter(id => ids.includes(id));
-    ids = first.concat(ids.filter(id => !first.includes(id)).sort());
-    const other = !!cur && !ids.includes(cur);
-    $('modelSel').innerHTML = ids.map(id => '<option value="' + id + '"' + (id === cur ? ' selected' : '') + '>' + (label[id] || id) + '</option>').join('') +
-      '<option value="__other"' + (other ? ' selected' : '') + '>Other — type a model name…</option>';
-    if (!cur) $('modelSel').value = ids[0];
-    $('model').style.display = other ? 'block' : 'none';
-    $('modelNote').textContent = liveModels.key === k && liveModels.list ? (liveModels.list.length ? liveModels.list.length + ' models this key can use' : '') :
-      k ? 'Built-in list — press Test key to load the models this key can use' : '';
-  }
-  async function loadModels(){
-    const k = $('apiKey').value.trim(); if (!k || liveModels.key === k) return;
-    const r = await window.fs.aiModels(k).catch(() => null);
-    if ($('apiKey').value.trim() !== k) return;
-    liveModels = { key: k, list: r && r.ok ? r.models : null };
-    drawModels();
-  }
-  $('modelSel').onchange = () => {
-    if ($('modelSel').value === '__other') { $('model').style.display = 'block'; $('model').value = ''; $('model').focus(); return; }
-    $('model').value = $('modelSel').value; $('model').style.display = 'none';
-    $('aiTestOut').textContent = ''; pushConfig(); saveAiFields();
-  };
-  $('model').onchange = async () => {
-    const t = await window.fs.tidyModel($('model').value).catch(() => $('model').value.trim());
-    if (t && t !== $('model').value) { $('model').value = t; $('modelNote').textContent = 'Using “' + t + '”'; }
-    pushConfig(); saveAiFields();
-  };
   function saveAiFields(){ window.fs.setConfig({ aiSave: true, useAI: $('useAI').checked, apiKey: $('apiKey').value.trim(), model: ($('model').value||'').trim() }); }
+  $('getClaudeKey').onclick = e => { e.preventDefault(); window.fs.openClaudeKeys(); };
+  async function claudeSignIn(){
+    $('claudeSignInOut').style.color = ''; $('claudeSignInOut').textContent = 'Sign in in the window that opened, click Create Key, then Copy…';
+    await window.fs.claudeSignIn();
+  }
+  $('claudeSignIn').onclick = claudeSignIn;
+  window.fs.on('ai-key', p => {
+    $('apiKey').value = p.key || ''; if (p.model) $('model').value = p.model;
+    $('useAI').checked = true; $('aiFields').style.display = 'block'; aiSync();
+    $('claudeSignInOut').style.color = p.ok ? 'var(--strong, #1a7f37)' : 'var(--pass, #b42318)';
+    $('claudeSignInOut').textContent = p.ok ? '✓ Signed in to Claude — photo check is on. Click 🏠 Scan Redfin.' : '✗ Claude refused the key: ' + p.error;
+    if (p.ok) { const box = $('finished'); if (box.querySelector('button')) { box.className = 'status good'; box.textContent = '✓ Signed in to Claude — click 🏠 Scan Redfin again.'; } }
+  });
   $('apiKey').oninput = () => { aiSync(); pushConfig(); saveAiFields(); };
-  $('apiKey').onchange = loadModels;
   $('model').oninput = () => { $('aiTestOut').textContent = ''; pushConfig(); saveAiFields(); };
   $('aiTest').onclick = async () => {
     $('aiTest').disabled = true; $('aiTestOut').style.color = ''; $('aiTestOut').textContent = 'Testing…';
     pushConfig();
     const r = await window.fs.aiTest();
     $('aiTest').disabled = false;
-    if (r.ok && r.model && r.model !== $('model').value) { $('model').value = r.model; saveAiFields(); }
-    loadModels();
     $('aiTestOut').style.color = r.ok ? 'var(--strong, #1a7f37)' : 'var(--pass, #b42318)';
     $('aiTestOut').textContent = r.ok ? `✓ Works — ${r.provider} · ${r.model}` : `✗ ${r.provider || ''} ${r.model ? '· ' + r.model : ''}: ${r.error}`;
   };
@@ -452,7 +462,7 @@
     if (a.model) $('model').value = a.model;
     $('useAI').checked = !!a.useAI;
     $('aiFields').style.display = $('useAI').checked ? 'block' : 'none';
-    aiSync(); pushConfig(); loadModels();
+    aiSync(); pushConfig();
   }).catch(() => {});
   $('readSeconds').oninput = pushConfig;
   $('scrollPause').oninput = () => { try { localStorage.setItem('fs.scrollPause', $('scrollPause').value); } catch(_) {} pushConfig(); };
@@ -483,8 +493,8 @@
       box.textContent = `Signed in as ${s.email || 'your Google account'} — now paste your spreadsheet URL.`;
     } else {
       box.className = 'status good';
-      box.innerHTML = `Connected as <b>${s.email || 'your Google account'}</b> → `
-        + `<b>${s.sheetTitle || 'your spreadsheet'}</b>, tab "${s.leadTab}". `
+      box.innerHTML = `Connected as <b>${escH(s.email || 'your Google account')}</b> → `
+        + `<b>${escH(s.sheetTitle || 'your spreadsheet')}</b>, tab "${escH(s.leadTab)}". `
         + (s.autoSync ? 'Leads are written automatically as each city finishes.'
                       : 'Auto-write is off — use "Send this run\'s leads".');
     }
@@ -518,7 +528,7 @@
     const r = await window.fs.googleTest();
     if (r.ok) {
       box.className='status good';
-      box.innerHTML = `Connected ✓ — <b>${r.title}</b> as ${r.email||'your account'}. Tabs: ${r.tabs.join(', ')}.`;
+      box.innerHTML = `Connected ✓ — <b>${escH(r.title)}</b> as ${escH(r.email||'your account')}. Tabs: ${escH(r.tabs.join(', '))}.`;
     } else { box.className='status warn'; box.textContent = 'Not connected: ' + r.error; }
   };
   $('gSend').onclick = async () => {
@@ -584,9 +594,18 @@
     $('funnel').textContent = p.neverStarted ? 'Idle.' : 'Finished.';
     const box = $('finished');
     box.style.display = 'block';
-    box.className = 'status ' + (p.stopped || p.neverStarted ? 'warn' : 'good');
-    box.innerHTML = (p.neverStarted ? '' : (p.stopped ? '⏹ ' : '✓ ')) + p.summary
+    box.className = 'status ' + (p.failed ? 'error' : p.stopped || p.neverStarted ? 'warn' : 'good');
+    box.innerHTML = (p.neverStarted ? '' : (p.stopped ? '⏹ ' : '✓ ')) + escH(p.summary)
       + (p.neverStarted ? '' : '<br>The ' + (p.redfin ? 'Redfin' : 'MLS') + ' window is closed and nothing is running.');
+    refreshBackup().catch(() => {}); refreshLedger().catch(() => {});
+    if (p.needsAi) {
+      // one click to the fix: open section 2's AI fields, tick Use AI, put the cursor in the key box
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = '🔑 Sign in to Claude';
+      b.style.marginTop = '8px'; b.style.display = 'block';
+      b.onclick = claudeSignIn;
+      box.appendChild(b);
+    }
+    if (p.failed) box.scrollIntoView({ block: 'center' });
   });
 
   window.fs.on('log', p => log(p.msg, p.level));
@@ -594,12 +613,12 @@
   window.fs.on('review', p => {
     currentMls = p.mls;
     $('rAddr').textContent = `${p.addr} — ${p.city}`;
-    $('rMeta').innerHTML = `<span class="pill">#${p.i} of ${p.total}</span> &nbsp; ${money(p.price)} · ${p.sqft} sqft · $${p.ppsf}/sf · ${p.photos} photos`;
+    $('rMeta').innerHTML = `<span class="pill">#${escH(p.i)} of ${escH(p.total)}</span> &nbsp; ${money(p.price)} · ${escH(p.sqft)} sqft · $${escH(p.ppsf)}/sf · ${escH(p.photos)} photos`;
     $('review').classList.add('on');
     const box = $('aiVerdict');
     box.style.display = 'block';
-    box.className = 'status ' + (p.verdict === 'keep' ? 'good' : 'warn');
-    box.textContent = `${p.verdict === 'keep' ? '✓ KEEP' : '✕ DROP'} — ${p.why || ''}`;
+    box.className = 'status ' + (p.verdict === 'keep' ? 'good' : p.verdict === 'reviewing' ? '' : 'warn');
+    box.textContent = `${p.verdict === 'keep' ? '✓ KEEP' : p.verdict === 'reviewing' ? '… reviewing' : '✕ DROP'} — ${p.why || ''}`;
     if (p.remarks) {
       $('rMeta').innerHTML += `<div class="hint" style="margin-top:6px">${
         String(p.remarks).slice(0,400).replace(/[<>]/g,'')}</div>`;
@@ -662,6 +681,11 @@
 
   window.fs.on('report', p => {
     lastLeads = p.leads || [];
+    if (p.noNew || !lastLeads.length) {
+      $('report').innerHTML = '<div class="hint">No new qualifying listings this run.</div>';
+      $('reportCard').style.display = 'block';
+      return;
+    }
     const surf = lastLeads.filter(l => l.surface);
     const noComps = lastLeads.length && lastLeads.every(l => l.needsComps);
     let html = `<div class="hint">${noComps
@@ -673,7 +697,7 @@
     for (const l of lastLeads) {
       const esc = t => String(t == null ? '' : t).replace(/[<>&]/g, '');
       const head = `<td><b>${esc(l.bucket)||'—'}</b></td><td class="mono">${l.oppScore!=null&&l.oppScore!==''?l.oppScore:'—'}</td>`+
-        `<td>${l.address}<br><span class="pill">${l.city} ${l.zip||''}</span></td>`+
+        `<td>${escH(l.address)}<br><span class="pill">${escH(l.city)} ${escH(l.zip)}</span></td>`+
         `<td class="mono"><b>${esc(l.offerDue)||'—'}</b></td>`+
         `<td class="mono">${l.dom!=null&&l.dom!==''?l.dom:'—'}</td>`;
       html += noComps
@@ -682,7 +706,7 @@
           `<td class="hint">${esc(l.why)}</td></tr>`
         : `<tr class="${l.surface?'surface':''}">${head}`+
           `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
-          `<td class="mono">${money(l.grossLight)}</td><td>${l.recommendation}</td></tr>`;
+          `<td class="mono">${money(l.grossLight)}</td><td>${escH(l.recommendation)}</td></tr>`;
     }
     html += '</tbody></table>';
     $('report').innerHTML = html; $('reportCard').style.display='block';

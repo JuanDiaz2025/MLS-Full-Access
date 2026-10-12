@@ -54,9 +54,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
    is delivered vacant at close — then it stays, with "confirm with the agent" in
    the Why. The run never
    stops to ask. With an API key and **Use AI vision** ticked, the AI also judges
-   the photos and can turn a keep into a C. Either an **OpenAI (ChatGPT)** key
-   (`sk-…`, default model `gpt-4.1`) or an **Anthropic (Claude)** key (`sk-ant-…`,
-   default `claude-opus-5-5`) works — the app tells them apart by the key. Press
+   the photos and can turn a keep into a C. **Claude only**: a Claude key
+   (`sk-ant-…`, from console.anthropic.com → API Keys; default model
+   `claude-opus-5-5`, `claude-sonnet-5-5` is cheaper). ChatGPT keys are refused. Press
    **Test key** before a scan. The key is saved on this computer only. A failed
    AI call never drops a listing: the text rules decide and the log says why,
    and after 3 failures in a row the run carries on without AI.
@@ -193,3 +193,13 @@ then it is judged. **Sign in to Redfin** (section 3) once to let the scan see Ea
 photo check is now a first look only: the home is opened again 2 days later (up to 7 times, about two weeks), so a
 quiet listing whose worn interior is posted later is not lost, and one kept on its first few photos gets its
 photo check. Photo verdicts, renovated/fire/tenant/structural wording and buy-box drops are final straight away.
+**v1.58:** the Redfin scan only ever adds a home that is **confirmed single-family** (Redfin's data or the page's own
+"Property type" — an unknown type, or a unit address like "#3", is skipped) and that the **photos show is a fixer**
+(heavy wear, or some wear on original finishes). Tidy "dated but fine" homes, 2000s refreshes and new finishes are
+dropped on the photos whatever the description says; a home whose photos could not be judged is held and rechecked,
+never added. The Redfin scan needs the AI photo check on (section 2) and will say so if it is off.
+**v1.61:** section 3 has **🧹 Clear cache & clean up** — clears stored pages (sign-ins kept), lets Redfin homes be
+judged again by today's rules, and moves Redfin leads an older version put on the sheet (over the cap, a unit, too
+new, never photo-checked) to C with the reason. Browser caches are also cleared the first time a new version starts.
+"↻ Refresh leads on the board" now finds Pending / Contingent / Sold leads by their MLS # again (v1.48–1.60 stamped
+them "Not found") and skips Redfin-only leads.

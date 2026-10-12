@@ -488,10 +488,14 @@ web app, no deployment and no shared secret any more. Three tabs:
   Sep): "Offers **will be accepted** Monday Sept 28th", and a day with no month
   — "Offers Due Wednesday **the 23rd**" takes the month where the 23rd is a
   Wednesday. Open-house / broker-tour dates (OH, SOH, BT) are never read as one.
-  **TBD wins over any date after it** (v1.59, Seth 10 Oct): "Offer date TBD after
+  **TBD wins over any date after it** (v1.71, Seth 10 Oct): "Offer date TBD after
   first weekend of open houses, open Sat 10/10 2-4 PM" alerted as due Sat 4 PM, and
   "to be determined after 10/11" as due 10/11 — the date after a TBD is an open
   house or a "not before". `offerDue()` now tests TBD/TBA/to be determined first.
+  (First shipped as v1.59 on Flip-scout-Filters, but that version number was also
+  built from claude/inspiring-ride-6er6pe and its download overwrote this fix —
+  **never reuse a version number another branch has released**; check the
+  Releases page first.)
 - **`Board`** — **owned by the app, rebuilt from `Leads` after every scan and
   every refresh** (nothing on it is typed by hand; notes belong on `Leads`).
   Top: today's funnel (Scanned · Auto-Pass C · AI Review B · Work Now A · New)
@@ -602,7 +606,7 @@ in the remarks (whole phrases — "private remarks", "private yard" are not).
 The Coming Soon pass also ticks a Private / Office Exclusive status when the
 search form offers one.
 
-### Coming Soon & Early Access — CURRENT behaviour (v1.57, read this first)
+### Coming Soon & Early Access — CURRENT behaviour (v1.61, read this first)
 
 The version notes below are history; where they disagree, this block wins.
 
@@ -616,14 +620,29 @@ The version notes below are history; where they disagree, this block wins.
   MLS grid backstop in `filterCandidates`): single-family only · San Mateo
   **≤ $2.5M**, every other county ≤ $1.5M · **never over $3M** · 25+ years old
   when the year is known. Search filters are never trusted.
+- **Single-family must be CONFIRMED (v1.58, Bryan 10 Oct: "not a single
+  family as well on redfin scan").** Redfin `uiPropertyType` 1 or
+  `propertyType` 6 (`isSfrType`), or the page's own "Property type" label /
+  key-details line (`core.redfinPageType` — never the description). Once the
+  page is read, an unknown type is DROPPED (it used to pass). An address with a
+  unit (`#3`, `Unit B`, `Apt 12`, `Spc 44` — `UNIT_ADDR_RE`) is a condo/unit.
+  A stray page line only counts when Redfin's data has not already said house.
 - **Per Redfin home, in this order:** buy box from Redfin's data → open the
   page, scroll it, buy box again (true type/year) → skip if an MLS scan already
   checked its MLS # → **PHOTOS FIRST**: every photo stepped through in Redfin's
   viewer and sent to the AI; a not-a-fixer photo verdict drops it here → read
   the listing agent ("Listed by" block only, never the Contact-agent card) →
   text rules (`qualify`, Rule #0 still drops "remodeled/turnkey") → **fixers
-  only** (`redfinFixerGate`: AI saw wear, or with no AI verdict the description
-  must say it needs work).
+  only, decided by the PHOTOS** (v1.58, Bryan 10 Oct: "I'm getting a good
+  property"): `core.redfinPhotoFixer(raw AI answer)` — a fixer only with
+  **heavy** wear, or **some** wear on **original** finishes; "dated but in
+  good condition", a prior 1995–2015 update, new finishes or a structural job
+  drop, and **no description can overrule the photos** (a "bring your vision"
+  used to rescue tidy houses through `aiVerdict`). **No photo verdict** (too
+  few photos posted, AI failed, photos would not download) = **held**, never a
+  lead: a `recheck` entry, opened again later. **The Redfin scan will not start
+  with the AI photo check off** — that fallback to the description is how good
+  houses got through.
 - **Memory (seen-ledger).** Ledger key `RF<homeId>` for Redfin, the MLS # for
   the MLS pass. **A verdict reached without a photo check is a first look
   only** (`core.comingSoonVerdict`): verdict `recheck`, opened again after
@@ -641,6 +660,60 @@ The version notes below are history; where they disagree, this block wins.
   go to the sheet and to the Lead Board file; a run that finds leads opens the
   board with them on the clipboard for **Add scan**. Every Redfin answer is in
   `<userData>/redfin-last-run.txt`; zero homes read → `grid-debug/redfin-*`.
+- **v1.59 bug sweep (Bryan 10 Oct: "make sure to fix all the bugs"; 12
+  findings from an independent review, all fixed):** only THIS listing's
+  photos are judged (`core.redfinSubjectPhotos` — Redfin's "similar homes" /
+  "recently sold" thumbnails share the CDN and used to be sent to the AI and
+  counted toward the ≤4 rule; grouped by the listing-number file stem); a
+  photo-confirmed fixer can't be dropped by the text score (only a hard
+  exclusion can; it becomes at least B); an MLS Coming Soon with 0 photos is
+  held, not a final C (`autoDecide` with no photos = no verdict); Redfin
+  buy-box skips are keyed `RF<homeId>` (an MLS # on Rejected blocks the MLS
+  scan) and logged once per reason (ledger `buybox`, which never blocks a
+  later price cut); re-review keys always cleared (`clearRecheck`, also on a
+  failed run); "property type" only read as a label at the start of a line;
+  exact `/home/<id>` match; the window must be on the home before reading
+  (redirect = skip, retry next run) and again after the photo viewer; AI calls
+  time out after 120 s, photo downloads 20 s incl. the body; Redfin buttons
+  disabled during any run; MLS fallback grid reads Class; the MLS scan skips a
+  house the Redfin scan already kept (digits match, e.g. 41149486 vs
+  BE41149486); the year is the current year, not 2026; a held home whose
+  description has a hard exclusion is dropped at once. Re-tested end to end in
+  the real app (mock Redfin + mock AI, 13 homes, two runs).
+- **v1.60 — cheap checks before any navigating or photos (Bryan 10 Oct:
+  "they keep navigating property that has already renovated… 2.5M up and not
+  single family").** Order per home: (1) **before opening** — buy box on
+  Redfin's data + Rule #0/fire/tenant/structural wording in Redfin's data
+  description (`listingRemarks`) → dropped, never opened; (2) **page opened,
+  no scrolling** — price (page asking price, never the Redfin Estimate or a
+  /mo payment), type, renovated wording → dropped in seconds; (3) full read →
+  single-family must be confirmed, **asking price must be known** (unknown =
+  skip; it used to read as $0 and pass), hard text exclusions; (4) only then
+  the photo walk + AI. `core.parsePrice` reads "$2.7M"/"$950K" (a "$2.7M" card
+  was $0 and passed every cap). If the AI fails 3 times the run stops opening
+  homes instead of holding the rest.
+- **v1.61 — 🧹 Clear cache & clean up (Bryan 10 Oct: "clear a cache all
+  the bugs").** The live board held **62 Redfin leads from older builds**
+  ($25M 1001 Vallejo, $7.85M Hillsborough, Woodside $4–5.5M, units #306/#805/
+  Unit 5A/Unit CU1, 2018–2025 builds, most "photos viewed but not judged").
+  Section 3's **🧹** button: clears browser caches for the app, MLS and Redfin
+  windows (cookies/sign-ins kept); forgets `RF*`, `recheck` and `buybox`
+  ledger entries; empties rereview.json; takes Redfin leads failing a hard
+  fact (price/unit/age) out of today's Lead Board file; on the sheet, every
+  Redfin lead (Why starts "Redfin", not C, not passed) failing
+  `core.oldRedfinLeadProblem` (cap by zip via `capForAddress` — San Mateo
+  zips $2.5M, 94303 by city — unit, < 25 yrs, never photo-checked) moves to C
+  with "(cleanup <date>: why)". Dry-run on the live data: 54 of 62 move, 8
+  photo-confirmed stay. Browser caches are also cleared automatically the
+  first time a new version starts (`last-version.txt`). A Redfin lead's Why now
+  starts with "photos show a fixer" (the board file clips Why at 240 chars).
+- **Refresh "Not found" bug (v1.48–v1.60).** `showGallery` searched only
+  Active + Coming Soon, so leads gone Pending / Contingent / Sold couldn't be
+  found by their own MLS # and "↻ Refresh leads on the board" stamped **572**
+  "Not found…" (over 142 Pending, 39 Contingent). The lookup now selects EVERY
+  status (`selectOnly(…, ['.'])`) and the refresh skips Redfin-only ids
+  (RF…/Redfin listing ids — nothing to look up). The next refresh restores the
+  real statuses.
 - **Not yet run against live Redfin** — the first real run's log and
   `redfin-last-run.txt` are what to ask for if it finds nothing.
 
@@ -748,6 +821,103 @@ back to the description and does not count toward the 3-failures AI cut-off
 fetched through the Redfin window's own session with a redfin.com referrer.
 Tested end to end with a mock AI: renovated and "dated but tidy" drop on the
 photos, the worn original house is kept.
+
+**v1.62 — wrong-data audit of the live board (Bryan 10 Oct: "make sure you're
+not pulling wrong data").** All 1,608 rows checked field by field. Fixed:
+new construction built 2026 (Meritage, SummerHill, "Lot 778") reached the
+board as B — the grid's Age reads 0 for a new house, which passes as
+"unknown"; `rulesDecide` now drops a report year under 25 years old as a hard
+exclusion, and Refresh re-checks it. Redfin's own listing ids
+(`2199662030468543705`, `120807`) and unprefixed bridgeMLS numbers
+(`41149866`) are no longer used as MLS #s — `redfinMlsId` keeps only real
+ones (SF/BA prefixes it can be sure of), the lead keeps `RF<homeId>`, and
+`redfinMlsDigits` still matches the MLS / board. The Redfin scan now pulls
+the sheet into the ledger first (1559 Grand Ave was on twice). A sqft under
+300 is a placeholder ("1" read $210,000/sqft). A zip loses stray punctuation.
+The Board lists a relisted house once, under its newest MLS #. Left as the
+MLS has it: agents' typos ("an ff" as an address, Benicia 90045) and
+@redfin.com emails on MLS leads (Redfin's own agents listing those homes).
+
+**v1.63 — bug check of v1.62 (Bryan 10 Oct).** Refresh judges "too new" on
+the MLS report's year only, never the sheet's Year Built (older rows can
+carry a bogus 2026). The Board's relisted-house key is the whole street line
++ zip ("100 N Main" and "100 N Oak" never merge), and the MLS copy of a
+house beats its Redfin copy. Checked against the live board: 15 duplicate
+rows hidden, all true twins.
+
+**v1.64 — independent review of v1.62/1.63, all fixed.** The sheet→ledger
+sync skips `RF<homeId>` ids (a blanket `scan-dropped`/`on-board` locked out
+the homes 🧹 frees and the buy-box skips a price cut should bring back);
+Redfin photo filtering anchors on `h.mls || h.mlsDigits` (a bare bridgeMLS
+number lost its anchor and "similar homes" thumbnails could win again); a
+sqft under 300 (or blank) is rejected WITH a reason, kept out of the
+medians, and never stops a confirmed deal; Board dedupe maps suffixes to one
+spelling (Oak St ≠ Oak Ct; "Avenal" = "Avenal Avenue") and takes the last
+zip; `scripts/mls-sf-scan.js` passes `yearBuilt` like the app.
+
+**v1.65 — "I don't see Redfin scanning" (Bryan 10 Oct).** Every way the
+Redfin scan can refuse to start now says so in red in the status box, not
+only in the log: AI photo check off (the scan needs it), no area ticked, or
+another run still finishing (that one used to do nothing at all and grey out
+the buttons). The Redfin window is brought to the front when a scan starts,
+and the log says "Opening redfin.com…" / "Reading the sheet first…" (that
+read is capped at 90 s). Checked in the real app: AI off → red message,
+button usable; AI on → full mock run unchanged.
+
+**v1.66 — "Redfin scan NOT started" (Bryan 10 Oct, screenshot).** The
+Redfin scan now uses an AI key saved earlier even when "Use AI" is unticked
+(that box only governs the MLS scan; the flag is restored after the run),
+and reads the key from `ai-settings.json` if the screen had not pushed it.
+With no key at all, the red message carries a **🔑 Set up the AI key**
+button that ticks Use AI, opens the fields and puts the cursor in the key
+box. Both cases checked in the real app.
+
+**v1.68 — UI bug sweep (independent review, Bryan 10 Oct "lots of bugs").**
+A run owns the buttons until its `done` arrives: Stop only disables
+Stop/Pause/Resume (it used to re-enable Start while the old run was still
+shutting down), `control.running` is cleared LAST in every finally (a new run
+could start under the old one's Board rebuild and have its window closed),
+"Check session" no longer re-enables Start mid-run, "Open MLS sign-in" is
+disabled during a run and `login` refuses while running. Every "already
+running" refusal says so (`busy()` in the renderer). Redfin homes being opened
+show "… reviewing", not "✕ DROP". The Redfin report/Export/Send cover every
+county (`allKept`), not the last. Refresh / Clean up failures are logged;
+Refresh when not signed in says so instead of "✓ finished". "No new
+qualifying listings" instead of an empty report. Backup + ledger lines
+refresh after each run. Section refs fixed (Google Sheet is section 8). Text
+from listings / the sheet is escaped before it goes into the page (`escH`).
+
+**v1.69 — full bug sweep, MLS + sheet + Redfin (three independent reviews).**
+MLS: a listing whose report did not load / window closed / number not found
+is SKIPPED with no ledger entry (`showGallery` returns `failed` / `notFound`;
+it used to be scored on nothing and written off); `nav()` reopens a closed MLS
+window; an AI answer that does not parse is an error, not a DROP; photos that
+won't download don't count toward the 3-AI-failures cut-off; a person's
+rejection replaces a `recheck` in the ledger and is never re-written by a
+re-review (its By stayed an email) nor added to the Lead Board file; refresh /
+re-review / cleanup sheet writes are `patchOnly` (a row deleted mid-refresh
+never comes back as a skeleton); sheet dates are the local day (UTC stamped
+evening scans tomorrow); Baths + Lot SqFt are read off the grid (`lotOf`,
+double-escaped regex!); MLS buy-box rejects sync as `buybox` (re-checkable
+after a price cut). Refresh leaves a row alone when its report fails to load.
+Redfin: `core.resolveRedfinType` — the page label wins only when decisive
+(single-family or clearly not a house), so "Property Type: Residential" no
+longer drops a house Redfin's data calls house; page-phase buy-box skips are
+`buybox` not final; each home is in its own try/catch (one error no longer
+loses the area's leads), a closed window ends the area cleanly; Stop during
+the photo walk judges nothing and pays no AI call; a buy-box skip never
+overwrites a final verdict; homes the MLS already checked are skipped BEFORE
+opening; a held home whose description turns "remodeled" is closed out.
+
+**v1.70 — 🔑 Sign in to Claude (Bryan 10 Oct, third ask: "just log in to Claude,
+no key").** A claude.ai chat login still can NOT be used by the app
+(Anthropic does not allow it) — so the button signs in to Claude's developer
+site, console.anthropic.com (same email), in the app's own window
+(`persist:anthropic`) on the API Keys page; the user clicks Create Key → Copy,
+the app watches the clipboard for `sk-ant-…`, saves it, ticks Use AI, tests it
+with one tiny call, clears the clipboard and closes the window. Nothing to
+paste. The button is in section 2 and on the Redfin "NOT started" message.
+Billing is the console's pay-as-you-go API credit, not a claude.ai plan.
 
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
@@ -876,7 +1046,7 @@ live-verified with `scripts/mls-photos.js`.
 AI vision would have failed on its first call. It is now `claude-opus-5-5`
 (`claude-sonnet-5` is the cheaper option), and a saved old value is migrated.
 
-**OpenAI works too (v1.41.0, Seth, 26 Sep — the team has a ChatGPT key).** The
+**⚠ v1.67: Claude ONLY — OpenAI support removed (Bryan, 10 Oct: "do not use ChatGPT, use Claude itself").** A non-`sk-ant-` key is refused with a message, never sent; `aiReady()` = Use AI + a Claude key; old `gpt-*` / `claude-opus-5` / `claude-sonnet-5` model names map to valid Claude ids; section 2 links to console.anthropic.com → API Keys. A claude.ai sign-in can NOT replace the key (Anthropic does not allow apps to use a claude.ai login) — Bryan asked, and was told so. History below. **(was) OpenAI works too (v1.41.0, Seth, 26 Sep — the team has a ChatGPT key).** The
 provider comes from the key: `sk-ant-…` = Anthropic, anything else = OpenAI
 Chat Completions (`gpt-4.1` by default; photos go as `image_url` data URLs;
 `max_completion_tokens`, which the newer models require). Same prompt, same
@@ -889,15 +1059,6 @@ screen's startup settings push carries an empty key box and would wipe it.
 v1.41.0 is built from `Flip-scout-Filters` after merging `claude/inspiring-ride-6er6pe`,
 which shipped the Sep 24 "Flip Scout Filters v1.40.0" — so the new download keeps
 that line's Lead Board hand-off, Redfin links and report scrolling.
-
-**v1.58.0 — the model is a dropdown (Seth, 3 Oct: "gpt-4.1mini" failed for a missing hyphen).**
-Section 2 lists the models the key can use — asked of OpenAI `/v1/models` or
-Anthropic `/v1/models` (`ai-models` in `main.js`; audio/realtime/image/embedding
-and dated snapshot ids filtered out) — with a built-in list as the fallback and
-"Other — type a model name…" for anything else. Every typed or saved name goes
-through `core.tidyModel()` (lower case, hyphens: "GPT 4.1 mini" → gpt-4.1-mini,
-gpt4o → gpt-4o; a real `chatgpt-4o-latest` is left alone). It never invents a
-model — a name still wrong after tidying fails Test key with the provider's message.
 
 **v1.42.0 (Seth's first live AI run, 26 Sep):**
 - *San Francisco: "280 matches → scraped 0 rows".* The grid was read ONCE, 3.5 s

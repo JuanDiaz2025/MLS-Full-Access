@@ -54,6 +54,9 @@ const JS_SCRAPE_GRID = `(() => {
   // by display, so find it by pattern rather than by exact name. Anchored so
   // "Postal City" cannot match it.
   const zipKey = Object.keys(idx).find(h => /^(zip|zip code|postal code|postal)$/i.test(h));
+  // "5,000" sqft or "0.11 Acres" — the sheet's Lot SqFt is square feet.
+  const lotOf = t => { const m = String(t||'').replace(/,/g,'').match(/([\\d.]+)\\s*(ac)?/i); if (!m) return '';
+    const n = Number(m[1]); return n ? Math.round(m[2] || /acre/i.test(t) ? n * 43560 : n) : ''; };
   const out = [];
   document.querySelectorAll('tr.DisplayRegRow, tr.DisplayAltRow').forEach(tr => {
     const cells = Array.from(tr.children).map(c => clean(c.innerText));
@@ -62,7 +65,8 @@ const JS_SCRAPE_GRID = `(() => {
     // Failing a column of its own, the street line often carries it.
     const inAddr = (pick('Street Address').match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '';
     out.push({ mls: pick('MLS #'), addr: pick('Street Address'), price: pick('Price'),
-      sqft: pick('SqFt'), bds: pick('Bds'), city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'), cls: pick('Class'),
+      sqft: pick('SqFt'), bds: pick('Bds'), baths: pick('Bths'), lotSqft: lotOf(pick('Lot Size')),
+      city: pick('Postal City'), age: pick('Age'), dom: pick('DOM'), cls: pick('Class'),
       zip: (zipCell.match(/9[0-5]\\d{3}/)||[''])[0] || inAddr });
   });
   // Fallback for a grid whose rows carry other class names (San Francisco read
@@ -83,7 +87,9 @@ const JS_SCRAPE_GRID = `(() => {
         if (!/^[A-Z]{2,6}\\d{5,}$/.test(mls)) return;
         const street = p('Street Address') || p('Address');
         out.push({ mls, addr: street, price: p('Price') || p('List Price'), sqft: p('SqFt'),
-          bds: p('Bds') || p('Beds'), city: p('Postal City') || p('City'), age: p('Age'), dom: p('DOM'),
+          bds: p('Bds') || p('Beds'), baths: p('Bths') || p('Baths'), lotSqft: lotOf(p('Lot Size')),
+          city: p('Postal City') || p('City'), age: p('Age'), dom: p('DOM'),
+          cls: p('Class') || p('Property Type') || p('Prop Type'),
           zip: (street.match(/\\b(9[0-5]\\d{3})\\b/)||[])[1] || '' });
       });
     }
@@ -137,20 +143,25 @@ function filterCandidates(rowsByArea) {
   for (const key of Object.keys(rowsByArea)) {
     for (const r of rowsByArea[key].rows || []) {
       const price = num(r.price), sqft = num(r.sqft);
-      if (!price || !sqft) continue;
+      if (!price) continue;
+      // A living area under 300 sqft (or none) is a placeholder, not a house:
+      // "1" made 6003 Wragg Canyon Rd read $210,000/sqft — 35,533% of the
+      // median. Kept out of $/sqft and the medians, and rejected below WITH a
+      // reason (a confirmed deal still goes through).
+      const realSqft = sqft >= 300 ? sqft : 0;
       // The area's own price cap, never over $3M — checked here as well as
       // in the search box, in case the search ignored it.
       const box = DEFAULT_BUYBOX.find(a => a.county === rowsByArea[key].county);
-      all.push({ ...r, _price: price, _sqft: sqft, _age: num(r.age), _dom: num(r.dom),
+      all.push({ ...r, _price: price, _sqft: realSqft, _sqftRaw: sqft, _age: num(r.age), _dom: num(r.dom),
         _cap: Math.min(((box && box.maxk) || 1500) * 1000, 3000000),
-        _ppsf: Math.round(price/sqft),
+        _ppsf: realSqft ? Math.round(price / realSqft) : 0,
         // "All San Francisco" is a log heading, not a city — never let it reach
         // a lead, a median key, or the vision prompt.
         _cityKey: r.city || String(key).replace(/^All\s+/i, '') });
     }
   }
   const byCity = {}, bySq = {};
-  all.forEach(r => { (byCity[r._cityKey]=byCity[r._cityKey]||[]).push(r._ppsf); (bySq[r._cityKey]=bySq[r._cityKey]||[]).push(r._sqft); });
+  all.filter(r => r._ppsf).forEach(r => { (byCity[r._cityKey]=byCity[r._cityKey]||[]).push(r._ppsf); (bySq[r._cityKey]=bySq[r._cityKey]||[]).push(r._sqft); });
   const med = {}, medSq = {};
   Object.keys(byCity).forEach(c => { med[c]=median(byCity[c]); medSq[c]=median(bySq[c]); });
   // Say WHY each listing failed, not just that it did. This is the first place
@@ -185,6 +196,7 @@ function filterCandidates(rowsByArea) {
     const a = String(r.addr || '').trim();
     if (isConfirmed(a)) return '';   // confirmed deal — no screen may drop it
     if (REJECTED_ADDR.some(re => re.test(a))) return 'previously rejected by Bryan — do not resurface';
+    if (!r._sqft) return r._sqftRaw ? `living area listed as ${r._sqftRaw} sqft — not a real figure; check by hand` : 'no living area (sqft) listed — check by hand';
     // Single-family only, under the cap — the search asks for both, this
     // makes sure (Bryan, 2 Oct: "filter single family home only and we don't
     // buy 3M above").
@@ -193,7 +205,7 @@ function filterCandidates(rowsByArea) {
     // A BLANK age field parses to 0, which used to read as "built this year" and
     // silently discarded the listing as too new. Missing is not new: let an
     // unknown age through to photo review, where the pictures settle it.
-    if (r._age > 0 && r._age < 25) return `too new — built ${2026 - r._age}, want 25+ years old`;
+    if (r._age > 0 && r._age < 25) return `too new — built ${new Date().getFullYear() - r._age}, want 25+ years old`;
     // Same treatment for a missing DOM: 0 means "the MLS didn't say", not
     // "listed today", and a blank must not be read as passing the cap either
     // way — it simply isn't grounds to drop.
@@ -207,7 +219,8 @@ function filterCandidates(rowsByArea) {
     if (reason) rejected.push({ ...r, _reason: reason, _nearness: r._ppsf / (med[r._cityKey] || 1) });
     else cands.push(r);
   }
-  cands.sort((a, b) => (a._ppsf / med[a._cityKey]) - (b._ppsf / med[b._cityKey]));
+  const near = r => r._ppsf ? r._ppsf / (med[r._cityKey] || 1) : 9;
+  cands.sort((a, b) => near(a) - near(b));
   // Near-misses first: those are the ones worth questioning. A full dump of
   // every listing in the county would bury the tab in noise.
   rejected.sort((a, b) => a._nearness - b._nearness);
@@ -384,6 +397,13 @@ function rulesDecide(meta) {
   const photos = meta.photos || 0;
   if (isConfirmed(meta.addr)) return { decision: 'keep', reason: 'confirmed deal — Bryan wants this one' };
   if (FIRE_KW.test(t)) return { decision: 'drop', reason: 'remarks note fire damage (hard exclusion)' };
+  // The grid's Age column reads 0 for a brand-new house, which passes the
+  // buy-box screen as "unknown". The report's Age/Yr Blt is the real year:
+  // new construction (Meritage, SummerHill, "Lot 778") reached the board as B.
+  const yb = Number(meta.yearBuilt) || 0;
+  if (yb > 1800 && new Date().getFullYear() - yb < 25) {
+    return { decision: 'drop', reason: `too new — built ${yb}, want 25+ years old (hard exclusion)` };
+  }
   const ten = tenantInfo(meta, t);
   if (ten.tenant && !ten.vacantAtClose) {
     return { decision: 'drop', reason: 'tenant occupied — we don’t buy tenant-occupied houses (hard exclusion)' };
@@ -625,7 +645,8 @@ function aiVerdict(o, remarksText) {
 function fullAddress(street, city, zip) {
   const esc = t => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let s = String(street || '').trim();
-  let z = String(zip || '').trim();
+  // Five digits only: "94928." reached the sheet with its full stop.
+  let z = (String(zip || '').match(/\b(\d{5})\b/) || [])[1] || '';
 
   const mz = s.match(/\b(9[0-5]\d{3})(?:-\d{4})?[\s,]*$/);
   if (mz) { z = z || mz[1]; s = s.slice(0, mz.index); }
@@ -863,7 +884,36 @@ function buildBoard(leadRows, today, now) {
   const closed = notPassed.filter(r => CLOSED_STATUS.test(cell(r, 'MLS Status')));
   const isC = r => /^C/.test(cell(r, 'Bucket'));
   const autoPass = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && isC(r));
-  const live = notPassed.filter(r => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r));
+  // A relisted house carries a new MLS # and lands on Leads a second time
+  // (278 6th St, Richmond: CC41137475 and CC41150273). List it once — the
+  // row added last, which is the live listing.
+  // Key: the whole street line (suffix and punctuation ignored) + zip, so
+  // "100 N Main St" and "100 N Oak St" never collide.
+  // Suffixes are mapped to one spelling, never removed ("Oak St" and "Oak Ct"
+  // are different houses); the zip is the last one in the address.
+  const SUFFIX = { street: 'st', avenue: 'ave', road: 'rd', drive: 'dr', court: 'ct', lane: 'ln', boulevard: 'blvd',
+    place: 'pl', terrace: 'ter', terrance: 'ter', circle: 'cir', parkway: 'pkwy' };
+  const SUF = new Set(Object.values(SUFFIX).concat(['way', 'cir', 'hwy', 'sq', 'loop', 'aly']));
+  const parts = r => { const a = cell(r, 'Address').toLowerCase();
+    const z = (a.match(/\b9\d{4}\b/g) || []).pop() || '';
+    const w = a.split(',')[0].replace(/[^a-z0-9 ]+/g, ' ').replace(/[a-z]+/g, x => SUFFIX[x] || x).trim().split(/\s+/);
+    if (!/^\d+[a-z]?$/.test(w[0] || '') || w.length < 2 || !z) return null;
+    const suf = w.length > 2 && SUF.has(w[w.length - 1]) ? w.pop() : '';
+    return { base: w.join(' ') + ' ' + z, suf }; };
+  // "5826 Avenal" and "5826 Avenal Avenue" are one house; "Oak St" and "Oak Ct" are two.
+  const sufs = {};
+  notPassed.forEach(r => { const p = parts(r); if (p && p.suf) (sufs[p.base] = sufs[p.base] || new Set()).add(p.suf); });
+  const houseKey = r => { const p = parts(r); if (!p) return '';
+    const only = sufs[p.base] && sufs[p.base].size === 1 ? [...sufs[p.base]][0] : '';
+    return p.base + '|' + (p.suf || only || '?'); };
+  // A real MLS # beats a Redfin-only id (it has the MLS link and a refresh
+  // can look it up); between equals, the row added last wins.
+  const realMls = r => { const m = cell(r, 'MLS #').toUpperCase(); return /^[A-Z]{2,6}\d{5,}$/.test(m) && !/^RF\d/.test(m) ? 1 : 0; };
+  const lastFor = {};
+  notPassed.forEach((r, i) => { const k = houseKey(r); if (!k || CLOSED_STATUS.test(cell(r, 'MLS Status')) || isC(r)) return;
+    if (lastFor[k] == null || realMls(r) >= realMls(notPassed[lastFor[k]])) lastFor[k] = i; });
+  const live = notPassed.filter((r, i) => !CLOSED_STATUS.test(cell(r, 'MLS Status')) && !isC(r)
+    && (!houseKey(r) || lastFor[houseKey(r)] === i));
   const isPending = r => PENDING_STATUS.test(cell(r, 'MLS Status'));
   const bucketOf = r => (cell(r, 'Bucket').match(/^[ABC]/) || ['?'])[0];
   const due = r => offerDueToDate(cell(r, 'Offer Due'));
@@ -1114,6 +1164,16 @@ function redfinSearchUrl(countyPath, maxk, page) {
     + ',sort=lo-days' + (page > 1 ? '/page-' + page : '');
 }
 
+/** "$1,250,000", "$1.25M", "$950K", "1250000" → dollars (0 when unreadable).
+ *  A "$2.7M" read as 0 used to pass every price cap. */
+function parsePrice(x) {
+  const m = String(x == null ? '' : x).replace(/\s+/g, '').match(/\$?([\d,]*\.?\d+)([MmKk])?/);
+  if (!m) return 0;
+  const n = Number(m[1].replace(/,/g, ''));
+  if (!isFinite(n)) return 0;
+  return Math.round(m[2] && /m/i.test(m[2]) ? n * 1e6 : m[2] && /k/i.test(m[2]) ? n * 1e3 : n);
+}
+
 /** One search card's text → the facts on it. `top` is the badge area. */
 function redfinCard({ href, text }) {
   const url = String(href || '').replace(/[?#].*$/, '');
@@ -1121,7 +1181,7 @@ function redfinCard({ href, text }) {
   if (!m) return null;
   const t = String(text || '');
   const lines = t.split(/\n+/).map(x => x.trim()).filter(Boolean);
-  const priceAt = lines.findIndex(x => /^\$[\d,]+$/.test(x));
+  const priceAt = lines.findIndex(x => /^\$[\d,]+(?:\.\d+)?[MmKk]?\+?$/.test(x));
   // The badge sits above the price on a Redfin card.
   const top = (priceAt > 0 ? lines.slice(0, priceAt) : lines.slice(0, 2)).join(' · ');
   const badge = (top.match(REDFIN_EARLY_RE) || [])[0] || '';
@@ -1129,7 +1189,7 @@ function redfinCard({ href, text }) {
   const addr = lines.find(x => /^\d+\S*\s.+,\s*[A-Za-z .'-]+,\s*CA\s*9\d{4}$/.test(x)) || redfinAddrFromUrl(url);
   return {
     homeId: m[1], url, addr, badge, top,
-    price: priceAt >= 0 ? Number(lines[priceAt].replace(/[$,]/g, '')) : 0,
+    price: priceAt >= 0 ? parsePrice(lines[priceAt]) : 0,
     beds: n(/([\d.]+)\s*beds?\b/i), baths: n(/([\d.]+)\s*baths?\b/i), sqft: n(/([\d,]+)\s*sq\s*ft/i),
     early: !!badge,
   };
@@ -1154,15 +1214,21 @@ function parseRedfinHome(text) {
   const year = Number(grab(/(?:Built in|Year Built\s*:?)\s*((?:18|19|20)\d{2})\b/i)) || 0;
   const dom = grab(/\b(\d+)\s+days?\s+on\s+Redfin/i);
   const lot = t.match(/Lot Size\s*:?\s*([\d,.]+)\s*(sq\.?\s*ft|acres?)/i);
+  // The asking price: the first dollar figure at the top of the page that is
+  // not the Redfin Estimate, a monthly payment or a price per sq ft.
+  const top = t.slice(0, 2500).split('\n');
+  const priceLine = top.find(x => /\$\s?[\d,.]+\s*[MmKk]?/.test(x) && !/estimate|est\.|\/mo|per month|\/sq|sq\.?\s*ft|payment|rent|sold for|last sold/i.test(x)) || '';
+  const pagePrice = parsePrice((priceLine.match(/\$\s?[\d,.]+\s*[MmKk]?/) || [''])[0]);
   const status = (t.slice(0, 1500).match(REDFIN_EARLY_RE) || [])[0]
     || grab(/(?:Listing |MLS )?Status\s*:?\s*([A-Za-z][A-Za-z -]{2,30})\n/i);
-  const ptype = grab(/Property Type\s*:?\s*([A-Za-z][^\n]{2,40})/i);
+  const ptype = redfinPageType(t);
   return {
-    remarks, year, dom: dom === '' ? '' : Number(dom), status,
+    remarks, year, dom: dom === '' ? '' : Number(dom), status, price: pagePrice,
     agent: grab(/Listed by\s+([^•·\n]{3,80}?)\s*(?:•|·|\n|$)/i),
-    mls: redfinMlsId(rawMls, source),
+    mls: redfinMlsId(rawMls, source), mlsDigits: redfinMlsDigits(rawMls),
     lotSqft: lot ? Math.round(Number(lot[1].replace(/,/g, '')) * (/acre/i.test(lot[2]) ? 43560 : 1)) : 0,
     propClass: /single/i.test(ptype) ? 'Res. Single Family' : ptype, ptype,
+    ptypeLabelled: /^[ \t]*Property[ \t]*type[ \t]*:?[ \t]*(?:\n[ \t]*)?[A-Za-z]/im.test(t),
   };
 }
 
@@ -1172,8 +1238,35 @@ function redfinMlsId(raw, source) {
   const id = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!id) return '';
   if (/^[A-Z]{2,4}\d{5,}$/.test(id)) return id;
-  if (/^\d{9}$/.test(id) && (/san francisco/i.test(source || '') || /^42\d{7}$/.test(id))) return 'SF' + id;
-  return id;
+  if (/^42\d{7}$/.test(id) || (/^\d{9}$/.test(id) && /san francisco/i.test(source || ''))) return 'SF' + id;
+  if (/^32\d{7}$/.test(id)) return 'BA' + id;   // Bay Area Real Estate Information Services
+  // Anything else is not an MLS # the board can use: an Early Access home has
+  // no MLS listing, and Redfin puts its own listing id there instead
+  // ("2199662030468543705", "120807"); a bare bridgeMLS "41149866" may be EB,
+  // BE or CC on MLSListings, so its prefix cannot be guessed. Those leads keep
+  // RF<homeId> as their id; redfinMlsDigits() still matches them against the
+  // MLS #s already checked or on the board.
+  return '';
+}
+
+/** The digits of a Redfin "MLS #" worth matching against MLS #s (8–10 digits:
+ *  real MLS numbers are 8–10 digits; Redfin's own listing ids are not). '' when there is nothing to match on. */
+/**
+ * Which type to judge a Redfin home on. The page's "Property type" label wins
+ * only when it is decisive — single-family, or clearly not a house. A generic
+ * "Residential" (MLS wording, with the subtype elsewhere) or a label too long to
+ * read must not overrule Redfin's own data saying house (uiPropertyType 1).
+ */
+function resolveRedfinType(pageType, pageLabelled, dataType) {
+  const p = String(pageType || '').trim();
+  if (pageLabelled && p && (isSfrType(p) || NOT_HOUSE_RE.test(p))) return p;
+  if (isSfrType(dataType)) return dataType;
+  return p || dataType || '';
+}
+
+function redfinMlsDigits(raw) {
+  const d = String(raw || '').trim().replace(/^[A-Za-z]{2,4}(?=\d)/, '');
+  return /^\d{8,10}$/.test(d) ? d : '';
 }
 
 /** The label a Redfin find carries on the board: always reads as Coming Soon
@@ -1223,6 +1316,33 @@ function redfinPhotoUrls(html) {
   return [...best.values()];
 }
 
+/** Only this listing's photos. A Redfin page also shows "Nearby similar homes"
+ *  and "Recently sold" thumbnails, all on the same photo CDN; judging those
+ *  would put a neighbour's interior on this house. Redfin names each photo
+ *  after its listing number ("426150277_3_0.jpg", "genMid.426150277_1.jpg"),
+ *  so photos are grouped by that stem and only this listing's group is kept:
+ *  the stem carrying the MLS #'s digits when known, else the group seen most
+ *  while stepping through the gallery. */
+const photoStem = u => String(u || '').split('/').pop().replace(/^gen[A-Za-z]+\./, '').split(/[_.]/)[0];
+function redfinSubjectPhotos(galleryUrls, pageUrls, mls) {
+  const all = redfinPhotoUrls((galleryUrls || []).concat(pageUrls || []).join(' '));
+  if (!all.length) return [];
+  const digits = String(mls || '').replace(/\D/g, '');
+  let stem = '';
+  if (digits.length >= 6) stem = (all.map(photoStem).find(st => st.includes(digits)) || '');
+  if (!stem) {
+    const count = {};
+    redfinPhotoUrls((galleryUrls || []).join(' ')).forEach(u => { const st = photoStem(u); count[st] = (count[st] || 0) + 1; });
+    stem = Object.keys(count).sort((a, b) => count[b] - count[a])[0] || '';
+  }
+  if (!stem) {
+    const count = {};
+    all.forEach(u => { const st = photoStem(u); count[st] = (count[st] || 0) + 1; });
+    stem = Object.keys(count).sort((a, b) => count[b] - count[a])[0] || '';
+  }
+  return all.filter(u => photoStem(u) === stem);
+}
+
 // ---- Redfin's own listing data (v1.52) ----
 // The search page's cards gave nothing on the first live run, so the county is
 // read from the data Redfin's search page itself loads: /stingray/api/gis
@@ -1241,7 +1361,7 @@ function redfinGisUrl({ regionId, maxk, page, csv, market }) {
 }
 
 const rv = x => (x && typeof x === 'object' && 'value' in x ? x.value : x);
-const rnum = x => { const n = Number(String(rv(x) == null ? '' : rv(x)).replace(/[$,]/g, '')); return isFinite(n) ? n : 0; };
+const rnum = x => { const v = rv(x); if (typeof v === 'number') return isFinite(v) ? v : 0; return /[MmKk]\s*$/.test(String(v || '')) ? parsePrice(v) : (Number(String(v == null ? '' : v).replace(/[$,]/g, '')) || 0); };
 
 function redfinHome(o) {
   const url = /^https?:/.test(o.url || '') ? o.url : 'https://www.redfin.com' + (o.url || '');
@@ -1254,12 +1374,14 @@ function redfinHome(o) {
   const street = String(rv(o.streetLine) || o.address || '').trim();
   const addr = street && o.city ? `${street}, ${o.city}, ${o.state || 'CA'} ${o.zip || ''}`.trim() : redfinAddrFromUrl(url);
   // House type: Redfin's uiPropertyType (1 = house) or its text label.
-  const ptype = o.uiPropertyType != null && o.uiPropertyType !== '' ? String(o.uiPropertyType) : String(rv(o.propertyType) || '');
+  const pt = String(rv(o.propertyType) == null ? '' : rv(o.propertyType));
+  const ptype = o.uiPropertyType != null && o.uiPropertyType !== '' ? String(o.uiPropertyType)
+    : /^\d+$/.test(pt) ? (pt === '6' ? 'propertyType:6' : 'propertyType:' + pt) : pt;
   return { homeId: id, url: url.replace(/[?#].*$/, ''), addr, badge, status, early: !!badge, ptype,
     early_access: /early[\s-]*access/i.test(status),
     price: rnum(o.price), beds: rnum(o.beds), baths: rnum(o.baths), sqft: rnum(o.sqFt || o.sqft),
     year: rnum(o.yearBuilt), dom: rv(o.dom) == null || rv(o.dom) === '' ? '' : rnum(o.dom),
-    mls: redfinMlsId(rv(o.mlsId), o.source || ''), remarks: String(o.listingRemarks || '').trim() };
+    mls: redfinMlsId(rv(o.mlsId), o.source || ''), mlsDigits: redfinMlsDigits(rv(o.mlsId)), remarks: String(o.listingRemarks || '').trim() };
 }
 
 /** Never above this, whatever the area's cap says (Bryan, 2 Oct: "we don't
@@ -1273,17 +1395,47 @@ const NOT_HOUSE_RE = /condo|co-?op|town\s*house|townhome|multi[\s-]*family|duple
  *  only, at or under the area's cap and never over $3M, 25+ years old when
  *  the year is known. Returns '' to keep, else the reason. `phase` 'page'
  *  means the home's own page has been read, so an unknown type now fails. */
+const UNIT_ADDR_RE = /(?:#\s*[\w-]+|\b(?:unit|apt|apartment|ste|suite|spc|space|lot)\s*#?\s*(?:[\w-]*\d[\w-]*|[A-Za-z]))\s*$/i;
+/** A Redfin type that means a single-family house: uiPropertyType 1, the
+ *  propertyType code 6, or a "Single Family" / "Single-family" label. */
+const isSfrType = t => t === '1' || t === 'sfr' || t === 'propertyType:6' || /single[\s-]*family|^house$/i.test(String(t || '').trim());
+
+/** The house type a Redfin home page states, read only where Redfin states it
+ *  (a "Property Type" label, or the type on a line of its own in the key
+ *  details) — never from the description, where "unlike a condo" or "duplex
+ *  potential" would mislead. '' when the page does not say. */
+function redfinPageType(text) {
+  const t = String(text || '').replace(/\r/g, '');
+  // The label starts its own line ("Property type: Townhouse", or the label
+  // then the value on the next line) — a sentence in the description that
+  // happens to say "property type" is not it.
+  const lab = (t.match(/^[ \t]*Property[ \t]*type[ \t]*:?[ \t]*(?:\n[ \t]*)?([A-Za-z][^\n]{1,40}?)[ \t]*$/im) || [])[1] || '';
+  if (lab) return lab.trim();
+  const line = t.split('\n').map(x => x.trim()).find(x =>
+    /^(single[\s-]*family(\s+(residential|home|residence))?|condo(minium)?(\/co-?op)?|co-?op|town\s*house|townhome|multi[\s-]*family(\s*\(.*\))?|duplex|triplex|fourplex|mobile\s*(\/manufactured)?\s*home|manufactured\s*home|vacant\s*land)$/i.test(x));
+  return line || '';
+}
+
 function redfinBuyBox(h, area, phase) {
   if (isConfirmed(h.addr)) return '';
   const cap = Math.min(((area && area.maxk) || 1500) * 1000, REDFIN_PRICE_CEILING);
+  // Once the page has been read the price must be known: an unreadable price
+  // used to count as $0 and pass every cap.
+  if (phase === 'page' && !(h.price > 0)) return 'asking price not shown — cannot confirm it is under the cap';
   if (h.price > cap) return `$${Math.round(h.price / 1000).toLocaleString()}k is over the $${cap / 1e6}M cap for ${area && area.county ? area.county : 'this area'}`;
+  // A unit number in the address is a condo / apartment, whatever else says so.
+  if (UNIT_ADDR_RE.test(String(h.addr || '').split(',')[0])) return `not a single-family home — a unit (${String(h.addr).split(',')[0]})`;
   const t = String(h.ptype || '').trim();
-  if (t === '1' || /single[\s-]*family|^house$/i.test(t)) { /* a house */ }
-  else if (/^\d+$/.test(t)) return `not a single-family home (Redfin type ${t})`;
+  if (isSfrType(t)) { /* a house */ }
+  else if (/^(?:propertyType:)?\d+$/.test(t)) return `not a single-family home (Redfin type ${t.replace('propertyType:', '')})`;
   else if (t && NOT_HOUSE_RE.test(t)) return `not a single-family home — ${t}`;
-  else if (phase === 'page' && t) return `not a single-family home — ${t}`;
+  // Once the page has been read, single-family must be CONFIRMED. An unknown
+  // type used to pass, which is how condos and multi-units reached the board
+  // when neither Redfin's data nor the page said what the house was (Bryan,
+  // 10 Oct: "not a single family as well on redfin scan").
+  else if (phase === 'page') return t ? `not a single-family home — ${t}` : 'property type not confirmed as single-family — skipped';
   const y = Number(h.year) || 0;
-  if (y > 1800 && 2026 - y < 25) return `too new — built ${y}, want 25+ years old`;
+  if (y > 1800 && new Date().getFullYear() - y < 25) return `too new — built ${y}, want 25+ years old`;
   return '';
 }
 
@@ -1315,6 +1467,7 @@ const addDays = (day, n) => { const d = new Date(String(day) + 'T00:00:00Z'); d.
  *  'recheck' whose wait is over. */
 function ledgerSkips(entry, today) {
   if (!entry) return false;
+  if (entry.verdict === 'buybox') return false;   // outside the box last time; judged afresh if it now fits
   if (entry.verdict !== 'recheck') return true;
   return String(today || '') < String(entry.recheck_after || '');
 }
@@ -1327,6 +1480,53 @@ function comingSoonVerdict({ prev, today, provisional, decision }) {
   const n = ((prev && prev.rechecks) || 0) + 1;
   if (!provisional || n > RECHECK_MAX) return { verdict: done, rechecks: n - 1, final_on: today };
   return { verdict: 'recheck', last_verdict: done, rechecks: n, recheck_after: addDays(today, RECHECK_DAYS) };
+}
+
+/** Photos decide whether a Redfin Coming Soon / Early Access home is a fixer
+ *  (Bryan, 10 Oct: good-condition homes were reaching the board). `o` is the
+ *  AI's raw answer. A fixer = the AI kept it AND saw HEAVY wear, or SOME wear
+ *  on ORIGINAL finishes. "Dated but fine", a prior update, a new kitchen, or a
+ *  structural job is not — and no description can overrule the photos here.
+ *  Returns '' for a fixer, else the reason it is not. */
+function redfinPhotoFixer(o) {
+  o = o || {};
+  const keep = /^keep$/i.test(String(o.decision || '').trim());
+  const wear = String(o.wear || '').trim().toLowerCase();
+  const era = String(o.era || '').trim().toLowerCase();
+  if (!keep) return 'photos: not a fixer' + (o.reason ? ' — ' + String(o.reason).slice(0, 160) : '');
+  if (/^structural/i.test(String(o.quickFlip || ''))) return 'photos: structural job, not a quick cosmetic flip';
+  if (/^heavy/.test(wear)) return '';
+  if (/^some/.test(wear) && (!era || /^original/.test(era))) return '';
+  if (/^(prior|new)/.test(era)) return `photos: ${era.startsWith('new') ? 'recently renovated finishes' : 'prior update — work already done'}`;
+  return 'photos: dated but in good condition — no real wear to fix';
+}
+
+// ---- cleaning up leads an older build let through (v1.61) ----
+// San Mateo County (the Peninsula, $2.5M cap) by zip; everywhere else $1.5M.
+// 94303 is split between East Palo Alto (San Mateo) and Palo Alto (Santa
+// Clara), so the city name settles it.
+const SAN_MATEO_ZIPS = new Set(['94002', '94005', '94010', '94011', '94014', '94015', '94016', '94017', '94018', '94019', '94020',
+  '94021', '94025', '94026', '94027', '94028', '94030', '94037', '94038', '94044', '94060', '94061', '94062', '94063', '94064',
+  '94065', '94066', '94070', '94074', '94080', '94083', '94128', '94401', '94402', '94403', '94404', '94497']);
+function capForAddress(addr) {
+  const a = String(addr || '');
+  const zip = (a.match(/\b(9\d{4})(?:-\d{4})?\s*$/) || [])[1] || '';
+  const sm = SAN_MATEO_ZIPS.has(zip) || (zip === '94303' && /east palo alto/i.test(a));
+  return Math.min((sm ? 2500 : 1500) * 1000, REDFIN_PRICE_CEILING);
+}
+
+/** What is wrong, under today's rules, with a Redfin lead already on the sheet
+ *  (written by an older build): over the cap, a unit, too new, or never shown
+ *  by its photos to be a fixer. '' when it still qualifies. */
+function oldRedfinLeadProblem({ addr, price, year, why }) {
+  if (isConfirmed(addr)) return '';
+  const cap = capForAddress(addr), p = Number(price) || 0, y = Number(year) || 0, w = String(why || '');
+  if (p > cap) return `$${Math.round(p / 1000).toLocaleString()}k is over the $${cap / 1e6}M cap`;
+  if (UNIT_ADDR_RE.test(String(addr || '').split(',')[0])) return 'not a single-family home — a unit';
+  if (y > 1800 && new Date().getFullYear() - y < 25) return `too new — built ${y}`;
+  if (/newer build \((\d{4})\)/.test(w) && new Date().getFullYear() - Number(RegExp.$1) < 25) return `too new — built ${RegExp.$1}`;
+  if (!/photos show a fixer|AI \(vision\) keep/i.test(w)) return 'never shown by its photos to be a fixer (added by an older version)';
+  return '';
 }
 
 /** /stingray/api/gis → homes. */
@@ -1364,31 +1564,11 @@ function redfinCsvHomes(text) {
   })).filter(Boolean);
 }
 
-/* AI model names, forgiven. The model box used to need the exact id —
- * "gpt-4.1mini" or "GPT 4.1 mini" failed every call (Seth, 3 Oct). This writes
- * what was typed the way the services spell it: lower case, hyphens for
- * spaces, "gpt4o" -> "gpt-4o", "4.1mini" -> "4.1-mini". It never invents a
- * model: a name that is still wrong after tidying fails the Test key check
- * with the provider's own message. */
-function tidyModel(m) {
-  let s = String(m || '').trim().toLowerCase();
-  if (!s) return '';
-  // "ChatGPT 4o" means gpt-4o; the real id "chatgpt-4o-latest" stays as it is
-  if (/^chat\s*gpt\s+\d/.test(s) || /^chatgpt\d/.test(s)) s = s.replace(/^chat\s*gpt\s*/, 'gpt-');
-  s = s.replace(/[\s_]+/g, '-')
-       .replace(/^gpt(?=\d)/, 'gpt-')                       // gpt4.1 -> gpt-4.1
-       .replace(/([0-9a-z])(?=(mini|nano|turbo|pro|preview|latest)\b)/g, (x, c, _w, i, all) => /-$/.test(all.slice(0, i + 1)) ? x : c + '-')
-       .replace(/^claude-?(opus|sonnet|haiku)(?=\d)/, 'claude-$1-')   // claudeopus5-5 -> claude-opus-5-5
-       .replace(/-+/g, '-').replace(/^-|-$/g, '');
-  return s;
-}
-
 module.exports = {
-  tidyModel,
   REDFIN_EARLY_RE, redfinCountyPath, redfinPrice, redfinSearchUrl, redfinCard, parseRedfinHome,
-  redfinMlsId, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
+  redfinMlsId, redfinMlsDigits, resolveRedfinType, NOT_HOUSE_RE, redfinLabel, redfinPhotoUrls, redfinAddrFromUrl, parseRedfinAgent,
   redfinRegionId, redfinGisUrl, redfinGisHomes, redfinCsvHomes, redfinBuyBox, REDFIN_PRICE_CEILING, redfinFixerGate,
-  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX,
+  ledgerSkips, comingSoonVerdict, RECHECK_DAYS, RECHECK_MAX, redfinPhotoFixer, redfinPageType, isSfrType, redfinSubjectPhotos, photoStem, parsePrice, capForAddress, oldRedfinLeadProblem, SAN_MATEO_ZIPS,
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
