@@ -488,14 +488,15 @@ web app, no deployment and no shared secret any more. Three tabs:
   Sep): "Offers **will be accepted** Monday Sept 28th", and a day with no month
   — "Offers Due Wednesday **the 23rd**" takes the month where the 23rd is a
   Wednesday. Open-house / broker-tour dates (OH, SOH, BT) are never read as one.
-  **TBD wins over any date after it** (v1.71, Seth 10 Oct): "Offer date TBD after
+  **TBD wins over any date after it** (v1.72.1, Seth 10 Oct): "Offer date TBD after
   first weekend of open houses, open Sat 10/10 2-4 PM" alerted as due Sat 4 PM, and
   "to be determined after 10/11" as due 10/11 — the date after a TBD is an open
   house or a "not before". `offerDue()` now tests TBD/TBA/to be determined first.
-  (First shipped as v1.59 on Flip-scout-Filters, but that version number was also
-  built from claude/inspiring-ride-6er6pe and its download overwrote this fix —
-  **never reuse a version number another branch has released**; check the
-  Releases page first.)
+  (Shipped as v1.59 and again as v1.71 on Flip-scout-Filters; both numbers were
+  also built from claude/inspiring-ride-6er6pe and those downloads overwrote this
+  fix. It finally ships in v1.72.1 — **never reuse a version number another
+  branch has released or is about to**: check the Releases page first, and use
+  a patch number (1.72.1) when the other branch is bumping the minor one.)
 - **`Board`** — **owned by the app, rebuilt from `Leads` after every scan and
   every refresh** (nothing on it is typed by hand; notes belong on `Leads`).
   Top: today's funnel (Scanned · Auto-Pass C · AI Review B · Work Now A · New)
@@ -938,6 +939,23 @@ still work); at startup the renderer pushes `useAI:false` and an empty key, so
 a key saved by an older version is never used; the Redfin scan no longer
 picks up `ai-settings.json`. Both scans judge on the descriptions; leads say
 "photos NOT checked". Do not bring a key prompt back unless Bryan asks.
+
+**v1.72.1 — AI photo check BACK, ChatGPT or Claude (Seth 12 Oct: "can you put
+it back? the chatgpt api key instead? i can switch to claude or chatgpt").**
+Built on Flip-scout-Filters from v1.72 (Seth was told Bryan had asked for it
+off and chose to build it). Section 2 shows the AI block again, OFF unless
+"AI photo check" is ticked: one key box — `sk-ant-…` = Claude, anything else
+= ChatGPT (OpenAI Chat Completions, photos as `image_url` data URLs,
+`max_completion_tokens` ≥ 4000 for photo calls); a **Model dropdown** filled
+from the key's own `/v1/models` list (built-in list until Test key), with
+"Other…" for any name, tidied by `core.tidyModel` ("GPT 4.1mini" →
+`gpt-4.1-mini`); a Claude model on a ChatGPT key (or the reverse) falls back
+to that service's default (`gpt-4.1` / `claude-opus-5-5`). The saved key comes
+back on launch. Both scans log "AI photo check is on — ChatGPT · gpt-4.1" at
+the start; with it off they behave exactly as v1.72 (descriptions decide,
+"photos NOT checked"). The Redfin scan uses the check only when it is ticked —
+no saved key is picked up behind the user's back. Also carries the offer-date
+TBD fix (above).
 
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
