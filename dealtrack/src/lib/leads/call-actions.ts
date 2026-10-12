@@ -10,7 +10,7 @@ import { activeAccount } from "@/lib/conversions/google"
 import { sendPendingConversions, setLeadStatus } from "@/lib/conversions/offline-conversions"
 import { gaql } from "@/lib/google-ads/client"
 import { callIdOf, type CallInfo } from "@/lib/leads/call-id"
-import { addLead, listLeads, updateLead } from "@/lib/leads/store"
+import { addLead, listDeletedLeads, listLeads, updateLead } from "@/lib/leads/store"
 import { leadStatuses, type LeadStatus } from "@/lib/leads/types"
 
 // "2026-09-06 08:11:00" is in the Google Ads account's time zone; turn it into the real moment.
@@ -44,6 +44,9 @@ export async function addCallLeadAction(
   if (!leadStatuses.some((s) => s.id === input.status)) return { error: "Pick a status." }
   const callId = callIdOf({ start: String(call.start), areaCode: String(call.areaCode ?? "") })
   if ((await listLeads()).some((l) => l.callId === callId)) return { error: "This call is already a lead." }
+  if ((await listDeletedLeads()).some((d) => d.lead.callId === callId)) {
+    return { error: "This call was added as a lead and then deleted. Restore it from the Deleted tab in the leads table." }
+  }
 
   const at = await callTime(String(call.start))
   const lead = await addLead(

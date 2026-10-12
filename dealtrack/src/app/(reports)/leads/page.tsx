@@ -14,7 +14,7 @@ import { DATA_MANAGER_LIBRARY } from "@/lib/conversions/data-manager"
 import { callCounting, getCalls, RECENT_CALL_DAYS } from "@/lib/google-ads/calls"
 import { leadSource } from "@/lib/leads/source"
 import { catchUp, leadsVersion } from "@/lib/leads/background"
-import { listLeads, listQrCodes } from "@/lib/leads/store"
+import { listDeletedLeads, listLeads, listQrCodes } from "@/lib/leads/store"
 import { countSince } from "@/lib/leads/time"
 import { cleanTracking, leadChannel, pagePath } from "@/lib/leads/tracking"
 import type { Lead } from "@/lib/leads/types"
@@ -22,20 +22,24 @@ import { load } from "@/lib/load"
 
 export const metadata: Metadata = { title: "Leads · DealTrack" }
 
-// One spreadsheet row per lead, with the date in the account's time zone.
+// A date in the account's time zone, e.g. "Oct 9, 2026, 3:35 PM".
+const when = (iso: string) =>
+  new Date(iso).toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+
+// One spreadsheet row per lead.
 function toRow(lead: Lead, placements: Map<string, string>): LeadRow {
   const t = cleanTracking(lead.tracking) ?? {}
   return {
     id: lead.id,
     receivedAt: lead.createdAt,
-    received: new Date(lead.createdAt).toLocaleString("en-US", {
-      timeZone: "America/Los_Angeles",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }),
+    received: when(lead.createdAt),
     name: lead.name,
     phone: lead.phone,
     email: lead.email,
@@ -128,7 +132,13 @@ export default async function LeadsPage() {
   after(() => catchUp())
   // The version first: a change saved while the leads are read then still shows on the next check.
   const version = await leadsVersion()
-  const [qrCodes, leads, calls, counting] = await Promise.all([listQrCodes(), listLeads(), load(() => getCalls(RECENT_CALL_DAYS)), callCounting().catch(() => null)])
+  const [qrCodes, leads, deleted, calls, counting] = await Promise.all([
+    listQrCodes(),
+    listLeads(),
+    listDeletedLeads(),
+    load(() => getCalls(RECENT_CALL_DAYS)),
+    callCounting().catch(() => null),
+  ])
   const placements = new Map(qrCodes.map((c) => [c.id, c.placement]))
   const callResult = calls.ok ? { calls: calls.data, counting } : { error: calls.kind === "missing" ? "Google Ads isn't connected." : calls.message }
   const missed = calls.ok ? calls.data.filter((c) => c.missed).length : 0
@@ -212,8 +222,11 @@ export default async function LeadsPage() {
         }
       >
         {stuckEntries.length > 0 && <SendingCheck stuck={stuckEntries.length} lastError={lastError} />}
-        {leads.length ? (
-          <LeadsTable rows={leads.map((l) => toRow(l, placements))} />
+        {leads.length || deleted.length ? (
+          <LeadsTable
+            rows={leads.map((l) => toRow(l, placements))}
+            deleted={deleted.map((d) => ({ ...toRow(d.lead, placements), deleted: when(d.deletedAt) }))}
+          />
         ) : (
           <p className="py-6 text-sm text-muted-foreground">No leads yet. Connect the website form below.</p>
         )}

@@ -14,6 +14,12 @@ type Db = { qrCodes: QrCode[]; leads: Lead[] }
 
 const file = jsonFileStore<Db>("leads.json", () => ({ qrCodes: [], leads: [] }))
 
+// Leads deleted from the Leads page, kept in .data/deleted-leads.json exactly as they were (status,
+// score, what Google Ads heard), so Restore can put them back. Every page and report reads only
+// leads.json, so a deleted lead is out of all of them. Nothing is sent to Google Ads either way.
+export type DeletedLead = { deletedAt: string; lead: Lead }
+const bin = jsonFileStore<{ leads: DeletedLead[] }>("deleted-leads.json", () => ({ leads: [] }))
+
 export const newId = () =>
   randomBytes(6)
     .toString("base64url")
@@ -47,13 +53,16 @@ const sameSource = (a?: string, b?: string) => Boolean(a && b && a.replace(/^wp:
 // Every new lead is scored on arrival, then your Google Ads rules (rules.ts) run on it, when
 // they're switched on: the first rule it matches decides what Google Ads hears about it.
 export async function addLead(input: Omit<Lead, "id" | "createdAt">, createdAt?: string) {
-  const [{ autoStatus }, rules] = await Promise.all([getScoringSettings(), getRules()])
+  const [{ autoStatus }, rules, deleted] = await Promise.all([getScoringSettings(), getRules(), bin.read()])
   return file.update((db) => {
     const at = createdAt ? new Date(createdAt).toISOString() : new Date().toISOString()
     db.leads ??= []
     if (input.inboxId) {
       const known = db.leads.find((l) => sameSource(l.inboxId, input.inboxId))
       if (known) return known
+      // Deleted on purpose: a later sync with the website doesn't bring it back.
+      const gone = (deleted.leads ?? []).find((d) => sameSource(d.lead.inboxId, input.inboxId))
+      if (gone) return gone.lead
     }
     const email = input.email?.toLowerCase()
     const phone = digits(input.phone)
@@ -101,6 +110,57 @@ export async function updateLead(id: string, change: (lead: Lead) => void) {
     }
     return lead
   })
+}
+
+// Deleted leads, the most recently deleted first.
+export async function listDeletedLeads() {
+  const db = await bin.read()
+  return [...(db.leads ?? [])].sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))
+}
+
+// Something for this lead still has to reach Google Ads: a conversion or a take-back waiting to be
+// sent. The app only sends for leads in the list, so deleting it now would leave that undone.
+export function waitingOnGoogle(lead: Lead) {
+  return Object.values(lead.conversions ?? {}).some((c) => c?.state === "pending" || c?.retraction?.state === "pending")
+}
+
+// Moves a Not interested lead to the deleted list. The copy is saved before the lead leaves
+// leads.json, so an interruption can only leave it in both lists, never in neither.
+export async function deleteLead(id: string): Promise<{ error?: string }> {
+  return file.update(async (db) => {
+    const lead = (db.leads ?? []).find((l) => l.id === id)
+    if (!lead) return { error: "That lead is gone." }
+    if (lead.status !== "not_interested") return { error: "Only leads in the Not interested list can be deleted. Mark it Not interested (✕) first." }
+    if (waitingOnGoogle(lead)) return { error: "Something for this lead is still waiting to go to Google Ads. Try again once it's sent (usually within a few minutes)." }
+    const deletedAt = new Date().toISOString()
+    await bin.update((b) => {
+      b.leads = [...(b.leads ?? []).filter((d) => d.lead.id !== id), { deletedAt, lead }]
+    })
+    db.leads = db.leads.filter((l) => l.id !== id)
+    return {}
+  })
+}
+
+// Puts a deleted lead back in the list exactly as it was deleted.
+export async function restoreLead(id: string): Promise<{ error?: string }> {
+  const entry = (await bin.read()).leads?.find((d) => d.lead.id === id)
+  if (!entry) return { error: "That lead isn't in the deleted list any more." }
+  const result = await file.update((db): { error?: string } => {
+    db.leads ??= []
+    // Already back: an earlier Restore was interrupted before it cleared the deleted list.
+    if (db.leads.some((l) => l.id === id)) return {}
+    const same = db.leads.find(
+      (l) => (entry.lead.inboxId && sameSource(l.inboxId, entry.lead.inboxId)) || (entry.lead.callId && l.callId === entry.lead.callId),
+    )
+    if (same) return { error: `“${same.name}” in your leads is the same lead, so this copy can't be put back.` }
+    db.leads.push(entry.lead)
+    return {}
+  })
+  if (result.error) return result
+  await bin.update((b) => {
+    b.leads = (b.leads ?? []).filter((d) => d.lead.id !== id)
+  })
+  return {}
 }
 
 // Scores leads that came in before scoring existed. Their status is left alone, so nothing old

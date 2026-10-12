@@ -51,6 +51,7 @@ DealTrack keeps its own records in the `.data` folder on the computer running it
 
 - `dealtrack.json`: the budget and alert lines, the alert history, the weekly negative batches with every step's name and time, and the go-live audit ticks.
 - `leads.json`: the website leads (same format as One Marketing Command Center: copy its `.data/leads.json` here to bring its leads over).
+- `deleted-leads.json`: leads deleted from the Leads page (🗑 in the Not interested list), kept exactly as they were so Restore in the Deleted tab can put them back.
 - `webhook-secret`: the key WordPress sends with each lead (unless `LEADS_WEBHOOK_SECRET` is set). `webhook-log.json`: the last few webhook calls, for troubleshooting.
 - `public-url`: the public address while `go-online.bat` runs.
 

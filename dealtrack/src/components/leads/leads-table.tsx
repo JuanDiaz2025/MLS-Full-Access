@@ -1,9 +1,10 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { ChevronLeft, ChevronRight, RotateCcw, Search, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, RotateCcw, Search, Trash2, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { deleteLeadAction, restoreLeadAction } from "@/lib/leads/delete-actions"
 import { setLeadStatusAction } from "@/lib/leads/status-actions"
 import { leadStatuses } from "@/lib/leads/types"
 import { formatPhone, telHref } from "@/lib/phone"
@@ -34,6 +35,8 @@ export type LeadRow = {
   score?: { value: number; grade: "hot" | "warm" | "cold" | "junk"; reasons: string[] }
   // What Google Ads heard: a conversion sent, waiting to be sent, failed or skipped.
   google?: { state: "sent" | "pending" | "failed" | "skipped" | "held" | "retracting" | "retracted" | "retract_failed" | "checking" | "accepted" | "rejected" | "invalid" | "invalid_pending"; detail?: string }
+  // When it was deleted (already formatted), for leads in the Deleted list.
+  deleted?: string
 }
 
 const PAGE = 25
@@ -209,12 +212,72 @@ function QuickStatus({ id, to, label }: { id: string; to: "not_interested" | "ne
   )
 }
 
+// The 🗑 on a Not interested lead: moves it to the Deleted list, where Restore puts it back.
+function DeleteLead({ id, name }: { id: string; name: string }) {
+  const [pending, start] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={`Delete: ${name}`}
+        title={`Delete: ${name}`}
+        disabled={pending}
+        onClick={() => {
+          if (!window.confirm(`Delete “${name}”? It moves to the Deleted tab, where Restore puts it back.`)) return
+          setError(null)
+          start(async () => {
+            const res = await deleteLeadAction(id)
+            if (res.error) setError(res.error)
+          })
+        }}
+        className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+      >
+        <Trash2 />
+      </Button>
+      {error && <span className="max-w-48 text-xs whitespace-normal text-destructive">{error}</span>}
+    </div>
+  )
+}
+
+// Restore on a deleted lead: back in the list with its status, score and Google Ads history.
+function RestoreLead({ id, name }: { id: string; name: string }) {
+  const [pending, start] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-label={`Restore: ${name}`}
+        disabled={pending}
+        onClick={() => {
+          setError(null)
+          start(async () => {
+            const res = await restoreLeadAction(id)
+            if (res.error) setError(res.error)
+          })
+        }}
+      >
+        <RotateCcw data-icon="inline-start" />
+        Restore
+      </Button>
+      {error && <span className="max-w-48 text-xs whitespace-normal text-destructive">{error}</span>}
+    </div>
+  )
+}
+
 // Leads as a spreadsheet: one row per lead, a column per detail, searchable and filterable.
-export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
+export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; deleted?: LeadRow[] }) {
   const [query, setQuery] = useState("")
-  // Not interested leads live in their own list, out of the way of the ones you're working.
-  const [list, setList] = useState<"active" | "not_interested">("active")
-  const inList = (r: LeadRow) => (list === "active" ? r.status !== "not_interested" : r.status === "not_interested")
+  // Not interested leads live in their own list, out of the way of the ones you're working, and
+  // deleted ones in another, until they're restored.
+  const [list, setList] = useState<"active" | "not_interested" | "deleted">("active")
+  const base = list === "deleted" ? deleted : rows
+  const inList = (r: LeadRow) => list === "deleted" || (list === "active" ? r.status !== "not_interested" : r.status === "not_interested")
   const notInterested = rows.filter((r) => r.status === "not_interested").length
   const [channel, setChannel] = useState("")
   const [status, setStatus] = useState("")
@@ -232,13 +295,13 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
 
   const channels = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const r of rows) counts.set(r.channel, (counts.get(r.channel) ?? 0) + 1)
+    for (const r of base) counts.set(r.channel, (counts.get(r.channel) ?? 0) + 1)
     return [...counts.entries()].sort((a, b) => b[1] - a[1])
-  }, [rows])
+  }, [base])
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return rows.filter(
+    return base.filter(
       (r) =>
         inList(r) &&
         inRange(r) &&
@@ -253,7 +316,7 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
           (q.replace(/\D/g, "").length >= 3 && Boolean(r.phone?.replace(/\D/g, "").includes(q.replace(/\D/g, ""))))),
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, query, channel, status, grade, range, from, to, list])
+  }, [base, query, channel, status, grade, range, from, to, list])
 
   const pages = Math.max(1, Math.ceil(shown.length / PAGE))
   const current = Math.min(page, pages - 1)
@@ -270,6 +333,7 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
           [
             ["active", `Leads (${rows.length - notInterested})`],
             ["not_interested", `Not interested (${notInterested})`],
+            ["deleted", `Deleted (${deleted.length})`],
           ] as const
         ).map(([id, text]) => (
           <button
@@ -294,7 +358,14 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
       {list === "not_interested" && (
         <p className="text-sm text-muted-foreground">
           Leads you marked Not interested. Anything already sent to Google Ads for them is taken back, and they&apos;re reported as
-          invalid leads (reporting only), so Google&apos;s reports show which ads bring leads like these. ↺ puts a lead back in your list.
+          invalid leads (reporting only), so Google&apos;s reports show which ads bring leads like these. ↺ puts a lead back in your list;
+          🗑 deletes it (tests, spam), and Restore in the Deleted tab brings it back.
+        </p>
+      )}
+      {list === "deleted" && (
+        <p className="text-sm text-muted-foreground">
+          Leads you deleted. They&apos;re out of every page, report and export, and nothing was sent to Google Ads when they were deleted.
+          Restore puts a lead back in the Not interested list exactly as it was, with its score and Google Ads history.
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -369,7 +440,7 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
             }}
             className="h-10 max-w-[14rem] rounded-lg border bg-card px-2 text-sm"
           >
-            <option value="">All ({rows.length})</option>
+            <option value="">All ({base.length})</option>
             {channels.map(([name, n]) => (
               <option key={name} value={name}>
                 {name} ({n})
@@ -413,7 +484,7 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
             <option value="">All</option>
             {(["hot", "warm", "cold", "junk"] as const).map((g) => (
               <option key={g} value={g}>
-                {gradeStyle[g].label} ({rows.filter((r) => r.score?.grade === g).length})
+                {gradeStyle[g].label} ({base.filter((r) => r.score?.grade === g).length})
               </option>
             ))}
           </select>
@@ -425,10 +496,11 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
           <thead>
             <tr>
               <th className={th}>
-                <span className="sr-only">{list === "active" ? "Not interested" : "Put back"}</span>
+                <span className="sr-only">{list === "active" ? "Not interested" : list === "deleted" ? "Restore" : "Put back or delete"}</span>
               </th>
               <th className={th}>#</th>
               <th className={th}>Received</th>
+              {list === "deleted" && <th className={th}>Deleted</th>}
               <th className={th}>Name</th>
               <th className={th} title="Scored when the lead arrived, from 0 to 100">Score</th>
               <th className={th}>Status</th>
@@ -454,18 +526,28 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
                 <td className={`${td} px-1 py-1`}>
                   {list === "active" ? (
                     <QuickStatus id={r.id} to="not_interested" label={`Not interested: ${r.name}`} />
+                  ) : list === "deleted" ? (
+                    <RestoreLead id={r.id} name={r.name} />
                   ) : (
-                    <QuickStatus id={r.id} to="new" label={`Put back in my leads: ${r.name}`} />
+                    <div className="flex items-start">
+                      <QuickStatus id={r.id} to="new" label={`Put back in my leads: ${r.name}`} />
+                      <DeleteLead id={r.id} name={r.name} />
+                    </div>
                   )}
                 </td>
                 <td className={`${td} text-muted-foreground`}>{current * PAGE + i + 1}</td>
                 <td className={td}>{r.received}</td>
+                {list === "deleted" && <td className={td}>{r.deleted || empty}</td>}
                 <td className={`${td} font-medium`}>{r.name}</td>
                 <td className={td}>
                   <ScoreCell score={r.score} />
                 </td>
                 <td className={td}>
-                  <StatusCell key={`${r.id}-${r.status}-${r.statusBy ?? ""}`} id={r.id} status={r.status} auto={r.statusBy === "auto"} rule={r.statusRule} />
+                  {list === "deleted" ? (
+                    <span className="text-xs font-semibold text-muted-foreground">{leadStatuses.find((s) => s.id === r.status)?.label ?? r.status}</span>
+                  ) : (
+                    <StatusCell key={`${r.id}-${r.status}-${r.statusBy ?? ""}`} id={r.id} status={r.status} auto={r.statusBy === "auto"} rule={r.statusRule} />
+                  )}
                 </td>
                 <td className={td} title={r.google?.detail}>
                   {r.google ? (
@@ -545,8 +627,12 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
             ))}
             {!visible.length && (
               <tr>
-                <td colSpan={20} className="px-3 py-6 text-center text-muted-foreground">
-                  {list === "not_interested" && !notInterested ? "No leads marked Not interested." : "No leads match."}
+                <td colSpan={21} className="px-3 py-6 text-center text-muted-foreground">
+                  {list === "not_interested" && !notInterested
+                    ? "No leads marked Not interested."
+                    : list === "deleted" && !deleted.length
+                      ? "No deleted leads."
+                      : "No leads match."}
                 </td>
               </tr>
             )}
@@ -559,7 +645,7 @@ export default function LeadsTable({ rows }: { rows: LeadRow[] }) {
           {shown.length
             ? `Showing ${current * PAGE + 1}–${current * PAGE + visible.length} of ${shown.length} leads`
             : "0 leads"}
-          {shown.length !== rows.length && ` (filtered from ${rows.length})`}
+          {shown.length !== base.length && ` (filtered from ${base.length})`}
         </span>
         {pages > 1 && (
           <div className="flex items-center gap-1">
