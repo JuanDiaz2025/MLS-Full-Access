@@ -51,7 +51,7 @@ import type { Lead } from "@/lib/leads/types"
 import { load, type Loaded } from "@/lib/load"
 import { currentName } from "@/lib/people"
 import { OVERVIEW_METRICS, delta, formatUnit, metricById, type MetricDef } from "@/lib/overview-metrics"
-import { checkPage, getPageSpeed } from "@/lib/pagespeed"
+import { checkPage, getPageSpeed, type PageSpeed } from "@/lib/pagespeed"
 import { DEFAULT_GRADE, readData, type ChangeRequest, type GradeSettings } from "@/lib/store"
 import { cn } from "@/lib/utils"
 
@@ -203,18 +203,12 @@ export default async function CampaignPage({ params, searchParams }: { params: P
       )}
 
       {tab === "landing" && (
-        <Suspense fallback={<LandingSkeleton />}>
-          <LandingSection
-            urls={[
-              ...new Set(
-                adList
-                  .filter((a) => a.status === "ENABLED")
-                  .map((a) => a.finalUrl)
-                  .filter(Boolean),
-              ),
-            ]}
-          />
-        </Suspense>
+        <>
+          <LandingSection pages={landingPages(adList)} />
+          <Suspense fallback={<SitelinksSkeleton />}>
+            <SitelinkSpeeds id={id} />
+          </Suspense>
+        </>
       )}
 
       {tab === "searches" && <SearchesTab id={id} range={range} q={q} admin={admin} />}
@@ -790,115 +784,221 @@ function AssetsStrip({ assets }: { assets: CampaignAssets }) {
 
 // ---- Landing page ---------------------------------------------------------------------------
 
-function LandingSkeleton() {
-  return (
-    <Section title="Landing page" description="Loading a phone screenshot from Google PageSpeed (10–30 seconds the first time)…">
-      <div className="h-40 animate-pulse rounded-xl bg-muted" />
-    </Section>
-  )
+// A page the running ads send people to, with the click address of its busiest ad (the ads come
+// sorted by impressions), so PageSpeed can test it the way an ad visitor gets it.
+type LandingPage = { url: string; clickUrl: string; adGroup: string }
+
+function landingPages(ads: CampaignAd[]) {
+  const pages = new Map<string, LandingPage>()
+  for (const a of ads) {
+    if (a.status === "ENABLED" && a.finalUrl && !pages.has(a.finalUrl)) pages.set(a.finalUrl, { url: a.finalUrl, clickUrl: a.clickUrl, adGroup: a.adGroup })
+  }
+  return [...pages.values()]
 }
 
-async function LandingSection({ urls }: { urls: string[] }) {
-  const shown = urls.slice(0, 2)
-  const pages = await Promise.all(
-    shown.map(async (url) => ({
-      url,
-      page: await load(() => checkPage(url)),
-      speed: await load(() => Promise.resolve().then(() => getPageSpeed(url))),
-    })),
-  )
+const TESTING = "Google PageSpeed is testing it on a phone, as an ad click and as a plain visit (10–30 seconds the first time)…"
+const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+const scriptList = (scripts: { name: string; ms: number }[]) => scripts.map((s) => `${s.name} ${secs(s.ms)}`).join(" · ")
+
+function LandingSection({ pages }: { pages: LandingPage[] }) {
+  const shown = pages.slice(0, 2)
   return (
     <Section
       id="landing"
       title="Landing page"
-      description="Where the ads send people: how the page looks on a phone, what it says, and how fast it loads."
+      description="Where the ads send people: how the page looks on a phone after tapping an ad, what it says, and how fast it loads."
       actions={
         <Link href="/landing-pages" className="text-sm font-medium text-primary hover:underline">
           All landing pages
         </Link>
       }
     >
-      {!pages.length && <p className="text-sm text-muted-foreground">No running ads, so no landing page.</p>}
+      {!shown.length && <p className="text-sm text-muted-foreground">No running ads, so no landing page.</p>}
       <div className="flex flex-col gap-6">
-        {pages.map(({ url, page, speed }) => {
-          const p = page.ok ? page.data : null
-          const s = speed.ok ? speed.data : null
-          return (
-            <div key={url} className="grid gap-4 border-t pt-4 first:border-t-0 first:pt-0 md:grid-cols-[14rem_minmax(0,1fr)]">
-              <div className="mx-auto w-56 overflow-hidden rounded-[1.75rem] border-8 border-neutral-800 bg-neutral-800 shadow-sm md:mx-0">
-                {s?.screenshot ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={s.screenshot} alt={`How ${url} looks on a phone`} className="block w-full rounded-[1.1rem] bg-white" />
-                ) : (
-                  <div className="flex aspect-[9/16] items-center justify-center rounded-[1.1rem] bg-white p-4 text-center text-xs text-muted-foreground">
-                    {speed.ok
-                      ? "No screenshot in this result yet."
-                      : speed.kind === "missing"
-                        ? "Add PAGESPEED_API_KEY to see a screenshot."
-                        : "Couldn't take a screenshot."}
-                  </div>
-                )}
-              </div>
-              <div className="flex min-w-0 flex-col gap-3 text-sm">
-                <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 truncate font-medium text-primary hover:underline">
-                  <ExternalLink className="size-3.5 shrink-0" aria-hidden /> {url}
-                </a>
-                {p ? (
-                  <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-                    <Fact label="Page title" value={p.title || "—"} />
-                    <Fact label="Main heading (H1)" value={p.h1 || "None found"} />
-                    <Fact label="Google snippet (meta description)" value={p.description || "None: Google picks text from the page"} wide />
-                    <Fact
-                      label="Loads"
-                      value={
-                        p.status === 200 ? (
-                          <Pill tone="green">Works (200)</Pill>
-                        ) : (
-                          <Pill tone="red">{p.status ? `Error ${p.status}` : p.resolves ? "Unreachable" : "Domain doesn't exist"}</Pill>
-                        )
-                      }
-                    />
-                    <Fact
-                      label="Speed on a phone"
-                      value={
-                        s?.performance != null ? (
-                          <span className="flex items-center gap-1.5">
-                            <Pill tone={s.performance >= 90 ? "green" : s.performance >= 50 ? "amber" : "red"}>{s.performance}/100</Pill>
-                            {s.lcpS != null && <span className="text-xs text-muted-foreground">main content in {s.lcpS}s</span>}
-                          </span>
-                        ) : (
-                          "—"
-                        )
-                      }
-                    />
-                    <Fact label="Form" value={p.formFields === null ? "No form" : `${p.formFields} field${p.formFields === 1 ? "" : "s"}`} />
-                    <Fact
-                      label="Tap to call / reviews"
-                      value={`${p.tapToCall ? "Has tap-to-call" : "No tap-to-call"} · ${p.reviews ? "Shows reviews" : "No reviews found"}`}
-                    />
-                  </dl>
-                ) : (
-                  !page.ok && <ReportProblem problem={page} />
-                )}
-                {p?.images && p.images.length > 0 && (
-                  <div className="flex flex-col gap-1.5">
-                    <p className="text-xs font-medium text-muted-foreground">Pictures on the page</p>
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {[...(p.image ? [p.image] : []), ...p.images.filter((i) => i !== p.image)].slice(0, 6).map((src) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={src} src={src} alt="" loading="lazy" className="h-20 w-auto shrink-0 rounded-lg border bg-white object-contain" />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })}
+        {shown.map((page) => (
+          <Suspense key={page.url} fallback={<LandingCardSkeleton url={page.url} />}>
+            <LandingCard page={page} />
+          </Suspense>
+        ))}
       </div>
-      {urls.length > shown.length && (
-        <p className="text-xs text-muted-foreground">And {urls.length - shown.length} more page(s) on the Landing pages report.</p>
+      {pages.length > shown.length && (
+        <p className="text-xs text-muted-foreground">And {pages.length - shown.length} more page(s) on the Landing pages report.</p>
       )}
+    </Section>
+  )
+}
+
+function LandingCardSkeleton({ url }: { url: string }) {
+  return (
+    <div className="grid gap-4 border-t pt-4 first:border-t-0 first:pt-0 md:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="mx-auto aspect-[9/16] w-56 animate-pulse rounded-[1.75rem] bg-muted md:mx-0" />
+      <div className="flex min-w-0 flex-col gap-2 text-sm">
+        <p className="truncate font-medium">{url}</p>
+        <p className="text-xs text-muted-foreground">{TESTING}</p>
+      </div>
+    </div>
+  )
+}
+
+// The page as an ad visitor gets it (PageSpeed on the ad's click address: the screenshot shows the
+// headline the ad swaps in) next to a plain visit, which shows what the ad tracking itself costs.
+async function LandingCard({ page: { url, clickUrl, adGroup } }: { page: LandingPage }) {
+  const [page, click, plain] = await Promise.all([load(() => checkPage(url)), load(() => getPageSpeed(clickUrl)), load(() => getPageSpeed(url))])
+  const p = page.ok ? page.data : null
+  const clickShot = click.ok ? click.data.screenshot : null
+  const shot = clickShot || (plain.ok ? plain.data.screenshot : null)
+  const scripts = click.ok ? (click.data.heaviestScripts ?? []) : []
+  const froze = click.ok && plain.ok ? (click.data.tbtMs ?? 0) - (plain.data.tbtMs ?? 0) : 0
+  return (
+    <div className="grid gap-4 border-t pt-4 first:border-t-0 first:pt-0 md:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="mx-auto flex w-56 flex-col gap-1.5 md:mx-0">
+        <div className="overflow-hidden rounded-[1.75rem] border-8 border-neutral-800 bg-neutral-800 shadow-sm">
+          {shot ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={shot} alt={`How ${url} looks on a phone`} className="block w-full rounded-[1.1rem] bg-white" />
+          ) : (
+            <div className="flex aspect-[9/16] items-center justify-center rounded-[1.1rem] bg-white p-4 text-center text-xs text-muted-foreground">
+              {click.ok || plain.ok
+                ? "No screenshot in this result yet."
+                : plain.kind === "missing"
+                  ? "Add PAGESPEED_API_KEY to see a screenshot."
+                  : "Couldn't take a screenshot."}
+            </div>
+          )}
+        </div>
+        {shot && (
+          <p className="text-center text-xs text-muted-foreground">{clickShot ? `After tapping the “${adGroup}” ad` : "A plain visit (the ad-click test failed)"}</p>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-col gap-3 text-sm">
+        <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 truncate font-medium text-primary hover:underline">
+          <ExternalLink className="size-3.5 shrink-0" aria-hidden /> {url}
+        </a>
+        {p ? (
+          <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            <Fact label="Page title" value={p.title || "—"} />
+            <Fact label="Main heading (H1), plain visit" value={p.h1 || "None found"} />
+            <Fact label="Google snippet (meta description)" value={p.description || "None: Google picks text from the page"} wide />
+            <Fact
+              label="Loads"
+              value={
+                p.status === 200 ? (
+                  <Pill tone="green">Works (200)</Pill>
+                ) : (
+                  <Pill tone="red">{p.status ? `Error ${p.status}` : p.resolves ? "Unreachable" : "Domain doesn't exist"}</Pill>
+                )
+              }
+            />
+            <Fact label="Form" value={p.formFields === null ? "No form" : `${p.formFields} field${p.formFields === 1 ? "" : "s"}`} />
+            <Fact
+              label="Tap to call / reviews"
+              value={`${p.tapToCall ? "Has tap-to-call" : "No tap-to-call"} · ${p.reviews ? "Shows reviews" : "No reviews found"}`}
+              wide
+            />
+          </dl>
+        ) : (
+          !page.ok && <ReportProblem problem={page} />
+        )}
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-muted-foreground">Speed on a phone</p>
+          <SpeedLine label="After an ad click" speed={click} />
+          <SpeedLine label="Plain visit" speed={plain} />
+          {scripts.length > 0 && <p className="text-xs text-muted-foreground">Slowest outside scripts on an ad click: {scriptList(scripts)}</p>}
+          {froze >= 1000 && (
+            <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              In this test the page froze {secs(froze)} longer after an ad click than on a plain visit.
+              {scripts[0] && ` ${scripts[0].name} kept the phone busiest (${secs(scripts[0].ms)}).`}
+            </p>
+          )}
+        </div>
+        {p?.images && p.images.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Pictures on the page</p>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {[...(p.image ? [p.image] : []), ...p.images.filter((i) => i !== p.image)].slice(0, 6).map((src) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={src} src={src} alt="" loading="lazy" className="h-20 w-auto shrink-0 rounded-lg border bg-white object-contain" />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// One PageSpeed result on one line: the score, when the main content showed, and how long the page
+// couldn't respond to taps while it loaded (total blocking time).
+function SpeedLine({ label, speed }: { label: string; speed: Loaded<PageSpeed> }) {
+  if (!speed.ok) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{label}:</span> {speed.kind === "missing" ? "add PAGESPEED_API_KEY to test it." : speed.message}
+      </p>
+    )
+  }
+  const s = speed.data
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+      {s.performance != null && <Pill tone={s.performance >= 90 ? "green" : s.performance >= 50 ? "amber" : "red"}>{s.performance}/100</Pill>}
+      <span className="font-medium text-foreground">{label}</span>
+      {s.lcpS != null && <span>· main content in {s.lcpS.toFixed(1)}s</span>}
+      {s.tbtMs != null && (
+        <span title="Total blocking time: how long the page couldn't respond to taps while it loaded">
+          · {s.tbtMs >= 100 ? `frozen ${secs(s.tbtMs)}` : "no freezing"}
+        </span>
+      )}
+    </p>
+  )
+}
+
+function SitelinksSkeleton() {
+  return (
+    <Section title="Sitelink pages" description={TESTING}>
+      <div className="h-32 animate-pulse rounded-xl bg-muted" />
+    </Section>
+  )
+}
+
+// The pages behind the sitelinks, each tested as a click on that sitelink (which carries the
+// campaign's or account's tracking, never the ad's) and as a plain visit.
+async function SitelinkSpeeds({ id }: { id: string }) {
+  const assets = await load(() => getCampaignAssets(id))
+  const all = assets.ok ? assets.data.sitelinks.filter((s) => s.url) : []
+  const rows = await Promise.all(
+    all.slice(0, 6).map(async (s) => {
+      const [click, plain] = await Promise.all([load(() => getPageSpeed(s.clickUrl)), load(() => getPageSpeed(s.url))])
+      return { ...s, click, plain }
+    }),
+  )
+  return (
+    <Section title="Sitelink pages" description="The pages behind this campaign's sitelinks, tested on a phone as a sitelink click and as a plain visit.">
+      {!assets.ok ? (
+        <ReportProblem problem={assets} />
+      ) : !rows.length ? (
+        <p className="text-sm text-muted-foreground">This campaign has no sitelinks.</p>
+      ) : (
+        <ul className="flex flex-col divide-y">
+          {rows.map((r) => {
+            const scripts = r.click.ok ? (r.click.data.heaviestScripts ?? []) : []
+            return (
+              <li key={`${r.text}|${r.url}`} className="flex min-w-0 flex-col gap-1 py-3 first:pt-0 last:pb-0">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                  <span className="text-sm font-medium">{r.text}</span>
+                  <a href={r.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1 text-xs text-primary hover:underline">
+                    <ExternalLink className="size-3 shrink-0" aria-hidden />
+                    <span className="truncate">{r.url.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                  </a>
+                </div>
+                <SpeedLine label="Sitelink click" speed={r.click} />
+                <SpeedLine label="Plain visit" speed={r.plain} />
+                {scripts.length > 0 && <p className="text-xs text-muted-foreground">Slowest outside scripts on a click: {scriptList(scripts)}</p>}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {all.length > rows.length && <p className="text-xs text-muted-foreground">Showing the first {rows.length} of {all.length} sitelinks.</p>}
     </Section>
   )
 }

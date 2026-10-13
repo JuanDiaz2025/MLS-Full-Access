@@ -1,12 +1,13 @@
 // The chat's tools. All of them only read: Google Ads through GAQL SELECT queries on DealTrack's
-// connection (the search endpoint can't change an account), the website leads, and DealTrack's
-// own saved records (alerts, budget lines, weekly negatives).
+// connection (the search endpoint can't change an account), the website leads, DealTrack's own
+// saved records (alerts, budget lines, weekly negatives), and PageSpeed tests of the landing pages.
 import { PAGES, PAGE_GUIDE, pageData, type PageName } from "@/lib/assistant/pages"
 import { addDays, dayOf, today } from "@/lib/date-range"
 import { getClickPatterns } from "@/lib/fraud/clicks"
 import { findJunkLeads } from "@/lib/fraud/leads"
 import { classifyVisits, findClusters, getAdVisits } from "@/lib/fraud/visitors"
 import { getCampaignAds, getCampaignAssets, getCampaignInfo, getCampaignKeywords } from "@/lib/google-ads/campaign"
+import { adClickUrl, TEST_GCLID } from "@/lib/google-ads/click-url"
 import { GoogleAdsError, gaql } from "@/lib/google-ads/client"
 import { getOverview } from "@/lib/google-ads/overview"
 import { getAllCampaigns, getLocationData, getSearchTerms, isWaste } from "@/lib/google-ads/reports"
@@ -14,6 +15,7 @@ import { activeAccount } from "@/lib/conversions/google"
 import { leadSource } from "@/lib/leads/source"
 import { listLeads, listQrCodes } from "@/lib/leads/store"
 import { leadChannel } from "@/lib/leads/tracking"
+import { getPageSpeed, type PageSpeed } from "@/lib/pagespeed"
 import { readCombined } from "@/lib/sheets/sync"
 import { readData } from "@/lib/store"
 
@@ -131,17 +133,43 @@ export const toolSpecs: ToolSpec[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "page_speed",
+    description:
+      "Test how fast pages load on a phone with Google PageSpeed Insights (the mobile test on pagespeed.web.dev). Give a campaign to test the pages its " +
+      "running ads and its sitelinks send people to, or a url to test one page. Each page is tested twice: as an ad click (the address a real click lands on, " +
+      "with the tracking Google adds, so click-fraud checks and tracking tags run as they do for ad visitors) and as a plain visit. Each result has the " +
+      "score (0-100), when the main content showed (seconds), how long the page was frozen and couldn't respond to taps (total blocking time), layout " +
+      "shift, real Chrome visitors' rating when Google has enough data, and the outside scripts that kept the phone busiest. Tests take 10-30 seconds " +
+      "and are kept for 12 hours. Pass an empty string for whichever of campaign and url isn't used.",
+    parameters: {
+      type: "object",
+      properties: {
+        campaign: { type: "string", description: "The campaign's name (or part of it) or its ID, or an empty string." },
+        url: { type: "string", description: "One page's full address (https://...), or an empty string." },
+      },
+      required: ["campaign", "url"],
+      additionalProperties: false,
+    },
+  },
 ]
+
+// The campaign a name, part of a name or an ID points to: the exact ID or name, else the one with
+// every word in its name (running campaigns first).
+function matchCampaign<T extends { id: string; name: string; status: string }>(all: T[], campaign: string) {
+  const wanted = campaign.trim().toLowerCase()
+  return (
+    all.find((c) => c.id === wanted) ??
+    all.find((c) => c.name.toLowerCase() === wanted) ??
+    all.filter((c) => wanted.split(/\s+/).every((w) => c.name.toLowerCase().includes(w))).sort((a, b) => (a.status === "ENABLED" ? 0 : 1) - (b.status === "ENABLED" ? 0 : 1))[0]
+  )
+}
 
 // One campaign, as its DealTrack page shows it.
 export async function campaignDetail(campaign: string, days: number) {
   const range = { from: addDays(today(), -(days - 1)), to: today(), label: `Last ${days} days` }
   const all = await getAllCampaigns(range)
-  const wanted = campaign.trim().toLowerCase()
-  const match =
-    all.find((c) => c.id === wanted) ??
-    all.find((c) => c.name.toLowerCase() === wanted) ??
-    all.filter((c) => wanted.split(/\s+/).every((w) => c.name.toLowerCase().includes(w))).sort((a, b) => (a.status === "ENABLED" ? 0 : 1) - (b.status === "ENABLED" ? 0 : 1))[0]
+  const match = matchCampaign(all, campaign)
   if (!match) return { error: `No campaign matches "${campaign}".`, campaigns: all.filter((c) => c.status === "ENABLED").map((c) => c.name) }
   const id = match.id
   const [info, overview, ads, assets, keywords, terms, places] = await Promise.all([
@@ -177,6 +205,72 @@ export async function campaignDetail(campaign: string, days: number) {
     searchesWithLeads: terms.filter((t) => t.metrics.conversions > 0).slice(0, 10).map((t) => ({ term: t.term, cost: round(t.metrics.cost), conversions: t.metrics.conversions })),
     costliestWithNoLeads: terms.filter((t) => isWaste(t.metrics)).slice(0, 10).map((t) => ({ term: t.term, cost: round(t.metrics.cost), clicks: t.metrics.clicks, blocked: t.status.includes("EXCLUDED") })),
     topCities: places.rows.slice(0, 10).map((p) => ({ city: p.city, inBuyArea: p.status !== "outside", cost: round(p.metrics.cost), conversions: p.metrics.conversions })),
+  }
+}
+
+// How long the chat waits for PageSpeed (tests usually take 10–40 seconds, a few at once can take
+// longer). The campaign's Landing page tab runs the same tests.
+const SPEED_WAIT_MS = 90_000
+
+// A campaign's ad landing pages and sitelink pages (at most 8), or one address, each tested on a
+// phone as an ad click and as a plain visit.
+export async function pageSpeedCheck(campaign: string, url: string) {
+  if (!process.env.PAGESPEED_API_KEY?.trim()) return { error: "PageSpeed isn't set up: PAGESPEED_API_KEY is missing from .env.local." }
+  let pages: { what: string; url: string; clickUrl: string }[]
+  let about: Record<string, string> = {}
+  if (url.trim()) {
+    const address = url.trim()
+    if (!/^https?:\/\//i.test(address) || !URL.canParse(address)) return { error: `"${address}" isn't a full web address (https://...).` }
+    // Any address: a typical Google Ads click's tracking. A campaign's pages get their own.
+    pages = [{ what: "Page", url: address, clickUrl: adClickUrl(address, "utm_source=google&utm_medium=cpc") }]
+  } else {
+    const range = { from: addDays(today(), -29), to: today(), label: "Last 30 days" }
+    const all = await getAllCampaigns(range)
+    const match = matchCampaign(all, campaign)
+    if (!match) return { error: `No campaign matches "${campaign}".`, campaigns: all.filter((c) => c.status === "ENABLED").map((c) => c.name) }
+    const [ads, assets] = await Promise.all([getCampaignAds(match.id, range), getCampaignAssets(match.id)])
+    const landing = new Map<string, { what: string; url: string; clickUrl: string }>()
+    for (const a of ads) {
+      if (a.status === "ENABLED" && a.finalUrl && !landing.has(a.finalUrl)) landing.set(a.finalUrl, { what: `Ad landing page (as a click on the ${a.adGroup} ad)`, url: a.finalUrl, clickUrl: a.clickUrl })
+    }
+    const sitelinks = assets.sitelinks.filter((s) => s.url).map((s) => ({ what: `Sitelink: ${s.text}`, url: s.url, clickUrl: s.clickUrl }))
+    pages = [...[...landing.values()].slice(0, 2), ...sitelinks].slice(0, 8)
+    about = { campaign: match.name, dealtrackPage: `/campaigns/${match.id}?tab=landing` }
+    if (!pages.length) return { ...about, error: "This campaign has no running ads or sitelinks with a landing page." }
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<{ stillTesting: string }>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ stillTesting: "PageSpeed took over 90 seconds on this test. Ask again in a minute, or see it on the campaign's Landing page tab." }),
+      SPEED_WAIT_MS,
+    )
+  })
+  const summary = (s: PageSpeed) => ({
+    score: s.performance,
+    mainContentSeconds: s.lcpS,
+    frozenSeconds: s.tbtMs === null ? null : Math.round(s.tbtMs / 100) / 10,
+    layoutShift: s.cls === null ? null : Math.round(s.cls * 1000) / 1000,
+    realChromeVisitors: s.fieldLcp ?? "not enough data",
+    slowestOutsideScripts: (s.heaviestScripts ?? []).map((x) => `${x.name} ${Math.round(x.ms / 100) / 10}s`),
+  })
+  const test = (address: string) =>
+    Promise.race([
+      (async () => summary(await getPageSpeed(address)))().catch((e: unknown) => ({ error: e instanceof Error ? e.message : "The test failed." })),
+      late,
+    ])
+  const results = await Promise.all(
+    pages.map(async (p) => {
+      const [adClick, plainVisit] = await Promise.all([test(p.clickUrl), test(p.url)])
+      return { ...p, adClick, plainVisit }
+    }),
+  )
+  clearTimeout(timer)
+  return {
+    ...about,
+    testedOn: "a phone (Google PageSpeed Insights, mobile)",
+    note: `The ad-click test opens the address a real click lands on, with ${TEST_GCLID} as the click ID. A big gap between the two tests means something on the page works much harder for ad visitors.`,
+    pages: results.map(({ what, url: address, adClick, plainVisit }) => ({ what, url: address, adClick, plainVisit })),
   }
 }
 
@@ -338,6 +432,13 @@ export async function runTool(name: string, input: unknown): Promise<{ content: 
       if (typeof campaign !== "string" || !campaign.trim()) return { content: "Say which campaign (name or ID).", isError: true }
       const d = Math.min(Math.max(Math.round(Number(days) || 30), 1), 365)
       return { content: JSON.stringify(await campaignDetail(campaign, d)).slice(0, MAX_CHARS) }
+    }
+    if (name === "page_speed") {
+      const { campaign, url } = input as { campaign?: unknown; url?: unknown }
+      const c = typeof campaign === "string" ? campaign : ""
+      const u = typeof url === "string" ? url : ""
+      if (!c.trim() && !u.trim()) return { content: "Say which campaign (name or ID) or which page (its full address) to test.", isError: true }
+      return { content: JSON.stringify(await pageSpeedCheck(c, u)).slice(0, MAX_CHARS) }
     }
     if (name === "dealtrack_status") return { content: JSON.stringify(await dealtrackStatus()).slice(0, MAX_CHARS) }
     if (name === "deal_history") {

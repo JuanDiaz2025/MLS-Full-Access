@@ -14,7 +14,7 @@ import { buildSnapshot } from "@/lib/assistant/snapshot"
 import { DATA_DIR } from "@/lib/store"
 
 const TIMEOUT_MS = 4 * 60_000
-const TOOLS = ["mcp__dealtrack__google_ads_query", "mcp__dealtrack__list_leads", "mcp__dealtrack__dealtrack_status", "mcp__dealtrack__fraud_check", "mcp__dealtrack__dealtrack_page", "mcp__dealtrack__campaign_detail", "mcp__dealtrack__deal_history"]
+const TOOLS = ["mcp__dealtrack__google_ads_query", "mcp__dealtrack__list_leads", "mcp__dealtrack__dealtrack_status", "mcp__dealtrack__fraud_check", "mcp__dealtrack__dealtrack_page", "mcp__dealtrack__campaign_detail", "mcp__dealtrack__deal_history", "mcp__dealtrack__page_speed"]
 
 const NOT_INSTALLED = "The chat needs Claude on this computer. Click Sign in with Claude below: it sets it up and signs you in with your Claude account."
 const NOT_SIGNED_IN = "Claude isn't signed in on this computer yet. Click Sign in with Claude below and sign in with your Claude account."

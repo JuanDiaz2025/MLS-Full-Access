@@ -4,6 +4,7 @@
 
 import { addDays, today, type DateRange } from "@/lib/date-range"
 import type { AdTextSet } from "@/lib/ad-text"
+import { adClickUrl, firstSuffix, mergeParams, type UrlParam } from "@/lib/google-ads/click-url"
 import { customerResource, gaql, gaqlFresh, mutate } from "@/lib/google-ads/client"
 import { cleanUrl, emptyMetrics, weekdays, type Metrics, type ScheduleGrid } from "@/lib/google-ads/reports"
 
@@ -101,6 +102,8 @@ export type CampaignAd = {
   approval: string
   topics: string[]
   finalUrl: string
+  // Where a click on this ad lands: the final URL with the tracking Google adds (click-url.ts).
+  clickUrl: string
   displayUrl: string // domain/path1/path2, as the ad shows it
   headlines: AdText[]
   descriptions: AdText[]
@@ -113,7 +116,9 @@ export async function getCampaignAds(id: string, range: DateRange): Promise<Camp
   if (!validCampaignId(id)) return []
   const [list, stats, labels] = await Promise.all([
     gaql<{
-      adGroup: { name?: string }
+      adGroup: { name?: string; id?: Num; finalUrlSuffix?: string; urlCustomParameters?: UrlParam[] }
+      campaign?: { finalUrlSuffix?: string; urlCustomParameters?: UrlParam[] }
+      customer?: { finalUrlSuffix?: string }
       adGroupAd: {
         resourceName: string
         status?: string
@@ -123,12 +128,16 @@ export async function getCampaignAds(id: string, range: DateRange): Promise<Camp
           id?: Num
           type?: string
           finalUrls?: string[]
+          finalUrlSuffix?: string
+          urlCustomParameters?: UrlParam[]
           responsiveSearchAd?: { headlines?: TextAsset[]; descriptions?: TextAsset[]; path1?: string; path2?: string }
         }
       }
     }>(
-      `SELECT ad_group.name, ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad_strength, ad_group_ad.policy_summary.approval_status,
-         ad_group_ad.policy_summary.policy_topic_entries, ad_group_ad.ad.id, ad_group_ad.ad.type, ad_group_ad.ad.final_urls,
+      `SELECT ad_group.name, ad_group.id, ad_group.final_url_suffix, ad_group.url_custom_parameters, campaign.final_url_suffix,
+         campaign.url_custom_parameters, customer.final_url_suffix, ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad_strength,
+         ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.policy_topic_entries, ad_group_ad.ad.id, ad_group_ad.ad.type,
+         ad_group_ad.ad.final_urls, ad_group_ad.ad.final_url_suffix, ad_group_ad.ad.url_custom_parameters,
          ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions,
          ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2
        FROM ad_group_ad
@@ -173,6 +182,14 @@ export async function getCampaignAds(id: string, range: DateRange): Promise<Camp
         approval: r.adGroupAd.policySummary?.approvalStatus ?? "UNKNOWN",
         topics: [...new Set((r.adGroupAd.policySummary?.policyTopicEntries ?? []).map((t) => t.topic ?? "").filter(Boolean))],
         finalUrl: finalUrl ? cleanUrl(finalUrl) : "",
+        clickUrl: finalUrl
+          ? adClickUrl(finalUrl, firstSuffix(ad.finalUrlSuffix, r.adGroup.finalUrlSuffix, r.campaign?.finalUrlSuffix, r.customer?.finalUrlSuffix), {
+              params: mergeParams(r.campaign?.urlCustomParameters, r.adGroup.urlCustomParameters, ad.urlCustomParameters),
+              campaignId: id,
+              adGroupId: String(r.adGroup.id ?? ""),
+              adId,
+            })
+          : "",
         displayUrl: [host, rsa?.path1, rsa?.path2].filter(Boolean).join("/"),
         headlines: texts(rsa?.headlines),
         descriptions: texts(rsa?.descriptions),
@@ -188,7 +205,7 @@ export type CampaignAssets = {
   businessName: string
   logo: string | null
   images: { url: string; level: string }[]
-  sitelinks: { text: string; line1: string; line2: string; url: string }[]
+  sitelinks: { text: string; line1: string; line2: string; url: string; clickUrl: string }[]
   callouts: string[]
   snippets: { header: string; values: string[] }[]
   phone: string
@@ -198,9 +215,12 @@ type AssetRow = {
   campaignAsset?: { fieldType?: string }
   adGroupAsset?: { fieldType?: string }
   customerAsset?: { fieldType?: string }
+  adGroup?: { id?: Num; finalUrlSuffix?: string; urlCustomParameters?: UrlParam[] }
   asset: {
     type?: string
     finalUrls?: string[]
+    finalUrlSuffix?: string
+    urlCustomParameters?: UrlParam[]
     textAsset?: { text?: string }
     imageAsset?: { fullSize?: { url?: string } }
     sitelinkAsset?: { linkText?: string; description1?: string; description2?: string }
@@ -210,25 +230,31 @@ type AssetRow = {
   }
 }
 
-const ASSET_FIELDS = `asset.type, asset.final_urls, asset.text_asset.text, asset.image_asset.full_size.url, asset.sitelink_asset.link_text,
-  asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.callout_asset.callout_text,
-  asset.structured_snippet_asset.header, asset.structured_snippet_asset.values, asset.call_asset.phone_number`
+const ASSET_FIELDS = `asset.type, asset.final_urls, asset.final_url_suffix, asset.url_custom_parameters, asset.text_asset.text,
+  asset.image_asset.full_size.url, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2,
+  asset.callout_asset.callout_text, asset.structured_snippet_asset.header, asset.structured_snippet_asset.values, asset.call_asset.phone_number`
 
 // What shows with the ads: the campaign's and its ad groups' own assets, and the account-wide ones
 // for any kind the campaign doesn't set itself (that's how Google picks them too).
 export async function getCampaignAssets(id: string): Promise<CampaignAssets> {
   const out: CampaignAssets = { businessName: "", logo: null, images: [], sitelinks: [], callouts: [], snippets: [], phone: "" }
   if (!validCampaignId(id)) return out
-  const [campaign, groups, account] = await Promise.all([
+  const [campaign, groups, account, levels] = await Promise.all([
     gaql<AssetRow>(
       `SELECT campaign_asset.field_type, campaign.id, ${ASSET_FIELDS} FROM campaign_asset WHERE campaign.id = ${id} AND campaign_asset.status = 'ENABLED'`,
     ),
     gaql<AssetRow>(
-      `SELECT ad_group_asset.field_type, campaign.id, ad_group.status, ${ASSET_FIELDS} FROM ad_group_asset
+      `SELECT ad_group_asset.field_type, campaign.id, ad_group.status, ad_group.id, ad_group.final_url_suffix, ad_group.url_custom_parameters,
+         ${ASSET_FIELDS} FROM ad_group_asset
        WHERE campaign.id = ${id} AND ad_group_asset.status = 'ENABLED' AND ad_group.status = 'ENABLED'`,
     ),
     gaql<AssetRow>(`SELECT customer_asset.field_type, ${ASSET_FIELDS} FROM customer_asset WHERE customer_asset.status = 'ENABLED'`),
+    // The campaign's and the account's tracking, for where a sitelink click lands.
+    gaql<{ campaign?: { finalUrlSuffix?: string; urlCustomParameters?: UrlParam[] }; customer?: { finalUrlSuffix?: string } }>(
+      `SELECT campaign.final_url_suffix, campaign.url_custom_parameters, customer.final_url_suffix FROM campaign WHERE campaign.id = ${id}`,
+    ),
   ])
+  const { campaign: camp, customer } = levels[0] ?? {}
   const tagged = [
     ...campaign.map((r) => ({ r, field: r.campaignAsset?.fieldType ?? "", level: "Campaign" })),
     ...groups.map((r) => ({ r, field: r.adGroupAsset?.fieldType ?? "", level: "Ad group" })),
@@ -253,6 +279,14 @@ export async function getCampaignAssets(id: string): Promise<CampaignAssets> {
         line1: a.sitelinkAsset.description1 ?? "",
         line2: a.sitelinkAsset.description2 ?? "",
         url: a.finalUrls?.[0] ? cleanUrl(a.finalUrls[0]) : "",
+        // A sitelink takes its own suffix, else its ad group's, campaign's or account's: never the ad's.
+        clickUrl: a.finalUrls?.[0]
+          ? adClickUrl(a.finalUrls[0], firstSuffix(a.finalUrlSuffix, r.adGroup?.finalUrlSuffix, camp?.finalUrlSuffix, customer?.finalUrlSuffix), {
+              params: mergeParams(camp?.urlCustomParameters, r.adGroup?.urlCustomParameters, a.urlCustomParameters),
+              campaignId: id,
+              adGroupId: r.adGroup?.id === undefined ? undefined : String(r.adGroup.id),
+            })
+          : "",
       })
     else if (field === "CALLOUT" && a.calloutAsset?.calloutText) out.callouts.push(a.calloutAsset.calloutText)
     else if (field === "STRUCTURED_SNIPPET" && a.structuredSnippetAsset)

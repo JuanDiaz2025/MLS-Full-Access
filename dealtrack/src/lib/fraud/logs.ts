@@ -71,6 +71,8 @@ const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/
 const IPV6 = /^[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}$/i
 const CLICK_ID = /[?&](?:gclid|gbraid|wbraid)=([^&\s"#]+)/
 const AD_LANDING = /[?&](?:gclid|gbraid|wbraid|gad_source|gad_campaignid)=/
+// DealTrack's PageSpeed tests of ad clicks (and typed-in test links) use gclid=test…: not a real click.
+const TEST_CLICK = /[?&]gclid=test/i
 
 function timeOf(line: string): string | null {
   const c = line.match(CLF_TIME)
@@ -99,7 +101,7 @@ export function parseLogLine(line: string): LogHit | "other" | null {
     .find((t) => IPV4.test(t) || (IPV6.test(t) && t.includes(":")))
   if (!time || !ip) return null
   const path = req[1]
-  if (!AD_LANDING.test(path)) return "other"
+  if (!AD_LANDING.test(path) || TEST_CLICK.test(path)) return "other"
   const quoted = line.slice(req.index! + req[0].length).match(/"([^"]*)"/g) ?? []
   let gclid = path.match(CLICK_ID)?.[1] ?? ""
   try {

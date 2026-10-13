@@ -74,6 +74,7 @@ const param = (url: string, name: string) => {
 export async function getAdVisits(range: DateRange): Promise<AdVisit[]> {
   // Everyone on the live site, the team included: someone clicking the ads a hundred times is
   // exactly what this looks for, so heavy visitors aren't left out the way other reports do.
+  // Click IDs starting "test" are DealTrack's PageSpeed tests of ad clicks or typed-in test links.
   const rows = await hogql(`
     select * from (
       select
@@ -97,7 +98,7 @@ export async function getAdVisits(range: DateRange): Promise<AdVisit[]> {
         and properties.$host in ('www.twinhomebuyer.com', 'twinhomebuyer.com')
       group by properties.$session_id
     )
-    where match(entry_url, '${AD_URL}')
+    where match(entry_url, '${AD_URL}') and not (entry_url ilike '%gclid=test%')
     order by started_at
     limit 20000`)
   return rows.map((r) => {

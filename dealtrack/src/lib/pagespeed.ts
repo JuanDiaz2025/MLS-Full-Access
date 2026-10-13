@@ -12,20 +12,32 @@ export type PageSpeed = {
   tbtMs: number | null // total blocking time
   cls: number | null
   fieldLcp: "FAST" | "AVERAGE" | "SLOW" | null // real Chrome visitors, last 28 days
-  slowestThirdParties: string[]
+  slowestThirdParties: string[] // the names in heaviestScripts, for the pages that list only names
   screenshot?: string | null // how the page looked on a phone once loaded (a data: URL); missing in older cached results
+  // Other companies' scripts that kept the phone busiest while the page loaded (Lighthouse's
+  // JavaScript execution time, by company), e.g. a click-fraud check or a tag manager.
+  heaviestScripts?: { name: string; ms: number }[]
 }
 
-type Audit = { numericValue?: number; details?: { data?: string; items?: { entity?: string | { text?: string }; blockingTime?: number }[] } }
+type Audit = { numericValue?: number; details?: { data?: string; items?: { url?: string; total?: number }[] } }
+
+// The site's ClickCease (CHEQ) click-fraud tag loads from a different made-up domain from one visit to
+// the next (ob.brilliantlocco.com, obseu.nordivalen.com…), always as /i/<tag ID>.js.
+const CLICKCEASE_TAG = /^https:\/\/ob[a-z]*\.[^/]+\/i\/[0-9a-f]{32}\.js(\?|$)/
+const domainOf = (host: string) => host.split(".").slice(-2).join(".")
 
 export function getPageSpeed(url: string): Promise<PageSpeed> {
   const { PAGESPEED_API_KEY } = settings(SERVICE, ["PAGESPEED_API_KEY"] as const)
-  return cached(`psi2:${url}`, 12 * HOUR, async () => {
+  return cached(`psi3:${url}`, 12 * HOUR, async () => {
     const params = new URLSearchParams({ url, strategy: "mobile", category: "performance", key: PAGESPEED_API_KEY })
     const res = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?${params}`, { cache: "no-store" })
     const body = (await res.json().catch(() => ({}))) as {
       error?: { message?: string }
-      lighthouseResult?: { categories?: { performance?: { score?: number } }; audits?: Record<string, Audit> }
+      lighthouseResult?: {
+        categories?: { performance?: { score?: number } }
+        audits?: Record<string, Audit>
+        entities?: { name?: string; isFirstParty?: boolean; origins?: string[] }[]
+      }
       loadingExperience?: { metrics?: { LARGEST_CONTENTFUL_PAINT_MS?: { category?: PageSpeed["fieldLcp"] } } }
     }
     if (!res.ok) {
@@ -39,19 +51,34 @@ export function getPageSpeed(url: string): Promise<PageSpeed> {
     const value = (id: string) => audits[id]?.numericValue ?? null
     const score = body.lighthouseResult?.categories?.performance?.score
     const lcp = value("largest-contentful-paint")
-    const third = audits["third-party-summary"]?.details?.items ?? []
+    const entities = new Map<string, { name?: string; isFirstParty?: boolean }>()
+    for (const e of body.lighthouseResult?.entities ?? []) for (const origin of e.origins ?? []) entities.set(origin, e)
+    const site = new URL(url).hostname.replace(/^www\./, "")
+    const scripts = (audits["bootup-time"]?.details?.items ?? []).filter((i) => URL.canParse(i.url ?? "")) // "Unattributable" work isn't a script
+    const clickCease = new Set(scripts.filter((i) => CLICKCEASE_TAG.test(i.url!)).map((i) => domainOf(new URL(i.url!).hostname)))
+    const busy = new Map<string, number>()
+    for (const item of scripts) {
+      const { origin, hostname } = new URL(item.url!)
+      const entity = entities.get(origin)
+      if (entity?.isFirstParty || hostname.replace(/^www\./, "") === site) continue // the site's own code
+      const name = clickCease.has(domainOf(hostname)) ? "ClickCease" : (entity?.name ?? hostname)
+      busy.set(name, (busy.get(name) ?? 0) + (item.total ?? 0))
+    }
+    const heaviest = [...busy]
+      .filter(([, ms]) => ms >= 150)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, ms]) => ({ name, ms: Math.round(ms) }))
     return {
       performance: score === undefined || score === null ? null : Math.round(score * 100),
       lcpS: lcp === null ? null : Math.round(lcp / 100) / 10,
       tbtMs: value("total-blocking-time") === null ? null : Math.round(value("total-blocking-time")!),
       cls: value("cumulative-layout-shift"),
       fieldLcp: body.loadingExperience?.metrics?.LARGEST_CONTENTFUL_PAINT_MS?.category ?? null,
-      slowestThirdParties: third
-        .filter((i) => (i.blockingTime ?? 0) > 100)
-        .sort((a, b) => (b.blockingTime ?? 0) - (a.blockingTime ?? 0))
-        .slice(0, 3)
-        .map((i) => (typeof i.entity === "string" ? i.entity : (i.entity?.text ?? "Unknown"))),
+      // Lighthouse 13 dropped the third-party summary these names used to come from.
+      slowestThirdParties: heaviest.map((s) => s.name),
       screenshot: audits["final-screenshot"]?.details?.data ?? null,
+      heaviestScripts: heaviest,
     }
   }, { staleMs: 7 * 24 * HOUR })
 }
