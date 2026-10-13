@@ -15,10 +15,14 @@
 // Every minute it also backs up the leads to the backup sheet linked on the Leads page, when a
 // lead arrived or changed (a website lead sent by webhook comes in with no page open). Nothing
 // happens until a sheet is linked.
+//
+// Every 2 minutes it also runs the Competitor ads searches that are due, once the weekly sampling
+// is turned on there (Bright Data's free searches only). Set DEALTRACK_AD_SAMPLER=0 to turn it off.
 
 const TODAY_EVERY_MS = 15 * 60 * 1000
 const REVIEW_EVERY_MS = 60 * 60 * 1000
 const BACKUP_EVERY_MS = 60 * 1000
+const AD_SAMPLES_EVERY_MS = 2 * 60 * 1000
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return
@@ -45,6 +49,12 @@ export async function register() {
       setTimeout(() => check().catch(() => undefined), 5 * 60_000)
       g.__dtReviewTimer = setInterval(() => check().catch(() => undefined), REVIEW_EVERY_MS)
     }
+  }
+  if (process.env.DEALTRACK_AD_SAMPLER !== "0") {
+    const g = globalThis as { __dtAdSampleTimer?: ReturnType<typeof setInterval> }
+    g.__dtAdSampleTimer ??= setInterval(() => {
+      import("@/lib/competitors/ad-sampler").then((m) => m.runDueSamples()).catch(() => undefined)
+    }, AD_SAMPLES_EVERY_MS)
   }
   {
     const g = globalThis as { __dtBackupTimer?: ReturnType<typeof setInterval> }

@@ -3,6 +3,8 @@ import type { Metadata } from "next"
 import { PageHeader } from "@/components/report"
 import Rankings, { type Tab } from "@/components/research/rankings"
 import { isAdmin } from "@/lib/auth"
+import { brightReady } from "@/lib/competitors/brightdata"
+import { freeSearches } from "@/lib/competitors/free-searches"
 import { TOPICS, placeKind, topicOf } from "@/lib/research/classify"
 import { estimatedShares, getResearch } from "@/lib/research/keywords"
 import { analyze, analyzeMaps, localKey } from "@/lib/research/serp-analysis"
@@ -32,13 +34,14 @@ const TABS: Tab[] = ["overview", "sites", "keywords", "maps", "brand", "scans"]
 // and reviews, the brand check, and past scans.
 export default async function RankingsPage({ searchParams }: { searchParams: Promise<{ scan?: string; tab?: string }> }) {
   const { scan: picked, tab } = await searchParams
-  const [scans, research, balance, admin, reviews, places] = await Promise.all([
+  const [scans, research, balance, admin, reviews, places, free] = await Promise.all([
     getScans(),
     getResearch(),
     serperBalance(),
     isAdmin(),
     getReviews(),
     scanPlaces(),
+    brightReady() ? freeSearches() : null,
   ])
   const kindOf = (s: Scan): ScanKind => s.kind ?? "web"
 
@@ -88,6 +91,7 @@ export default async function RankingsPage({ searchParams }: { searchParams: Pro
         kindLabels={KIND_LABELS}
         balance={balance.value}
         balanceError={balance.error}
+        free={free}
         running={scanRunning()}
         scans={scans}
         web={{ shownId: web.shownId, comparedAt: web.comparedAt, analysis: web.now ? analyze(web.now, volumes, web.before, OUR_SITES) : null }}

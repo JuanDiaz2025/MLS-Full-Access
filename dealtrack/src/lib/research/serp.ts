@@ -10,9 +10,11 @@
 //
 // Searches come from Serper (SERPER_API_KEY: real Google results set to a city, plus ads when
 // Google shows it some, which is rare; 2,500 free once, then paid packs) or, for Google results
-// only, Brave (BRAVE_SEARCH_API_KEY: free every month, regular results only, US-wide). Serper
-// charges 1 credit per search, 3 for a Maps search with stars, 1 per 10 reviews; a scan never
-// starts with more credits than the account has left.
+// only, Bright Data (BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE: real Google from the city with
+// the ads it showed, kept for Competitor ads; only its free searches, see free-searches.ts) or
+// Brave (BRAVE_SEARCH_API_KEY: free every month, regular results only, US-wide). Serper charges 1
+// credit per search, 3 for a Maps search with stars, 1 per 10 reviews; a scan never starts with
+// more credits than the account has left, or more Bright Data searches than are free.
 //
 // Each scan is saved in .data/serp/<id>.json with its plan, so a scan stopped by hand, by running
 // out of credits or by the app closing can continue where it left off. The list of scans is in
@@ -20,15 +22,19 @@
 import { rm } from "node:fs/promises"
 import path from "node:path"
 
+import { saveSample } from "@/lib/competitors/ad-samples"
+import { BrightDataError, brightReady, searchGoogle } from "@/lib/competitors/brightdata"
+import { freeSearches } from "@/lib/competitors/free-searches"
 import { jsonFileStore } from "@/lib/json-file-store"
 import { placeOf, topicOf } from "@/lib/research/classify"
 import { getResearch } from "@/lib/research/keywords"
+import { siteOf } from "@/lib/research/site"
 import { CALIFORNIA_PLACES } from "@/lib/service-area"
 import { shared } from "@/lib/shared-state"
 import { DATA_DIR } from "@/lib/store"
 
-export type SerpEngine = "serper" | "brave"
-export const ENGINE_LABELS: Record<SerpEngine, string> = { serper: "Serper (Google)", brave: "Brave Search" }
+export type SerpEngine = "serper" | "brave" | "brightdata"
+export const ENGINE_LABELS: Record<SerpEngine, string> = { serper: "Serper (Google)", brave: "Brave Search", brightdata: "Bright Data (Google, free)" }
 
 export type ScanKind = "web" | "maps" | "brand"
 export const KIND_LABELS: Record<ScanKind, string> = { web: "Google results", maps: "Google Maps", brand: "Brand check" }
@@ -128,19 +134,13 @@ const balanceCache = shared("serp-balance", () => ({ at: 0, value: null as numbe
 
 export const serperKey = () => (process.env.SERPER_API_KEY ?? "").trim()
 export const braveKey = () => (process.env.BRAVE_SEARCH_API_KEY ?? "").trim()
-export const enginesReady = (): SerpEngine[] => [...(serperKey() ? (["serper"] as const) : []), ...(braveKey() ? (["brave"] as const) : [])]
+export const enginesReady = (): SerpEngine[] => [
+  ...(brightReady() ? (["brightdata"] as const) : []),
+  ...(serperKey() ? (["serper"] as const) : []),
+  ...(braveKey() ? (["brave"] as const) : []),
+]
 
-// "www.sacramento.example.co.uk/page" → "example.co.uk"; "www.opendoor.com" → "opendoor.com".
-export function siteOf(url: string) {
-  try {
-    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "")
-    const parts = host.split(".")
-    const keep = parts.length > 2 && /^(co|com|org|net|gov|ac)$/.test(parts.at(-2) ?? "") ? 3 : 2
-    return parts.slice(-keep).join(".")
-  } catch {
-    return ""
-  }
-}
+export { siteOf }
 
 // Which place a keyword is searched from: the city it names, if any; otherwise each chosen place.
 // Google Maps needs a city, so a Maps scan searches keywords that name a region (or none) from each
@@ -256,6 +256,22 @@ async function mapsSearch(k: string, loc: string, stars: boolean): Promise<MapHi
     }))
 }
 
+// Bright Data, from the city on a computer: the results, and every ad it showed kept as a sample
+// for Competitor ads (a search with no ads too).
+async function brightSearch(k: string, loc: string): Promise<Pick<SerpResult, "org" | "ads">> {
+  try {
+    const found = await searchGoogle(k, loc, "desktop")
+    await saveSample({ at: new Date().toISOString(), k, loc, dev: "desktop", src: "scan", ads: found.ads, ...(found.aiOverview ? { ai: true } : {}), ...(found.mapPack ? { maps: true } : {}) })
+    return {
+      org: found.organic.map((r) => hit(r.u, r.t, r.p)),
+      ads: found.ads.map((a, i) => ({ d: a.d, u: (a.u ?? "").slice(0, 300), t: a.t, p: i + 1 })),
+    }
+  } catch (e) {
+    if (e instanceof BrightDataError) throw new SearchError(e.message, e.fatal, e.retry)
+    throw e
+  }
+}
+
 async function braveSearch(k: string): Promise<Pick<SerpResult, "org" | "ads">> {
   const res = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(k)}&country=US&search_lang=en&count=10`, {
     headers: { "X-Subscription-Token": braveKey(), accept: "application/json" },
@@ -348,6 +364,15 @@ export async function startScan(opts: {
       }
     }
   }
+  if (engine === "brightdata") {
+    const { left } = await freeSearches()
+    if (plan.length > left) {
+      return {
+        ok: false,
+        message: `This scan needs ${plan.length.toLocaleString("en-US")} searches and ${left.toLocaleString("en-US")} free Bright Data searches are left. Pick fewer keywords or places.`,
+      }
+    }
+  }
   const at = new Date().toISOString()
   const id = `${at.slice(0, 19).replace(/[^0-9]/g, "")}-${Math.random().toString(36).slice(2, 6)}`
   await scanFile(id).update((f) => {
@@ -388,6 +413,7 @@ export async function continueScan(id: string): Promise<{ ok: boolean; message: 
     const { value } = await serperBalance(true)
     if (value !== null && value < 1) return { ok: false, message: "Serper has no searches left." }
   }
+  if (scan.engine === "brightdata" && (await freeSearches()).left < 1) return { ok: false, message: "The free Bright Data searches are used up for now." }
   await updateScan(id, (s) => {
     s.status = "running"
     delete s.note
@@ -413,7 +439,8 @@ export async function deleteScan(id: string) {
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // Runs a scan's remaining searches in the background: Serper 3 at a time (its free plan allows 5 a
-// second), Brave one a second (its free plan's limit). Progress is saved every 20 searches.
+// second), Bright Data 2 at a time, Brave one a second (its free plan's limit). Progress is saved
+// every 20 searches.
 async function run(id: string, engine: SerpEngine) {
   job.id = id
   job.stop = false
@@ -452,7 +479,9 @@ async function run(id: string, engine: SerpEngine) {
                 ? { org: [], ads: [], maps: await mapsSearch(p.k, p.loc, Boolean(p.s)) }
                 : engine === "serper"
                   ? await serperSearch(p.k, p.loc)
-                  : await braveSearch(p.k)
+                  : engine === "brightdata"
+                    ? await brightSearch(p.k, p.loc)
+                    : await braveSearch(p.k)
             result = { ...p, at: new Date().toISOString(), ...found }
             failedInARow = 0
           } catch (e) {
@@ -468,14 +497,14 @@ async function run(id: string, engine: SerpEngine) {
             result = { ...p, at: new Date().toISOString(), org: [], ads: [], err: message.slice(0, 200) }
             if (++failedInARow >= 10) note = `Stopped after 10 failed searches in a row (last: ${message.slice(0, 120)}).`
           }
-          const wait = (engine === "serper" ? 650 : 1100) - (Date.now() - started)
+          const wait = (engine === "serper" ? 650 : engine === "brightdata" ? 1000 : 1100) - (Date.now() - started)
           if (wait > 0) await pause(wait)
         }
         if (result) fresh.push(result)
         if (fresh.length >= 20) await save()
       }
     }
-    await Promise.all(Array.from({ length: engine === "serper" ? 3 : 1 }, worker))
+    await Promise.all(Array.from({ length: engine === "serper" ? 3 : engine === "brightdata" ? 2 : 1 }, worker))
     await save()
     const stopped = job.stop || Boolean(note)
     await updateScan(id, (s) => {

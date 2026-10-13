@@ -36,8 +36,9 @@ It reports on one Google Ads account and collects the website's leads. The leads
 **Competitors**
 
 - **Keyword explorer:** our own keyword research for home-selling searches: every keyword we track, grouped by topic and city, with Keyword Planner's monthly searches and bid ranges for California.
-- **Google rankings:** who shows up on Google for our keywords, city by city: the top 10 results, the businesses on Google Maps and their reviews, and what a seller sees when they look us up. Each scan is saved, so the next one shows who moved.
+- **Google rankings:** who shows up on Google for our keywords, city by city: the top 10 results, the businesses on Google Maps and their reviews, and what a seller sees when they look us up. Each scan is saved, so the next one shows who moved. Searches come from Bright Data (free tier only), Serper or Brave, whichever keys are set.
 - **Competitor sites:** the keywords Google ties to a competitor's website (Keyword Planner), and the ones we don't have yet.
+- **Competitor ads:** who advertises on Google for our seller searches, city by city, and what their ads say. Every week DealTrack has Bright Data search our core seller keywords from our targeted cities (on a computer, and a quarter on a phone), at random times, mostly 6 AM to 10 PM Pacific, and keeps every search, with ads or without. Each advertiser's share is the searches they showed in ÷ the searches made, with a 95% range (Wilson score interval) that narrows as searches add up; an advertiser never seen in n searches likely shows in under 3/n. The page has the advertisers (how often above the results or first, on a computer and on a phone, the keywords they show on most), a keyword × city grid per advertiser, when in the day they show (one that drops off in the evening is out of budget or turns ads off), each keyword and city, and every ad version with what it offers (cash, close fast, as-is, no fees, inherited, foreclosure...). Google rankings scans made with Bright Data add their searches too. It only ever uses Bright Data's free tier (5,000 searches a month): every search is counted before it's made, and none is made once 4,800 were made in the last 32 days, so no billing month can go over. The weekly searches run while the app is open, only on one computer (on a team, the main computer), and back off when Bright Data has trouble, so failures can't use up the free searches. **Test one search** checks the setup. DealTrack never searches Google itself.
 - **Auction insights:** who competes in our own Google Ads auctions, from Google itself: each advertiser's impression share, how often they show when we do, how often they rank above us, and how often they're at the top, with links to their ads in Google's Ads Transparency Center and Meta's Ad Library. Google's API doesn't offer this report, so it's a download: in Google Ads, Campaigns → Insights and reports → Auction insights → Download → .csv, then upload the file on the page (both of Google's CSV formats work). The file is read in the browser and only its numbers are saved. Every upload is kept, so whole-account downloads (one a week or a month) build a trend; downloads split by campaign, week or device show those columns.
 
 **Insights**
@@ -61,6 +62,7 @@ DealTrack keeps its own records in the `.data` folder on the computer running it
 - `deleted-leads.json`: leads deleted from the Leads page (🗑 in the Not interested list), kept exactly as they were so Restore in the Deleted tab can put them back.
 - `lead-backup.json`: which Google Sheet the leads are backed up to, and when the last backup ran.
 - `auction-insights.json`: the Auction insights downloads uploaded on Competitors → Auction insights (the newest 100).
+- `ads/`: every Bright Data search's ads, with or without any, one file a month (`2026-10.jsonl`). `ad-sampler.json`: the weekly searches' settings and this week's plan. `brightdata-usage.json`: how many Bright Data searches were made each day, for the free limit.
 - `webhook-secret`: the key WordPress sends with each lead (unless `LEADS_WEBHOOK_SECRET` is set). `webhook-log.json`: the last few webhook calls, for troubleshooting.
 - `wordpress.json`: the website connection: its address, how far its leads and the team's statuses have been brought in, and which computer sends to Google Ads. `install-id`: this computer's id on the team, so its own status reports aren't applied twice.
 - `public-url`: the public address while `go-online.bat` runs.
@@ -163,6 +165,10 @@ All settings are environment variables. On your computer they go in `.env.local`
 | `GOOGLE_SHEETS_REFRESH_TOKEN` | Forecast. OAuth Playground → gear → "Use your own OAuth credentials" (the Ads web client) → scope `https://www.googleapis.com/auth/spreadsheets.readonly`. Enable the Google Sheets API in the same Cloud project. Optional if `GOOGLE_ADS_REFRESH_TOKEN` has both scopes |
 | `POSTHOG_API_KEY`, `POSTHOG_PROJECT_ID`, `POSTHOG_HOST` | Behavior, Alerts. PostHog → Settings → Personal API keys → "Read-only access", limited to the project (Twin Home Buyer: `421236`, host `https://us.posthog.com`) |
 | `CLARITY_API_TOKEN` | Alerts. Clarity → Settings → Data export. Allows ~10 calls a day, so results are cached 3 hours |
+| `BRIGHTDATA_API_KEY`, `BRIGHTDATA_SERP_ZONE` | Competitor ads, Google rankings. Sign up at brightdata.com (no card: then nothing can be charged), add a **SERP API** zone (its name goes in `BRIGHTDATA_SERP_ZONE`), then Account settings → API keys. Free: 5,000 searches a month, and DealTrack stops at 4,800 in any 32 days. Put them on one computer only |
+| `BRIGHTDATA_MONTHLY_CAP` | Optional. A lower limit than 4,800 (never higher), e.g. 2,400 on each of two computers that share one Bright Data account |
+| `SERPER_API_KEY` | Optional. Google rankings: serper.dev (2,500 free searches once, then paid packs); also Google Maps and reviews |
+| `BRAVE_SEARCH_API_KEY` | Optional. Google rankings: brave.com/search/api (regular results only, US-wide) |
 | `PAGESPEED_API_KEY` | Landing pages, Go-live audit. Google Cloud → enable PageSpeed Insights API → Credentials → Create API key |
 | `ALLOWED_EMAILS` | Google sign-in: who may view, e.g. `@twinhomebuyer.com,partner@gmail.com` |
 | `ADMIN_EMAILS` | Google sign-in: who may also make changes, e.g. `seth@twinhomebuyer.com` |
@@ -173,6 +179,7 @@ All settings are environment variables. On your computer they go in `.env.local`
 | `ASSISTANT_PROVIDER` | Optional. `claude-code` uses the Claude Code app on this computer signed in with a Claude account, no key (double-click `setup-claude.bat` or click **Sign in with Claude** in the chat). With both keys, OpenAI answers unless this says `anthropic` |
 | `DEALTRACK_DATA_DIR` | Optional. Where the saved data goes (default: `.data` in this folder) |
 | `DEALTRACK_WARMUP` | Optional. `0` stops the startup warm-up (see Speed) |
+| `DEALTRACK_AD_SAMPLER` | Optional. `0` stops Competitor ads' weekly searches |
 | `DEALTRACK_VALIDATE_ONLY` | Optional. `1` turns on dry-run mode: Google checks every change and applies nothing |
 
 If a value is missing, the page that needs it says which one; the other pages keep working.

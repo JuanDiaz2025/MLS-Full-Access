@@ -49,7 +49,7 @@ function cleanTyped(list: unknown): string[] {
 export async function startScanAction(req: ScanRequest): Promise<SerpState> {
   if (!(await isAdmin())) return { ok: false, message: "Only admins can start a scan (it uses search credits)." }
   const kind: ScanKind = req.kind === "maps" || req.kind === "brand" ? req.kind : "web"
-  const engine: SerpEngine = req.engine === "brave" && kind === "web" ? "brave" : "serper"
+  const engine: SerpEngine = kind === "web" && (req.engine === "brave" || req.engine === "brightdata") ? req.engine : "serper"
   if (kind === "brand") {
     const res = await startScan({ kind, engine, keywords: [], locations: [], what: "Brand check: how people look us up" })
     refresh()
