@@ -163,6 +163,63 @@ export async function restoreLead(id: string): Promise<{ error?: string }> {
   return {}
 }
 
+// Someone worked on this lead in DealTrack: gave it a status, or something about it went to Google Ads.
+const worked = (l: Lead) => Boolean((l.status && l.status !== "new") || l.statusBy === "you" || Object.keys(l.conversions ?? {}).length)
+
+// Puts back leads from the backup sheet (sheet-backup.ts): any lead DealTrack doesn't have, and
+// the backed-up copy of a lead that came in again but nobody has worked on yet (so its status,
+// score and Google Ads history come back). A lead someone worked on here is never changed, and a
+// lead deleted here stays deleted. Backed-up deleted leads go back in the Deleted list.
+// `covered` lists backed-up leads left out because this DealTrack keeps its own copy of the same
+// lead under another id, so the next backup may write over their rows.
+export async function restoreLeads(entries: { lead: Lead; deletedAt?: string }[]) {
+  const counts = { added: 0, replaced: 0, deleted: 0, kept: 0 }
+  const covered: string[] = []
+  const same = (a: Lead, b: Lead) =>
+    a.id === b.id || (Boolean(b.inboxId) && sameSource(a.inboxId, b.inboxId)) || (Boolean(b.callId) && a.callId === b.callId)
+  await file.update(async (db) => {
+    db.leads ??= []
+    const gone = (await bin.read()).leads ?? []
+    const toBin: DeletedLead[] = []
+    const add: Lead[] = []
+    const replace = new Map<string, Lead>() // this DealTrack's copy's id → the backed-up lead
+    const remove = new Set<string>()
+    for (const { lead, deletedAt } of entries) {
+      const keep = (mine: Lead) => {
+        counts.kept++
+        if (mine.id !== lead.id) covered.push(lead.id)
+      }
+      const before = [...gone, ...toBin].find((d) => same(d.lead, lead))?.lead ?? add.find((l) => same(l, lead))
+      if (before) {
+        keep(before)
+        continue
+      }
+      const local = db.leads.find((l) => same(l, lead))
+      if (local && (local.id === lead.id || worked(local) || replace.has(local.id) || remove.has(local.id))) {
+        keep(replace.get(local.id) ?? local)
+      } else if (deletedAt) {
+        toBin.push({ deletedAt, lead })
+        if (local) remove.add(local.id)
+        counts.deleted++
+      } else if (local) {
+        replace.set(local.id, lead)
+        counts.replaced++
+      } else {
+        add.push(lead)
+        counts.added++
+      }
+    }
+    // The Deleted list first, as when deleting: an interruption can leave a lead in both lists, never in neither.
+    if (toBin.length) {
+      await bin.update((b) => {
+        b.leads = [...(b.leads ?? []), ...toBin]
+      })
+    }
+    db.leads = [...db.leads.filter((l) => !remove.has(l.id)).map((l) => replace.get(l.id) ?? l), ...add]
+  })
+  return { ...counts, covered }
+}
+
 // Scores leads that came in before scoring existed. Their status is left alone, so nothing old
 // is sent to Google Ads without you choosing it.
 export async function scoreUnscored() {

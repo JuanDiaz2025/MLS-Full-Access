@@ -1,7 +1,8 @@
 // The Leads page's background work: new leads from the WordPress site (checked at most every 30
 // seconds), taps on the website's phone number (call-taps.ts, at most every minute), scores for
-// new leads, conversions for Google Ads and the spreadsheet (at most every 6 hours). Run after a
-// page is sent, so nothing waits on it. From One Marketing Command Center.
+// new leads, conversions for Google Ads, the spreadsheet (at most every 6 hours) and the lead
+// backup sheet (sheet-backup.ts, when a lead changed). Run after a page is sent, so nothing waits
+// on it. From One Marketing Command Center.
 import { createHash } from "node:crypto"
 import { readFile, stat } from "node:fs/promises"
 import path from "node:path"
@@ -9,6 +10,7 @@ import path from "node:path"
 import { activeAccount } from "@/lib/conversions/google"
 import { sendPendingConversions } from "@/lib/conversions/offline-conversions"
 import { syncSheetIfDue } from "@/lib/sheets/sync"
+import { backupLeadsIfChanged } from "@/lib/leads/sheet-backup"
 import { scoreUnscored } from "@/lib/leads/store"
 import { syncCallTaps } from "@/lib/leads/call-taps"
 import { syncWordPress } from "@/lib/leads/wordpress"
@@ -30,7 +32,9 @@ export function catchUp() {
   return Promise.all([
     scoreUnscored()
       .then(() => syncWordPress())
-      .catch((error) => console.error("Couldn't check the website for new leads:", error)),
+      .catch((error) => console.error("Couldn't check the website for new leads:", error))
+      // After the website check, so a lead that just came in is backed up straight away.
+      .then(() => backupLeadsIfChanged()),
     syncCallTaps().catch((error) => console.error("Couldn't check PostHog for call taps:", error)),
     sendConversions(),
   ])

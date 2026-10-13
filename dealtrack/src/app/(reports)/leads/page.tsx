@@ -1,8 +1,9 @@
 import type { Metadata } from "next"
 import { after } from "next/server"
-import { Download } from "lucide-react"
+import { CircleCheck, Download, TriangleAlert } from "lucide-react"
 
 import { formatNumber } from "@/components/dashboard/format"
+import LeadBackup from "@/components/leads/lead-backup"
 import LeadsTable, { type LeadRow } from "@/components/leads/leads-table"
 import LiveRefresh from "@/components/leads/live-refresh"
 import PhoneCalls from "@/components/leads/phone-calls"
@@ -11,11 +12,13 @@ import WebhookSetup from "@/components/leads/webhook-setup"
 import { KpiGrid, PageHeader, Section } from "@/components/report"
 import { buttonVariants } from "@/components/ui/button"
 import { DATA_MANAGER_LIBRARY } from "@/lib/conversions/data-manager"
+import { getConnection, SHEETS_SCOPE } from "@/lib/conversions/google"
 import { callCounting, getCalls, RECENT_CALL_DAYS } from "@/lib/google-ads/calls"
 import { leadSource } from "@/lib/leads/source"
 import { catchUp, leadsVersion } from "@/lib/leads/background"
+import { getLeadBackup } from "@/lib/leads/sheet-backup"
 import { listDeletedLeads, listLeads, listQrCodes } from "@/lib/leads/store"
-import { countSince } from "@/lib/leads/time"
+import { countSince, timeAgo } from "@/lib/leads/time"
 import { cleanTracking, leadChannel, pagePath } from "@/lib/leads/tracking"
 import type { Lead } from "@/lib/leads/types"
 import { load } from "@/lib/load"
@@ -132,12 +135,14 @@ export default async function LeadsPage() {
   after(() => catchUp())
   // The version first: a change saved while the leads are read then still shows on the next check.
   const version = await leadsVersion()
-  const [qrCodes, leads, deleted, calls, counting] = await Promise.all([
+  const [qrCodes, leads, deleted, calls, counting, backup, connection] = await Promise.all([
     listQrCodes(),
     listLeads(),
     listDeletedLeads(),
     load(() => getCalls(RECENT_CALL_DAYS)),
     callCounting().catch(() => null),
+    getLeadBackup(),
+    getConnection().catch(() => null),
   ])
   const placements = new Map(qrCodes.map((c) => [c.id, c.placement]))
   const callResult = calls.ok ? { calls: calls.data, counting } : { error: calls.kind === "missing" ? "Google Ads isn't connected." : calls.message }
@@ -170,6 +175,21 @@ export default async function LeadsPage() {
           <span className="size-2 animate-pulse rounded-full bg-emerald-500" aria-hidden />
           Live: new leads appear on their own
         </span>
+        {backup.spreadsheetId && (
+          <a
+            href="#lead-backup"
+            className={
+              backup.lastError
+                ? "inline-flex items-center gap-1.5 text-xs font-medium text-destructive hover:underline"
+                : "inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            }
+          >
+            {backup.lastError ? <TriangleAlert className="size-3.5" aria-hidden /> : <CircleCheck className="size-3.5 text-emerald-600" aria-hidden />}
+            {backup.lastError
+              ? "Backup to Google Sheets isn't working"
+              : `Backed up to Google Sheets${backup.lastBackup ? ` ${timeAgo(backup.lastBackup)}` : ""}`}
+          </a>
+        )}
       </div>
 
       {waiting.length > 0 && (
@@ -233,6 +253,19 @@ export default async function LeadsPage() {
       </Section>
 
       <PhoneCalls result={callResult} addedCalls={leads.map((l) => l.callId).filter((id): id is string => Boolean(id))} />
+
+      <div id="lead-backup" className="scroll-mt-20">
+        <LeadBackup
+          spreadsheetId={backup.spreadsheetId}
+          title={backup.title}
+          lastBackup={backup.lastBackup}
+          lastError={backup.lastError}
+          others={backup.others}
+          leads={backup.leads}
+          deleted={backup.deleted}
+          canEdit={Boolean(connection?.scopes.includes(SHEETS_SCOPE))}
+        />
+      </div>
 
       <WebhookSetup websiteLeads={leads.filter((l) => !l.qrCodeId).length} />
       <LiveRefresh version={version} />

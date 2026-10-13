@@ -52,11 +52,13 @@ DealTrack keeps its own records in the `.data` folder on the computer running it
 - `dealtrack.json`: the budget and alert lines, the alert history, the weekly negative batches with every step's name and time, and the go-live audit ticks.
 - `leads.json`: the website leads (same format as One Marketing Command Center: copy its `.data/leads.json` here to bring its leads over).
 - `deleted-leads.json`: leads deleted from the Leads page (🗑 in the Not interested list), kept exactly as they were so Restore in the Deleted tab can put them back.
+- `lead-backup.json`: which Google Sheet the leads are backed up to, and when the last backup ran.
 - `webhook-secret`: the key WordPress sends with each lead (unless `LEADS_WEBHOOK_SECRET` is set). `webhook-log.json`: the last few webhook calls, for troubleshooting.
 - `public-url`: the public address while `go-online.bat` runs.
 
 - It's per computer. If two people each run DealTrack on their own laptop, each has their own history. Run it on one computer (or copy the file) to share one record.
 - Back it up like any other file. Deleting it resets the settings and history; Google Ads isn't affected.
+- The leads can back themselves up: under **Backup to Google Sheets** on the Leads page, paste a Google Sheet's link. DealTrack keeps a "DealTrack leads" tab in it with every lead (contact details, message, status, score, campaign, click ID, what Google Ads heard, and deleted leads with when they were deleted), updated within about a minute of any change, even with no page open. Values are written as plain text, never as formulas. On a new computer, link the same sheet and click **Restore from this sheet**: it adds the leads this DealTrack doesn't have and gives leads the website sends again their saved status and history, but never changes a lead someone already worked on. DealTrack won't write over leads in the tab that it doesn't have itself (a new computer before Restore, or two computers using one sheet). It uses the "Connect Google for conversions" connection, which also allows editing spreadsheets.
 - It needs a disk to write to. On hosting without one (Vercel, for example), the reports work but saving shows an error.
 - Checks run when someone opens the app, not on a schedule: alerts are evaluated when the Alerts page or the Overview opens.
 - Steps that need a name (budget lines, audit ticks, proving, approving, pushing) use the name typed in the "Your name" field. It's remembered in that browser for a year.

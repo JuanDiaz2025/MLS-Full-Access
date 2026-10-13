@@ -35,9 +35,11 @@ export async function setSpreadsheet(id: string | null) {
   })
 }
 
-const quote = (tab: string) => `'${tab.replace(/'/g, "''")}'`
+export const quote = (tab: string) => `'${tab.replace(/'/g, "''")}'`
 
-async function sheets<T>(connection: AdsConnection, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+// One Google Sheets API call, with Google's refusals turned into what to do about them. The lead
+// backup (leads/sheet-backup.ts) uses it too.
+export async function sheets<T>(connection: AdsConnection, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${path}`, {
     method: init.method ?? (init.body ? "POST" : "GET"),
     headers: { Authorization: `Bearer ${await accessToken(connection)}`, "Content-Type": "application/json" },
@@ -55,7 +57,7 @@ async function sheets<T>(connection: AdsConnection, path: string, init: { method
   if (/SERVICE_DISABLED/.test(reasons) || /API has not been used|API .*is disabled/i.test(e.message ?? "")) {
     const meta = Object.assign({}, ...(e.details ?? []).map((d) => d.metadata ?? {})) as Record<string, string>
     const link = meta.activationUrl ?? "https://console.cloud.google.com/apis/library/sheets.googleapis.com"
-    throw new AdsApiError(`Turn on the Google Sheets API for your app's Google Cloud project here: ${link} , wait 5 minutes, then click Sync now.`, "API_OFF")
+    throw new AdsApiError(`Turn on the Google Sheets API for your app's Google Cloud project here: ${link} , wait 5 minutes, then try again.`, "API_OFF")
   }
   if (res.status === 404) throw new AdsApiError("That spreadsheet wasn't found. Check the link, and that the Google account you connected can open it.")
   if (res.status === 403) throw new AdsApiError("The Google account you connected can't edit that spreadsheet. Share it with that account as an Editor, or connect with the account that owns it.")
