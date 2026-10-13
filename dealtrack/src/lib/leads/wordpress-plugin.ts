@@ -12,8 +12,22 @@
 import { TRACKING_FIELDS, TRACKING_SNIPPET } from "@/lib/leads/wordpress-snippets"
 import { zipFiles } from "@/lib/zip"
 
-export const PLUGIN_VERSION = "1.4.0"
+export const PLUGIN_VERSION = "1.4.1"
 export const PLUGIN_FOLDER = "omcc-lead-saver"
+
+// "1.4.0" is older than "1.4.1". (A teammate's app may have put a newer plugin on the site.)
+export function olderVersion(version: string, than: string) {
+  const a = version.split(".").map(Number)
+  const b = than.split(".").map(Number)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0)
+  }
+  return false
+}
+
+// The statuses plugin 1.4.0 keeps for the team; 1.4.1 and later keep any status.
+const FIRST_STATUSES = new Set(["new", "interested", "appointment", "offer", "closed", "not_interested"])
+export const siteKeepsStatus = (plugin: string | undefined, status: string) => FIRST_STATUSES.has(status) || !olderVersion(plugin ?? "0", "1.4.1")
 
 const phpString = (s: string) => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
 
@@ -244,12 +258,12 @@ function omcc_leads_status_post($request) {
 	$body = is_array($body) ? $body : array();
 	$changes = isset($body['changes']) && is_array($body['changes']) ? array_slice($body['changes'], 0, 100) : array();
 	$from = isset($body['from']) ? omcc_leads_cut((string) $body['from'], 64) : '';
-	$allowed = array('new', 'interested', 'appointment', 'offer', 'closed', 'not_interested');
 	global $wpdb;
 	$table = omcc_leads_status_table();
 	$saved = 0;
 	foreach ($changes as $change) {
-		if (!is_array($change) || !isset($change['key'], $change['status']) || !in_array($change['status'], $allowed, true)) {
+		// Any status id (lowercase letters and _), so a status added to the app later needs no new plugin.
+		if (!is_array($change) || !isset($change['key'], $change['status']) || !is_string($change['status']) || !preg_match('/^[a-z][a-z_]{0,29}$/', $change['status'])) {
 			continue;
 		}
 		$ok = $wpdb->insert($table, array(

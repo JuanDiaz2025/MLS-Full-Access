@@ -94,6 +94,7 @@ function rangeBounds(id: RangeId, from: string, to: string): [Date, Date] | null
 
 const statusTone: Record<string, string> = {
   new: "border-border bg-card",
+  unresponsive: "border-amber-500/50 bg-amber-500/10 text-amber-800",
   interested: "border-emerald-500/50 bg-emerald-500/10 text-emerald-800",
   appointment: "border-sky-500/50 bg-sky-500/10 text-sky-800",
   offer: "border-violet-500/50 bg-violet-500/10 text-violet-800",

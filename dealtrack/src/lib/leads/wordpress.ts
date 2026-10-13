@@ -9,6 +9,7 @@ import { addLead } from "@/lib/leads/store"
 import { applyChanges, installId, markShared, unsharedChanges, type Sender, type StatusChange } from "@/lib/leads/team-sync"
 import { parseWebsiteLead, webhookSecret } from "@/lib/leads/webhook"
 import { logAttempt } from "@/lib/leads/webhook-log"
+import { siteKeepsStatus } from "@/lib/leads/wordpress-plugin"
 
 type WordPressState = {
   site?: string // e.g. https://twinhomebuyer.com
@@ -180,7 +181,8 @@ export function shareStatuses(): Promise<void> {
     do {
       sharing.again = false
       const state = await file.read()
-      const changes = await unsharedChanges()
+      // A status the site's plugin doesn't keep yet (Unresponsive on 1.4.0) waits for the newer plugin.
+      const changes = (await unsharedChanges()).filter((c) => siteKeepsStatus(state.plugin, c.status))
       if (!state.site || !changes.length) continue
       const answer = await post(state, await webhookSecret(), "status", {
         from: await installId(),

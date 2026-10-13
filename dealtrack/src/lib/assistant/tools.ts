@@ -85,7 +85,7 @@ export const toolSpecs: ToolSpec[] = [
     description:
       "List the leads collected in the last N days, newest first, from the WordPress website's forms. " +
       "Each lead has a date, name, phone, email, property address, notes, the form, its channel (Google Ads, Facebook, organic search...), tracking (UTM tags, Google click ID, landing page), " +
-      "its score (0-100, graded hot/warm/cold/junk, with the reasons), the team's status (new, interested, appointment, offer, closed, not_interested), and what was sent back to Google Ads as an offline conversion. " +
+      "its score (0-100, graded hot/warm/cold/junk, with the reasons), the team's status (new, unresponsive, interested, appointment, offer, closed, not_interested), and what was sent back to Google Ads as an offline conversion. " +
       "These are separate from Google Ads conversions.",
     parameters: {
       type: "object",

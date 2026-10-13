@@ -68,7 +68,8 @@ function toRow(lead: Lead, placements: Map<string, string>, elsewhere: Sender | 
     score: lead.score,
     google:
       elsewhere && sharedKey(lead)
-        ? lead.status && lead.status !== "new"
+        ? // New, or Unresponsive with nothing for Google Ads: nothing to say.
+          lead.status && lead.status !== "new" && (lead.status !== "unresponsive" || Object.keys(lead.conversions ?? {}).length)
           ? { state: "elsewhere", detail: `Google Ads hears about it from ${elsewhere.name || "your team's main computer"}.` }
           : undefined
         : googleState(lead),

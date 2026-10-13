@@ -49,6 +49,8 @@ export type LeadTracking = {
 // offline conversions, so Google learns which clicks bring real sellers.
 export const leadStatuses = [
   { id: "new", label: "New" },
+  // Tried to reach them, no answer yet. Google Ads hears nothing new (what was already sent stays).
+  { id: "unresponsive", label: "Unresponsive" },
   { id: "interested", label: "Interested" },
   { id: "appointment", label: "Appointment" },
   { id: "offer", label: "Offer made" },

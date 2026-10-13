@@ -15,7 +15,7 @@ import { tunnelUrl, webhookSecret } from "@/lib/leads/webhook"
 import { recentAttempts, type WebhookAttempt } from "@/lib/leads/webhook-log"
 import { CF7_HIDDEN_FIELDS, TRACKING_SNIPPET } from "@/lib/leads/wordpress-snippets"
 import { getWordPress, type SiteEvent } from "@/lib/leads/wordpress"
-import { PLUGIN_VERSION } from "@/lib/leads/wordpress-plugin"
+import { olderVersion, PLUGIN_VERSION } from "@/lib/leads/wordpress-plugin"
 import { timeAgo } from "@/lib/leads/time"
 import { DATA_DIR } from "@/lib/store"
 import { cn } from "@/lib/utils"
@@ -24,17 +24,6 @@ import { cn } from "@/lib/utils"
 const FINAL_URL_SUFFIX = "utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_term={keyword}&utm_content={creative}"
 
 const LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
-
-// "1.1.1" is older than "1.4.0". A teammate's app may have put a newer plugin on the site: that one
-// isn't replaced with this older one.
-function olderThan(site: string, ours: string) {
-  const a = site.split(".").map(Number)
-  const b = ours.split(".").map(Number)
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0)
-  }
-  return false
-}
 
 function describe(a: WebhookAttempt) {
   if (a.result === "lead") return `Lead received: ${a.lead ?? "website lead"}`
@@ -180,7 +169,8 @@ export default async function WebhookSetup({ websiteLeads }: { websiteLeads: num
             </div>
           )}
 
-          {connected && wp.plugin && olderThan(wp.plugin, PLUGIN_VERSION) && (
+          {/* Only when the site's is older: a teammate's app may have put a newer one there. */}
+          {connected && wp.plugin && olderVersion(wp.plugin, PLUGIN_VERSION) && (
             <p className="flex gap-2 rounded-lg border-2 border-amber-500/50 bg-amber-500/10 p-3 font-medium text-amber-950">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
               <span>

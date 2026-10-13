@@ -80,6 +80,7 @@ The usual way is the **Lead Saver** plugin. On **Leads**, expand **Website leads
 - **Adding a computer.** An admin copies the **team code** under **Your team** and pastes it on the other computer under **Joining someone's team?**. The code carries the site's key, so give it only to the team. Nothing changes on that computer unless the site accepts the code.
 - **Only one computer sends to Google Ads,** so no shared lead is counted twice. That's the first computer with Google Ads connected, or the one where an admin clicks **Send to Google Ads from this computer instead**. Other computers show "Sent by the main computer" for those leads.
 - **A key set in `.env.local`.** A computer whose key comes from `LEADS_WEBHOOK_SECRET` can't join with a code. Put the same key in that setting on each computer instead.
+- **Newer statuses need plugin 1.4.1.** Plugin 1.4.0 only keeps the first six statuses. On a site with 1.4.0, an **Unresponsive** status waits on this computer until the plugin is updated, then goes to the team. 1.4.1 keeps any status. One Marketing Command Center doesn't have Unresponsive: its leads keep their previous status there.
 
 The older instant webhook still works for other form plugins, but only while DealTrack is reachable from the internet:
 
