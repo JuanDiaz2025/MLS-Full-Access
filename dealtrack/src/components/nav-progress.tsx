@@ -63,7 +63,7 @@ export default function NavProgress() {
 
   return (
     <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 z-50 h-[3px] print:hidden">
-      <div className="h-full rounded-r-full bg-primary shadow-[0_0_8px_var(--primary)]" style={style} />
+      <div className="h-full rounded-r-full bg-cta shadow-[0_0_8px_var(--cta)]" style={style} />
     </div>
   )
 }

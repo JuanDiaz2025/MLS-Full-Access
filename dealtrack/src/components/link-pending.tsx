@@ -13,7 +13,7 @@ export default function LinkPending() {
   return (
     <>
       <LoaderCircle aria-label="Loading" className="size-3.5 animate-spin" />
-      <span aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-0 z-50 h-1 animate-pulse bg-primary" />
+      <span aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-0 z-50 h-1 animate-pulse bg-cta" />
     </>
   )
 }

@@ -20,8 +20,9 @@ export default function ThemeToggle() {
   }
   return (
     <Button type="button" variant="ghost" size="icon" onClick={toggle} aria-label="Switch light or dark mode" title="Light or dark mode">
-      <Moon className="dark:hidden" />
-      <Sun className="hidden dark:block" />
+      {/* By the page's own mode: the header it sits in is always navy. */}
+      <Moon className="page-dark:hidden" />
+      <Sun className="hidden page-dark:block" />
     </Button>
   )
 }

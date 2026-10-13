@@ -124,14 +124,18 @@ export default function AppHeader({
         {n}
       </span>
     ) : null
-  const tab = (href: string, label: string, current: boolean, count = 0) => (
+  // The section you're in is an orange pill; the page within it is underlined in orange.
+  const tab = (href: string, label: string, current: boolean, count = 0, section = false) => (
     <Link
       key={href}
       href={`${href}${query}`}
       aria-current={current ? "page" : undefined}
       className={cn(
         "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground",
-        current && "bg-muted font-medium text-foreground",
+        current &&
+          (section
+            ? "bg-primary font-semibold text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+            : "bg-muted font-medium text-foreground shadow-[inset_0_-2px_0_var(--primary)]"),
       )}
     >
       {label}
@@ -141,7 +145,8 @@ export default function AppHeader({
   )
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur-md print:hidden">
+    // Always the brand navy, in light mode too: "dark" gives it and everything in it the navy colors.
+    <header className="dark sticky top-0 z-20 border-b border-border bg-background text-foreground print:hidden">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
         <BrandLogo />
         <div className="flex items-center gap-2">
@@ -177,7 +182,7 @@ export default function AppHeader({
         </div>
       </div>
       <nav aria-label="Sections" className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-1 text-sm sm:px-6">
-        {navGroups.map((g) => tab(g.links[0].href, g.label, g === active, g.label === "Monitor" ? problems : 0))}
+        {navGroups.map((g) => tab(g.links[0].href, g.label, g === active, g.label === "Monitor" ? problems : 0, true))}
       </nav>
       {active.links.length > 1 && (
         <nav aria-label={active.label} className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 text-xs sm:px-6">

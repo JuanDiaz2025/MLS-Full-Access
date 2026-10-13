@@ -3,6 +3,8 @@
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
+/* The page's own light/dark choice, for things inside the header, which is always navy (.dark). */
+@custom-variant page-dark (&:is(:root.dark *));
 
 @theme inline {
   --color-background: var(--background);
@@ -39,6 +41,8 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-cta: var(--cta);
+  --color-cta-foreground: var(--cta-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -49,74 +53,82 @@
 }
 
 :root {
-  --background: oklch(0.985 0.012 85);
-  --foreground: oklch(0.2 0.04 280);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.04 280);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.04 280);
-  --primary: oklch(0.55 0.25 285);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.95 0.03 300);
-  --secondary-foreground: oklch(0.3 0.12 285);
-  --muted: oklch(0.955 0.015 80);
-  --muted-foreground: oklch(0.5 0.03 280);
-  --accent: oklch(0.95 0.04 295);
-  --accent-foreground: oklch(0.35 0.15 285);
+  /* Twin Home Buyer's colors: navy #051531, orange #ff924c and white, with tints of the navy for
+     surfaces and lines. Orange is a background (buttons, highlights), never small text on white,
+     where it's too faint to read; navy text on orange reads well. */
+  --background: #f5f6f8;
+  --foreground: #051531;
+  --card: #ffffff;
+  --card-foreground: #051531;
+  --popover: #ffffff;
+  --popover-foreground: #051531;
+  --primary: #051531;
+  --primary-foreground: #ffffff;
+  --secondary: #eceef2;
+  --secondary-foreground: #051531;
+  --muted: #eef0f3;
+  --muted-foreground: #505b6f;
+  --accent: #fff2e9;
+  --accent-foreground: #051531;
   --destructive: oklch(0.6 0.23 22);
-  --border: oklch(0.9 0.02 80);
-  --input: oklch(0.88 0.025 80);
-  --ring: oklch(0.62 0.22 285);
-  --chart-1: oklch(0.55 0.25 285);
-  --chart-2: oklch(0.72 0.18 45);
-  --chart-3: oklch(0.7 0.14 180);
-  --chart-4: oklch(0.65 0.24 350);
-  --chart-5: oklch(0.82 0.16 90);
+  --border: #e1e3e7;
+  --input: #d2d5dc;
+  --ring: #ff924c;
+  /* Main buttons and the chat button: orange with navy text, in both modes. */
+  --cta: #ff924c;
+  --cta-foreground: #051531;
+  --chart-1: #051531;
+  --chart-2: #ff924c;
+  --chart-3: #8a93a6;
+  --chart-4: #ffc49e;
+  --chart-5: #2c3e5c;
   --radius: 0.75rem;
-  --sidebar: oklch(0.975 0.012 85);
-  --sidebar-foreground: oklch(0.2 0.04 280);
-  --sidebar-primary: oklch(0.55 0.25 285);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.95 0.04 295);
-  --sidebar-accent-foreground: oklch(0.35 0.15 285);
-  --sidebar-border: oklch(0.9 0.02 80);
-  --sidebar-ring: oklch(0.62 0.22 285);
+  --sidebar: #ffffff;
+  --sidebar-foreground: #051531;
+  --sidebar-primary: #051531;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #fff2e9;
+  --sidebar-accent-foreground: #051531;
+  --sidebar-border: #e1e3e7;
+  --sidebar-ring: #ff924c;
 }
 
 .dark {
   color-scheme: dark;
-  /* Warm, deep plum-gray to match the brand, not flat black (from One Marketing Command Center). */
-  --background: oklch(0.17 0.015 285);
-  --foreground: oklch(0.96 0.005 285);
-  --card: oklch(0.215 0.018 285);
-  --card-foreground: oklch(0.96 0.005 285);
-  --popover: oklch(0.235 0.02 285);
-  --popover-foreground: oklch(0.96 0.005 285);
-  --primary: oklch(0.68 0.19 285);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.28 0.03 290);
-  --secondary-foreground: oklch(0.94 0.01 290);
-  --muted: oklch(0.26 0.02 285);
-  --muted-foreground: oklch(0.72 0.02 285);
-  --accent: oklch(0.29 0.04 290);
-  --accent-foreground: oklch(0.94 0.02 290);
+  /* The brand navy, with lighter navy for cards and orange for what's active or clickable. */
+  --background: #051531;
+  --foreground: #ffffff;
+  --card: #12213b;
+  --card-foreground: #ffffff;
+  --popover: #16253f;
+  --popover-foreground: #ffffff;
+  --primary: #ff924c;
+  --primary-foreground: #051531;
+  --secondary: #1c2a44;
+  --secondary-foreground: #ffffff;
+  --muted: #16253f;
+  --muted-foreground: #b4b9c1;
+  --accent: #1e2c46;
+  --accent-foreground: #ffffff;
   --destructive: oklch(0.7 0.19 22);
-  --border: oklch(1 0 0 / 11%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.68 0.19 285);
-  --chart-1: oklch(0.7 0.19 285);
-  --chart-2: oklch(0.76 0.16 50);
-  --chart-3: oklch(0.75 0.13 180);
-  --chart-4: oklch(0.72 0.2 350);
-  --chart-5: oklch(0.85 0.15 90);
-  --sidebar: oklch(0.2 0.016 285);
-  --sidebar-foreground: oklch(0.96 0.005 285);
-  --sidebar-primary: oklch(0.68 0.19 285);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.29 0.04 290);
-  --sidebar-accent-foreground: oklch(0.94 0.02 290);
-  --sidebar-border: oklch(1 0 0 / 11%);
-  --sidebar-ring: oklch(0.68 0.19 285);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: #ff924c;
+  --cta: #ff924c;
+  --cta-foreground: #051531;
+  --chart-1: #ff924c;
+  --chart-2: #9db0d0;
+  --chart-3: #ffc49e;
+  --chart-4: #5f7396;
+  --chart-5: #ffffff;
+  --sidebar: #0b1a35;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ff924c;
+  --sidebar-primary-foreground: #051531;
+  --sidebar-accent: #1e2c46;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-ring: #ff924c;
 }
 
 /* Dark mode: the status colors are made for a light page. Text gets light shades of the same

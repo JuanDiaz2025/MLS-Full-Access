@@ -65,7 +65,7 @@ export default function AssistantLauncher({ enabled, context }: { enabled: boole
         <button
           type="button"
           onClick={openPanel}
-          className="fixed right-4 bottom-4 z-40 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3.5 text-sm font-semibold text-primary-foreground shadow-xl shadow-primary/30 transition hover:brightness-110 sm:right-6 sm:bottom-6 print:hidden"
+          className="fixed right-4 bottom-4 z-40 inline-flex items-center gap-2 rounded-full bg-cta px-5 py-3.5 text-sm font-semibold text-cta-foreground shadow-xl shadow-cta/30 transition hover:brightness-105 sm:right-6 sm:bottom-6 print:hidden"
         >
           <MessageSquareText className="size-5" />
           Ask about your ads
