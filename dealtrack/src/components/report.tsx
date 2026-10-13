@@ -75,7 +75,7 @@ export type Kpi = { label: string; value: string; note?: string; tone?: "default
 
 export function KpiGrid({ items }: { items: Kpi[] }) {
   return (
-    <section aria-label="Summary" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+    <section aria-label="Summary" className="grid grid-cols-2 gap-3 [overflow-wrap:anywhere] md:grid-cols-3 xl:grid-cols-6">
       {items.map((kpi) => {
         const body = (
           <>

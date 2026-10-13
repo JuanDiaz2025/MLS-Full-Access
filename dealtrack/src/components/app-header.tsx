@@ -60,6 +60,7 @@ export const navGroups = [
       { href: "/competitors/keywords", label: "Keyword explorer" },
       { href: "/competitors/rankings", label: "Google rankings" },
       { href: "/competitors/sites", label: "Competitor sites" },
+      { href: "/competitors/auction-insights", label: "Auction insights" },
     ],
   },
   {

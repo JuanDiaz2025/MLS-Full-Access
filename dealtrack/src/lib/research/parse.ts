@@ -33,7 +33,7 @@ export function decodeFile(buffer: ArrayBuffer): string {
 }
 
 // One line of CSV or TSV, quotes respected.
-function splitLine(line: string, sep: string): string[] {
+export function splitLine(line: string, sep: string): string[] {
   const out: string[] = []
   let cell = ""
   let quoted = false
