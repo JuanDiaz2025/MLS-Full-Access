@@ -13,13 +13,16 @@ import { syncSheetIfDue } from "@/lib/sheets/sync"
 import { backupLeadsIfChanged } from "@/lib/leads/sheet-backup"
 import { scoreUnscored } from "@/lib/leads/store"
 import { syncCallTaps } from "@/lib/leads/call-taps"
-import { syncWordPress } from "@/lib/leads/wordpress"
+import { computerName } from "@/lib/leads/team-sync"
+import { claimSender, getWordPress, syncWordPress } from "@/lib/leads/wordpress"
 import { DATA_DIR } from "@/lib/store"
 
 async function sendConversions() {
   try {
     const active = await activeAccount()
     if (active) {
+      // The team's website has no computer sending to Google Ads yet: this one does (team-sync.ts).
+      if ((await getWordPress()).sender === null) await claimSender(computerName()).catch(() => null)
       void syncSheetIfDue(active.connection, active.account)
       await sendPendingConversions(active.connection, active.account)
     }

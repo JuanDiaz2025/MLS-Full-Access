@@ -17,8 +17,10 @@ import { jsonFileStore } from "@/lib/json-file-store"
 import { shared } from "@/lib/shared-state"
 import { applyStatus } from "@/lib/leads/status"
 import { listLeads, updateLead } from "@/lib/leads/store"
+import { sharedKey } from "@/lib/leads/team-sync"
 import { conversionKinds, type ConversionKind, type Lead, type LeadStatus } from "@/lib/leads/types"
 import { googleClick } from "@/lib/leads/tracking"
+import { sentElsewhere } from "@/lib/leads/wordpress"
 
 // The actions the app makes when the account has none that accept imported leads. The same names
 // as One Marketing Command Center, so both apps send to the same actions.
@@ -490,9 +492,22 @@ async function retract(connection: AdsConnection, account: AdsAccount, lead: Lea
 }
 
 // Sets a lead's status (chosen by you) and queues the conversions it means; they're sent right
-// away when Google Ads is connected, and retried later if Google isn't ready for them yet.
-export async function setLeadStatus(id: string, status: LeadStatus) {
-  return updateLead(id, (lead) => applyStatus(lead, status, "you"))
+// away when Google Ads is connected, and retried later if Google isn't ready for them yet. `by` is
+// the person's name, shown to the rest of the team; a website lead's status goes to the team's
+// other computers too (team-sync.ts).
+export async function setLeadStatus(id: string, status: LeadStatus, by?: string) {
+  return updateLead(id, (lead) => {
+    applyStatus(lead, status, "you")
+    lead.statusByName = by || undefined
+    if (sharedKey(lead)) lead.statusShare = "pending"
+  })
+}
+
+// The leads this computer sends to Google Ads: all of them, except the team's shared website
+// leads when another computer is the one that sends those (team-sync.ts), so none goes twice.
+async function leadsToSend() {
+  const leads = await listLeads()
+  return (await sentElsewhere()) ? leads.filter((l) => !sharedKey(l)) : leads
 }
 
 // Sends every conversion waiting to go: new ones at once, retries at most hourly.
@@ -510,7 +525,7 @@ export function sendPendingConversions(connection: AdsConnection, account: AdsAc
     // Failed in another Google Ads account (you picked another one, or the app now opens on your
     // main account): give it another go in this one, at most a few times, so switching back and
     // forth can't resend the same failures without end. Lead statuses are respected below.
-    for (const lead of await listLeads()) {
+    for (const lead of await leadsToSend()) {
       for (const kind of conversionKinds) {
         const e = lead.conversions?.[kind]
         if (e?.state !== "failed" || e.accountId === account.customerId || (e.accountResets ?? 0) >= 3) continue
@@ -525,7 +540,7 @@ export function sendPendingConversions(connection: AdsConnection, account: AdsAc
         })
       }
     }
-    const leads = await listLeads()
+    const leads = await leadsToSend()
     for (const lead of leads) {
       for (const kind of conversionKinds) {
         let entry = lead.conversions?.[kind]
@@ -614,7 +629,7 @@ export function sendPendingConversions(connection: AdsConnection, account: AdsAc
 // Sends every waiting or failed conversion again now, without the hourly wait (the Leads page's
 // "Try again now"). Ones that can't be matched (no click ID, email or phone) are left as they are.
 export async function retryNow(connection: AdsConnection, account: AdsAccount) {
-  for (const lead of await listLeads()) {
+  for (const lead of await leadsToSend()) {
     for (const kind of conversionKinds) {
       const entry = lead.conversions?.[kind]
       if (entry?.state !== "pending" && entry?.state !== "failed") continue

@@ -134,6 +134,10 @@ export type Lead = {
   statusChangedAt?: string
   // "auto" when the app set the status from the lead's score; anything you set yourself wins.
   statusBy?: "auto" | "you"
+  // Who on the team set it (their name), when it was set by a person (here or on a teammate's computer).
+  statusByName?: string
+  // Set here and not yet reported to the team's other computers (team-sync.ts).
+  statusShare?: "pending"
   // Set when an old lead rule set the status (rules now only decide what Google Ads hears).
   statusRule?: string
   // A Google Ads rule said not to send this lead (setting a status yourself still sends it).

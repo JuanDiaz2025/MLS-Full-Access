@@ -18,9 +18,11 @@ import { leadSource } from "@/lib/leads/source"
 import { catchUp, leadsVersion } from "@/lib/leads/background"
 import { getLeadBackup } from "@/lib/leads/sheet-backup"
 import { listDeletedLeads, listLeads, listQrCodes } from "@/lib/leads/store"
+import { sharedKey, type Sender } from "@/lib/leads/team-sync"
 import { countSince, timeAgo } from "@/lib/leads/time"
 import { cleanTracking, leadChannel, pagePath } from "@/lib/leads/tracking"
 import type { Lead } from "@/lib/leads/types"
+import { sentElsewhere } from "@/lib/leads/wordpress"
 import { load } from "@/lib/load"
 
 export const metadata: Metadata = { title: "Leads · DealTrack" }
@@ -36,8 +38,9 @@ const when = (iso: string) =>
     minute: "2-digit",
   })
 
-// One spreadsheet row per lead.
-function toRow(lead: Lead, placements: Map<string, string>): LeadRow {
+// One spreadsheet row per lead. `elsewhere` is the team's computer that sends website leads to
+// Google Ads, when it isn't this one.
+function toRow(lead: Lead, placements: Map<string, string>, elsewhere: Sender | null): LeadRow {
   const t = cleanTracking(lead.tracking) ?? {}
   return {
     id: lead.id,
@@ -61,8 +64,14 @@ function toRow(lead: Lead, placements: Map<string, string>): LeadRow {
     status: lead.status ?? "new",
     statusBy: lead.statusBy,
     statusRule: lead.statusRule,
+    statusByName: lead.statusByName,
     score: lead.score,
-    google: googleState(lead),
+    google:
+      elsewhere && sharedKey(lead)
+        ? lead.status && lead.status !== "new"
+          ? { state: "elsewhere", detail: `Google Ads hears about it from ${elsewhere.name || "your team's main computer"}.` }
+          : undefined
+        : googleState(lead),
   }
 }
 
@@ -147,10 +156,14 @@ export default async function LeadsPage() {
   const placements = new Map(qrCodes.map((c) => [c.id, c.placement]))
   const callResult = calls.ok ? { calls: calls.data, counting } : { error: calls.kind === "missing" ? "Google Ads isn't connected." : calls.message }
   const missed = calls.ok ? calls.data.filter((c) => c.missed).length : 0
+  // Another computer on the team sends the website leads to Google Ads: their Google Ads state is
+  // that computer's to show, not this one's.
+  const elsewhere = await sentElsewhere()
+  const ownSending = elsewhere ? leads.filter((l) => !sharedKey(l)) : leads
   // Conversions held back by a set-up step Google needs, so the page can say what to do.
-  const waiting = leads.flatMap((l) => Object.values(l.conversions ?? {})).filter((c) => c?.state === "pending" && c.waitingFor)
+  const waiting = ownSending.flatMap((l) => Object.values(l.conversions ?? {})).filter((c) => c?.state === "pending" && c.waitingFor)
   // Leads Google Ads hasn't taken yet (failed, or still waiting after a try), and the latest reason.
-  const stuckEntries = leads
+  const stuckEntries = ownSending
     .flatMap((l) => Object.values(l.conversions ?? {}))
     .filter((c) => c && (c.state === "failed" || (c.state === "pending" && c.lastTry)))
   const lastError = stuckEntries.sort((a, b) => (b!.lastTry ?? "").localeCompare(a!.lastTry ?? ""))[0]?.error
@@ -244,8 +257,8 @@ export default async function LeadsPage() {
         {stuckEntries.length > 0 && <SendingCheck stuck={stuckEntries.length} lastError={lastError} />}
         {leads.length || deleted.length ? (
           <LeadsTable
-            rows={leads.map((l) => toRow(l, placements))}
-            deleted={deleted.map((d) => ({ ...toRow(d.lead, placements), deleted: when(d.deletedAt) }))}
+            rows={leads.map((l) => toRow(l, placements, elsewhere))}
+            deleted={deleted.map((d) => ({ ...toRow(d.lead, placements, elsewhere), deleted: when(d.deletedAt) }))}
           />
         ) : (
           <p className="py-6 text-sm text-muted-foreground">No leads yet. Connect the website form below.</p>

@@ -2,12 +2,15 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import { headers } from "next/headers"
-import { CircleAlert, CircleCheck, Download, Globe, TriangleAlert } from "lucide-react"
+import { CircleAlert, CircleCheck, Download, Globe, TriangleAlert, Users } from "lucide-react"
 
 import CopyButton from "@/components/copy-button"
+import { JoinTeamForm, TakeSenderButton } from "@/components/leads/team-forms"
 import WordPressForm from "@/components/leads/wordpress-form"
 import { buttonVariants } from "@/components/ui/button"
 import Disclosure from "@/components/ui/disclosure"
+import { isAdmin } from "@/lib/auth"
+import { installId, teamCode } from "@/lib/leads/team-sync"
 import { tunnelUrl, webhookSecret } from "@/lib/leads/webhook"
 import { recentAttempts, type WebhookAttempt } from "@/lib/leads/webhook-log"
 import { CF7_HIDDEN_FIELDS, TRACKING_SNIPPET } from "@/lib/leads/wordpress-snippets"
@@ -21,6 +24,17 @@ import { cn } from "@/lib/utils"
 const FINAL_URL_SUFFIX = "utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_term={keyword}&utm_content={creative}"
 
 const LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
+
+// "1.1.1" is older than "1.4.0". A teammate's app may have put a newer plugin on the site: that one
+// isn't replaced with this older one.
+function olderThan(site: string, ours: string) {
+  const a = site.split(".").map(Number)
+  const b = ours.split(".").map(Number)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0)
+  }
+  return false
+}
 
 function describe(a: WebhookAttempt) {
   if (a.result === "lead") return `Lead received: ${a.lead ?? "website lead"}`
@@ -70,6 +84,11 @@ export default async function WebhookSetup({ websiteLeads }: { websiteLeads: num
   const connected = Boolean(wp.site && wp.lastSync && !wp.lastError)
   const siteName = wp.site?.replace(/^https?:\/\//, "")
   const usedSheet = await oldSheetInbox()
+  // Team sharing needs the plugin that keeps statuses (1.4+): it says which computer sends.
+  const teamReady = connected && wp.sender !== undefined
+  const [admin, me] = await Promise.all([isAdmin(), installId()])
+  // The team code opens the site's leads, so only admins see it.
+  const code = admin && wp.site ? teamCode(wp.site, await webhookSecret()) : ""
 
   return (
     <Disclosure className="group rounded-2xl border bg-card shadow-xs" initialOpen={!connected || websiteLeads === 0 || usedSheet}>
@@ -161,7 +180,7 @@ export default async function WebhookSetup({ websiteLeads }: { websiteLeads: num
             </div>
           )}
 
-          {connected && wp.plugin && wp.plugin !== PLUGIN_VERSION && (
+          {connected && wp.plugin && olderThan(wp.plugin, PLUGIN_VERSION) && (
             <p className="flex gap-2 rounded-lg border-2 border-amber-500/50 bg-amber-500/10 p-3 font-medium text-amber-950">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
               <span>
@@ -202,7 +221,79 @@ export default async function WebhookSetup({ websiteLeads }: { websiteLeads: num
             </ol>
           </Disclosure>
           <WordPressForm current={wp.site} />
+          {/* Also when the site turns this copy's key away: a teammate may have put their plugin on it. */}
+          {!connected && admin && <JoinTeamForm />}
         </section>
+
+        {connected && (
+          <section className="flex flex-col gap-3 rounded-xl border p-4">
+            <p className="flex items-center gap-2 text-base font-semibold">
+              <Users className="size-4 text-primary" />
+              Your team
+            </p>
+            <p className="text-muted-foreground">
+              Everyone can run DealTrack, or One Marketing Command Center, on their own computer. A status anyone sets on a
+              website lead shows up on everyone&apos;s within about a minute, through {siteName}, with who set it.
+            </p>
+            {teamReady ? (
+              <>
+                {admin ? (
+                  <ol className="list-decimal space-y-2 pl-5 text-muted-foreground">
+                    <li>Your teammate starts their app (DealTrack with start.bat, or One Marketing Command Center).</li>
+                    <li>
+                      On their computer, they open <strong>Leads → Website leads</strong> and paste this team code under{" "}
+                      <strong>Joining someone&apos;s team?</strong>
+                      <span className="mt-2 block">
+                        <CopyButton text={code} label="Copy team code" />
+                      </span>
+                      <span className="mt-1 block">It opens your leads, so send it only to people on your team.</span>
+                    </li>
+                  </ol>
+                ) : (
+                  <p className="text-muted-foreground">An admin can copy the team code here for a teammate.</p>
+                )}
+                <div className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                  <p>
+                    <span className="font-medium">Google Ads is updated from </span>
+                    {wp.sender ? (
+                      wp.sender.id === me ? (
+                        <strong>this computer ✓</strong>
+                      ) : (
+                        <strong>{wp.sender.name || "another computer"}</strong>
+                      )
+                    ) : (
+                      "the first computer that connects Google Ads"
+                    )}
+                    <span className="text-muted-foreground">
+                      {" "}
+                      (only one computer sends, so no lead is counted twice; statuses set anywhere still reach Google Ads through it,
+                      next time it&apos;s open).
+                    </span>
+                  </p>
+                  {admin && wp.sender && wp.sender.id !== me && <TakeSenderButton />}
+                </div>
+              </>
+            ) : (
+              <p className="flex gap-2 font-medium text-amber-950">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <span>To share statuses with your team, update the Lead Saver plugin on your site first (download it above and upload it again).</span>
+              </p>
+            )}
+            {admin && (
+              <Disclosure className="rounded-lg border bg-card p-3" initialOpen={false}>
+                <summary className="cursor-pointer font-medium">Joining a teammate&apos;s team instead?</summary>
+                <p className="mt-2 text-muted-foreground">
+                  Only if a teammate&apos;s app (for example One Marketing Command Center) put its own Lead Saver on your site: paste
+                  their team code here. This computer then uses their key, so it reads the same leads and statuses. Nothing
+                  changes unless your site takes the code.
+                </p>
+                <div className="mt-2">
+                  <JoinTeamForm label="Their team code" />
+                </div>
+              </Disclosure>
+            )}
+          </section>
+        )}
 
         <div className="flex flex-col gap-2">
           <p className="font-medium">What came in lately</p>

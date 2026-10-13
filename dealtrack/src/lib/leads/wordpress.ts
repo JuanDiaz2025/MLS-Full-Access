@@ -1,10 +1,12 @@
 // Leads straight from the WordPress site: the Lead Saver plugin (wordpress-plugin.ts) keeps every
 // Contact Form 7 submission in WordPress, and the app picks up the new ones whenever it's open, at
 // most every 30 seconds. WordPress is always online and its address never changes, so leads sent
-// while this computer or the app was off still arrive, with the time they were really sent.
+// while this computer or the app was off still arrive, with the time they were really sent. The
+// same check shares lead statuses with the rest of the team (team-sync.ts, plugin 1.4+).
 import { jsonFileStore } from "@/lib/json-file-store"
 import { shared } from "@/lib/shared-state"
 import { addLead } from "@/lib/leads/store"
+import { applyChanges, installId, markShared, unsharedChanges, type Sender, type StatusChange } from "@/lib/leads/team-sync"
 import { parseWebsiteLead, webhookSecret } from "@/lib/leads/webhook"
 import { logAttempt } from "@/lib/leads/webhook-log"
 
@@ -17,13 +19,28 @@ type WordPressState = {
   saved?: number // how many submissions the plugin has saved in all
   plugin?: string // the plugin's version
   events?: SiteEvent[] // what happened to the latest form submissions on the site (plugin 1.2+)
+  statusSeq?: number // the last team status change already picked up (plugin 1.4+)
+  // The computer that sends shared leads to Google Ads: null when none has yet, missing when the
+  // site's plugin is older than 1.4 (no team sharing).
+  sender?: Sender | null
 }
 
 // One form submission as the site saw it: no names or numbers, just when, which form and the outcome.
 export type SiteEvent = { at: string; form?: string; status: string; saved: boolean }
 
 type SavedLead = { id: number; received: string; form?: string; fields?: Record<string, unknown> }
-type Answer = { ok?: boolean; code?: string; error?: string; message?: string; leads?: SavedLead[]; total?: number; plugin?: string; events?: SiteEvent[] }
+type Answer = {
+  ok?: boolean
+  code?: string
+  error?: string
+  message?: string
+  leads?: SavedLead[]
+  total?: number
+  plugin?: string
+  events?: SiteEvent[]
+  statuses?: StatusChange[]
+  sender?: Sender | null
+}
 
 const file = jsonFileStore<WordPressState>("wordpress.json", () => ({}))
 const SYNC_EVERY_MS = 30_000
@@ -45,7 +62,17 @@ export function normalizeSite(input: string) {
   }
 }
 
-const bareHost = (site: string) => new URL(site).host.replace(/^www\./, "")
+export const bareHost = (site: string) => new URL(site).host.replace(/^www\./, "")
+
+const DIFFERENT_KEY = "The Lead Saver plugin on your site has a different key. Download the plugin again from this page and reinstall it."
+
+// What went wrong talking to the site, in plain words.
+function problem(error: unknown) {
+  if (!(error instanceof Error)) return String(error)
+  if (error.name === "TimeoutError") return "Your site took too long to answer."
+  if (error.message === "fetch failed") return "Couldn't reach your site. Check the address."
+  return error.message
+}
 
 // Saves the site's address. Typing the same site again (with or without www) keeps how far its
 // leads have been brought in; a different site starts from its first saved lead.
@@ -64,11 +91,11 @@ export async function setWordPressSite(site: string | null) {
 
 // The site's answer for leads after `after`, trying the usual /wp-json/ address first and then
 // ?rest_route= (for sites without "pretty" permalinks).
-async function ask(state: WordPressState, key: string, after: number): Promise<{ answer: Answer; api: WordPressState["api"] }> {
+async function ask(state: WordPressState, key: string, after: number, statusAfter = state.statusSeq ?? 0): Promise<{ answer: Answer; api: WordPressState["api"] }> {
   const order: NonNullable<WordPressState["api"]>[] = state.api === "rest_route" ? ["rest_route", "wp-json"] : ["wp-json", "rest_route"]
   let last: { status: number; answer: Answer | null } = { status: 0, answer: null }
   const get = async (api: NonNullable<WordPressState["api"]>, keyInAddress: boolean) => {
-    const params = `after=${after}${keyInAddress ? `&key=${encodeURIComponent(key)}` : ""}&t=${Date.now()}`
+    const params = `after=${after}&status_after=${statusAfter}${keyInAddress ? `&key=${encodeURIComponent(key)}` : ""}&t=${Date.now()}`
     const url = api === "wp-json" ? `${state.site}/wp-json/omcc/v1/leads?${params}` : `${state.site}/?rest_route=/omcc/v1/leads&${params}`
     const res = await fetch(url, {
       headers: { "x-omcc-key": key, accept: "application/json", "user-agent": "OneMarketingCommandCenter/1.0" },
@@ -88,9 +115,7 @@ async function ask(state: WordPressState, key: string, after: number): Promise<{
     if (result.answer?.code?.startsWith("omcc_")) break
   }
   const { status, answer } = last
-  if (answer?.code === "omcc_bad_key") {
-    throw new Error("The Lead Saver plugin on your site has a different key. Download the plugin again from this page and reinstall it.")
-  }
+  if (answer?.code === "omcc_bad_key") throw new Error(DIFFERENT_KEY)
   if (answer?.code?.startsWith("omcc_")) throw new Error(answer.error ?? "The Lead Saver plugin had a problem. Try again.")
   if (status === 404 || answer?.code === "rest_no_route") {
     throw new Error("Your site answered, but the Lead Saver plugin isn't there. Install and activate it (steps below), then click Connect again.")
@@ -108,6 +133,89 @@ async function ask(state: WordPressState, key: string, after: number): Promise<{
   )
 }
 
+// Whether the site's Lead Saver plugin takes this key (a teammate's team code), without bringing
+// anything in: null when it does, else what's wrong.
+export async function siteKeyProblem(site: string, key: string): Promise<string | null> {
+  const past = 2_147_483_647 // after every saved lead and status, so none comes back
+  try {
+    await ask({ site }, key, past, past)
+    return null
+  } catch (error) {
+    if (error instanceof Error && error.message === DIFFERENT_KEY) {
+      return "Your site's Lead Saver plugin has another key than that team code. Check your teammate's app says Connected to the site, then copy their team code again."
+    }
+    return problem(error)
+  }
+}
+
+// Sends something to the plugin (plugin 1.4+): the team's statuses, or which computer sends to
+// Google Ads. Null when the site's plugin is older and doesn't take it.
+async function post(state: WordPressState, key: string, route: "status" | "sender", body: unknown): Promise<Answer | null> {
+  if (!state.site) return null
+  const send = async (keyInAddress: boolean) => {
+    const k = keyInAddress ? `${state.api === "rest_route" ? "&" : "?"}key=${encodeURIComponent(key)}` : ""
+    const url = state.api === "rest_route" ? `${state.site}/?rest_route=/omcc/v1/${route}${k}` : `${state.site}/wp-json/omcc/v1/${route}${k}`
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "x-omcc-key": key, "content-type": "application/json", accept: "application/json", "user-agent": "OneMarketingCommandCenter/1.0" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    })
+    return (await res.json().catch(() => null)) as Answer | null
+  }
+  let answer = await send(false)
+  if (answer?.code === "omcc_bad_key") answer = await send(true)
+  return answer?.ok ? answer : null
+}
+
+// Reports the statuses set here to the rest of the team, right away (also part of every check).
+const sharing = shared("team-share", () => ({ running: null as Promise<void> | null, again: false }))
+export function shareStatuses(): Promise<void> {
+  if (sharing.running) {
+    sharing.again = true
+    return sharing.running
+  }
+  sharing.running = (async () => {
+    do {
+      sharing.again = false
+      const state = await file.read()
+      const changes = await unsharedChanges()
+      if (!state.site || !changes.length) continue
+      const answer = await post(state, await webhookSecret(), "status", {
+        from: await installId(),
+        changes: changes.slice(0, 100).map(({ key, status, at, by }) => ({ key, status, at: Date.parse(at), by })),
+      }).catch(() => null)
+      if (answer) await markShared(changes.slice(0, 100))
+    } while (sharing.again)
+  })()
+    .catch((error) => console.error("Couldn't share statuses with the team:", error))
+    .finally(() => {
+      sharing.running = null
+    })
+  return sharing.running
+}
+
+// Makes this computer the one that sends shared leads to Google Ads: when none is yet (`take`
+// false), or from now on in place of another one (`take`).
+export async function claimSender(name: string, take = false) {
+  const state = await file.read()
+  if (!state.site) return null
+  const answer = await post(state, await webhookSecret(), "sender", { id: await installId(), name, take })
+  if (answer) {
+    await file.update((s) => {
+      if (s.site === state.site) s.sender = answer.sender ?? null
+    })
+  }
+  return answer?.sender ?? null
+}
+
+// Whether this computer should leave a shared lead's Google Ads conversions to another one.
+export async function sentElsewhere(): Promise<Sender | null> {
+  const { sender } = await file.read()
+  return sender && sender.id !== (await installId()) ? sender : null
+}
+
 // Brings in leads saved in WordPress since the last time. At most every 30 seconds, and one at a
 // time; `force` skips the wait (e.g. right after connecting).
 export function syncWordPress(force = false): Promise<void> {
@@ -119,11 +227,14 @@ export function syncWordPress(force = false): Promise<void> {
     const state = await file.read()
     if (!state.site) return
     try {
+      await shareStatuses()
       const key = await webhookSecret()
       const host = bareHost(state.site)
       let lastId = state.lastId ?? 0
       let api = state.api
       let info: Answer = {}
+      let statuses: StatusChange[] = []
+      let allIn = false
       // Up to 2,000 leads per check (200 at a time); anything beyond comes in on the next one.
       for (let page = 0; page < 10; page++) {
         const result = await ask({ ...state, api }, key, lastId)
@@ -164,7 +275,22 @@ export function syncWordPress(force = false): Promise<void> {
         await file.update((s) => {
           if (s.site === state.site) s.lastId = lastId
         })
-        if (leads.length < 200) break
+        if (page === 0) statuses = info.statuses ?? []
+        if (leads.length < 200) {
+          allIn = true
+          break
+        }
+      }
+      // The statuses the team set (the first answer has up to 500), once their leads are in. With
+      // leads still to come, they're asked for again next time, for the leads that weren't here yet.
+      if (statuses.length) {
+        await applyChanges(statuses, await installId())
+        if (allIn) {
+          const seq = Math.max(state.statusSeq ?? 0, ...statuses.map((c) => c.seq))
+          await file.update((s) => {
+            if (s.site === state.site) s.statusSeq = seq
+          })
+        }
       }
       await file.update((s) => {
         if (s.site !== state.site) return
@@ -172,18 +298,14 @@ export function syncWordPress(force = false): Promise<void> {
         s.lastSync = new Date().toISOString()
         s.saved = info.total
         s.plugin = info.plugin
+        // An older plugin (no team sharing) doesn't say.
+        if ("sender" in info) s.sender = info.sender ?? null
+        else delete s.sender
         if (Array.isArray(info.events)) s.events = info.events.slice(0, 20)
         delete s.lastError
       })
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.name === "TimeoutError"
-            ? "Your site took too long to answer."
-            : error.message === "fetch failed"
-              ? "Couldn't reach your site. Check the address."
-              : error.message
-          : String(error)
+      const message = problem(error)
       await file.update((s) => {
         if (s.site !== state.site) return
         s.lastError = message.slice(0, 300)

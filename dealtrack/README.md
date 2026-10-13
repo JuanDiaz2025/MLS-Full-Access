@@ -54,9 +54,10 @@ DealTrack keeps its own records in the `.data` folder on the computer running it
 - `deleted-leads.json`: leads deleted from the Leads page (🗑 in the Not interested list), kept exactly as they were so Restore in the Deleted tab can put them back.
 - `lead-backup.json`: which Google Sheet the leads are backed up to, and when the last backup ran.
 - `webhook-secret`: the key WordPress sends with each lead (unless `LEADS_WEBHOOK_SECRET` is set). `webhook-log.json`: the last few webhook calls, for troubleshooting.
+- `wordpress.json`: the website connection: its address, how far its leads and the team's statuses have been brought in, and which computer sends to Google Ads. `install-id`: this computer's id on the team, so its own status reports aren't applied twice.
 - `public-url`: the public address while `go-online.bat` runs.
 
-- It's per computer. If two people each run DealTrack on their own laptop, each has their own history. Run it on one computer (or copy the file) to share one record.
+- It's per computer. If two people each run DealTrack on their own laptop, each has their own history. Run it on one computer (or copy the file) to share one record. Website lead statuses are the exception: the team's computers share them through the website (see Website leads from WordPress).
 - Back it up like any other file. Deleting it resets the settings and history; Google Ads isn't affected.
 - The leads can back themselves up: under **Backup to Google Sheets** on the Leads page, paste a Google Sheet's link. DealTrack keeps a "DealTrack leads" tab in it with every lead (contact details, message, status, score, campaign, click ID, what Google Ads heard, and deleted leads with when they were deleted), updated within about a minute of any change, even with no page open. Values are written as plain text, never as formulas. On a new computer, link the same sheet and click **Restore from this sheet**: it adds the leads this DealTrack doesn't have and gives leads the website sends again their saved status and history, but never changes a lead someone already worked on. DealTrack won't write over leads in the tab that it doesn't have itself (a new computer before Restore, or two computers using one sheet). It uses the "Connect Google for conversions" connection, which also allows editing spreadsheets.
 - It needs a disk to write to. On hosting without one (Vercel, for example), the reports work but saving shows an error.
@@ -70,6 +71,17 @@ DealTrack keeps its own records in the `.data` folder on the computer running it
 - With no sign-in set up, the reports are open on your own computer only: never in production, and never while `go-online.bat` has DealTrack on a public address.
 
 ## Website leads from WordPress
+
+The usual way is the **Lead Saver** plugin. On **Leads**, expand **Website leads (WordPress)**, download the plugin, upload it in WordPress (**Plugins → Add New Plugin → Upload Plugin**), then type the site's address and click **Connect**. The plugin saves every Contact Form 7 lead in WordPress itself. DealTrack picks up new ones every 30 seconds while the Leads page is open, including leads sent while it was off.
+
+**A team on several computers (plugin 1.4 or newer).** Each person can run DealTrack, or One Marketing Command Center, on their own computer:
+
+- **Statuses are shared.** A status set on one computer is reported to the site right away. It shows up on the others within about a minute, with who set it: the "Your name" field, or else the part of their Google sign-in address before the @. Only website leads are shared.
+- **Adding a computer.** An admin copies the **team code** under **Your team** and pastes it on the other computer under **Joining someone's team?**. The code carries the site's key, so give it only to the team. Nothing changes on that computer unless the site accepts the code.
+- **Only one computer sends to Google Ads,** so no shared lead is counted twice. That's the first computer with Google Ads connected, or the one where an admin clicks **Send to Google Ads from this computer instead**. Other computers show "Sent by the main computer" for those leads.
+- **A key set in `.env.local`.** A computer whose key comes from `LEADS_WEBHOOK_SECRET` can't join with a code. Put the same key in that setting on each computer instead.
+
+The older instant webhook still works for other form plugins, but only while DealTrack is reachable from the internet:
 
 1. Open **Leads** and expand **Website leads (WordPress)**. Copy the webhook address.
 2. In WordPress, paste it into the form's webhook setting, method **POST** (Contact Form 7: the free **CF7 to Webhook** plugin; Elementor: Actions After Submit → Webhook; WPForms and Gravity Forms: their webhook add-on). Sending the key as an `X-Webhook-Secret` header instead of `?key=` in the address keeps it out of logs, where the plugin allows it.

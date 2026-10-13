@@ -4,12 +4,15 @@
 // tracking script on every page, so nothing has to be pasted into WordPress. WordPress is always online, so leads
 // sent while this computer or the app is off are kept there until the app picks them up.
 //
+// It's also where a team's copies of the app meet: each one reports the statuses people set, and
+// picks up everyone else's (team-sync.ts), so a status changed on one computer shows on all of them.
+//
 // The app builds the plugin with its key filled in; the Leads page offers it as a .zip to upload in
 // WordPress (Plugins → Add New → Upload Plugin).
 import { TRACKING_FIELDS, TRACKING_SNIPPET } from "@/lib/leads/wordpress-snippets"
 import { zipFiles } from "@/lib/zip"
 
-export const PLUGIN_VERSION = "1.3.0"
+export const PLUGIN_VERSION = "1.4.0"
 export const PLUGIN_FOLDER = "omcc-lead-saver"
 
 const phpString = (s: string) => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
@@ -31,11 +34,17 @@ if (!defined('ABSPATH')) {
 // The key the Command Center sends when it asks for leads. Keep it private.
 define('OMCC_LEADS_KEY', ${phpString(key)});
 define('OMCC_LEADS_VERSION', '${PLUGIN_VERSION}');
-define('OMCC_LEADS_DB_VERSION', '1');
+define('OMCC_LEADS_DB_VERSION', '2');
 
 function omcc_leads_table() {
 	global $wpdb;
 	return $wpdb->prefix . 'omcc_leads';
+}
+
+// Every status someone on the team set in the app, in order (newest last).
+function omcc_leads_status_table() {
+	global $wpdb;
+	return $wpdb->prefix . 'omcc_lead_status';
 }
 
 // The table the leads are kept in: one row per form submission.
@@ -50,6 +59,16 @@ function omcc_leads_install() {
 		form varchar(200) NOT NULL DEFAULT '',
 		fields longtext NOT NULL,
 		PRIMARY KEY  (id)
+	) $charset;");
+	$status_table = omcc_leads_status_table();
+	dbDelta("CREATE TABLE $status_table (
+		seq bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+		lead_key varchar(191) NOT NULL DEFAULT '',
+		status varchar(30) NOT NULL DEFAULT '',
+		changed varchar(40) NOT NULL DEFAULT '',
+		by_name varchar(100) NOT NULL DEFAULT '',
+		from_id varchar(64) NOT NULL DEFAULT '',
+		PRIMARY KEY  (seq)
 	) $charset;");
 	update_option('omcc_leads_db_version', OMCC_LEADS_DB_VERSION);
 }
@@ -177,23 +196,106 @@ function omcc_leads_store($form, $submission, $flag) {
 	}
 }
 
-// GET /wp-json/omcc/v1/leads?after=<id>: the leads saved after that one, oldest first.
+// GET /wp-json/omcc/v1/leads?after=<id>&status_after=<seq>: the leads saved after that one, oldest
+// first, and the statuses set since. POST /status: statuses set in the app. POST /sender: which
+// computer sends to Google Ads (so the team's copies don't send the same lead twice).
 add_action('rest_api_init', function () {
 	register_rest_route('omcc/v1', '/leads', array(
 		'methods' => 'GET',
 		'callback' => 'omcc_leads_list',
 		'permission_callback' => '__return_true',
 	));
+	register_rest_route('omcc/v1', '/status', array(
+		'methods' => 'POST',
+		'callback' => 'omcc_leads_status_post',
+		'permission_callback' => '__return_true',
+	));
+	register_rest_route('omcc/v1', '/sender', array(
+		'methods' => 'POST',
+		'callback' => 'omcc_leads_sender_post',
+		'permission_callback' => '__return_true',
+	));
 });
 
-function omcc_leads_list($request) {
-	nocache_headers();
+// Null when the request has the right key, otherwise the answer to send back.
+function omcc_leads_denied($request) {
 	$given = $request->get_header('x-omcc-key');
 	if (!$given) {
 		$given = $request->get_param('key');
 	}
 	if (!is_string($given) || !hash_equals(OMCC_LEADS_KEY, $given)) {
 		return new WP_REST_Response(array('ok' => false, 'code' => 'omcc_bad_key', 'error' => 'Wrong or missing key.'), 403);
+	}
+	return null;
+}
+
+function omcc_leads_sender() {
+	$sender = get_option('omcc_leads_sender');
+	return is_array($sender) && !empty($sender['id']) ? $sender : null;
+}
+
+function omcc_leads_status_post($request) {
+	nocache_headers();
+	$denied = omcc_leads_denied($request);
+	if ($denied) {
+		return $denied;
+	}
+	$body = $request->get_json_params();
+	$body = is_array($body) ? $body : array();
+	$changes = isset($body['changes']) && is_array($body['changes']) ? array_slice($body['changes'], 0, 100) : array();
+	$from = isset($body['from']) ? omcc_leads_cut((string) $body['from'], 64) : '';
+	$allowed = array('new', 'interested', 'appointment', 'offer', 'closed', 'not_interested');
+	global $wpdb;
+	$table = omcc_leads_status_table();
+	$saved = 0;
+	foreach ($changes as $change) {
+		if (!is_array($change) || !isset($change['key'], $change['status']) || !in_array($change['status'], $allowed, true)) {
+			continue;
+		}
+		$ok = $wpdb->insert($table, array(
+			'lead_key' => omcc_leads_cut((string) $change['key'], 191),
+			'status' => $change['status'],
+			// Milliseconds since 1970 (a plain number, so no database reads it as a date in its own time zone).
+			'changed' => isset($change['at']) && is_numeric($change['at']) ? sprintf('%.0f', $change['at']) : sprintf('%.0f', microtime(true) * 1000),
+			'by_name' => omcc_leads_cut(isset($change['by']) ? (string) $change['by'] : '', 100),
+			'from_id' => $from,
+		));
+		if ($ok) {
+			$saved++;
+		} elseif ($wpdb->last_error) {
+			omcc_leads_install();
+			return new WP_REST_Response(array('ok' => false, 'code' => 'omcc_no_table', 'error' => 'The plugin was still setting up. Try again.'), 500);
+		}
+	}
+	return new WP_REST_Response(array('ok' => true, 'saved' => $saved), 200);
+}
+
+// The first computer with Google Ads connected becomes the one that sends; "take" moves it to
+// another computer (e.g. a new one).
+function omcc_leads_sender_post($request) {
+	nocache_headers();
+	$denied = omcc_leads_denied($request);
+	if ($denied) {
+		return $denied;
+	}
+	$body = $request->get_json_params();
+	$body = is_array($body) ? $body : array();
+	$id = isset($body['id']) ? omcc_leads_cut((string) $body['id'], 64) : '';
+	if ($id && (!empty($body['take']) || !omcc_leads_sender())) {
+		update_option('omcc_leads_sender', array(
+			'id' => $id,
+			'name' => isset($body['name']) ? omcc_leads_cut((string) $body['name'], 100) : '',
+			'at' => gmdate('Y-m-d\TH:i:s\Z'),
+		), false);
+	}
+	return new WP_REST_Response(array('ok' => true, 'sender' => omcc_leads_sender()), 200);
+}
+
+function omcc_leads_list($request) {
+	nocache_headers();
+	$denied = omcc_leads_denied($request);
+	if ($denied) {
+		return $denied;
 	}
 	global $wpdb;
 	$table = omcc_leads_table();
@@ -213,10 +315,30 @@ function omcc_leads_list($request) {
 			'fields' => is_array($fields) ? $fields : new stdClass(),
 		);
 	}
+	$statuses = array();
+	$status_table = omcc_leads_status_table();
+	$status_after = max(0, intval($request->get_param('status_after')));
+	$changes = $wpdb->get_results($wpdb->prepare("SELECT seq, lead_key, status, changed, by_name, from_id FROM $status_table WHERE seq > %d ORDER BY seq ASC LIMIT 500", $status_after), ARRAY_A);
+	if ($changes === null || $wpdb->last_error) {
+		omcc_leads_install();
+		$changes = array();
+	}
+	foreach ($changes as $change) {
+		$statuses[] = array(
+			'seq' => intval($change['seq']),
+			'key' => $change['lead_key'],
+			'status' => $change['status'],
+			'at' => $change['changed'],
+			'by' => $change['by_name'],
+			'from' => $change['from_id'],
+		);
+	}
 	update_option('omcc_leads_last_pull', gmdate('Y-m-d H:i:s'), false);
 	return new WP_REST_Response(array(
 		'ok' => true,
 		'plugin' => OMCC_LEADS_VERSION,
+		'statuses' => $statuses,
+		'sender' => omcc_leads_sender(),
 		'total' => intval($wpdb->get_var("SELECT COUNT(*) FROM $table")),
 		'events' => is_array(get_option('omcc_leads_events')) ? get_option('omcc_leads_events') : array(),
 		'leads' => $leads,

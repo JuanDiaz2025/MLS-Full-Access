@@ -12,6 +12,7 @@ import { gaql } from "@/lib/google-ads/client"
 import { callIdOf, type CallInfo } from "@/lib/leads/call-id"
 import { addLead, listDeletedLeads, listLeads, updateLead } from "@/lib/leads/store"
 import { leadStatuses, type LeadStatus } from "@/lib/leads/types"
+import { personName } from "@/lib/people"
 
 // "2026-09-06 08:11:00" is in the Google Ads account's time zone; turn it into the real moment.
 async function callTime(start: string) {
@@ -63,7 +64,7 @@ export async function addCallLeadAction(
   await updateLead(lead.id, (l) => {
     l.callId = callId
   })
-  if (input.status !== "new") await setLeadStatus(lead.id, input.status as LeadStatus)
+  if (input.status !== "new") await setLeadStatus(lead.id, input.status as LeadStatus, await personName())
   try {
     const active = await activeAccount()
     if (active) await sendPendingConversions(active.connection, active.account)

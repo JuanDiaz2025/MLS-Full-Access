@@ -8,16 +8,18 @@ import path from "node:path"
 
 import { completeTracking, realValue, trackingAliases } from "@/lib/leads/tracking"
 import type { Lead, LeadTracking } from "@/lib/leads/types"
+import { shared } from "@/lib/shared-state"
 import { DATA_DIR } from "@/lib/store"
 
 export type WebsiteLead = Omit<Lead, "id" | "createdAt" | "qrCodeId">
 
 // The key WordPress must send, from LEADS_WEBHOOK_SECRET or created once in .data/webhook-secret.
 const secretFile = path.join(DATA_DIR, "webhook-secret")
-let secret: Promise<string> | null = null
+// One for the whole app (pages and API routes alike), see shared-state.ts.
+const cache = shared("webhook-secret", () => ({ secret: null as Promise<string> | null }))
 
 export function webhookSecret() {
-  secret ??= (async () => {
+  cache.secret ??= (async () => {
     const configured = process.env.LEADS_WEBHOOK_SECRET?.trim()
     if (configured) return configured
     try {
@@ -34,7 +36,16 @@ export function webhookSecret() {
       return created
     }
   })()
-  return secret
+  return cache.secret
+}
+
+// Uses the team's key instead of this computer's own (joining a team with its team code), so this
+// copy can read the leads on the team's site.
+export async function setWebhookSecret(key: string) {
+  if (process.env.LEADS_WEBHOOK_SECRET?.trim()) throw new Error("This copy's key is set in .env.local (LEADS_WEBHOOK_SECRET), so it can't join a team that way.")
+  await mkdir(path.dirname(secretFile), { recursive: true })
+  await writeFile(secretFile, key, { mode: 0o600 })
+  cache.secret = Promise.resolve(key)
 }
 
 // The public address go-online.bat saved (a Cloudflare tunnel), if it's running. The file stays

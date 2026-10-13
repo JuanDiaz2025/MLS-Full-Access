@@ -4,6 +4,8 @@
 
 import { cookies } from "next/headers"
 
+import { signedInEmail } from "@/lib/auth"
+
 export const NAME_COOKIE = "dt_name"
 
 export function cleanName(value: unknown): string {
@@ -16,6 +18,12 @@ export function cleanName(value: unknown): string {
 
 export async function currentName(): Promise<string> {
   return cleanName((await cookies()).get(NAME_COOKIE)?.value)
+}
+
+// Who set a lead's status, as the rest of the team sees it: the name typed in DealTrack, else the
+// Google sign-in's name before the @.
+export async function personName(): Promise<string | undefined> {
+  return (await currentName()) || cleanName((await signedInEmail())?.split("@")[0]) || undefined
 }
 
 // Saves the name someone typed, for next time. Call from server actions only (it sets a cookie).
