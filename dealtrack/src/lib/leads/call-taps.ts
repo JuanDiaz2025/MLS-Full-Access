@@ -113,6 +113,8 @@ export function syncCallTaps(): Promise<void> {
             notes: `Tapped ${shownNumber(tel)} on ${pathOf(current)}${device ? ` · ${device}` : ""}${place ? ` · ${place}` : ""}. The call is in REI BlackBook: find it there, add the caller's details, and set the status.`,
             tracking: trackingFrom(entry, current, referrer),
             inboxId: `tap:${visitor}:${uuid}`,
+            // Roughly where they were (location.ts): their internet connection's city.
+            place: place ? { posthog: place } : undefined,
           },
           lastAt,
         )

@@ -13,6 +13,7 @@ import { syncSheetIfDue } from "@/lib/sheets/sync"
 import { backupLeadsIfChanged } from "@/lib/leads/sheet-backup"
 import { scoreUnscored } from "@/lib/leads/store"
 import { syncCallTaps } from "@/lib/leads/call-taps"
+import { locateLeads } from "@/lib/leads/location"
 import { computerName } from "@/lib/leads/team-sync"
 import { claimSender, getWordPress, syncWordPress } from "@/lib/leads/wordpress"
 import { DATA_DIR } from "@/lib/store"
@@ -32,14 +33,16 @@ async function sendConversions() {
 }
 
 export function catchUp() {
+  const leadsIn = scoreUnscored()
+    .then(() => syncWordPress())
+    .catch((error) => console.error("Couldn't check the website for new leads:", error))
   return Promise.all([
-    scoreUnscored()
-      .then(() => syncWordPress())
-      .catch((error) => console.error("Couldn't check the website for new leads:", error))
-      // After the website check, so a lead that just came in is backed up straight away.
-      .then(() => backupLeadsIfChanged()),
+    // After the website check, so a lead that just came in is backed up straight away.
+    leadsIn.then(() => backupLeadsIfChanged()),
     syncCallTaps().catch((error) => console.error("Couldn't check PostHog for call taps:", error)),
     sendConversions(),
+    // Roughly where new leads were (location.ts).
+    leadsIn.then(() => locateLeads()),
   ])
 }
 

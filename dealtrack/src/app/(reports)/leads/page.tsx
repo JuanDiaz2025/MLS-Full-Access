@@ -21,7 +21,7 @@ import { listDeletedLeads, listLeads, listQrCodes } from "@/lib/leads/store"
 import { sharedKey, type Sender } from "@/lib/leads/team-sync"
 import { countSince, timeAgo } from "@/lib/leads/time"
 import { cleanTracking, leadChannel, pagePath } from "@/lib/leads/tracking"
-import type { Lead } from "@/lib/leads/types"
+import type { Lead, LeadPlace } from "@/lib/leads/types"
 import { sentElsewhere } from "@/lib/leads/wordpress"
 import { load } from "@/lib/load"
 
@@ -61,6 +61,7 @@ function toRow(lead: Lead, placements: Map<string, string>, elsewhere: Sender | 
     landingPath: pagePath(t.landingPage),
     referrer: t.referrer,
     notes: lead.notes,
+    place: placeRow(lead.place),
     status: lead.status ?? "new",
     statusBy: lead.statusBy,
     statusRule: lead.statusRule,
@@ -73,6 +74,21 @@ function toRow(lead: Lead, placements: Map<string, string>, elsewhere: Sender | 
           ? { state: "elsewhere", detail: `Google Ads hears about it from ${elsewhere.name || "your team's main computer"}.` }
           : undefined
         : googleState(lead),
+  }
+}
+
+// Roughly where they were (location.ts): Google's place for the ad click first, PostHog's city
+// for the visit too when it's another one.
+function placeRow(p?: LeadPlace): LeadRow["place"] {
+  const main = p?.google ?? p?.posthog
+  if (!p || !main) return undefined
+  const town = (s?: string) => s?.replace(/ \d{5}$/, "").toLowerCase()
+  const agree = Boolean(p.google && p.posthog && town(p.google) === town(p.posthog))
+  return {
+    text: main,
+    source: p.google ? (agree ? "Google Ads click · PostHog" : "Google Ads click") : "PostHog (internet connection)",
+    other: p.google && p.posthog && !agree ? p.posthog : undefined,
+    about: p.googleInterest,
   }
 }
 

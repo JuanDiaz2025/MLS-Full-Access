@@ -23,7 +23,7 @@ export async function GET() {
     [
       "Date", "Name", "Score", "Grade", "Status", "Phone", "Email", "Property address", "Channel", "UTM source", "UTM medium", "UTM campaign",
       "UTM term", "UTM content", "Google click ID", "Facebook click ID", "Microsoft click ID", "Landing page", "Referrer",
-      "Form", "Notes",
+      "Form", "Notes", "Location: Google Ads click", "Location: searched about", "Location: website visit (PostHog)",
     ],
     ...leads.map((l) => {
       const t = cleanTracking(l.tracking)
@@ -33,7 +33,7 @@ export async function GET() {
         l.phone && formatPhone(l.phone), l.email, l.propertyAddress, leadChannel(l),
         t?.utmSource, t?.utmMedium, t?.utmCampaign, t?.utmTerm, t?.utmContent,
         t?.gclid || t?.gbraid || t?.wbraid, t?.fbclid, t?.msclkid, t?.landingPage, t?.referrer,
-        leadSource(l, placements), l.notes,
+        leadSource(l, placements), l.notes, l.place?.google, l.place?.googleInterest, l.place?.posthog,
       ]
     }),
   ]

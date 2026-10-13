@@ -85,7 +85,8 @@ export const toolSpecs: ToolSpec[] = [
     description:
       "List the leads collected in the last N days, newest first, from the WordPress website's forms. " +
       "Each lead has a date, name, phone, email, property address, notes, the form, its channel (Google Ads, Facebook, organic search...), tracking (UTM tags, Google click ID, landing page), " +
-      "its score (0-100, graded hot/warm/cold/junk, with the reasons), the team's status (new, unresponsive, interested, appointment, offer, closed, not_interested), and what was sent back to Google Ads as an offline conversion. " +
+      "its score (0-100, graded hot/warm/cold/junk, with the reasons), the team's status (new, unresponsive, interested, appointment, offer, closed, not_interested), and what was sent back to Google Ads as an offline conversion, " +
+      "and roughly where the person was (not the property): the city/ZIP of their Google Ads click, the place their search was about, and their internet connection's city from the website visit. " +
       "These are separate from Google Ads conversions.",
     parameters: {
       type: "object",
@@ -307,6 +308,7 @@ export async function recentLeads(days: number) {
         ? Object.fromEntries(Object.entries(l.conversions).map(([kind, c]) => [kind, c?.retraction ? `taken back (${c.retraction.state})` : (c?.google?.status ?? c?.state)]))
         : undefined,
       tracking: l.tracking,
+      roughLocation: l.place && (l.place.google || l.place.posthog) ? { googleAdsClick: l.place.google, searchedAbout: l.place.googleInterest, websiteVisit: l.place.posthog } : undefined,
     }))
 }
 

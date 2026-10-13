@@ -29,6 +29,9 @@ export type LeadRow = {
   landingPath?: string
   referrer?: string
   notes?: string
+  // Roughly where they were when they got in touch (location.ts): the place, which source said so,
+  // PostHog's city when it differs from Google's, and the place their search was about.
+  place?: { text: string; source: string; other?: string; about?: string }
   status: string
   statusBy?: "auto" | "you"
   statusRule?: string
@@ -42,6 +45,10 @@ export type LeadRow = {
 }
 
 const PAGE = 25
+
+const PLACE_HELP =
+  "Roughly where they were when they got in touch, not the property. Google Ads: where their phone or computer was when they clicked the ad. " +
+  "PostHog: the city of their internet connection on the website (on phones often the carrier's nearby city)."
 
 // The date choices above the table. Days are counted in this computer's time zone.
 const ranges = [
@@ -519,6 +526,9 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
               <th className={th}>Phone</th>
               <th className={th}>Email</th>
               <th className={th}>Property address</th>
+              <th className={th} title={PLACE_HELP}>
+                Location (rough)
+              </th>
               <th className={th}>Channel</th>
               <th className={th}>UTM source</th>
               <th className={th}>UTM medium</th>
@@ -603,6 +613,18 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
                 <td className={`${td} max-w-64 truncate`} title={r.address}>
                   {r.address || empty}
                 </td>
+                <td className={td} title={PLACE_HELP}>
+                  {r.place ? (
+                    <div className="flex flex-col">
+                      <span>{r.place.text}</span>
+                      <span className="text-xs text-muted-foreground">{r.place.source}</span>
+                      {r.place.other && <span className="text-xs text-muted-foreground">PostHog: {r.place.other}</span>}
+                      {r.place.about && <span className="text-xs text-muted-foreground">Searched about {r.place.about}</span>}
+                    </div>
+                  ) : (
+                    empty
+                  )}
+                </td>
                 <td className={td}>
                   <span
                     className={
@@ -645,7 +667,7 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
             ))}
             {!visible.length && (
               <tr>
-                <td colSpan={21} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={22} className="px-3 py-6 text-center text-muted-foreground">
                   {list === "not_interested" && !notInterested
                     ? "No leads marked Not interested."
                     : list === "deleted" && !deleted.length

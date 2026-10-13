@@ -146,4 +146,17 @@ export type Lead = {
   googleBlockedBy?: string
   score?: LeadScore
   conversions?: Partial<Record<ConversionKind, ConversionUpload>>
+  // Roughly where they were when they got in touch (not the property), looked up by location.ts.
+  place?: LeadPlace
+}
+
+export type LeadPlace = {
+  google?: string // "San Carlos, CA 94070": where they were when they clicked the ad (Google Ads)
+  googleInterest?: string // "Oakland, CA": the place their search was about, when it named another one
+  posthog?: string // "San Carlos, CA": the city of their internet connection on the website (PostHog)
+  // Lookups so far, so each source is only asked a few times.
+  googleTries?: number
+  googleAt?: string
+  posthogTries?: number
+  posthogAt?: string
 }

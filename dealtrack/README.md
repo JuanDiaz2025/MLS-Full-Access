@@ -82,6 +82,12 @@ The usual way is the **Lead Saver** plugin. On **Leads**, expand **Website leads
 - **A key set in `.env.local`.** A computer whose key comes from `LEADS_WEBHOOK_SECRET` can't join with a code. Put the same key in that setting on each computer instead.
 - **Newer statuses need plugin 1.4.1.** Plugin 1.4.0 only keeps the first six statuses. On a site with 1.4.0, an **Unresponsive** status waits on this computer until the plugin is updated, then goes to the team. 1.4.1 keeps any status. One Marketing Command Center doesn't have Unresponsive: its leads keep their previous status there.
 
+**Rough location.** The Leads table's **Location (rough)** column shows roughly where each person was when they got in touch, never the property:
+
+- **Google Ads click:** the city and ZIP code Google recorded for the ad click, matched by the lead's Google click ID. Google keeps these 90 days, and DealTrack looks them up an hour or so after the lead arrives. If their search named another place, that shows as "Searched about".
+- **PostHog:** the city PostHog read from their internet connection on the website, found by the ad click, or by the form they sent at that moment. On phones this is often the carrier's hub city, so Google's place is shown first.
+- **In the CSV export:** both are included.
+
 The older instant webhook still works for other form plugins, but only while DealTrack is reachable from the internet:
 
 1. Open **Leads** and expand **Website leads (WordPress)**. Copy the webhook address.
