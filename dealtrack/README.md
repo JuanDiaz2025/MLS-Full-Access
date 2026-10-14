@@ -95,7 +95,7 @@ The usual way is the **Lead Saver** plugin. On **Leads**, expand **Website leads
 **Rough location.** The Leads table's **Location (rough)** column shows roughly where each person was when they got in touch, never the property:
 
 - **Google Ads click:** the city and ZIP code Google recorded for the ad click, matched by the lead's Google click ID. Google keeps these 90 days, and DealTrack looks them up an hour or so after the lead arrives. If their search named another place, that shows as "Searched about".
-- **PostHog:** the city PostHog read from their internet connection on the website, found by the ad click, or by the form they sent at that moment. On phones this is often the carrier's hub city, so Google's place is shown first.
+- **PostHog:** the city PostHog read from their internet connection on the website, found by the ad click (the first visit with it from before the lead arrived: anyone can open the same link later, the team from the lead's email say), or by the form they sent at that moment. On phones this is often the carrier's hub city, so Google's place is shown first. A PostHog city abroad for an ad click Google placed in the US is left out (someone else who opened the link, or a VPN); places saved before this rule are cleaned up the same way.
 - **In the CSV export:** both are included.
 
 The older instant webhook still works for other form plugins, but only while DealTrack is reachable from the internet:

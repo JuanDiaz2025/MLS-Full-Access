@@ -48,7 +48,8 @@ const PAGE = 25
 
 const PLACE_HELP =
   "Roughly where they were when they got in touch, not the property. Google Ads: where their phone or computer was when they clicked the ad. " +
-  "PostHog: the city of their internet connection on the website (on phones often the carrier's nearby city)."
+  "PostHog: the city of their internet connection on the website (on phones often the carrier's nearby city). " +
+  "A PostHog city abroad for an ad click Google placed in the US is left out: someone else opened the link, or a VPN."
 
 // The date choices above the table. Days are counted in this computer's time zone.
 const ranges = [

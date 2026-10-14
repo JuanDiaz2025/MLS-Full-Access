@@ -7,6 +7,7 @@
 // REI BlackBook. So these leads are never scored or sent to Google Ads on their own; once the team
 // sets a status (Interested…), they go to Google Ads like any other lead, matched by the ad click.
 import { jsonFileStore } from "@/lib/json-file-store"
+import { visitorPlace } from "@/lib/leads/location"
 import { addLead, listLeads } from "@/lib/leads/store"
 import { realValue } from "@/lib/leads/tracking"
 import { CALL_TAP_SOURCE, type LeadTracking } from "@/lib/leads/types"
@@ -81,7 +82,7 @@ export function syncCallTaps(): Promise<void> {
       const rows = await hogqlFresh(`
         select uuid, timestamp, distinct_id, properties.$current_url, properties.$device_type, properties.$geoip_city_name,
           properties.$geoip_subdivision_1_code, properties.$referrer, session.$entry_current_url,
-          extract(elements_chain, 'href="(tel:[^"]+)"')
+          extract(elements_chain, 'href="(tel:[^"]+)"'), properties.$geoip_country_code, properties.$geoip_country_name
         from events
         where event = '$autocapture' and elements_chain like '%href="tel:%'
           and properties.$host in ('www.twinhomebuyer.com', 'twinhomebuyer.com')
@@ -97,7 +98,7 @@ export function syncCallTaps(): Promise<void> {
       let added = 0
       for (const r of rows) {
         const values = Object.values(r).map((v) => (v == null ? "" : String(v)))
-        const [uuid, at, visitor, current, device, city, region, referrer, entry, tel] = values
+        const [uuid, at, visitor, current, device, city, region, referrer, entry, tel, country, countryName] = values
         const when = Date.parse(at)
         if (Number.isNaN(when) || (state.lastAt && when <= Date.parse(state.lastAt))) continue
         lastAt = new Date(when).toISOString()
@@ -105,7 +106,7 @@ export function syncCallTaps(): Promise<void> {
         const previous = lastByVisitor.get(visitor)
         lastByVisitor.set(visitor, when)
         if (previous && when - previous < SAME_CALL_MS) continue
-        const place = [city, /^[A-Z]{2}$/.test(region) ? region : ""].filter(Boolean).join(", ")
+        const place = visitorPlace(city, region, country, countryName) ?? ""
         await addLead(
           {
             name: "Website caller (tapped the phone number)",
@@ -114,7 +115,7 @@ export function syncCallTaps(): Promise<void> {
             tracking: trackingFrom(entry, current, referrer),
             inboxId: `tap:${visitor}:${uuid}`,
             // Roughly where they were (location.ts): their internet connection's city.
-            place: place ? { posthog: place } : undefined,
+            place: place ? { posthog: place, ...(country ? { posthogCountry: country } : {}) } : undefined,
           },
           lastAt,
         )

@@ -4,8 +4,11 @@
 //   Google click ID finds it.
 // - PostHog, on the website, reads a city from each visitor's internet connection. The lead's visit
 //   is found by its ad click ID, or else by the form sent on the site at that same moment.
-//   Call-button taps come with theirs (call-taps.ts).
+//   Call-button taps come with theirs (call-taps.ts). Only a visit from before the lead arrived
+//   counts: anyone can open the same link later (the team, from the lead's email).
 // Both are rough: a phone often shows its carrier's nearby city, and a VPN somewhere else entirely.
+// So a PostHog city abroad for an ad click Google placed in the US is left out: that's someone
+// else who opened the link, or a VPN.
 import { gaqlFresh, missingKeys } from "@/lib/google-ads/client"
 import { getAccount, geoNames } from "@/lib/google-ads/reports"
 import { hogqlFresh } from "@/lib/posthog"
@@ -59,14 +62,26 @@ export function placeName(name: string, canonical: string) {
   return `${name}, ${state}`
 }
 
-// "San Jose" + "CA" + "US" → "San Jose, CA"; outside the US, "Toronto, CA" (its country's code).
-export function visitorPlace(city: unknown, region: unknown, country: unknown) {
+// "San Jose" + "CA" + "US" → "San Jose, CA"; outside the US, with the country's name: "Toronto,
+// Canada" (its code, "CA", would read like a state).
+export function visitorPlace(city: unknown, region: unknown, country: unknown, countryName?: unknown) {
   const c = String(city ?? "").trim()
   if (!c) return undefined
   const r = String(region ?? "").trim()
   const k = String(country ?? "").trim()
   if (k === "US" || !k) return /^[A-Z]{2}$/.test(r) ? `${c}, ${r}` : c
-  return `${c}, ${k}`
+  return `${c}, ${String(countryName ?? "").trim() || k}`
+}
+
+const STATE_CODES = new Set(Object.values(STATES))
+// Google's place is in the US: "San Jose, CA 95136", "San Jose, CA" or a state ("California").
+const googleInUS = (place: string) => STATE_CODES.has(place.match(/, ([A-Z]{2})(?: \d{5})?$/)?.[1] ?? "") || place in STATES
+// PostHog's place is abroad: by the country it came with, or (saved before that) a two-letter
+// ending that isn't a state, "Manila, PH".
+function posthogAbroad(p: LeadPlace) {
+  if (p.posthogCountry) return p.posthogCountry !== "US"
+  const code = p.posthog?.match(/, ([A-Z]{2})$/)?.[1]
+  return Boolean(code && !STATE_CODES.has(code))
 }
 
 // Whether a source is due another look: the first a while after the lead came in, then spaced out.
@@ -187,7 +202,11 @@ async function locateByPostHog(leads: Lead[]) {
     .sort(newestFirst)
     .slice(0, PER_RUN)
   if (!todo.length) return
-  const found = new Map<string, string>() // lead id → place
+  const found = new Map<string, { place: string; country: string }>() // lead id → place
+  const placeOf = (r: Record<string, unknown>) => {
+    const place = visitorPlace(r.city, r.region, r.country, r.country_name)
+    return place ? { place, country: String(r.country ?? "") } : undefined
+  }
 
   // Call-button taps from before taps brought their place: the tap itself.
   const byTap = todo.filter((l) => tapEvent(l))
@@ -195,33 +214,33 @@ async function locateByPostHog(leads: Lead[]) {
     const since = Math.min(...byTap.map((l) => Date.parse(l.createdAt))) - DAY
     const rows = await hogqlFresh(`
       select toString(uuid) as id, properties.$geoip_city_name as city, properties.$geoip_subdivision_1_code as region,
-        properties.$geoip_country_code as country
+        properties.$geoip_country_code as country, properties.$geoip_country_name as country_name
       from events
       where timestamp >= ${utc(since)} and toString(uuid) in (${byTap.map((l) => `'${tapEvent(l)!.toLowerCase()}'`).join(", ")})`)
-    const places = new Map(rows.map((r) => [String(r.id).toLowerCase(), visitorPlace(r.city, r.region, r.country)]))
+    const places = new Map(rows.map((r) => [String(r.id).toLowerCase(), placeOf(r)]))
     for (const l of byTap) {
       const place = places.get(tapEvent(l)!.toLowerCase())
       if (place) found.set(l.id, place)
     }
   }
 
-  // Ad leads: the visit that landed with the same click ID.
+  // Ad leads: the first visit that landed with the same click ID, from before the lead came in.
   const byClick = todo.filter((l) => !tapEvent(l) && clickOf(l))
   if (byClick.length) {
     const since = Math.min(...byClick.map((l) => Date.parse(l.createdAt))) - 95 * DAY
     const click = `extract(properties.$current_url, '[?&](?:gclid|gbraid|wbraid)=([A-Za-z0-9_-]+)')`
     const rows = await hogqlFresh(`
-      select ${click} as click, argMin(properties.$geoip_city_name, timestamp) as city,
-        argMin(properties.$geoip_subdivision_1_code, timestamp) as region, argMin(properties.$geoip_country_code, timestamp) as country
+      select ${click} as click, timestamp, properties.$geoip_city_name as city, properties.$geoip_subdivision_1_code as region,
+        properties.$geoip_country_code as country, properties.$geoip_country_name as country_name
       from events
       where event = '$pageview' and timestamp >= ${utc(since)} and ${LIVE_SITE}
         and (properties.$current_url ilike '%gclid=%' or properties.$current_url ilike '%braid=%')
         and ${click} in (${[...new Set(byClick.map((l) => clickOf(l)!))].map((id) => `'${id}'`).join(", ")})
-      group by click`)
-    const places = new Map(rows.map((r) => [String(r.click), visitorPlace(r.city, r.region, r.country)]))
+      order by timestamp limit 5000`)
     for (const l of byClick) {
-      const place = places.get(clickOf(l)!)
-      if (place) found.set(l.id, place)
+      const by = Date.parse(l.createdAt) + SENT_AFTER
+      const visit = rows.find((r) => String(r.click) === clickOf(l) && Date.parse(String(r.timestamp)) <= by && placeOf(r))
+      if (visit) found.set(l.id, placeOf(visit)!)
     }
   }
 
@@ -231,11 +250,11 @@ async function locateByPostHog(leads: Lead[]) {
     const windows = byTime.map((l) => `(timestamp >= ${utc(Date.parse(l.createdAt) - SENT_BEFORE)} and timestamp <= ${utc(Date.parse(l.createdAt) + SENT_AFTER)})`)
     const rows = await hogqlFresh(`
       select timestamp, person_id, properties.$geoip_city_name as city, properties.$geoip_subdivision_1_code as region,
-        properties.$geoip_country_code as country
+        properties.$geoip_country_code as country, properties.$geoip_country_name as country_name
       from events
       where event = '$autocapture' and properties.$event_type = 'submit' and ${LIVE_SITE} and (${windows.join(" or ")})
       limit 5000`)
-    const sends = rows.map((r) => ({ at: Date.parse(String(r.timestamp)), person: String(r.person_id ?? ""), place: visitorPlace(r.city, r.region, r.country) }))
+    const sends = rows.map((r) => ({ at: Date.parse(String(r.timestamp)), person: String(r.person_id ?? ""), place: placeOf(r) }))
     for (const l of byTime) {
       const at = Date.parse(l.createdAt)
       const near = sends.filter((s) => s.at >= at - SENT_BEFORE && s.at <= at + SENT_AFTER)
@@ -250,7 +269,24 @@ async function locateByPostHog(leads: Lead[]) {
     await save(l.id, (p) => {
       p.posthogTries = place || Date.now() - Date.parse(l.createdAt) < SETTLED ? (p.posthogTries ?? 0) + 1 : POSTHOG_WAITS.length
       p.posthogAt = now
-      if (place) p.posthog = place
+      if (place) {
+        p.posthog = place.place
+        if (place.country) p.posthogCountry = place.country
+      }
+    })
+  }
+}
+
+// A PostHog city abroad for an ad click Google placed in the US isn't where the lead was: someone
+// else opened the link (the team, from the lead's email), or a VPN. It's left out.
+async function dropForeignVisits() {
+  for (const l of await listLeads()) {
+    const p = l.place
+    if (!p?.google || !p.posthog || !googleInUS(p.google) || !posthogAbroad(p)) continue
+    await save(l.id, (x) => {
+      delete x.posthog
+      delete x.posthogCountry
+      x.posthogTries = POSTHOG_WAITS.length
     })
   }
 }
@@ -265,6 +301,7 @@ export function locateLeads(): Promise<void> {
     const leads = await listLeads()
     await locateByGoogle(leads).catch((error) => console.error("Couldn't look up where Google Ads clicks came from:", error))
     await locateByPostHog(leads).catch((error) => console.error("Couldn't look up where website visitors were:", error))
+    await dropForeignVisits().catch(() => undefined)
   })().finally(() => {
     run.running = null
   })
