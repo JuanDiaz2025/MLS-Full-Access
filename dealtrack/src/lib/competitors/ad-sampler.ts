@@ -7,7 +7,7 @@
 // It only uses Bright Data's free searches (free-searches.ts), runs while the app is open, and on
 // a team only on the main computer (the one that sends leads to Google Ads), so two computers
 // can't both spend them. Settings and this week's plan are in .data/ad-sampler.json.
-import { saveSample, readSamples } from "@/lib/competitors/ad-samples"
+import { readSamples, sampleOf, saveSample } from "@/lib/competitors/ad-samples"
 import { BrightDataError, FreeSearchesUsedUp, brightReady, searchGoogle, type Device } from "@/lib/competitors/brightdata"
 import { FREE_LIMIT, WINDOW_DAYS } from "@/lib/competitors/free-searches"
 import { jsonFileStore } from "@/lib/json-file-store"
@@ -164,16 +164,7 @@ export async function runDueSamples() {
       const same = (s: Slot) => s.k === slot.k && s.loc === slot.loc && s.dev === slot.dev && s.due === slot.due
       try {
         const found = await searchGoogle(slot.k, slot.loc, slot.dev)
-        await saveSample({
-          at: new Date().toISOString(),
-          k: slot.k,
-          loc: slot.loc,
-          dev: slot.dev,
-          src: "sampler",
-          ads: found.ads,
-          ...(found.aiOverview ? { ai: true } : {}),
-          ...(found.mapPack ? { maps: true } : {}),
-        })
+        await saveSample(sampleOf(found, slot.k, slot.loc, slot.dev, "sampler"))
         await file.update((f) => {
           const s = f.week?.slots.find(same)
           if (s) s.done = true

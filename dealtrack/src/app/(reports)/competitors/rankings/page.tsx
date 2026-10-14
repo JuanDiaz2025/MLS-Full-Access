@@ -1,13 +1,17 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 
-import { PageHeader } from "@/components/report"
+import { PageHeader, Section } from "@/components/report"
 import Rankings, { type Tab } from "@/components/research/rankings"
-import { isAdmin } from "@/lib/auth"
+import Ideas from "@/components/seo/ideas"
+import { isAdmin, isSignedIn } from "@/lib/auth"
 import { brightReady } from "@/lib/competitors/brightdata"
 import { freeSearches } from "@/lib/competitors/free-searches"
 import { TOPICS, placeKind, topicOf } from "@/lib/research/classify"
 import { estimatedShares, getResearch } from "@/lib/research/keywords"
+import { normalizeKeyword } from "@/lib/research/parse"
 import { analyze, analyzeMaps, localKey } from "@/lib/research/serp-analysis"
+import { searchIdeas } from "@/lib/seo/rankings"
 import {
   BRAND_QUERIES,
   ENGINE_LABELS,
@@ -34,7 +38,7 @@ const TABS: Tab[] = ["overview", "sites", "keywords", "maps", "brand", "scans"]
 // and reviews, the brand check, and past scans.
 export default async function RankingsPage({ searchParams }: { searchParams: Promise<{ scan?: string; tab?: string }> }) {
   const { scan: picked, tab } = await searchParams
-  const [scans, research, balance, admin, reviews, places, free] = await Promise.all([
+  const [scans, research, balance, admin, reviews, places, free, signedIn] = await Promise.all([
     getScans(),
     getResearch(),
     serperBalance(),
@@ -42,7 +46,17 @@ export default async function RankingsPage({ searchParams }: { searchParams: Pro
     getReviews(),
     scanPlaces(),
     brightReady() ? freeSearches() : null,
+    isSignedIn(),
   ])
+  // What Google lists under "People also ask" and "Related searches" for our keywords (Bright Data
+  // searches keep them), not in the keyword list yet.
+  const known = new Set(research.keywords.map((k) => normalizeKeyword(k.text) ?? k.text))
+  const asked = (await searchIdeas(42, known)).slice(0, 200).map((i) => ({
+    text: normalizeKeyword(i.text.replace(/[?!.]+$/, "")) ?? i.text,
+    from: i.kind === "question" ? "People also ask" : "Related searches",
+    detail: `Seen ${i.seen}× · on “${i.keywords[0]}”${i.places.length > 1 ? ` in ${i.places.length} places` : ` in ${i.places[0]}`}`,
+    weight: i.seen,
+  }))
   const kindOf = (s: Scan): ScanKind => s.kind ?? "web"
 
   // For each kind: the scan asked for, else the newest one with results. It's compared with the
@@ -105,6 +119,21 @@ export default async function RankingsPage({ searchParams }: { searchParams: Pro
         targeted={places.targeted}
         keywords={research.keywords.map((k) => ({ t: topicOf(k.text), v: k.volume ?? null, named: placeKind(k.text) }))}
       />
+      <Section
+        title="What else people search"
+        description={
+          <>
+            Questions Google lists under “People also ask” and its “Related searches” for our keywords, from the last 6 weeks of searches made with Bright Data, that
+            aren&apos;t in the Keyword explorer yet. Each city&apos;s top 10 over every search DealTrack made is in{" "}
+            <Link href="/competitors/seo?tab=rankings" className="text-primary hover:underline">
+              SEO → Rankings by city
+            </Link>
+            .
+          </>
+        }
+      >
+        <Ideas ideas={asked} signedIn={signedIn} />
+      </Section>
     </>
   )
 }

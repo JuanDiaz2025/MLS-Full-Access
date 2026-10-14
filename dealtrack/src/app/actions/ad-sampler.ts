@@ -6,7 +6,7 @@
 import { refresh } from "next/cache"
 
 import { isAdmin } from "@/lib/auth"
-import { saveSample } from "@/lib/competitors/ad-samples"
+import { sampleOf, saveSample } from "@/lib/competitors/ad-samples"
 import { MAX_PER_WEEK, getSampler, saveSampler, type SamplerSettings } from "@/lib/competitors/ad-sampler"
 import { BrightDataError, brightReady, searchGoogle } from "@/lib/competitors/brightdata"
 import { currentName } from "@/lib/people"
@@ -45,7 +45,7 @@ export async function testSearchAction(): Promise<SamplerState> {
   const loc = places[0] ?? "California"
   try {
     const found = await searchGoogle(k, loc, "desktop")
-    await saveSample({ at: new Date().toISOString(), k, loc, dev: "desktop", src: "scan", ads: found.ads, ...(found.aiOverview ? { ai: true } : {}), ...(found.mapPack ? { maps: true } : {}) })
+    await saveSample(sampleOf(found, k, loc, "desktop", "scan"))
     refresh()
     const who = [...new Set(found.ads.map((a) => a.d))]
     return {

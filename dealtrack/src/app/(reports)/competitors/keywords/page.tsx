@@ -1,10 +1,13 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 
 import { PageHeader } from "@/components/report"
 import KeywordExplorer, { type ExplorerRow } from "@/components/research/keyword-explorer"
 import { TOPICS, placeOf, topicOf } from "@/lib/research/classify"
 import { getCityVolumes } from "@/lib/research/city-volumes"
 import { SOURCE_LABELS, STATEWIDE_VOLUMES, estimateVolume, estimatedShares, getResearch, volumeLocations } from "@/lib/research/keywords"
+import { normalizeKeyword } from "@/lib/research/parse"
+import { searchConsoleReport } from "@/lib/seo/search-console"
 
 export const metadata: Metadata = { title: "Keyword explorer · DealTrack" }
 
@@ -44,7 +47,13 @@ function variantKey(v: Vol | undefined) {
 
 export default async function KeywordExplorerPage({ searchParams }: { searchParams: Promise<{ vol?: string | string[] }> }) {
   const { vol } = await searchParams
-  const [{ keywords, imports, volumesNote, placeTotals }, city] = await Promise.all([getResearch(), getCityVolumes()])
+  const [{ keywords, imports, volumesNote, placeTotals }, city, sc] = await Promise.all([
+    getResearch(),
+    getCityVolumes(),
+    searchConsoleReport(28).catch(() => null),
+  ])
+  // Us in Google's free results for each keyword, when Search Console is connected (Competitors → SEO).
+  const google = new Map((sc?.queries ?? []).map((q) => [normalizeKeyword(q.q) ?? q.q, { position: q.position, views: q.impressions, clicks: q.clicks }]))
   const cityPlaces = Object.values(city.places)
   const places = volumeLocations(keywords)
   const shares = estimatedShares(placeTotals, keywords)
@@ -83,6 +92,7 @@ export default async function KeywordExplorerPage({ searchParams }: { searchPara
       sources: k.sources,
       group: key,
       variantOf: lead && lead !== k.text ? lead : undefined,
+      google: google.get(k.text),
     }
   })
   const volumeAt =
@@ -103,6 +113,13 @@ export default async function KeywordExplorerPage({ searchParams }: { searchPara
         title="Keyword explorer"
         description="Our own keyword research for home-selling searches, like Ahrefs or Semrush: every keyword we track, grouped by topic and city, with monthly searches and bid ranges from Google's Keyword Planner (California). Add keywords from a Google Ads report (only the keywords are kept), a Keyword Planner export, by hand, or from Google's search suggestions."
       />
+      <p className="text-sm text-muted-foreground">
+        Searches estimated for each city, who ranks there, the visits it&apos;s worth, and new ideas from Search Console and Google&apos;s results:{" "}
+        <Link href="/competitors/seo" className="text-primary hover:underline">
+          Competitors → SEO
+        </Link>
+        .
+      </p>
       <KeywordExplorer
         rows={rows}
         topics={TOPICS.map((t) => ({ id: t.id, label: t.label }))}
@@ -127,6 +144,7 @@ export default async function KeywordExplorerPage({ searchParams }: { searchPara
               .at(-1) ?? "",
         }}
         estimateNote={notes.join(" ")}
+        searchConsole={!!sc}
       />
     </>
   )

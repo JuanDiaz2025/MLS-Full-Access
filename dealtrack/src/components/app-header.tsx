@@ -58,6 +58,7 @@ export const navGroups = [
     label: "Competitors",
     links: [
       { href: "/competitors/keywords", label: "Keyword explorer" },
+      { href: "/competitors/seo", label: "SEO" },
       { href: "/competitors/rankings", label: "Google rankings" },
       { href: "/competitors/sites", label: "Competitor sites" },
       { href: "/competitors/ads", label: "Competitor ads" },

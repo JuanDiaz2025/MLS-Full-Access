@@ -125,7 +125,7 @@ export function todayRules(data: Data, day = today()): RuleGroup {
         metrics?: { costMicros?: string | number; clicks?: string | number }
       }
       const usd = (m: string | number | undefined) => Number(m ?? 0) / 1_000_000
-      // One query per check (Explorer API access allows 2,880 operations a day). The 14 days
+      // One query per check (Basic API access allows 15,000 operations a day). The 14 days
       // before don't change during the day, so they're fetched once a day.
       const [hours, past] = await Promise.all([
         gaql<HourRow>(

@@ -22,7 +22,7 @@
 import { rm } from "node:fs/promises"
 import path from "node:path"
 
-import { saveSample } from "@/lib/competitors/ad-samples"
+import { sampleOf, saveSample } from "@/lib/competitors/ad-samples"
 import { BrightDataError, brightReady, searchGoogle } from "@/lib/competitors/brightdata"
 import { freeSearches } from "@/lib/competitors/free-searches"
 import { jsonFileStore } from "@/lib/json-file-store"
@@ -45,7 +45,8 @@ export type Hit = { d: string; u: string; t: string; p: number } // site, addres
 export type MapHit = { n: string; p: number; d: string; cid: string; r?: number; c?: number; type?: string; phone?: string; addr?: string }
 // t: "maps" for a Google Maps search; s: with stars (Serper's dearer Maps search).
 export type Planned = { k: string; loc: string; t?: "maps"; s?: boolean }
-export type SerpResult = Planned & { at: string; org: Hit[]; ads: Hit[]; maps?: MapHit[]; err?: string }
+// paa / rel: "People also ask" and related searches (Bright Data scans only).
+export type SerpResult = Planned & { at: string; org: Hit[]; ads: Hit[]; maps?: MapHit[]; paa?: string[]; rel?: string[]; err?: string }
 
 const keyOf = (p: Planned) => `${p.t ?? ""}|${p.k}|${p.loc}`
 export const creditsFor = (p: Planned) => (p.t === "maps" && p.s ? 3 : 1)
@@ -258,13 +259,15 @@ async function mapsSearch(k: string, loc: string, stars: boolean): Promise<MapHi
 
 // Bright Data, from the city on a computer: the results, and every ad it showed kept as a sample
 // for Competitor ads (a search with no ads too).
-async function brightSearch(k: string, loc: string): Promise<Pick<SerpResult, "org" | "ads">> {
+async function brightSearch(k: string, loc: string): Promise<Pick<SerpResult, "org" | "ads" | "paa" | "rel">> {
   try {
     const found = await searchGoogle(k, loc, "desktop")
-    await saveSample({ at: new Date().toISOString(), k, loc, dev: "desktop", src: "scan", ads: found.ads, ...(found.aiOverview ? { ai: true } : {}), ...(found.mapPack ? { maps: true } : {}) })
+    await saveSample(sampleOf(found, k, loc, "desktop", "scan"))
     return {
       org: found.organic.map((r) => hit(r.u, r.t, r.p)),
       ads: found.ads.map((a, i) => ({ d: a.d, u: (a.u ?? "").slice(0, 300), t: a.t, p: i + 1 })),
+      ...(found.questions.length ? { paa: found.questions } : {}),
+      ...(found.related.length ? { rel: found.related } : {}),
     }
   } catch (e) {
     if (e instanceof BrightDataError) throw new SearchError(e.message, e.fatal, e.retry)

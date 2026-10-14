@@ -2,6 +2,8 @@ import type { Metadata } from "next"
 
 import { PageHeader } from "@/components/report"
 import CompetitorSites, { type SiteRow } from "@/components/research/competitor-sites"
+import SiteSeoCard from "@/components/seo/site-card"
+import { isAdmin } from "@/lib/auth"
 import { keywordsInUse } from "@/lib/negative-batches"
 import { TOPICS, topicOf } from "@/lib/research/classify"
 import { getCityVolumes } from "@/lib/research/city-volumes"
@@ -15,12 +17,13 @@ const NOT_SELLER = new Set(["home-buyers", "agents", "competitor", "other"])
 
 export default async function CompetitorSitesPage({ searchParams }: { searchParams: Promise<{ r?: string }> }) {
   const { r } = await searchParams
-  const [reports, research, city, suggested, bids] = await Promise.all([
+  const [reports, research, city, suggested, bids, admin] = await Promise.all([
     getSiteReports(),
     getResearch(),
     getCityVolumes(),
     suggestedSites().catch(() => []),
     keywordsInUse().catch(() => null),
+    isAdmin(),
   ])
   const report = reports.find((x) => x.id === r) ?? reports[0]
   const ours = new Set(research.keywords.map((k) => k.text))
@@ -59,6 +62,7 @@ export default async function CompetitorSitesPage({ searchParams }: { searchPara
         suggested={suggested}
         bidsKnown={!!bidOn}
       />
+      {report && <SiteSeoCard site={report.site} admin={admin} />}
     </>
   )
 }

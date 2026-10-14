@@ -4,13 +4,16 @@ import { ExternalLink } from "lucide-react"
 
 import { AdGallery, CoverageGrid, SamplerCard } from "@/components/competitors/competitor-ads"
 import { DataTable, KpiGrid, PageHeader, Section, type Column } from "@/components/report"
+import { WatchButton } from "@/components/seo/watch-controls"
 import { isAdmin } from "@/lib/auth"
 import { DAYPARTS, analyzeAds, type AdvertiserRow, type Range } from "@/lib/competitors/ad-analysis"
 import { readSamples } from "@/lib/competitors/ad-samples"
 import { MAX_PER_WEEK, getSampler } from "@/lib/competitors/ad-sampler"
 import { brightReady } from "@/lib/competitors/brightdata"
 import { FREE_LIMIT, WINDOW_DAYS, freeSearches } from "@/lib/competitors/free-searches"
+import { isDirectory } from "@/lib/research/serp-analysis"
 import { OUR_SITES, scanPlaces } from "@/lib/research/serp"
+import { getWatchList } from "@/lib/seo/competitors"
 import { cn } from "@/lib/utils"
 
 export const metadata: Metadata = { title: "Competitor ads · DealTrack" }
@@ -90,7 +93,8 @@ export default async function CompetitorAdsPage({ searchParams }: { searchParams
   const q = await searchParams
   const days = PERIODS.includes(Number(q.days)) ? Number(q.days) : 28
   const dev = q.dev === "desktop" || q.dev === "mobile" ? q.dev : "all"
-  const [all, sampler, free, admin, places] = await Promise.all([readSamples(days), getSampler(), freeSearches(), isAdmin(), scanPlaces()])
+  const [all, sampler, free, admin, places, watched] = await Promise.all([readSamples(days), getSampler(), freeSearches(), isAdmin(), scanPlaces(), getWatchList()])
+  const watching = new Set(watched.map((w) => w.site))
   const ready = brightReady()
   const samples = dev === "all" ? all : all.filter((s) => s.dev === dev)
   const a = analyzeAds(samples, OUR_SITES)
@@ -112,6 +116,7 @@ export default async function CompetitorAdsPage({ searchParams }: { searchParams
         <div className="flex flex-col gap-0.5">
           <span className="font-medium">{r.ours ? `${r.d} (you)` : r.d}</span>
           {!r.ours && <AdLibraries domain={r.d} />}
+          {!r.ours && admin && !isDirectory(r.d) && <WatchButton site={r.d} from="ads" watching={watching.has(r.d)} />}
         </div>
       ),
     },

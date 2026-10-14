@@ -17,6 +17,8 @@ export const DATA_MANAGER_SCOPE = "https://www.googleapis.com/auth/datamanager"
 export const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 // For emailing alerts to the people set on the Alerts page (lib/notify.ts).
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+// For reading our site's Google search numbers (Competitors → SEO, lib/seo/search-console.ts).
+export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
 
 // `code` says what to do: NEEDS_PERMISSION (connect again), API_OFF (turn the API on), TRANSIENT.
 export class AdsApiError extends Error {

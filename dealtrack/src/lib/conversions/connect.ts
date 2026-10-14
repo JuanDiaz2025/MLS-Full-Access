@@ -6,18 +6,20 @@ import { createHash, randomBytes } from "node:crypto"
 import { cookies } from "next/headers"
 
 import { secureCookies, signValue, unsignValue } from "@/lib/auth"
-import { ADS_SCOPE, DATA_MANAGER_SCOPE, GMAIL_SCOPE, SHEETS_SCOPE, saveConnection } from "@/lib/conversions/google"
+import { ADS_SCOPE, DATA_MANAGER_SCOPE, GMAIL_SCOPE, SEARCH_CONSOLE_SCOPE, SHEETS_SCOPE, saveConnection } from "@/lib/conversions/google"
 import { adsAccountConfig } from "@/lib/google-ads/client"
 import { redirectUri } from "@/lib/google-signin"
 
 const COOKIE = "dt_conv_oauth"
+const DEFAULT_BACK = "/leads/automation"
 
-export async function startConnect(requestUrl: string, by: string) {
+// `back`: the page to return to afterwards (the Leads automation page unless another page asked).
+export async function startConnect(requestUrl: string, by: string, back = DEFAULT_BACK) {
   const { clientId } = adsAccountConfig()
   const state = randomBytes(16).toString("base64url")
   const verifier = randomBytes(32).toString("base64url")
   const challenge = createHash("sha256").update(verifier).digest("base64url")
-  const saved = Buffer.from(JSON.stringify({ state, verifier, by })).toString("base64url")
+  const saved = Buffer.from(JSON.stringify({ state, verifier, by, back })).toString("base64url")
   ;(await cookies()).set(COOKIE, signValue(saved), {
     httpOnly: true,
     secure: await secureCookies(),
@@ -30,7 +32,7 @@ export async function startConnect(requestUrl: string, by: string) {
     client_id: clientId,
     redirect_uri: redirectUri(requestUrl),
     response_type: "code",
-    scope: ["openid", "email", ADS_SCOPE, DATA_MANAGER_SCOPE, SHEETS_SCOPE, GMAIL_SCOPE].join(" "),
+    scope: ["openid", "email", ADS_SCOPE, DATA_MANAGER_SCOPE, SHEETS_SCOPE, GMAIL_SCOPE, SEARCH_CONSOLE_SCOPE].join(" "),
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -39,6 +41,14 @@ export async function startConnect(requestUrl: string, by: string) {
     include_granted_scopes: "true",
   }).toString()
   return url.toString()
+}
+
+// The page that asked for the connect, to go back to.
+export async function connectBack() {
+  const raw = unsignValue((await cookies()).get(COOKIE)?.value)
+  if (!raw) return DEFAULT_BACK
+  const back = (JSON.parse(Buffer.from(raw, "base64url").toString()) as { back?: string }).back
+  return back && /^\/[a-z0-9/_-]*$/.test(back) ? back : DEFAULT_BACK
 }
 
 // True when this callback belongs to a conversions connect (its state matches our cookie).

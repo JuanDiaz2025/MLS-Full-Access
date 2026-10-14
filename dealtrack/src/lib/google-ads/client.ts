@@ -9,7 +9,7 @@ const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v22"
 const ADS_ENDPOINT = "https://googleads.googleapis.com"
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
-// Report results are fresh for 10 minutes. Explorer access allows 2,880 API operations a day, so
+// Report results are fresh for 10 minutes. Basic access allows 15,000 API operations a day, so
 // clicking around the dashboard shouldn't spend a new operation on every page view. After that,
 // for up to 6 hours, the last result is shown straight away while a fresh one is fetched in the
 // background for the next view, so pages don't wait on Google.

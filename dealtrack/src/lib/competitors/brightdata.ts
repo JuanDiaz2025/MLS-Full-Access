@@ -14,7 +14,15 @@ export type AdBlock = "top" | "bottom"
 // One ad as Google showed it: advertiser's site, block, order in the block (1 = first), headline,
 // text, shown address, landing page (without its tracking), phone and sitelink texts.
 export type SeenAd = { d: string; block: AdBlock; r: number; t: string; desc?: string; dl?: string; u?: string; phone?: string; links?: string[] }
-export type GoogleResult = { organic: { u: string; t: string; p: number }[]; ads: SeenAd[]; aiOverview: boolean; mapPack: boolean }
+// questions: "People also ask"; related: "Related searches" (both what people search around it).
+export type GoogleResult = {
+  organic: { u: string; t: string; p: number }[]
+  ads: SeenAd[]
+  questions: string[]
+  related: string[]
+  aiOverview: boolean
+  mapPack: boolean
+}
 
 export const brightKey = () => (process.env.BRIGHTDATA_API_KEY ?? "").trim()
 export const brightZone = () => (process.env.BRIGHTDATA_SERP_ZONE ?? "").trim()
@@ -56,12 +64,25 @@ type RawAd = {
   extensions?: { type?: string; text?: string }[]
   global_rank?: number
 }
+type RawRelated = { text?: string; items?: RawRelated[] }
 type Raw = {
   organic?: { link?: string; title?: string; rank?: number; global_rank?: number }[]
   top_ads?: RawAd[]
   bottom_ads?: RawAd[]
+  people_also_ask?: { question?: string }[]
+  related?: RawRelated[]
   ai_overview?: unknown
   snack_pack?: unknown[]
+}
+
+// Related searches can hold more inside ("expanded" groups); all of them, once each, in order.
+function relatedTexts(list: RawRelated[] | undefined, out: string[] = []) {
+  for (const r of Array.isArray(list) ? list : []) {
+    const t = text(r?.text, 100).toLowerCase()
+    if (t && !out.includes(t)) out.push(t)
+    if (r?.items) relatedTexts(r.items, out)
+  }
+  return out.slice(0, 20)
 }
 
 const text = (s: unknown, max: number) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, max) : "")
@@ -95,16 +116,23 @@ export function readGoogleResult(raw: Raw): GoogleResult {
     .filter((r) => r?.link)
     .slice(0, 10)
     .map((r, i) => ({ u: r.link!.slice(0, 300), t: text(r.title, 140), p: r.rank ?? i + 1 }))
+  const questions = (Array.isArray(raw.people_also_ask) ? raw.people_also_ask : [])
+    .map((q) => text(q?.question, 160))
+    .filter(Boolean)
+    .slice(0, 10)
   return {
     organic,
     ads: [...readAds(raw.top_ads, "top"), ...readAds(raw.bottom_ads, "bottom")],
+    questions,
+    related: relatedTexts(raw.related),
     aiOverview: Boolean(raw.ai_overview),
     mapPack: Array.isArray(raw.snack_pack) && raw.snack_pack.length > 0,
   }
 }
 
-// One search. Takes one free search first; refuses once they're used up.
-export async function searchGoogle(keyword: string, place: string, device: Device = "desktop"): Promise<GoogleResult> {
+// One request through Bright Data (a Google search, or Google Trends), as parsed JSON. Takes one
+// free search first; refuses once they're used up.
+export async function brightRequest(url: string): Promise<unknown> {
   if (!brightReady()) throw new BrightDataError("Add BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE to .env.local first.", true)
   if (!(await takeFreeSearches(1))) {
     throw new FreeSearchesUsedUp(
@@ -117,7 +145,7 @@ export async function searchGoogle(keyword: string, place: string, device: Devic
     res = await fetch("https://api.brightdata.com/request", {
       method: "POST",
       headers: { authorization: `Bearer ${brightKey()}`, "content-type": "application/json" },
-      body: JSON.stringify({ zone: brightZone(), url: searchUrl(keyword, place, device), format: "raw" }),
+      body: JSON.stringify({ zone: brightZone(), url, format: "raw" }),
       cache: "no-store",
       signal: AbortSignal.timeout(60_000),
     })
@@ -132,12 +160,17 @@ export async function searchGoogle(keyword: string, place: string, device: Devic
   if (res.status === 402) throw new BrightDataError("Bright Data asked for payment, so DealTrack stopped. Nothing was charged.", true)
   if (res.status >= 400 && res.status < 500) throw new BrightDataError(`Bright Data refused the search (${res.status}${why ? `: ${why}` : ""}).`, true)
   if (!res.ok) throw new BrightDataError(`Bright Data answered ${res.status}`)
-  let raw: Raw
+  let raw: unknown
   try {
-    raw = JSON.parse(body) as Raw
+    raw = JSON.parse(body)
   } catch {
     throw new BrightDataError("Bright Data sent a page instead of results. Check that the zone is a SERP API zone.")
   }
   if (!raw || typeof raw !== "object") throw new BrightDataError("Bright Data sent no results.")
-  return readGoogleResult(raw)
+  return raw
+}
+
+// One Google search from a place.
+export async function searchGoogle(keyword: string, place: string, device: Device = "desktop"): Promise<GoogleResult> {
+  return readGoogleResult((await brightRequest(searchUrl(keyword, place, device))) as Raw)
 }

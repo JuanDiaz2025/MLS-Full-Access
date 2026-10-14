@@ -1,6 +1,6 @@
 // How many Google Ads API operations DealTrack has used today, for the meter in the header.
-// Google counts a day in Pacific time and Explorer access allows 2,880 operations a day
-// (GOOGLE_ADS_DAILY_LIMIT overrides it, e.g. 15000 once Basic access is approved).
+// Google counts a day in Pacific time, and our developer token's Basic access allows 15,000
+// operations a day (GOOGLE_ADS_DAILY_LIMIT overrides it, e.g. 2880 for a token with Explorer access).
 //
 // This is DealTrack's own count of the requests it sends, so it's close but not Google's official
 // number: another app using the same developer token (One Marketing Command Center, scripts) isn't
@@ -10,7 +10,7 @@
 import { jsonFileStore } from "@/lib/json-file-store"
 import { shared } from "@/lib/shared-state"
 
-export const DAILY_LIMIT = Number(process.env.GOOGLE_ADS_DAILY_LIMIT) || 2880
+export const DAILY_LIMIT = Number(process.env.GOOGLE_ADS_DAILY_LIMIT) || 15000
 
 type Usage = { day: string; used: number; hours: number[]; limitHit?: string }
 export type UsageView = Usage & { limit: number }

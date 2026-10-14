@@ -18,11 +18,16 @@
 //
 // Every 2 minutes it also runs the Competitor ads searches that are due, once the weekly sampling
 // is turned on there (Bright Data's free searches only). Set DEALTRACK_AD_SAMPLER=0 to turn it off.
+//
+// Every hour it also checks the competitor websites on Competitors → SEO → Competitor watch that are
+// due (once a week each by default), politely and as their robots.txt allows. Nothing happens until
+// a competitor is on the list. Set DEALTRACK_SITE_WATCH=0 to turn it off.
 
 const TODAY_EVERY_MS = 15 * 60 * 1000
 const REVIEW_EVERY_MS = 60 * 60 * 1000
 const BACKUP_EVERY_MS = 60 * 1000
 const AD_SAMPLES_EVERY_MS = 2 * 60 * 1000
+const SITE_WATCH_EVERY_MS = 60 * 60 * 1000
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return
@@ -55,6 +60,14 @@ export async function register() {
     g.__dtAdSampleTimer ??= setInterval(() => {
       import("@/lib/competitors/ad-sampler").then((m) => m.runDueSamples()).catch(() => undefined)
     }, AD_SAMPLES_EVERY_MS)
+  }
+  if (process.env.DEALTRACK_SITE_WATCH !== "0") {
+    const g = globalThis as { __dtSiteWatchTimer?: ReturnType<typeof setInterval> }
+    if (!g.__dtSiteWatchTimer) {
+      const check = () => import("@/lib/seo/site-watch").then((m) => m.runWatchIfDue()).catch(() => undefined)
+      setTimeout(check, 10 * 60_000)
+      g.__dtSiteWatchTimer = setInterval(check, SITE_WATCH_EVERY_MS)
+    }
   }
   {
     const g = globalThis as { __dtBackupTimer?: ReturnType<typeof setInterval> }

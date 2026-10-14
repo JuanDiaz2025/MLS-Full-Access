@@ -6,13 +6,16 @@ import { jsonFileStore } from "@/lib/json-file-store"
 import type { ParsedKeyword } from "@/lib/research/parse"
 import { normalizeKeyword } from "@/lib/research/parse"
 
-export type KeywordSource = "ads-report" | "planner" | "suggest" | "upload" | "manual"
+export type KeywordSource = "ads-report" | "planner" | "suggest" | "upload" | "manual" | "search-console" | "google-results" | "trends"
 export const SOURCE_LABELS: Record<KeywordSource, string> = {
   "ads-report": "Our Google Ads keywords",
   planner: "Keyword Planner",
   suggest: "Google suggestions",
   upload: "Uploaded file",
   manual: "Added by hand",
+  "search-console": "Search Console",
+  "google-results": "People also ask / related searches",
+  trends: "Google Trends (rising)",
 }
 
 export type ResearchKeyword = {

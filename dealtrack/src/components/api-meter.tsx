@@ -1,6 +1,6 @@
 "use client"
 
-// "API 312 / 2,880" in the header: how much of today's Google Ads API allowance DealTrack has
+// "API 312 / 15,000" in the header: how much of today's Google Ads API allowance DealTrack has
 // used. Refreshes every minute and on every page change. Click it for the details.
 
 import { useEffect, useRef, useState } from "react"

@@ -36,6 +36,7 @@ export type ExplorerRow = {
   sources: string[]
   group: string | null // close variants Google counts together share this
   variantOf?: string // the keyword the group's searches are counted under
+  google?: { position: number; views: number; clicks: number } // us in Google's free results (Search Console, 28 days)
 }
 
 // Searches a month for a set of keywords, each group of close variants counted once.
@@ -65,6 +66,7 @@ type Props = {
   volumesFor: string[] // California alone, or the places added up
   estimateNote: string // set when the volumes shown are estimates
   cities: CityStatus
+  searchConsole?: boolean // Search Console is connected: the "Us on Google" column
 }
 
 // The background run that gets every targeted city's volumes from Keyword Planner.
@@ -103,6 +105,7 @@ export default function KeywordExplorer({
   volumesFor,
   estimateNote,
   cities,
+  searchConsole = false,
 }: Props) {
   const router = useRouter()
   const [group, setGroup] = useState<"topic" | "place">("topic")
@@ -374,6 +377,11 @@ export default function KeywordExplorer({
                     {header("place", "City in keyword")}
                     {header("volume", "Volume", true)}
                     <th className="px-3 py-2 font-medium">Trend</th>
+                    {searchConsole && (
+                      <th className="px-3 py-2 text-right font-medium" title="Search Console, last 28 days, every place">
+                        Us on Google
+                      </th>
+                    )}
                     {header("cpc", "CPC (top of page)", true)}
                     <th className="px-3 py-2 font-medium">Competition</th>
                     {header("words", "Words", true)}
@@ -414,6 +422,20 @@ export default function KeywordExplorer({
                       <td className="px-3 py-1.5">
                         <Trend values={r.trend} />
                       </td>
+                      {searchConsole && (
+                        <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">
+                          {r.google ? (
+                            <span className="flex flex-col items-end">
+                              <span>pos. {r.google.position.toFixed(1)}</span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {fmt(r.google.views)} views · {fmt(r.google.clicks)} clicks
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">–</span>
+                          )}
+                        </td>
+                      )}
                       <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">
                         {r.cpcHigh === null ? (
                           <span className="text-muted-foreground">–</span>
