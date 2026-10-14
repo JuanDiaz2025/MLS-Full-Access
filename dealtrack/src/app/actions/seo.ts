@@ -14,7 +14,7 @@ import { addKeywords, type KeywordSource } from "@/lib/research/keywords"
 import { addCompetitor, getWatchList, removeCompetitor, updateCompetitor, type WatchedSite } from "@/lib/seo/competitors"
 import { SearchConsoleError, listSites, searchConsoleReport, setSearchConsoleSite } from "@/lib/seo/search-console"
 import { EVERY_CHOICES, PAGE_CHOICES, decideChanges, forgetSite, noteChange, requestCheck, saveWatchSettings, type ChangeStatus } from "@/lib/seo/site-watch"
-import { TRENDS_PER_RUN, checkTrends } from "@/lib/seo/trends"
+import { TRENDS_PER_RUN, startTrendsCheck } from "@/lib/seo/trends"
 
 export type SeoState = { ok: boolean; message: string }
 
@@ -49,13 +49,14 @@ export async function refreshSearchConsoleAction(days: number): Promise<SeoState
 
 // ---- Keywords -----------------------------------------------------------------------------------
 
-// Up to 10 keywords' Google Trends lines: one free search each.
-export async function checkTrendsAction(keywords: string[]): Promise<SeoState> {
+// Google Trends lines for the picked keywords, else the first ones without one: one free search
+// each, in the background (10 at most, 1 after a check that got nothing back).
+export async function checkTrendsAction(keywords: string[], picked = false): Promise<SeoState> {
   if (!(await isAdmin())) return { ok: false, message: "Only admins can check Google Trends (it uses the free searches)." }
   if (!brightReady()) return { ok: false, message: "Add BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE to .env.local first, then restart the app." }
   const list = (Array.isArray(keywords) ? keywords : []).map((k) => String(k).slice(0, 80)).slice(0, TRENDS_PER_RUN * 5)
   if (!list.length) return { ok: false, message: "No keywords to check." }
-  const result = await checkTrends(list)
+  const result = await startTrendsCheck(list, Boolean(picked), await who())
   refresh()
   return result
 }

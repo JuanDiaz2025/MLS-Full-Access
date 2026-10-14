@@ -21,13 +21,13 @@ import { CA, estimates, keywordIdeas } from "@/lib/seo/keywords"
 import { latestRankings, rankKey, searchIdeas } from "@/lib/seo/rankings"
 import { SELLER_TOPICS } from "@/lib/seo/search-analysis"
 import { searchConsoleReport } from "@/lib/seo/search-console"
-import { TRENDS_PER_RUN, getTrends, trendsFresh } from "@/lib/seo/trends"
+import { getTrends, getTrendsRun, trendsFresh, trendsLimit, trendsProgress } from "@/lib/seo/trends"
 
 const fmt = (n: number) => n.toLocaleString("en-US")
 
 export default async function KeywordsTab({ admin, place: asked }: { admin: boolean; place?: string }) {
   const ready = brightReady()
-  const [research, sc, ads, rankings, trends, free, signedIn] = await Promise.all([
+  const [research, sc, ads, rankings, trends, free, signedIn, trendsRun] = await Promise.all([
     getResearch(),
     searchConsoleReport(28).catch(() => null),
     adsSearches().catch(() => new Map()),
@@ -35,6 +35,7 @@ export default async function KeywordsTab({ admin, place: asked }: { admin: bool
     getTrends(),
     ready ? freeSearches() : null,
     isSignedIn(),
+    getTrendsRun(),
   ])
   const shares = estimatedShares(research.placeTotals, research.keywords)
   const planner = new Set(volumeLocations(research.keywords).map((p) => p.place))
@@ -52,11 +53,15 @@ export default async function KeywordsTab({ admin, place: asked }: { admin: bool
       })
   const input = { keywords, shares, ads, sc, rankings, trends, ourSites: OUR_SITES }
   const byRank = new Map(rankings.map((r) => [rankKey(r.loc, r.k), r]))
-  const rows: KeywordRow[] = estimates(input, place).map((e) => ({
-    ...e,
-    top: (byRank.get(rankKey(place, e.k))?.now.top ?? []).map((site) => ({ site, dir: isDirectory(site), ours: OUR_SITES.includes(site) })),
-    trendsFresh: trendsFresh(e.trendsAt),
-  }))
+  const rows: KeywordRow[] = estimates(input, place).map((e) => {
+    const t = trends[normalizeKeyword(e.k) ?? e.k]
+    return {
+      ...e,
+      top: (byRank.get(rankKey(place, e.k))?.now.top ?? []).map((site) => ({ site, dir: isDirectory(site), ours: OUR_SITES.includes(site) })),
+      trendsFresh: trendsFresh(t),
+      trendsNote: t && "error" in t ? t.error : null,
+    }
+  })
 
   const known = new Set(research.keywords.map((k) => normalizeKeyword(k.text) ?? k.text))
   const ideas = keywordIdeas(sc, await searchIdeas(42, known), trends, known)
@@ -138,7 +143,9 @@ export default async function KeywordsTab({ admin, place: asked }: { admin: bool
           admin={admin}
           trendsReady={ready}
           freeLeft={free?.left ?? null}
-          trendsPerRun={TRENDS_PER_RUN}
+          trendsPerRun={trendsLimit(trendsRun)}
+          trendsRun={trendsRun}
+          trendsProgress={trendsProgress()}
         />
       </Section>
 

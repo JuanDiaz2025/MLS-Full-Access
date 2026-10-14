@@ -5,7 +5,7 @@
 // have (our ads, Search Console), who ranks there and where we are, and the visits that's worth.
 // Admins can check Google Trends for a few keywords (Bright Data's free searches).
 
-import { Fragment, useMemo, useState, useTransition } from "react"
+import { Fragment, useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { ChevronDown, ChevronRight, LoaderCircle, TrendingUp } from "lucide-react"
 
@@ -14,9 +14,11 @@ import Sparkline from "@/components/dashboard/sparkline"
 import { Pill } from "@/components/pill"
 import { Button } from "@/components/ui/button"
 import type { EstimateRow } from "@/lib/seo/keywords"
+import type { TrendsRun } from "@/lib/seo/trends"
 import { cn } from "@/lib/utils"
 
-export type KeywordRow = EstimateRow & { top: { site: string; dir: boolean; ours: boolean }[]; trendsFresh: boolean }
+// trendsNote: why the last Google Trends check of this keyword got no line.
+export type KeywordRow = EstimateRow & { top: { site: string; dir: boolean; ours: boolean }[]; trendsFresh: boolean; trendsNote: string | null }
 
 const fmt = (n: number) => n.toLocaleString("en-US")
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric" })
@@ -69,6 +71,8 @@ export default function KeywordTable({
   trendsReady,
   freeLeft,
   trendsPerRun,
+  trendsRun,
+  trendsProgress,
 }: {
   rows: KeywordRow[]
   ca: boolean
@@ -78,7 +82,9 @@ export default function KeywordTable({
   admin: boolean
   trendsReady: boolean
   freeLeft: number | null
-  trendsPerRun: number
+  trendsPerRun: number // 10, or 1 to test after a check that got nothing back
+  trendsRun: TrendsRun | null
+  trendsProgress: { total: number; done: number; current: string; started: string } | null
 }) {
   const router = useRouter()
   const [search, setSearch] = useState("")
@@ -91,6 +97,12 @@ export default function KeywordTable({
   const [message, setMessage] = useState<SeoState | null>(null)
   const [busy, start] = useTransition()
   const topicLabel = useMemo(() => Object.fromEntries(topics.map((t) => [t.id, t.label])), [topics])
+  // While a Google Trends check runs (in the background), the page refreshes itself to show it.
+  useEffect(() => {
+    if (!trendsProgress) return
+    const t = setInterval(() => router.refresh(), 5000)
+    return () => clearInterval(t)
+  }, [trendsProgress, router])
   const seller = useMemo(() => new Set(sellerTopics), [sellerTopics])
 
   const list = useMemo(() => {
@@ -111,7 +123,7 @@ export default function KeywordTable({
     })
   }, [rows, search, topic, onlyNumbers, sort, seller])
 
-  const trendsFor = picked.size ? [...picked] : list.filter((r) => r.searches !== null && !r.trendsFresh).slice(0, trendsPerRun).map((r) => r.k)
+  const trendsFor = picked.size ? [...picked].slice(0, trendsPerRun) : list.filter((r) => r.searches !== null && !r.trendsFresh).slice(0, trendsPerRun).map((r) => r.k)
   const header = (key: SortKey, label: string, right = true) => (
     <th className={cn("px-3 py-2 font-medium whitespace-nowrap", right && "text-right")}>
       <button
@@ -166,18 +178,20 @@ export default function KeywordTable({
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy || !trendsFor.length}
+              disabled={busy || !!trendsProgress || !trendsFor.length}
               onClick={() =>
                 start(async () => {
                   setMessage(null)
-                  setMessage(await checkTrendsAction(trendsFor))
+                  setMessage(await checkTrendsAction(trendsFor, picked.size > 0))
                   setPicked(new Set())
                   router.refresh()
                 })
               }
             >
-              {busy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <TrendingUp data-icon="inline-start" />}
-              Check Google Trends ({picked.size ? `${Math.min(picked.size, trendsPerRun)} picked` : `top ${trendsFor.length}`})
+              {busy || trendsProgress ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <TrendingUp data-icon="inline-start" />}
+              {trendsProgress
+                ? `Checking Google Trends: ${trendsProgress.done} of ${trendsProgress.total}`
+                : `Check Google Trends (${picked.size ? `${trendsFor.length} picked` : !trendsFor.length ? "all checked" : trendsPerRun === 1 ? "1 to test" : `top ${trendsFor.length}`})`}
             </Button>
             <span className="text-xs text-muted-foreground">
               One free search each{freeLeft !== null ? ` (${fmt(freeLeft)} left)` : ""}. Kept 30 days.
@@ -188,6 +202,24 @@ export default function KeywordTable({
       {message && (
         <p role="status" className={cn("text-xs", message.ok ? "text-emerald-700 dark:text-emerald-400" : "text-destructive")}>
           {message.message}
+        </p>
+      )}
+      {admin && trendsReady && trendsProgress && (
+        <p className="text-xs text-muted-foreground" role="status">
+          Google Trends: {trendsProgress.done} of {trendsProgress.total} done{trendsProgress.current ? `, now “${trendsProgress.current}”` : ""}. One at a time, up to 2 minutes each;
+          this page updates by itself.
+        </p>
+      )}
+      {admin && trendsReady && !trendsProgress && trendsRun && (
+        <p className={cn("text-xs", trendsRun.got ? "text-muted-foreground" : "text-amber-700 dark:text-amber-400")}>
+          Last Google Trends check, {day(trendsRun.at)}: {trendsRun.got} of {trendsRun.asked} got a line
+          {Object.keys(trendsRun.reasons).length
+            ? `. No line: ${Object.entries(trendsRun.reasons)
+                .map(([why, n]) => `${why} (${n})`)
+                .join("; ")}`
+            : ""}
+          {trendsRun.stopped ? `. Stopped: ${trendsRun.stopped}` : ""}.
+          {trendsPerRun === 1 ? " So the next check tests 1 keyword first; once one gets a line, checks take 10 again." : ""}
         </p>
       )}
       <div className="-mx-4 overflow-x-auto sm:-mx-5">
@@ -247,6 +279,11 @@ export default function KeywordTable({
                     <td className="w-36 px-3 py-2">
                       {r.trend.length >= 2 ? <Sparkline values={r.trend} className="text-primary" /> : <span className="text-muted-foreground">–</span>}
                       <Now r={r} />
+                      {r.trendsAt && r.nowFrom !== "Google Trends" && (
+                        <span className="block text-[11px] whitespace-nowrap text-muted-foreground" title={r.trendsNote ?? undefined}>
+                          Trends {day(r.trendsAt)}: no line
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {r.ads ? (
@@ -314,7 +351,12 @@ export default function KeywordTable({
                                 from California&apos;s numbers.
                               </p>
                             )}
-                            {r.trendsAt && <p className="text-muted-foreground">Google Trends checked {day(r.trendsAt)}{r.nowFrom === "Google Trends" ? "" : ": no line for this search"}.</p>}
+                            {r.trendsAt && (
+                              <p className="text-muted-foreground">
+                                Google Trends checked {day(r.trendsAt)}
+                                {r.nowFrom === "Google Trends" ? "." : `: no line. ${r.trendsNote ?? ""}`}
+                              </p>
+                            )}
                             {r.sc?.page && (
                               <p>
                                 Our page Google shows most:{" "}

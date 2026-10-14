@@ -131,8 +131,9 @@ export function readGoogleResult(raw: Raw): GoogleResult {
 }
 
 // One request through Bright Data (a Google search, or Google Trends), as parsed JSON. Takes one
-// free search first, noting what it's for; refuses once they're used up.
-export async function brightRequest(url: string, use: SearchUse): Promise<unknown> {
+// free search first, noting what it's for; refuses once they're used up. Waits up to a minute for
+// the answer (`timeoutMs` for slower ones).
+export async function brightRequest(url: string, use: SearchUse, { timeoutMs = 60_000 }: { timeoutMs?: number } = {}): Promise<unknown> {
   if (!brightReady()) throw new BrightDataError("Add BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE to .env.local first.", true)
   if (!(await takeFreeSearches(1, use))) {
     throw new FreeSearchesUsedUp(
@@ -147,10 +148,10 @@ export async function brightRequest(url: string, use: SearchUse): Promise<unknow
       headers: { authorization: `Bearer ${brightKey()}`, "content-type": "application/json" },
       body: JSON.stringify({ zone: brightZone(), url, format: "raw" }),
       cache: "no-store",
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (e) {
-    throw new BrightDataError(e instanceof Error && e.name === "TimeoutError" ? "Took too long" : "Couldn't reach Bright Data")
+    throw new BrightDataError(e instanceof Error && e.name === "TimeoutError" ? `Bright Data didn't answer in ${Math.round(timeoutMs / 1000)} seconds` : "Couldn't reach Bright Data")
   }
   const body = await res.text().catch(() => "")
   const why = (res.headers.get("x-brd-error") ?? body).replace(/\s+/g, " ").trim().slice(0, 160)
