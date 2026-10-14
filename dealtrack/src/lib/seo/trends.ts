@@ -110,8 +110,9 @@ export function describeAnswer(raw: unknown) {
 // A line is good for 30 days; a keyword that got none is tried again after 7.
 export const trendsFresh = (e: TrendEntry | undefined | null) => !!e && Date.now() - Date.parse(e.at) < ("error" in e ? RETRY_DAYS : KEEP_DAYS) * DAY
 
-// Keywords a check takes: 10, or 1 when the last check got nothing back (a test first).
-export const trendsLimit = (run: TrendsRun | null) => (run && run.got === 0 && run.asked >= 2 ? 1 : TRENDS_PER_RUN)
+// Keywords a check takes: 10, or 1 while the last check got nothing back (a 1-keyword test that
+// got nothing keeps it at 1).
+export const trendsLimit = (run: TrendsRun | null) => (run && run.asked > 0 && run.got === 0 ? 1 : TRENDS_PER_RUN)
 
 const job = shared("trends-job", () => ({ running: false, total: 0, done: 0, current: "", started: 0 }))
 export const trendsProgress = () =>
