@@ -96,6 +96,11 @@ export default function BrightDataMeter() {
             <p className="text-xs text-muted-foreground">
               {fmt(view.used)} used in the last 32 days: {fmt(view.today)} today, {fmt(view.week)} in the last 7 days, {fmt(view.month)} in {today ? monthOf(today) : "this month"}.
             </p>
+            {view.failed > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {fmt(view.failed)} more got an error from Bright Data instead of results: Bright Data doesn&apos;t count those, so DealTrack gave them back.
+              </p>
+            )}
             {view.moreOn ? (
               <p className="text-xs font-medium text-red-700">All used: DealTrack makes no more until {day(view.moreOn)}, so nothing can be charged.</p>
             ) : view.nextFree ? (

@@ -4,7 +4,7 @@
 // Settings: BRIGHTDATA_API_KEY (Bright Data → Account settings → API keys) and
 // BRIGHTDATA_SERP_ZONE (the name of the SERP API zone). Only the free tier is used: each search is
 // taken from free-searches.ts first, and none is made once it's used up.
-import { takeFreeSearches, freeCap, WINDOW_DAYS, type SearchUse } from "@/lib/competitors/free-searches"
+import { giveBackFreeSearch, takeFreeSearches, freeCap, WINDOW_DAYS, type SearchUse } from "@/lib/competitors/free-searches"
 import { siteOf } from "@/lib/research/site"
 
 const STATEWIDE = "California"
@@ -132,43 +132,65 @@ export function readGoogleResult(raw: Raw): GoogleResult {
 
 // One request through Bright Data (a Google search, or Google Trends), as parsed JSON. Takes one
 // free search first, noting what it's for; refuses once they're used up. Waits up to a minute for
-// the answer (`timeoutMs` for slower ones).
+// the answer (`timeoutMs` for slower ones). Bright Data answers a search it couldn't make with
+// "200 OK", no results and its reason in x-brd-error ("no ready cookies": no browser session ready
+// yet, which clears in seconds): that search is given back (Bright Data doesn't count it) and,
+// when it came back quickly, tried once more 5 seconds later.
 export async function brightRequest(url: string, use: SearchUse, { timeoutMs = 60_000 }: { timeoutMs?: number } = {}): Promise<unknown> {
   if (!brightReady()) throw new BrightDataError("Add BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE to .env.local first.", true)
-  if (!(await takeFreeSearches(1, use))) {
-    throw new FreeSearchesUsedUp(
-      `The free Bright Data searches are used up (${freeCap().toLocaleString("en-US")} in the last ${WINDOW_DAYS} days). DealTrack makes no more until some free up, so nothing is charged.`,
-      true,
-    )
+  const started = Date.now()
+  for (let attempt = 1; ; attempt++) {
+    if (!(await takeFreeSearches(1, use))) {
+      throw new FreeSearchesUsedUp(
+        `The free Bright Data searches are used up (${freeCap().toLocaleString("en-US")} in the last ${WINDOW_DAYS} days). DealTrack makes no more until some free up, so nothing is charged.`,
+        true,
+      )
+    }
+    let res: Response
+    try {
+      res = await fetch("https://api.brightdata.com/request", {
+        method: "POST",
+        headers: { authorization: `Bearer ${brightKey()}`, "content-type": "application/json" },
+        body: JSON.stringify({ zone: brightZone(), url, format: "raw" }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+    } catch (e) {
+      // No answer in time: it may still have made the search, so it stays counted.
+      if (e instanceof Error && e.name === "TimeoutError") throw new BrightDataError(`Bright Data didn't answer in ${Math.round(timeoutMs / 1000)} seconds`)
+      await giveBackFreeSearch(use)
+      throw new BrightDataError("Couldn't reach Bright Data")
+    }
+    const body = await res.text().catch(() => "")
+    const brdError = res.headers.get("x-brd-error")
+    const why = (brdError ?? body).replace(/\s+/g, " ").trim().slice(0, 160)
+    // Anything but results isn't counted by Bright Data.
+    if (!res.ok || brdError || !body.trim()) await giveBackFreeSearch(use)
+    if (res.status === 429) throw new BrightDataError("Too many searches at once", false, true)
+    if (res.status === 401 || res.status === 403)
+      throw new BrightDataError(`Bright Data refused the search${why ? ` (${why})` : ""}. Check BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE in .env.local.`, true)
+    if (res.status === 402) throw new BrightDataError("Bright Data asked for payment, so DealTrack stopped. Nothing was charged.", true)
+    if (res.status >= 400 && res.status < 500) throw new BrightDataError(`Bright Data refused the search (${res.status}${why ? `: ${why}` : ""}).`, true)
+    // Its servers having trouble (502, 504) or no results for this one: once more, if it was quick.
+    const trouble = !res.ok || brdError || !body.trim()
+    if (trouble && attempt === 1 && Date.now() - started < 20_000) {
+      await new Promise((r) => setTimeout(r, 5000))
+      continue
+    }
+    if (!res.ok) throw new BrightDataError(`Bright Data answered ${res.status}; it doesn't count those`)
+    if (trouble) {
+      const upstream = res.headers.get("x-brd-status-code")
+      throw new BrightDataError(`Bright Data couldn't get the page (${brdError ?? "an empty answer"}${upstream ? `, ${upstream}` : ""}); it doesn't count those`)
+    }
+    let raw: unknown
+    try {
+      raw = JSON.parse(body)
+    } catch {
+      throw new BrightDataError("Bright Data sent a page instead of results. Check that the zone is a SERP API zone.")
+    }
+    if (!raw || typeof raw !== "object") throw new BrightDataError("Bright Data sent no results.")
+    return raw
   }
-  let res: Response
-  try {
-    res = await fetch("https://api.brightdata.com/request", {
-      method: "POST",
-      headers: { authorization: `Bearer ${brightKey()}`, "content-type": "application/json" },
-      body: JSON.stringify({ zone: brightZone(), url, format: "raw" }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-  } catch (e) {
-    throw new BrightDataError(e instanceof Error && e.name === "TimeoutError" ? `Bright Data didn't answer in ${Math.round(timeoutMs / 1000)} seconds` : "Couldn't reach Bright Data")
-  }
-  const body = await res.text().catch(() => "")
-  const why = (res.headers.get("x-brd-error") ?? body).replace(/\s+/g, " ").trim().slice(0, 160)
-  if (res.status === 429) throw new BrightDataError("Too many searches at once", false, true)
-  if (res.status === 401 || res.status === 403)
-    throw new BrightDataError(`Bright Data refused the search${why ? ` (${why})` : ""}. Check BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE in .env.local.`, true)
-  if (res.status === 402) throw new BrightDataError("Bright Data asked for payment, so DealTrack stopped. Nothing was charged.", true)
-  if (res.status >= 400 && res.status < 500) throw new BrightDataError(`Bright Data refused the search (${res.status}${why ? `: ${why}` : ""}).`, true)
-  if (!res.ok) throw new BrightDataError(`Bright Data answered ${res.status}`)
-  let raw: unknown
-  try {
-    raw = JSON.parse(body)
-  } catch {
-    throw new BrightDataError("Bright Data sent a page instead of results. Check that the zone is a SERP API zone.")
-  }
-  if (!raw || typeof raw !== "object") throw new BrightDataError("Bright Data sent no results.")
-  return raw
 }
 
 // One Google search from a place: for the weekly searches, a rankings scan, or a test.

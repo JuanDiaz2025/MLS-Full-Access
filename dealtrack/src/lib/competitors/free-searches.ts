@@ -2,8 +2,9 @@
 // own: every Bright Data search is counted here before it's made, and none is made once 4,800 were
 // made in the last 32 days, so no billing month can go over, whenever it starts and in any time
 // zone. BRIGHTDATA_MONTHLY_CAP can lower the limit (2,400 on each of two computers sharing one
-// Bright Data account, say), never raise it. Saved in .data/brightdata-usage.json, a count per
-// day (UTC), and what each was for (the header's Bright Data meter shows both).
+// Bright Data account, say), never raise it. A search Bright Data says it couldn't make (it doesn't
+// count those) is given back. Saved in .data/brightdata-usage.json, a count per day (UTC), what
+// each was for, and the ones given back (the header's Bright Data meter shows all three).
 import { jsonFileStore } from "@/lib/json-file-store"
 
 export const FREE_LIMIT = 4800
@@ -15,7 +16,7 @@ const DAY = 86_400_000
 export type SearchUse = "sampler" | "scan" | "trends" | "test"
 export const SEARCH_USES: SearchUse[] = ["sampler", "scan", "trends", "test"]
 
-type UsageFile = { days: Record<string, number>; uses?: Record<string, Partial<Record<SearchUse, number>>> }
+type UsageFile = { days: Record<string, number>; uses?: Record<string, Partial<Record<SearchUse, number>>>; failed?: Record<string, number> }
 const file = jsonFileStore<UsageFile>("brightdata-usage.json", () => ({ days: {} }))
 
 export function freeCap() {
@@ -29,6 +30,7 @@ const usedIn = (days: Record<string, number>, now: number) => windowDays(now).re
 
 // used / left: in the last 32 days. week, month: the last 7 days and this calendar month (UTC).
 // byUse: what the 32 days' searches were for ("other": counted before DealTrack kept that).
+// failed: the ones Bright Data couldn't make, given back (not in used).
 // daily: each of the 32 days, oldest first. nextFree: the oldest day's searches, and when they
 // leave the 32 days. moreOn: when all are used, the day room comes back.
 export type FreeSearches = {
@@ -39,6 +41,7 @@ export type FreeSearches = {
   week: number
   month: number
   byUse: Record<SearchUse | "other", number>
+  failed: number
   daily: { day: string; n: number }[]
   nextFree?: { day: string; n: number }
   moreOn?: string
@@ -73,6 +76,7 @@ export async function freeSearches(): Promise<FreeSearches> {
     week: window.slice(0, 7).reduce((n, d) => n + (days[d] ?? 0), 0),
     month: window.filter((d) => d.startsWith(month)).reduce((n, d) => n + (days[d] ?? 0), 0),
     byUse,
+    failed: window.reduce((n, d) => n + (f.failed?.[d] ?? 0), 0),
     daily: [...window].reverse().map((d) => ({ day: d, n: days[d] ?? 0 })),
     ...(oldest ? { nextFree: { day: freeOn(oldest), n: days[oldest] ?? 0 } } : {}),
     ...(used >= cap && oldest ? { moreOn: freeOn(oldest) } : {}),
@@ -97,6 +101,22 @@ export function takeFreeSearches(n = 1, use?: SearchUse): Promise<boolean> {
     const keep = new Set(windowDays(now))
     for (const d of Object.keys(x.days)) if (!keep.has(d)) delete x.days[d]
     for (const d of Object.keys(x.uses ?? {})) if (!keep.has(d)) delete x.uses![d]
+    for (const d of Object.keys(x.failed ?? {})) if (!keep.has(d)) delete x.failed![d]
     return true
+  })
+}
+
+// Gives back a search Bright Data said it couldn't make (an error instead of results): Bright Data
+// doesn't count those. Taken from today's count; one taken just before midnight (UTC) stays
+// counted, on the safe side.
+export function giveBackFreeSearch(use?: SearchUse): Promise<void> {
+  return file.update((x) => {
+    const today = dayOf(Date.now())
+    if (!x.days?.[today]) return
+    x.days[today]--
+    const t = x.uses?.[today]
+    if (use && t?.[use]) t[use]!--
+    x.failed ??= {}
+    x.failed[today] = (x.failed[today] ?? 0) + 1
   })
 }
