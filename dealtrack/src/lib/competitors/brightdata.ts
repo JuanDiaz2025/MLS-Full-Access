@@ -15,6 +15,8 @@ export type AdBlock = "top" | "bottom"
 // text, shown address, landing page (without its tracking), phone and sitelink texts.
 export type SeenAd = { d: string; block: AdBlock; r: number; t: string; desc?: string; dl?: string; u?: string; phone?: string; links?: string[] }
 // questions: "People also ask"; related: "Related searches" (both what people search around it).
+// where: where Google says it ran the search ("Redwood City, California"); "" when Bright Data
+// doesn't say.
 export type GoogleResult = {
   organic: { u: string; t: string; p: number }[]
   ads: SeenAd[]
@@ -22,6 +24,7 @@ export type GoogleResult = {
   related: string[]
   aiOverview: boolean
   mapPack: boolean
+  where: string
 }
 
 export const brightKey = () => (process.env.BRIGHTDATA_API_KEY ?? "").trim()
@@ -49,10 +52,32 @@ const shownSite = (display: string) => siteOf((display.split(/\s|›/)[0] ?? "")
 // "Oakland,California,United States".
 export const canonicalPlace = (place: string) => (place === STATEWIDE ? "California,United States" : `${place},California,United States`)
 
+// The same name in Google's own code for a place (uule): "w " and, in base64, a few fixed bytes,
+// the name's length and the name. "Redwood City,California,United States" →
+// "w CAIQICIlUmVkd29vZCBDaXR5LENhbGlmb3JuaWEsVW5pdGVkIFN0YXRlcw", as Bright Data's Playground makes it.
+export function uuleOf(name: string) {
+  const bytes = [...new TextEncoder().encode(name)]
+  const len: number[] = []
+  let n = bytes.length
+  for (; n >= 0x80; n >>>= 7) len.push((n & 0x7f) | 0x80)
+  len.push(n)
+  return `w ${btoa(String.fromCharCode(0x08, 0x02, 0x10, 0x20, 0x22, ...len, ...bytes)).replace(/=+$/, "")}`
+}
+
 export function searchUrl(keyword: string, place: string, device: Device) {
-  // Nothing may come before q= (Bright Data's rule); spaces as "+", commas as they are.
-  const uule = encodeURIComponent(canonicalPlace(place)).replace(/%2C/g, ",").replace(/%20/g, "+")
-  return `https://www.google.com/search?q=${encodeURIComponent(keyword).replace(/%20/g, "+")}&gl=us&hl=en&uule=${uule}&brd_json=1${device === "mobile" ? "&brd_mobile=1" : ""}`
+  // Nothing may come before q= (Bright Data's rule). The place goes both ways Bright Data's
+  // Playground sends it: by name (location=) and in Google's code (uule=). Spaces as "+".
+  const plus = (s: string) => encodeURIComponent(s).replace(/%20/g, "+")
+  const name = canonicalPlace(place)
+  return `https://www.google.com/search?q=${plus(keyword)}&brd_json=1&gl=US&hl=en&location=${plus(name).replace(/%2C/g, ",")}&uule=${plus(uuleOf(name))}${device === "mobile" ? "&brd_mobile=1" : ""}`
+}
+
+// Whether Google ran the search from the place asked for ("Redwood City, California" for Redwood
+// City); null when Bright Data didn't say where, or for the whole state.
+export function ranFrom(place: string, where: string | undefined): boolean | null {
+  if (!where || place === STATEWIDE) return null
+  const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+  return plain(where.split(",")[0] ?? "") === plain(place)
 }
 
 type RawAd = {
@@ -66,6 +91,7 @@ type RawAd = {
 }
 type RawRelated = { text?: string; items?: RawRelated[] }
 type Raw = {
+  general?: { location?: string }
   organic?: { link?: string; title?: string; rank?: number; global_rank?: number }[]
   top_ads?: RawAd[]
   bottom_ads?: RawAd[]
@@ -127,6 +153,7 @@ export function readGoogleResult(raw: Raw): GoogleResult {
     related: relatedTexts(raw.related),
     aiOverview: Boolean(raw.ai_overview),
     mapPack: Array.isArray(raw.snack_pack) && raw.snack_pack.length > 0,
+    where: text(raw.general?.location, 80),
   }
 }
 

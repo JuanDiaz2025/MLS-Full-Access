@@ -12,8 +12,9 @@ import { DATA_DIR } from "@/lib/store"
 // at: when (UTC); k: keyword; loc: the place it was searched from; dev: computer or phone;
 // src: the weekly sampling or a Google rankings scan; org: the top 10 (site, position, address);
 // paa: "People also ask"; rel: related searches; ai/maps: Google also showed an AI Overview or the
-// Google Maps box (both leave less room for ads). Samples saved before DealTrack kept the top 10
-// (October 2026) have no org, paa or rel.
+// Google Maps box (both leave less room for ads); where: where Google says it ran the search
+// ("Redwood City, California"), when Bright Data says. Samples saved before DealTrack kept the top
+// 10 (October 2026) have no org, paa or rel, and earlier ones no where.
 export type OrganicHit = { d: string; p: number; u: string }
 export type AdSample = {
   at: string
@@ -27,6 +28,7 @@ export type AdSample = {
   rel?: string[]
   ai?: boolean
   maps?: boolean
+  where?: string
 }
 
 // A sample from one Bright Data search.
@@ -44,6 +46,7 @@ export function sampleOf(found: GoogleResult, k: string, loc: string, dev: Devic
     ...(found.related.length ? { rel: found.related } : {}),
     ...(found.aiOverview ? { ai: true } : {}),
     ...(found.mapPack ? { maps: true } : {}),
+    ...(found.where ? { where: found.where } : {}),
   }
 }
 

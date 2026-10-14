@@ -9,7 +9,7 @@ import { isAdmin } from "@/lib/auth"
 import { DAYPARTS, analyzeAds, type AdvertiserRow, type Range } from "@/lib/competitors/ad-analysis"
 import { readSamples } from "@/lib/competitors/ad-samples"
 import { MAX_PER_WEEK, getSampler } from "@/lib/competitors/ad-sampler"
-import { brightReady } from "@/lib/competitors/brightdata"
+import { brightReady, ranFrom } from "@/lib/competitors/brightdata"
 import { FREE_LIMIT, WINDOW_DAYS, freeSearches } from "@/lib/competitors/free-searches"
 import { isDirectory } from "@/lib/research/serp-analysis"
 import { OUR_SITES, scanPlaces } from "@/lib/research/serp"
@@ -98,6 +98,10 @@ export default async function CompetitorAdsPage({ searchParams }: { searchParams
   const ready = brightReady()
   const samples = dev === "all" ? all : all.filter((s) => s.dev === dev)
   const a = analyzeAds(samples, OUR_SITES)
+  // Searches Google says it ran from somewhere else than their city: "Marin → San Rafael, California (3)".
+  const elsewhere = new Map<string, number>()
+  for (const s of samples) if (ranFrom(s.loc, s.where) === false) elsewhere.set(`${s.loc} → ${s.where}`, (elsewhere.get(`${s.loc} → ${s.where}`) ?? 0) + 1)
+  const elsewhereCount = [...elsewhere.values()].reduce((n, c) => n + c, 0)
   const href = (next: { days?: number; dev?: string }) => {
     const p = new URLSearchParams()
     const d = next.days ?? days
@@ -197,6 +201,18 @@ export default async function CompetitorAdsPage({ searchParams }: { searchParams
               { label: "Free searches left", value: fmt(free.left), note: `Of ${fmt(free.cap)} in the last ${WINDOW_DAYS} days` },
             ]}
           />
+
+          {elsewhereCount > 0 && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Google ran {fmt(elsewhereCount)} of these searches from somewhere other than the city they were for, so their ads are for that other place:{" "}
+              {[...elsewhere]
+                .sort((x, y) => y[1] - x[1])
+                .slice(0, 5)
+                .map(([pair, n]) => `${pair} (${fmt(n)})`)
+                .join(" · ")}
+              .
+            </p>
+          )}
 
           <Section
             title="Advertisers"

@@ -8,7 +8,7 @@ import { refresh } from "next/cache"
 import { isAdmin } from "@/lib/auth"
 import { sampleOf, saveSample } from "@/lib/competitors/ad-samples"
 import { MAX_PER_WEEK, getSampler, saveSampler, type SamplerSettings } from "@/lib/competitors/ad-sampler"
-import { BrightDataError, brightReady, searchGoogle } from "@/lib/competitors/brightdata"
+import { BrightDataError, brightReady, ranFrom, searchGoogle } from "@/lib/competitors/brightdata"
 import { currentName } from "@/lib/people"
 import { scanPlaces } from "@/lib/research/serp"
 
@@ -48,9 +48,15 @@ export async function testSearchAction(): Promise<SamplerState> {
     await saveSample(sampleOf(found, k, loc, "desktop", "scan"))
     refresh()
     const who = [...new Set(found.ads.map((a) => a.d))]
+    // Where Google says it ran the search, so a wrong place shows.
+    const where = !found.where
+      ? ""
+      : ranFrom(loc, found.where) === false
+        ? ` But Google ran it from ${found.where}, not ${loc}, so its results and ads are for there.`
+        : ` Google ran it from ${found.where}.`
     return {
       ok: true,
-      message: `It works: “${k}” from ${loc} gave ${found.organic.length} results and ${found.ads.length} ad${found.ads.length === 1 ? "" : "s"}${who.length ? ` (${who.slice(0, 4).join(", ")})` : ""}.${found.ads.length ? "" : " Searches without ads are normal and count too."}`,
+      message: `It works: “${k}” from ${loc} gave ${found.organic.length} results and ${found.ads.length} ad${found.ads.length === 1 ? "" : "s"}${who.length ? ` (${who.slice(0, 4).join(", ")})` : ""}.${where}${found.ads.length ? "" : " Searches without ads are normal and count too."}`,
     }
   } catch (e) {
     return { ok: false, message: e instanceof BrightDataError ? e.message : `The test search failed: ${e instanceof Error ? e.message : String(e)}` }
