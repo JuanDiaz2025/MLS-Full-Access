@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation"
 
 import { signOut } from "@/app/login/actions"
 import ApiMeter from "@/components/api-meter"
+import BrightDataMeter from "@/components/brightdata-meter"
 import LoadAll from "@/components/load-all"
 import BrandLogo from "@/components/brand-logo"
 import ThemeToggle from "@/components/theme-toggle"
@@ -155,6 +156,10 @@ export default function AppHeader({
         <div className="flex items-center gap-2">
           <span className="hidden md:block">
             <LoadAll pages={PRELOAD} />
+          </span>
+          {/* Only where the header has room for it; Competitor ads and SEO show the same count. */}
+          <span className="hidden xl:block">
+            <BrightDataMeter />
           </span>
           <ApiMeter />
           {admin ? (

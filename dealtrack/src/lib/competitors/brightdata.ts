@@ -4,7 +4,7 @@
 // Settings: BRIGHTDATA_API_KEY (Bright Data → Account settings → API keys) and
 // BRIGHTDATA_SERP_ZONE (the name of the SERP API zone). Only the free tier is used: each search is
 // taken from free-searches.ts first, and none is made once it's used up.
-import { takeFreeSearches, freeCap, WINDOW_DAYS } from "@/lib/competitors/free-searches"
+import { takeFreeSearches, freeCap, WINDOW_DAYS, type SearchUse } from "@/lib/competitors/free-searches"
 import { siteOf } from "@/lib/research/site"
 
 const STATEWIDE = "California"
@@ -131,10 +131,10 @@ export function readGoogleResult(raw: Raw): GoogleResult {
 }
 
 // One request through Bright Data (a Google search, or Google Trends), as parsed JSON. Takes one
-// free search first; refuses once they're used up.
-export async function brightRequest(url: string): Promise<unknown> {
+// free search first, noting what it's for; refuses once they're used up.
+export async function brightRequest(url: string, use: SearchUse): Promise<unknown> {
   if (!brightReady()) throw new BrightDataError("Add BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE to .env.local first.", true)
-  if (!(await takeFreeSearches(1))) {
+  if (!(await takeFreeSearches(1, use))) {
     throw new FreeSearchesUsedUp(
       `The free Bright Data searches are used up (${freeCap().toLocaleString("en-US")} in the last ${WINDOW_DAYS} days). DealTrack makes no more until some free up, so nothing is charged.`,
       true,
@@ -170,7 +170,7 @@ export async function brightRequest(url: string): Promise<unknown> {
   return raw
 }
 
-// One Google search from a place.
-export async function searchGoogle(keyword: string, place: string, device: Device = "desktop"): Promise<GoogleResult> {
-  return readGoogleResult((await brightRequest(searchUrl(keyword, place, device))) as Raw)
+// One Google search from a place: for the weekly searches, a rankings scan, or a test.
+export async function searchGoogle(keyword: string, place: string, device: Device, use: SearchUse): Promise<GoogleResult> {
+  return readGoogleResult((await brightRequest(searchUrl(keyword, place, device), use)) as Raw)
 }

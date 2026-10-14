@@ -63,7 +63,7 @@ export async function checkTrends(keywords: string[]): Promise<{ ok: boolean; me
   for (const k of todo) {
     let entry: TrendEntry
     try {
-      const line = readTrends(await brightRequest(trendsUrl(k)))
+      const line = readTrends(await brightRequest(trendsUrl(k), "trends"))
       entry = line ?? { at: new Date().toISOString(), error: "Google Trends gave no line for this search (too few searches, or Bright Data didn't return it)." }
       if (line) got++
       else none++

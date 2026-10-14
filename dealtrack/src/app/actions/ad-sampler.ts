@@ -44,7 +44,7 @@ export async function testSearchAction(): Promise<SamplerState> {
   const k = settings.keywords[0] ?? "sell my house fast"
   const loc = places[0] ?? "California"
   try {
-    const found = await searchGoogle(k, loc, "desktop")
+    const found = await searchGoogle(k, loc, "desktop", "test")
     await saveSample(sampleOf(found, k, loc, "desktop", "scan"))
     refresh()
     const who = [...new Set(found.ads.map((a) => a.d))]

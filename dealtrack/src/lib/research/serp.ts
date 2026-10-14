@@ -261,7 +261,7 @@ async function mapsSearch(k: string, loc: string, stars: boolean): Promise<MapHi
 // for Competitor ads (a search with no ads too).
 async function brightSearch(k: string, loc: string): Promise<Pick<SerpResult, "org" | "ads" | "paa" | "rel">> {
   try {
-    const found = await searchGoogle(k, loc, "desktop")
+    const found = await searchGoogle(k, loc, "desktop", "scan")
     await saveSample(sampleOf(found, k, loc, "desktop", "scan"))
     return {
       org: found.organic.map((r) => hit(r.u, r.t, r.p)),

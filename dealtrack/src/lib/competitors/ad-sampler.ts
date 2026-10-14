@@ -163,7 +163,7 @@ export async function runDueSamples() {
     for (const slot of due) {
       const same = (s: Slot) => s.k === slot.k && s.loc === slot.loc && s.dev === slot.dev && s.due === slot.due
       try {
-        const found = await searchGoogle(slot.k, slot.loc, slot.dev)
+        const found = await searchGoogle(slot.k, slot.loc, slot.dev, "sampler")
         await saveSample(sampleOf(found, slot.k, slot.loc, slot.dev, "sampler"))
         await file.update((f) => {
           const s = f.week?.slots.find(same)
