@@ -16,14 +16,18 @@ import { getConnection, SHEETS_SCOPE } from "@/lib/conversions/google"
 import { callCounting, getCalls, RECENT_CALL_DAYS } from "@/lib/google-ads/calls"
 import { leadSource } from "@/lib/leads/source"
 import { catchUp, leadsVersion } from "@/lib/leads/background"
+import { callLeads } from "@/lib/leads/call-id"
+import { leadDetail } from "@/lib/leads/panel"
 import { getLeadBackup } from "@/lib/leads/sheet-backup"
 import { listDeletedLeads, listLeads, listQrCodes } from "@/lib/leads/store"
 import { sharedKey, type Sender } from "@/lib/leads/team-sync"
 import { countSince, timeAgo } from "@/lib/leads/time"
 import { cleanTracking, leadChannel, pagePath } from "@/lib/leads/tracking"
 import type { Lead, LeadPlace } from "@/lib/leads/types"
-import { sentElsewhere } from "@/lib/leads/wordpress"
+import { getWordPress, sentElsewhere } from "@/lib/leads/wordpress"
+import { siteKeepsNotes } from "@/lib/leads/wordpress-plugin"
 import { load } from "@/lib/load"
+import { personName } from "@/lib/people"
 
 export const metadata: Metadata = { title: "Leads · DealTrack" }
 
@@ -74,6 +78,7 @@ function toRow(lead: Lead, placements: Map<string, string>, elsewhere: Sender | 
           ? { state: "elsewhere", detail: `Google Ads hears about it from ${elsewhere.name || "your team's main computer"}.` }
           : undefined
         : googleState(lead),
+    detail: leadDetail(lead, Boolean(sharedKey(lead)), elsewhere),
   }
 }
 
@@ -161,7 +166,7 @@ export default async function LeadsPage() {
   after(() => catchUp())
   // The version first: a change saved while the leads are read then still shows on the next check.
   const version = await leadsVersion()
-  const [qrCodes, leads, deleted, calls, counting, backup, connection] = await Promise.all([
+  const [qrCodes, leads, deleted, calls, counting, backup, connection, site, you] = await Promise.all([
     listQrCodes(),
     listLeads(),
     listDeletedLeads(),
@@ -169,7 +174,11 @@ export default async function LeadsPage() {
     callCounting().catch(() => null),
     getLeadBackup(),
     getConnection().catch(() => null),
+    getWordPress(),
+    personName(),
   ])
+  // Whether the lead panel's notes reach the team's other computers (Lead Saver plugin 1.5+).
+  const sharing = !site.site ? "off" : siteKeepsNotes(site.plugin) ? "on" : "needs-plugin"
   const placements = new Map(qrCodes.map((c) => [c.id, c.placement]))
   const callResult = calls.ok ? { calls: calls.data, counting } : { error: calls.kind === "missing" ? "Google Ads isn't connected." : calls.message }
   const missed = calls.ok ? calls.data.filter((c) => c.missed).length : 0
@@ -276,13 +285,15 @@ export default async function LeadsPage() {
           <LeadsTable
             rows={leads.map((l) => toRow(l, placements, elsewhere))}
             deleted={deleted.map((d) => ({ ...toRow(d.lead, placements, elsewhere), deleted: when(d.deletedAt) }))}
+            you={you}
+            sharing={sharing}
           />
         ) : (
           <p className="py-6 text-sm text-muted-foreground">No leads yet. Connect the website form below.</p>
         )}
       </Section>
 
-      <PhoneCalls result={callResult} addedCalls={leads.map((l) => l.callId).filter((id): id is string => Boolean(id))} />
+      <PhoneCalls result={callResult} addedCalls={callLeads(leads)} />
 
       <div id="lead-backup" className="scroll-mt-20">
         <LeadBackup

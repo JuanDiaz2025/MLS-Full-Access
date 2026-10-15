@@ -2,14 +2,16 @@
 // Contact Form 7 submission in WordPress, and the app picks up the new ones whenever it's open, at
 // most every 30 seconds. WordPress is always online and its address never changes, so leads sent
 // while this computer or the app was off still arrive, with the time they were really sent. The
-// same check shares lead statuses with the rest of the team (team-sync.ts, plugin 1.4+).
+// same check shares lead statuses with the rest of the team (team-sync.ts, plugin 1.4+), and the
+// lead panel's notes and follow-up dates (notes.ts, plugin 1.5+).
 import { jsonFileStore } from "@/lib/json-file-store"
 import { shared } from "@/lib/shared-state"
+import { applyNoteChanges, markNotesShared, unsharedNotes, type NoteChange } from "@/lib/leads/notes"
 import { addLead } from "@/lib/leads/store"
 import { applyChanges, installId, markShared, unsharedChanges, type Sender, type StatusChange } from "@/lib/leads/team-sync"
 import { parseWebsiteLead, webhookSecret } from "@/lib/leads/webhook"
 import { logAttempt } from "@/lib/leads/webhook-log"
-import { siteKeepsStatus } from "@/lib/leads/wordpress-plugin"
+import { siteKeepsNotes, siteKeepsStatus } from "@/lib/leads/wordpress-plugin"
 
 type WordPressState = {
   site?: string // e.g. https://twinhomebuyer.com
@@ -21,6 +23,7 @@ type WordPressState = {
   plugin?: string // the plugin's version
   events?: SiteEvent[] // what happened to the latest form submissions on the site (plugin 1.2+)
   statusSeq?: number // the last team status change already picked up (plugin 1.4+)
+  notesSeq?: number // the last team note or follow-up change already picked up (plugin 1.5+)
   // The computer that sends shared leads to Google Ads: null when none has yet, missing when the
   // site's plugin is older than 1.4 (no team sharing).
   sender?: Sender | null
@@ -40,6 +43,7 @@ type Answer = {
   plugin?: string
   events?: SiteEvent[]
   statuses?: StatusChange[]
+  notes?: NoteChange[]
   sender?: Sender | null
 }
 
@@ -92,11 +96,17 @@ export async function setWordPressSite(site: string | null) {
 
 // The site's answer for leads after `after`, trying the usual /wp-json/ address first and then
 // ?rest_route= (for sites without "pretty" permalinks).
-async function ask(state: WordPressState, key: string, after: number, statusAfter = state.statusSeq ?? 0): Promise<{ answer: Answer; api: WordPressState["api"] }> {
+async function ask(
+  state: WordPressState,
+  key: string,
+  after: number,
+  statusAfter = state.statusSeq ?? 0,
+  notesAfter = state.notesSeq ?? 0,
+): Promise<{ answer: Answer; api: WordPressState["api"] }> {
   const order: NonNullable<WordPressState["api"]>[] = state.api === "rest_route" ? ["rest_route", "wp-json"] : ["wp-json", "rest_route"]
   let last: { status: number; answer: Answer | null } = { status: 0, answer: null }
   const get = async (api: NonNullable<WordPressState["api"]>, keyInAddress: boolean) => {
-    const params = `after=${after}&status_after=${statusAfter}${keyInAddress ? `&key=${encodeURIComponent(key)}` : ""}&t=${Date.now()}`
+    const params = `after=${after}&status_after=${statusAfter}&notes_after=${notesAfter}${keyInAddress ? `&key=${encodeURIComponent(key)}` : ""}&t=${Date.now()}`
     const url = api === "wp-json" ? `${state.site}/wp-json/omcc/v1/leads?${params}` : `${state.site}/?rest_route=/omcc/v1/leads&${params}`
     const res = await fetch(url, {
       headers: { "x-omcc-key": key, accept: "application/json", "user-agent": "OneMarketingCommandCenter/1.0" },
@@ -137,9 +147,9 @@ async function ask(state: WordPressState, key: string, after: number, statusAfte
 // Whether the site's Lead Saver plugin takes this key (a teammate's team code), without bringing
 // anything in: null when it does, else what's wrong.
 export async function siteKeyProblem(site: string, key: string): Promise<string | null> {
-  const past = 2_147_483_647 // after every saved lead and status, so none comes back
+  const past = 2_147_483_647 // after every saved lead, status and note, so none comes back
   try {
-    await ask({ site }, key, past, past)
+    await ask({ site }, key, past, past, past)
     return null
   } catch (error) {
     if (error instanceof Error && error.message === DIFFERENT_KEY) {
@@ -149,9 +159,9 @@ export async function siteKeyProblem(site: string, key: string): Promise<string 
   }
 }
 
-// Sends something to the plugin (plugin 1.4+): the team's statuses, or which computer sends to
-// Google Ads. Null when the site's plugin is older and doesn't take it.
-async function post(state: WordPressState, key: string, route: "status" | "sender", body: unknown): Promise<Answer | null> {
+// Sends something to the plugin (plugin 1.4+): the team's statuses, notes (1.5+), or which
+// computer sends to Google Ads. Null when the site's plugin is older and doesn't take it.
+async function post(state: WordPressState, key: string, route: "status" | "notes" | "sender", body: unknown): Promise<Answer | null> {
   if (!state.site) return null
   const send = async (keyInAddress: boolean) => {
     const k = keyInAddress ? `${state.api === "rest_route" ? "&" : "?"}key=${encodeURIComponent(key)}` : ""
@@ -198,6 +208,35 @@ export function shareStatuses(): Promise<void> {
   return sharing.running
 }
 
+// Reports the notes and follow-up dates set here to the rest of the team, right away (also part
+// of every check). With a plugin older than 1.5 they wait here until the site has the newer one.
+const noteSharing = shared("team-note-share", () => ({ running: null as Promise<void> | null, again: false }))
+export function shareNotes(): Promise<void> {
+  if (noteSharing.running) {
+    noteSharing.again = true
+    return noteSharing.running
+  }
+  noteSharing.running = (async () => {
+    do {
+      noteSharing.again = false
+      const state = await file.read()
+      if (!state.site || !siteKeepsNotes(state.plugin)) continue
+      const changes = (await unsharedNotes()).slice(0, 100)
+      if (!changes.length) continue
+      const answer = await post(state, await webhookSecret(), "notes", {
+        from: await installId(),
+        changes: changes.map(({ key, kind, id, text, due, at, by }) => ({ key, kind, id, text, due, at: Date.parse(at), by })),
+      }).catch(() => null)
+      if (answer) await markNotesShared(changes)
+    } while (noteSharing.again)
+  })()
+    .catch((error) => console.error("Couldn't share notes with the team:", error))
+    .finally(() => {
+      noteSharing.running = null
+    })
+  return noteSharing.running
+}
+
 // Makes this computer the one that sends shared leads to Google Ads: when none is yet (`take`
 // false), or from now on in place of another one (`take`).
 export async function claimSender(name: string, take = false) {
@@ -230,12 +269,14 @@ export function syncWordPress(force = false): Promise<void> {
     if (!state.site) return
     try {
       await shareStatuses()
+      await shareNotes()
       const key = await webhookSecret()
       const host = bareHost(state.site)
       let lastId = state.lastId ?? 0
       let api = state.api
       let info: Answer = {}
       let statuses: StatusChange[] = []
+      let notes: NoteChange[] = []
       let allIn = false
       // Up to 2,000 leads per check (200 at a time); anything beyond comes in on the next one.
       for (let page = 0; page < 10; page++) {
@@ -277,7 +318,10 @@ export function syncWordPress(force = false): Promise<void> {
         await file.update((s) => {
           if (s.site === state.site) s.lastId = lastId
         })
-        if (page === 0) statuses = info.statuses ?? []
+        if (page === 0) {
+          statuses = info.statuses ?? []
+          notes = Array.isArray(info.notes) ? info.notes : []
+        }
         if (leads.length < 200) {
           allIn = true
           break
@@ -294,6 +338,16 @@ export function syncWordPress(force = false): Promise<void> {
           })
         }
       }
+      // The team's notes and follow-up dates the same way (plugin 1.5+, up to 500 at a time).
+      if (notes.length) {
+        await applyNoteChanges(notes, await installId())
+        if (allIn) {
+          const seq = Math.max(state.notesSeq ?? 0, ...notes.map((c) => Number(c.seq) || 0))
+          await file.update((s) => {
+            if (s.site === state.site) s.notesSeq = seq
+          })
+        }
+      }
       await file.update((s) => {
         if (s.site !== state.site) return
         s.api = api
@@ -306,6 +360,8 @@ export function syncWordPress(force = false): Promise<void> {
         if (Array.isArray(info.events)) s.events = info.events.slice(0, 20)
         delete s.lastError
       })
+      // The site was just updated to a plugin that keeps notes: send the ones waiting here now.
+      if (siteKeepsNotes(info.plugin) && !siteKeepsNotes(state.plugin)) await shareNotes()
     } catch (error) {
       const message = problem(error)
       await file.update((s) => {

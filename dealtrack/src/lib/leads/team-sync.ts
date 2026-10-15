@@ -2,7 +2,8 @@
 // (Bryan's app) too, which speaks the same way. The WordPress site (always online, Lead Saver
 // plugin 1.4+) is where they meet: every status someone sets is reported there, and every copy
 // picks up the others' with its website check (wordpress.ts). Only website leads are shared,
-// since every copy has them. From One Marketing Command Center.
+// since every copy has them. From One Marketing Command Center. DealTrack's notes and follow-up
+// dates (the lead panel) travel the same way, with plugin 1.5+ (notes.ts).
 //
 // Only one computer sends to Google Ads for shared leads (the first with Google Ads connected, or
 // whichever takes over), so the same lead is never sent twice from two computers.

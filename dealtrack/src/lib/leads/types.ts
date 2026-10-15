@@ -148,6 +148,52 @@ export type Lead = {
   conversions?: Partial<Record<ConversionKind, ConversionUpload>>
   // Roughly where they were when they got in touch (not the property), looked up by location.ts.
   place?: LeadPlace
+  // The Google Ads click the lead came from (location.ts): its campaign, keyword, device...
+  adClick?: LeadAdClick
+  // The Google Ads call a phone-call lead was made from (call-actions.ts).
+  call?: { start: string; seconds: number; missed?: boolean; campaign?: string; areaCode?: string }
+  // The team's notes on the lead (the lead panel), oldest first, and when to get back to them.
+  // Both are shared with the team's other computers through the website, like statuses (team-sync.ts).
+  teamNotes?: LeadNote[]
+  followUp?: LeadFollowUp
+  // Every status it was given, oldest first (store.ts keeps it), for the lead panel's history.
+  statusLog?: StatusEvent[]
+  // Its score when it came in, kept when a status first changes the score (store.ts).
+  firstScore?: { value: number; grade: LeadGrade }
+}
+
+// A note someone on the team wrote about a lead. Its id is the same on every computer.
+export type LeadNote = {
+  id: string
+  at: string // ISO datetime
+  by?: string
+  text: string
+  // Deleted: kept without its text, so the deletion reaches the team's other computers too.
+  deletedAt?: string
+  // Written (or deleted) here and not yet reported to the team's other computers.
+  share?: "pending"
+}
+
+// When to get back to a lead ("Call back Friday"): on the Overview once it's due.
+export type LeadFollowUp = {
+  on?: string // the day, "2026-10-17" (Pacific); missing once it's done or cleared
+  note?: string
+  by?: string
+  at: string // when it was set or cleared: between computers, the latest wins
+  share?: "pending"
+}
+
+export type StatusEvent = { at: string; status: LeadStatus; by?: string; auto?: boolean }
+
+// What Google Ads knows about the ad click (its click report, kept 90 days). An empty object: looked, not found.
+export type LeadAdClick = {
+  campaign?: string
+  adGroup?: string
+  keyword?: string
+  matchType?: string // "EXACT", "PHRASE", "BROAD"
+  device?: string // "MOBILE", "DESKTOP", "TABLET"...
+  slot?: string // "SEARCH_TOP", "SEARCH_OTHER"...
+  page?: number // the results page the ad was on
 }
 
 export type LeadPlace = {

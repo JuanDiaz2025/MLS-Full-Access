@@ -94,19 +94,35 @@ export async function addLead(input: Omit<Lead, "id" | "createdAt">, createdAt?:
   })
 }
 
+// The most status changes kept in a lead's history.
+const STATUS_LOG_MAX = 50
+
 // Changes one lead in place (status, conversion uploads). Returns the updated lead, or null.
 export async function updateLead(id: string, change: (lead: Lead) => void) {
   return file.update((db) => {
     const lead = db.leads.find((l) => l.id === id)
     if (!lead) return null
-    const before = lead.status
+    const before = { status: lead.status, at: lead.statusChangedAt, by: lead.statusByName, auto: lead.statusBy === "auto", score: lead.score }
     change(lead)
-    // A new status changes the score (Interested adds points, Closed deal is 100...).
-    if (lead.status !== before) {
+    if (lead.status !== before.status) {
+      // The score it came in with, for the lead panel's history: before any status, it's that one.
+      if (!lead.firstScore && (!before.status || before.status === "new") && before.score && !before.score.unscored) {
+        lead.firstScore = { value: before.score.value, grade: before.score.grade }
+      }
+      // A new status changes the score (Interested adds points, Closed deal is 100...).
       lead.score = scoreLead(
         lead,
         db.leads.filter((l) => l.createdAt < lead.createdAt),
       )
+      // Its history, for the lead panel. A lead from before the history was kept starts with the
+      // status it had.
+      if (!lead.statusLog?.length && before.status && before.status !== "new" && before.at) {
+        lead.statusLog = [{ at: before.at, status: before.status, by: before.by, auto: before.auto || undefined }]
+      }
+      lead.statusLog = [
+        ...(lead.statusLog ?? []),
+        { at: lead.statusChangedAt ?? new Date().toISOString(), status: lead.status ?? "new", by: lead.statusByName, auto: lead.statusBy === "auto" || undefined },
+      ].slice(-STATUS_LOG_MAX)
     }
     return lead
   })
@@ -163,8 +179,10 @@ export async function restoreLead(id: string): Promise<{ error?: string }> {
   return {}
 }
 
-// Someone worked on this lead in DealTrack: gave it a status, or something about it went to Google Ads.
-const worked = (l: Lead) => Boolean((l.status && l.status !== "new") || l.statusBy === "you" || Object.keys(l.conversions ?? {}).length)
+// Someone worked on this lead in DealTrack: gave it a status, a note or a follow-up date, or
+// something about it went to Google Ads.
+const worked = (l: Lead) =>
+  Boolean((l.status && l.status !== "new") || l.statusBy === "you" || Object.keys(l.conversions ?? {}).length || l.teamNotes?.length || l.followUp)
 
 // Puts back leads from the backup sheet (sheet-backup.ts): any lead DealTrack doesn't have, and
 // the backed-up copy of a lead that came in again but nobody has worked on yet (so its status,

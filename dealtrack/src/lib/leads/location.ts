@@ -1,7 +1,8 @@
 // Roughly where each lead was when they got in touch, never the property's address. Two sources:
 // - Google Ads keeps where every ad click came from for 90 days: the city and ZIP code of the
 //   phone or computer, and the place the search was about when it named another one. The lead's
-//   Google click ID finds it.
+//   Google click ID finds it. The same lookup keeps the click's campaign, ad group, keyword,
+//   device and where the ad showed, for the lead panel (lead.adClick).
 // - PostHog, on the website, reads a city from each visitor's internet connection. The lead's visit
 //   is found by its ad click ID, or else by the form sent on the site at that same moment.
 //   Call-button taps come with theirs (call-taps.ts). Only a visit from before the lead arrived
@@ -15,7 +16,7 @@ import { hogqlFresh } from "@/lib/posthog"
 import { shared } from "@/lib/shared-state"
 import { listLeads, updateLead } from "@/lib/leads/store"
 import { googleClick } from "@/lib/leads/tracking"
-import type { Lead, LeadPlace } from "@/lib/leads/types"
+import type { Lead, LeadAdClick, LeadPlace } from "@/lib/leads/types"
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -104,7 +105,25 @@ async function save(id: string, change: (place: LeadPlace) => void) {
 // ---- Google Ads -----------------------------------------------------------------------------
 
 type GeoIds = { city?: string; metro?: string; region?: string; country?: string; mostSpecific?: string }
-type ClickRow = { clickView?: { gclid?: string; locationOfPresence?: GeoIds; areaOfInterest?: GeoIds } }
+type ClickRow = {
+  clickView?: { gclid?: string; locationOfPresence?: GeoIds; areaOfInterest?: GeoIds; keywordInfo?: { text?: string; matchType?: string }; pageNumber?: string | number }
+  segments?: { device?: string; slot?: string }
+  campaign?: { name?: string }
+  adGroup?: { name?: string }
+}
+
+function adClickOf(r: ClickRow): LeadAdClick {
+  const page = Number(r.clickView?.pageNumber)
+  return {
+    campaign: r.campaign?.name || undefined,
+    adGroup: r.adGroup?.name || undefined,
+    keyword: r.clickView?.keywordInfo?.text || undefined,
+    matchType: r.clickView?.keywordInfo?.matchType || undefined,
+    device: r.segments?.device || undefined,
+    slot: r.segments?.slot || undefined,
+    page: page > 0 ? page : undefined,
+  }
+}
 
 const gclidOf = (l: Lead) => {
   const id = googleClick(l.tracking)?.gclid
@@ -116,8 +135,11 @@ const dayIn = (zone: string, ms: number) => new Intl.DateTimeFormat("en-CA", { t
 
 async function locateByGoogle(leads: Lead[]) {
   if (missingKeys().length) return
+  // Not placed yet and due another look; or placed before the click's ad details were kept: one
+  // more look for those.
+  const wanted = (l: Lead) => (l.place?.google ? !l.adClick : due(l.place?.googleTries, l.place?.googleAt, GOOGLE_WAITS, l.createdAt))
   const todo = leads
-    .filter((l) => gclidOf(l) && !l.place?.google && Date.now() - Date.parse(l.createdAt) < GOOGLE_KEEPS && due(l.place?.googleTries, l.place?.googleAt, GOOGLE_WAITS, l.createdAt))
+    .filter((l) => gclidOf(l) && Date.now() - Date.parse(l.createdAt) < GOOGLE_KEEPS && wanted(l))
     .sort(newestFirst)
     .slice(0, PER_RUN)
   if (!todo.length) return
@@ -131,18 +153,20 @@ async function locateByGoogle(leads: Lead[]) {
       byDay.get(day)!.add(gclidOf(l)!)
     }
   }
-  const found = new Map<string, ClickRow["clickView"]>()
+  const found = new Map<string, ClickRow>()
   for (const [day, ids] of byDay) {
     const rows = await gaqlFresh<ClickRow>(
       `SELECT click_view.gclid, click_view.location_of_presence.city, click_view.location_of_presence.metro,
          click_view.location_of_presence.region, click_view.location_of_presence.country, click_view.location_of_presence.most_specific,
          click_view.area_of_interest.city, click_view.area_of_interest.metro, click_view.area_of_interest.region,
-         click_view.area_of_interest.country, click_view.area_of_interest.most_specific
+         click_view.area_of_interest.country, click_view.area_of_interest.most_specific,
+         click_view.keyword_info.text, click_view.keyword_info.match_type, click_view.page_number,
+         segments.device, segments.slot, campaign.name, ad_group.name
        FROM click_view WHERE segments.date = '${day}' AND click_view.gclid IN (${[...ids].map((g) => `'${g}'`).join(", ")})`,
     )
-    for (const r of rows) if (r.clickView?.gclid) found.set(r.clickView.gclid, r.clickView)
+    for (const r of rows) if (r.clickView?.gclid) found.set(r.clickView.gclid, r)
   }
-  const all = [...found.values()].flatMap((c) => [c?.locationOfPresence, c?.areaOfInterest])
+  const all = [...found.values()].flatMap((r) => [r.clickView?.locationOfPresence, r.clickView?.areaOfInterest])
   const names = await geoNames(all.flatMap((g) => (g ? [g.city, g.metro, g.region, g.country, g.mostSpecific] : [])).filter((id): id is string => Boolean(id)))
   // The city (with its ZIP code when Google has one), else the area or state it was in.
   const label = (g?: GeoIds) => {
@@ -156,16 +180,22 @@ async function locateByGoogle(leads: Lead[]) {
   }
   const now = new Date().toISOString()
   for (const l of todo) {
-    const click = found.get(gclidOf(l)!)
-    const where = label(click?.locationOfPresence)
-    const about = label(click?.areaOfInterest)
-    await save(l.id, (p) => {
-      p.googleTries = where || Date.now() - Date.parse(l.createdAt) < SETTLED ? (p.googleTries ?? 0) + 1 : GOOGLE_WAITS.length
-      p.googleAt = now
-      if (where) p.google = where
-      // Only when the search named somewhere other than where they were.
-      const town = (s?: string) => s?.replace(/ \d{5}$/, "")
-      if (about && town(about) !== town(where)) p.googleInterest = about
+    const row = found.get(gclidOf(l)!)
+    const where = label(row?.clickView?.locationOfPresence)
+    const about = label(row?.clickView?.areaOfInterest)
+    await updateLead(l.id, (lead) => {
+      const p = (lead.place ??= {})
+      if (!p.google) {
+        p.googleTries = where || Date.now() - Date.parse(l.createdAt) < SETTLED ? (p.googleTries ?? 0) + 1 : GOOGLE_WAITS.length
+        p.googleAt = now
+        if (where) p.google = where
+        // Only when the search named somewhere other than where they were.
+        const town = (s?: string) => s?.replace(/ \d{5}$/, "")
+        if (about && town(about) !== town(where)) p.googleInterest = about
+      }
+      if (row) lead.adClick = adClickOf(row)
+      // Placed by an earlier look, and the click isn't in Google's report any more: don't ask again.
+      else if (p.google) lead.adClick ??= {}
     })
   }
 }

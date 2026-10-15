@@ -7,6 +7,7 @@ import { saveGradeSettings } from "@/app/actions/settings"
 import CompareChart from "@/components/dashboard/compare-chart"
 import { formatConversions, formatDate, formatNumber, formatPercent, formatUsd, formatUsdCents } from "@/components/dashboard/format"
 import { AtAGlance, DoToday, Glossary, doToday, gradeOf } from "@/components/dashboard/glance"
+import FollowUpsDue from "@/components/leads/follow-ups"
 import TrendKpis from "@/components/dashboard/trend-kpis"
 import MetricPicker from "@/components/metric-picker"
 import RefreshButton from "@/components/refresh-button"
@@ -74,6 +75,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
       <>
         <PageHeader title="Overview" description="Spend, leads, and what needs attention." range={range} />
         <ReportProblem problem={result} />
+        <FollowUpsDue />
       </>
     )
   }
@@ -146,6 +148,8 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
       </p>
 
       <AtAGlance grade={grade} totals={totals} before={before} range={range} leadCost={gradeSettings.leadCost} />
+
+      <FollowUpsDue />
 
       <DoToday todos={todos} />
 

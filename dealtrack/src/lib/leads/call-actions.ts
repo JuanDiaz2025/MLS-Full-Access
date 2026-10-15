@@ -39,7 +39,7 @@ async function callTime(start: string) {
 export async function addCallLeadAction(
   call: CallInfo,
   input: { phone: string; name: string; status: string; notes: string },
-): Promise<{ error?: string; ok?: string }> {
+): Promise<{ error?: string; ok?: string; id?: string }> {
   if (!(await isSignedIn())) return { error: "Sign in first." }
   const digits = String(input.phone ?? "").replace(/\D/g, "")
   if (digits.length < 10) return { error: "Type the caller's full phone number (with area code)." }
@@ -70,6 +70,14 @@ export async function addCallLeadAction(
   )
   await updateLead(lead.id, (l) => {
     l.callId = callId
+    // The call itself, for the lead panel.
+    l.call = {
+      start: String(call.start),
+      seconds: Math.max(0, Number(call.seconds) || 0),
+      missed: missed || undefined,
+      campaign: String(call.campaign ?? "") || undefined,
+      areaCode: String(call.areaCode ?? "") || undefined,
+    }
   })
   if (input.status !== "new") await setLeadStatus(lead.id, input.status as LeadStatus, await personName())
   try {
@@ -79,5 +87,8 @@ export async function addCallLeadAction(
     console.error("Couldn't send conversions to Google Ads:", error)
   }
   revalidatePath("/leads", "layout")
-  return { ok: input.status === "new" ? "Added to your leads." : "Added to your leads and sent to Google Ads, matched by the phone number." }
+  return {
+    id: lead.id,
+    ok: input.status === "new" ? "Added to your leads." : "Added to your leads and sent to Google Ads, matched by the phone number.",
+  }
 }

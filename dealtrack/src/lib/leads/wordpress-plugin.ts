@@ -6,13 +6,14 @@
 //
 // It's also where a team's copies of the app meet: each one reports the statuses people set, and
 // picks up everyone else's (team-sync.ts), so a status changed on one computer shows on all of them.
+// Since 1.5 it keeps the lead panel's notes and follow-up dates for the team the same way (notes.ts).
 //
 // The app builds the plugin with its key filled in; the Leads page offers it as a .zip to upload in
 // WordPress (Plugins → Add New → Upload Plugin).
 import { TRACKING_FIELDS, TRACKING_SNIPPET } from "@/lib/leads/wordpress-snippets"
 import { zipFiles } from "@/lib/zip"
 
-export const PLUGIN_VERSION = "1.4.1"
+export const PLUGIN_VERSION = "1.5.0"
 export const PLUGIN_FOLDER = "omcc-lead-saver"
 
 // "1.4.0" is older than "1.4.1". (A teammate's app may have put a newer plugin on the site.)
@@ -28,6 +29,8 @@ export function olderVersion(version: string, than: string) {
 // The statuses plugin 1.4.0 keeps for the team; 1.4.1 and later keep any status.
 const FIRST_STATUSES = new Set(["new", "interested", "appointment", "offer", "closed", "not_interested"])
 export const siteKeepsStatus = (plugin: string | undefined, status: string) => FIRST_STATUSES.has(status) || !olderVersion(plugin ?? "0", "1.4.1")
+// Notes and follow-up dates need 1.5.0 or later.
+export const siteKeepsNotes = (plugin: string | undefined) => Boolean(plugin) && !olderVersion(plugin!, "1.5.0")
 
 const phpString = (s: string) => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
 
@@ -48,7 +51,7 @@ if (!defined('ABSPATH')) {
 // The key the Command Center sends when it asks for leads. Keep it private.
 define('OMCC_LEADS_KEY', ${phpString(key)});
 define('OMCC_LEADS_VERSION', '${PLUGIN_VERSION}');
-define('OMCC_LEADS_DB_VERSION', '2');
+define('OMCC_LEADS_DB_VERSION', '3');
 
 function omcc_leads_table() {
 	global $wpdb;
@@ -59,6 +62,12 @@ function omcc_leads_table() {
 function omcc_leads_status_table() {
 	global $wpdb;
 	return $wpdb->prefix . 'omcc_lead_status';
+}
+
+// Every note written or deleted, and every follow-up date set, in DealTrack's lead panel (newest last).
+function omcc_leads_notes_table() {
+	global $wpdb;
+	return $wpdb->prefix . 'omcc_lead_notes';
 }
 
 // The table the leads are kept in: one row per form submission.
@@ -79,6 +88,19 @@ function omcc_leads_install() {
 		seq bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 		lead_key varchar(191) NOT NULL DEFAULT '',
 		status varchar(30) NOT NULL DEFAULT '',
+		changed varchar(40) NOT NULL DEFAULT '',
+		by_name varchar(100) NOT NULL DEFAULT '',
+		from_id varchar(64) NOT NULL DEFAULT '',
+		PRIMARY KEY  (seq)
+	) $charset;");
+	$notes_table = omcc_leads_notes_table();
+	dbDelta("CREATE TABLE $notes_table (
+		seq bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+		lead_key varchar(191) NOT NULL DEFAULT '',
+		kind varchar(20) NOT NULL DEFAULT '',
+		note_id varchar(40) NOT NULL DEFAULT '',
+		body text NOT NULL,
+		due varchar(10) NOT NULL DEFAULT '',
 		changed varchar(40) NOT NULL DEFAULT '',
 		by_name varchar(100) NOT NULL DEFAULT '',
 		from_id varchar(64) NOT NULL DEFAULT '',
@@ -210,9 +232,10 @@ function omcc_leads_store($form, $submission, $flag) {
 	}
 }
 
-// GET /wp-json/omcc/v1/leads?after=<id>&status_after=<seq>: the leads saved after that one, oldest
-// first, and the statuses set since. POST /status: statuses set in the app. POST /sender: which
-// computer sends to Google Ads (so the team's copies don't send the same lead twice).
+// GET /wp-json/omcc/v1/leads?after=<id>&status_after=<seq>&notes_after=<seq>: the leads saved after
+// that one, oldest first, and the statuses and notes set since. POST /status: statuses set in the
+// app. POST /notes: notes and follow-up dates written in DealTrack. POST /sender: which computer
+// sends to Google Ads (so the team's copies don't send the same lead twice).
 add_action('rest_api_init', function () {
 	register_rest_route('omcc/v1', '/leads', array(
 		'methods' => 'GET',
@@ -222,6 +245,11 @@ add_action('rest_api_init', function () {
 	register_rest_route('omcc/v1', '/status', array(
 		'methods' => 'POST',
 		'callback' => 'omcc_leads_status_post',
+		'permission_callback' => '__return_true',
+	));
+	register_rest_route('omcc/v1', '/notes', array(
+		'methods' => 'POST',
+		'callback' => 'omcc_leads_notes_post',
 		'permission_callback' => '__return_true',
 	));
 	register_rest_route('omcc/v1', '/sender', array(
@@ -270,6 +298,46 @@ function omcc_leads_status_post($request) {
 			'lead_key' => omcc_leads_cut((string) $change['key'], 191),
 			'status' => $change['status'],
 			// Milliseconds since 1970 (a plain number, so no database reads it as a date in its own time zone).
+			'changed' => isset($change['at']) && is_numeric($change['at']) ? sprintf('%.0f', $change['at']) : sprintf('%.0f', microtime(true) * 1000),
+			'by_name' => omcc_leads_cut(isset($change['by']) ? (string) $change['by'] : '', 100),
+			'from_id' => $from,
+		));
+		if ($ok) {
+			$saved++;
+		} elseif ($wpdb->last_error) {
+			omcc_leads_install();
+			return new WP_REST_Response(array('ok' => false, 'code' => 'omcc_no_table', 'error' => 'The plugin was still setting up. Try again.'), 500);
+		}
+	}
+	return new WP_REST_Response(array('ok' => true, 'saved' => $saved), 200);
+}
+
+// Notes written or deleted, and follow-up dates set or cleared ("note_id" is "followup" then).
+function omcc_leads_notes_post($request) {
+	nocache_headers();
+	$denied = omcc_leads_denied($request);
+	if ($denied) {
+		return $denied;
+	}
+	$body = $request->get_json_params();
+	$body = is_array($body) ? $body : array();
+	$changes = isset($body['changes']) && is_array($body['changes']) ? array_slice($body['changes'], 0, 100) : array();
+	$from = isset($body['from']) ? omcc_leads_cut((string) $body['from'], 64) : '';
+	global $wpdb;
+	$table = omcc_leads_notes_table();
+	$saved = 0;
+	foreach ($changes as $change) {
+		if (!is_array($change) || !isset($change['key'], $change['kind'], $change['id']) || !in_array($change['kind'], array('note', 'note_deleted', 'followup'), true)
+			|| !is_string($change['id']) || !preg_match('/^[A-Za-z0-9_-]{1,40}$/', $change['id'])) {
+			continue;
+		}
+		$due = isset($change['due']) && is_string($change['due']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $change['due']) ? $change['due'] : '';
+		$ok = $wpdb->insert($table, array(
+			'lead_key' => omcc_leads_cut((string) $change['key'], 191),
+			'kind' => $change['kind'],
+			'note_id' => $change['id'],
+			'body' => omcc_leads_cut(isset($change['text']) && is_scalar($change['text']) ? (string) $change['text'] : '', 2000),
+			'due' => $due,
 			'changed' => isset($change['at']) && is_numeric($change['at']) ? sprintf('%.0f', $change['at']) : sprintf('%.0f', microtime(true) * 1000),
 			'by_name' => omcc_leads_cut(isset($change['by']) ? (string) $change['by'] : '', 100),
 			'from_id' => $from,
@@ -347,11 +415,33 @@ function omcc_leads_list($request) {
 			'from' => $change['from_id'],
 		);
 	}
+	$notes = array();
+	$notes_table = omcc_leads_notes_table();
+	$notes_after = max(0, intval($request->get_param('notes_after')));
+	$note_rows = $wpdb->get_results($wpdb->prepare("SELECT seq, lead_key, kind, note_id, body, due, changed, by_name, from_id FROM $notes_table WHERE seq > %d ORDER BY seq ASC LIMIT 500", $notes_after), ARRAY_A);
+	if ($note_rows === null || $wpdb->last_error) {
+		omcc_leads_install();
+		$note_rows = array();
+	}
+	foreach ($note_rows as $row) {
+		$notes[] = array(
+			'seq' => intval($row['seq']),
+			'key' => $row['lead_key'],
+			'kind' => $row['kind'],
+			'id' => $row['note_id'],
+			'text' => $row['body'],
+			'due' => $row['due'],
+			'at' => $row['changed'],
+			'by' => $row['by_name'],
+			'from' => $row['from_id'],
+		);
+	}
 	update_option('omcc_leads_last_pull', gmdate('Y-m-d H:i:s'), false);
 	return new WP_REST_Response(array(
 		'ok' => true,
 		'plugin' => OMCC_LEADS_VERSION,
 		'statuses' => $statuses,
+		'notes' => $notes,
 		'sender' => omcc_leads_sender(),
 		'total' => intval($wpdb->get_var("SELECT COUNT(*) FROM $table")),
 		'events' => is_array(get_option('omcc_leads_events')) ? get_option('omcc_leads_events') : array(),

@@ -8,6 +8,7 @@ import SheetSync from "@/components/sheets/sheet-sync"
 import { buttonVariants } from "@/components/ui/button"
 import { activeAccount } from "@/lib/conversions/google"
 import { getCalls, RECENT_CALL_DAYS } from "@/lib/google-ads/calls"
+import { callLeads } from "@/lib/leads/call-id"
 import { listLeads } from "@/lib/leads/store"
 import { load as loadReport } from "@/lib/load"
 import { getSheetSync, readCombined, syncSheetIfDue, type CombinedView } from "@/lib/sheets/sync"
@@ -155,7 +156,7 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
 
       {error && sheet.spreadsheetId && <p className="text-sm font-medium text-destructive">Couldn&apos;t read your sheet: {error}</p>}
 
-      <PhoneCalls result={callResult} addedCalls={leads.map((l) => l.callId).filter((id): id is string => Boolean(id))} />
+      <PhoneCalls result={callResult} addedCalls={callLeads(leads)} />
 
       <SheetSync open={!view || Boolean(sheet.lastError)} {...sheet} />
     </>

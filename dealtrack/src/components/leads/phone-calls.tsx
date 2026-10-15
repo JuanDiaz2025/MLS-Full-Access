@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils"
 
 type Props = {
   result: { calls: Call[]; counting?: CallCounting | null } | { error: string } | null
-  addedCalls?: string[]
+  // Calls already added as leads: the call's key → the lead's id.
+  addedCalls?: Record<string, string>
   days?: number // how far back the calls go
 }
 
@@ -28,7 +29,7 @@ function when(start: string) {
 }
 
 // Calls from Google Ads over the last few months, missed calls first in the highlights.
-export default function PhoneCalls({ result, addedCalls = [], days = RECENT_CALL_DAYS }: Props) {
+export default function PhoneCalls({ result, addedCalls = {}, days = RECENT_CALL_DAYS }: Props) {
   const counting = result && "calls" in result ? result.counting : undefined
   const countingPrimary = counting?.filter((c) => c.primary) ?? []
   const calls = result && "calls" in result ? result.calls : []
@@ -148,7 +149,7 @@ export default function PhoneCalls({ result, addedCalls = [], days = RECENT_CALL
                     <td className="px-5 py-3 sm:px-6">
                       <CallLeadButton
                         call={{ start: c.start, areaCode: c.areaCode, campaign: c.campaign, seconds: c.seconds, missed: c.missed }}
-                        added={addedCalls.includes(callIdOf(c))}
+                        leadId={addedCalls[callIdOf(c)]}
                         hint={numberHint(c)}
                       />
                     </td>

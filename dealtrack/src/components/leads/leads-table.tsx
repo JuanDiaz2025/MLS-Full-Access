@@ -1,10 +1,14 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
-import { ChevronLeft, ChevronRight, RotateCcw, Search, Trash2, X } from "lucide-react"
+import { useCallback, useMemo, useState, useTransition } from "react"
+import { useSearchParams } from "next/navigation"
+import { CalendarClock, ChevronLeft, ChevronRight, RotateCcw, Search, StickyNote, Trash2, X } from "lucide-react"
 
+import LeadPanel, { type NotesSharing } from "@/components/leads/lead-panel"
+import { googleLabel, gradeStyle, ScoreCell, StatusCell, type GoogleState, type Score } from "@/components/leads/lead-ui"
 import { Button } from "@/components/ui/button"
 import { deleteLeadAction, restoreLeadAction } from "@/lib/leads/delete-actions"
+import type { LeadDetail } from "@/lib/leads/panel"
 import { setLeadStatusAction } from "@/lib/leads/status-actions"
 import { leadStatuses } from "@/lib/leads/types"
 import { formatPhone, telHref } from "@/lib/phone"
@@ -37,11 +41,13 @@ export type LeadRow = {
   statusRule?: string
   // Who on the team set it (shared between computers, team-sync.ts).
   statusByName?: string
-  score?: { value: number; grade: "hot" | "warm" | "cold" | "junk"; reasons: string[] }
+  score?: Score
   // What Google Ads heard: a conversion sent, waiting to be sent, failed or skipped.
-  google?: { state: "sent" | "pending" | "failed" | "skipped" | "held" | "retracting" | "retracted" | "retract_failed" | "checking" | "accepted" | "rejected" | "invalid" | "invalid_pending" | "elsewhere"; detail?: string }
+  google?: { state: GoogleState; detail?: string }
   // When it was deleted (already formatted), for leads in the Deleted list.
   deleted?: string
+  // The rest of what the lead panel shows (notes, follow-up, history, the ad...).
+  detail: LeadDetail
 }
 
 const PAGE = 25
@@ -98,108 +104,6 @@ function rangeBounds(id: RangeId, from: string, to: string): [Date, Date] | null
     default:
       return null
   }
-}
-
-const statusTone: Record<string, string> = {
-  new: "border-border bg-card",
-  unresponsive: "border-amber-500/50 bg-amber-500/10 text-amber-800",
-  interested: "border-emerald-500/50 bg-emerald-500/10 text-emerald-800",
-  appointment: "border-sky-500/50 bg-sky-500/10 text-sky-800",
-  offer: "border-violet-500/50 bg-violet-500/10 text-violet-800",
-  closed: "border-emerald-700/60 bg-emerald-600 text-white",
-  not_interested: "border-border bg-muted text-muted-foreground",
-}
-
-const gradeStyle = {
-  hot: { label: "Hot", cls: "bg-red-600 text-white" },
-  warm: { label: "Warm", cls: "bg-amber-400 text-amber-950" },
-  cold: { label: "Cold", cls: "bg-sky-100 text-sky-900" },
-  junk: { label: "Junk", cls: "bg-muted text-muted-foreground line-through" },
-} as const
-
-// The lead's score, with the reasons one click away.
-function ScoreCell({ score }: { score?: LeadRow["score"] }) {
-  if (!score) return <span className="text-muted-foreground/60">–</span>
-  const g = gradeStyle[score.grade]
-  return (
-    <details className="group/score">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5">
-        <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold", g.cls)}>{g.label}</span>
-        <span className="text-xs font-medium tabular-nums">{score.grade === "junk" ? "" : score.value}</span>
-        <span className="text-xs text-primary underline-offset-2 group-open/score:hidden hover:underline">why?</span>
-      </summary>
-      <ul className="mt-1 max-w-64 space-y-0.5 text-xs whitespace-normal text-muted-foreground">
-        {score.reasons.map((r, i) => (
-          <li key={i}>{r}</li>
-        ))}
-      </ul>
-    </details>
-  )
-}
-
-const googleLabel = {
-  sent: { text: "Sent to Google ✓", cls: "bg-emerald-500/10 text-emerald-700" },
-  pending: { text: "Waiting for Google", cls: "bg-amber-500/15 text-amber-800" },
-  failed: { text: "Not sent", cls: "bg-destructive/10 text-destructive" },
-  skipped: { text: "Can't match", cls: "bg-muted text-muted-foreground" },
-  held: { text: "Not sent (rule)", cls: "bg-muted text-muted-foreground" },
-  checking: { text: "Sent, Google checking", cls: "bg-sky-500/10 text-sky-800" },
-  accepted: { text: "Accepted by Google ✓", cls: "bg-emerald-500/15 text-emerald-800" },
-  rejected: { text: "Rejected by Google", cls: "bg-destructive/10 text-destructive" },
-  retracting: { text: "Taking back from Google", cls: "bg-amber-500/15 text-amber-800" },
-  invalid: { text: "Reported as invalid ✓", cls: "bg-muted text-foreground" },
-  invalid_pending: { text: "Reporting as invalid", cls: "bg-muted text-muted-foreground" },
-  retracted: { text: "Taken back from Google ✓", cls: "bg-muted text-foreground" },
-  elsewhere: { text: "Sent by the main computer", cls: "bg-muted text-muted-foreground" },
-  retract_failed: { text: "Couldn't take back", cls: "bg-destructive/10 text-destructive" },
-} as const
-
-// The status picker in each row. Interested and later stages tell Google Ads this lead was good.
-// `by` is who on the team set it.
-function StatusCell({ id, status, auto, rule, by }: { id: string; status: string; auto: boolean; rule?: string; by?: string }) {
-  const [value, setValue] = useState(status)
-  const [byApp, setByApp] = useState(auto)
-  const [byName, setByName] = useState(by)
-  const [pending, start] = useTransition()
-  const [error, setError] = useState<string | null>(null)
-  return (
-    <div className="flex flex-col gap-1">
-      <select
-        aria-label="Lead status"
-        value={value}
-        disabled={pending}
-        onChange={(e) => {
-          const next = e.target.value
-          setValue(next)
-          setByApp(false)
-          // Whoever set it before didn't set this: the page shows the new name once it's saved.
-          setByName(undefined)
-          setError(null)
-          start(async () => {
-            const res = await setLeadStatusAction(id, next)
-            if (res.error) {
-              setError(res.error)
-              setValue(status)
-              setByApp(auto)
-              setByName(by)
-            }
-          })
-        }}
-        className={cn("h-8 rounded-lg border px-1.5 text-xs font-semibold", statusTone[value] ?? statusTone.new)}
-      >
-        {leadStatuses.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.label}
-          </option>
-        ))}
-      </select>
-      {byApp && value !== "new" && (
-        <span className="max-w-40 text-xs whitespace-normal text-muted-foreground">{rule ? `Set by rule: ${rule}` : "Set by its score"}</span>
-      )}
-      {!byApp && byName && <span className="max-w-40 truncate text-xs text-muted-foreground">by {byName}</span>}
-      {error && <span className="text-xs text-destructive">{error}</span>}
-    </div>
-  )
 }
 
 // The ✕ on a lead: marks it Not interested in one click (it moves to the Not interested list,
@@ -289,8 +193,31 @@ function RestoreLead({ id, name }: { id: string; name: string }) {
   )
 }
 
-// Leads as a spreadsheet: one row per lead, a column per detail, searchable and filterable.
-export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; deleted?: LeadRow[] }) {
+// Leads as a spreadsheet: one row per lead, a column per detail, searchable and filterable. A click
+// on a lead opens the lead panel on the right; the address then ends in ?lead=<id>, so a link
+// (the Overview's follow-ups, a call that's a lead) opens the same panel. `you` is the name
+// DealTrack knows for whoever is using it; `sharing` says whether notes reach the team.
+export default function LeadsTable({
+  rows,
+  deleted = [],
+  you,
+  sharing = "off",
+}: {
+  rows: LeadRow[]
+  deleted?: LeadRow[]
+  you?: string
+  sharing?: NotesSharing
+}) {
+  const openId = useSearchParams().get("lead")
+  const open = useCallback((id: string | null) => {
+    const url = new URL(window.location.href)
+    if (id) url.searchParams.set("lead", id)
+    else url.searchParams.delete("lead")
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+  }, [])
+  const close = useCallback(() => open(null), [open])
+  const [dueOnly, setDueOnly] = useState(false)
+  const isDue = (r: LeadRow) => r.detail.followUp?.due === "overdue" || r.detail.followUp?.due === "today"
   const [query, setQuery] = useState("")
   // Not interested leads live in their own list, out of the way of the ones you're working, and
   // deleted ones in another, until they're restored.
@@ -324,18 +251,20 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
       (r) =>
         inList(r) &&
         inRange(r) &&
+        (!dueOnly || isDue(r)) &&
         (!channel || r.channel === channel) &&
         (!status || r.status === status) &&
         (!grade || r.score?.grade === grade) &&
         (!q ||
-          [r.name, r.phone, r.email, r.address, r.utmCampaign, r.utmTerm, r.utmSource, r.notes, r.form]
+          [r.name, r.phone, r.email, r.address, r.utmCampaign, r.utmTerm, r.utmSource, r.notes, r.form, ...r.detail.notes.map((n) => n.text), r.detail.followUp?.note]
             .filter(Boolean)
             .some((v) => v!.toLowerCase().includes(q)) ||
           // "(510) 394-5339", "510-394" or "5103945339" all find the same number.
           (q.replace(/\D/g, "").length >= 3 && Boolean(r.phone?.replace(/\D/g, "").includes(q.replace(/\D/g, ""))))),
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, query, channel, status, grade, range, from, to, list])
+  }, [base, query, channel, status, grade, range, from, to, list, dueOnly])
+  const dueCount = base.filter((r) => inList(r) && isDue(r)).length
 
   const pages = Math.max(1, Math.ceil(shown.length / PAGE))
   const current = Math.min(page, pages - 1)
@@ -398,7 +327,7 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
               setQuery(e.target.value)
               setPage(0)
             }}
-            placeholder="Search name, phone, email, campaign…"
+            placeholder="Search name, phone, email, notes…"
             className="h-10 w-full rounded-lg border bg-card pr-3 pl-9 text-sm"
           />
         </label>
@@ -508,7 +437,25 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
             ))}
           </select>
         </label>
+        {(dueCount > 0 || dueOnly) && (
+          <button
+            type="button"
+            aria-pressed={dueOnly}
+            onClick={() => {
+              setDueOnly(!dueOnly)
+              setPage(0)
+            }}
+            className={cn(
+              "inline-flex h-10 items-center gap-1.5 rounded-lg border px-3 text-sm",
+              dueOnly ? "border-amber-500 bg-amber-500/15 font-medium text-amber-900 dark:text-amber-200" : "bg-card hover:bg-muted",
+            )}
+          >
+            <CalendarClock className="size-4" aria-hidden />
+            Follow-ups due ({dueCount})
+          </button>
+        )}
       </div>
+      <p className="-mt-1 text-xs text-muted-foreground">Click a lead to open it: notes, follow-up date, history and the ad it came from.</p>
 
       <div className="max-h-[70vh] overflow-auto rounded-xl border">
         <table className="w-full min-w-[1800px] border-collapse text-sm tabular-nums">
@@ -544,7 +491,15 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
           </thead>
           <tbody>
             {visible.map((r, i) => (
-              <tr key={r.id} className="border-b odd:bg-card even:bg-muted/30 hover:bg-primary/5">
+              <tr
+                key={r.id}
+                onClick={(e) => {
+                  // The row's own buttons, links and pickers do their own thing.
+                  if ((e.target as HTMLElement).closest("a, button, select, input, textarea, summary, label")) return
+                  open(r.id)
+                }}
+                className={cn("cursor-pointer border-b odd:bg-card even:bg-muted/30 hover:bg-primary/5", openId === r.id && "bg-primary/10 odd:bg-primary/10 even:bg-primary/10")}
+              >
                 <td className={`${td} px-1 py-1`}>
                   {list === "active" ? (
                     <QuickStatus id={r.id} to="not_interested" label={`Not interested: ${r.name}`} />
@@ -560,7 +515,36 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
                 <td className={`${td} text-muted-foreground`}>{current * PAGE + i + 1}</td>
                 <td className={td}>{r.received}</td>
                 {list === "deleted" && <td className={td}>{r.deleted || empty}</td>}
-                <td className={`${td} font-medium`}>{r.name}</td>
+                <td className={td}>
+                  <button type="button" onClick={() => open(r.id)} className="text-left font-medium text-primary hover:underline">
+                    {r.name}
+                  </button>
+                  {(r.detail.followUp || r.detail.notes.length > 0) && (
+                    <span className="mt-0.5 flex items-center gap-2 text-xs">
+                      {r.detail.followUp && (
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1",
+                            r.detail.followUp.due === "overdue"
+                              ? "font-medium text-destructive"
+                              : r.detail.followUp.due === "today"
+                                ? "font-medium text-amber-700 dark:text-amber-300"
+                                : "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarClock className="size-3" aria-hidden />
+                          {r.detail.followUp.label}
+                        </span>
+                      )}
+                      {r.detail.notes.length > 0 && (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground">
+                          <StickyNote className="size-3" aria-hidden />
+                          {r.detail.notes.length} note{r.detail.notes.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </td>
                 <td className={td}>
                   <ScoreCell score={r.score} />
                 </td>
@@ -704,6 +688,9 @@ export default function LeadsTable({ rows, deleted = [] }: { rows: LeadRow[]; de
           </div>
         )}
       </div>
+      {openId && (
+        <LeadPanel key={openId} row={rows.find((r) => r.id === openId) ?? deleted.find((r) => r.id === openId)} onClose={close} you={you} sharing={sharing} />
+      )}
     </div>
   )
 }

@@ -15,7 +15,7 @@ import { tunnelUrl, webhookSecret } from "@/lib/leads/webhook"
 import { recentAttempts, type WebhookAttempt } from "@/lib/leads/webhook-log"
 import { CF7_HIDDEN_FIELDS, TRACKING_SNIPPET } from "@/lib/leads/wordpress-snippets"
 import { getWordPress, type SiteEvent } from "@/lib/leads/wordpress"
-import { olderVersion, PLUGIN_VERSION } from "@/lib/leads/wordpress-plugin"
+import { olderVersion, PLUGIN_VERSION, siteKeepsNotes } from "@/lib/leads/wordpress-plugin"
 import { timeAgo } from "@/lib/leads/time"
 import { DATA_DIR } from "@/lib/store"
 import { cn } from "@/lib/utils"
@@ -174,7 +174,8 @@ export default async function WebhookSetup({ websiteLeads }: { websiteLeads: num
             <p className="flex gap-2 rounded-lg border-2 border-amber-500/50 bg-amber-500/10 p-3 font-medium text-amber-950">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
               <span>
-                A newer Lead Saver plugin is ready (version {PLUGIN_VERSION}; your site has {wp.plugin}). Download it below and
+                A newer Lead Saver plugin is ready (version {PLUGIN_VERSION}; your site has {wp.plugin})
+                {siteKeepsNotes(wp.plugin) ? "" : ": it shares the notes and follow-up dates in each lead's panel with your team"}. Download it below and
                 upload it the same way; when WordPress asks, click <strong>Replace current with uploaded</strong>.
               </span>
             </p>
@@ -223,7 +224,8 @@ export default async function WebhookSetup({ websiteLeads }: { websiteLeads: num
             </p>
             <p className="text-muted-foreground">
               Everyone can run DealTrack, or One Marketing Command Center, on their own computer. A status anyone sets on a
-              website lead shows up on everyone&apos;s within about a minute, through {siteName}, with who set it.
+              website lead shows up on everyone&apos;s within about a minute, through {siteName}, with who set it. So do the notes
+              and follow-up dates in DealTrack&apos;s lead panel{siteKeepsNotes(wp.plugin) ? "" : ", once the site has Lead Saver plugin 1.5"}.
             </p>
             {teamReady ? (
               <>
