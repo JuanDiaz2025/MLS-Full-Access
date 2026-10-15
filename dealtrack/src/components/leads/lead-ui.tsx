@@ -4,9 +4,12 @@
 // Google Ads heard is labeled.
 import { useState, useTransition } from "react"
 
+import { gradeStyle } from "@/components/leads/grades"
 import { setLeadStatusAction } from "@/lib/leads/status-actions"
 import { leadStatuses } from "@/lib/leads/types"
 import { cn } from "@/lib/utils"
+
+export { gradeStyle }
 
 export type Grade = "hot" | "warm" | "cold" | "junk"
 export type Score = { value: number; grade: Grade; reasons: string[] }
@@ -20,13 +23,6 @@ export const statusTone: Record<string, string> = {
   closed: "border-emerald-700/60 bg-emerald-600 text-white",
   not_interested: "border-border bg-muted text-muted-foreground",
 }
-
-export const gradeStyle = {
-  hot: { label: "Hot", cls: "bg-red-600 text-white" },
-  warm: { label: "Warm", cls: "bg-amber-400 text-amber-950" },
-  cold: { label: "Cold", cls: "bg-sky-100 text-sky-900" },
-  junk: { label: "Junk", cls: "bg-muted text-muted-foreground line-through" },
-} as const
 
 export const statusLabel = (id: string) => leadStatuses.find((s) => s.id === id)?.label ?? id
 

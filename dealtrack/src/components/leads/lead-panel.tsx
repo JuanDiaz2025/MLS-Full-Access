@@ -3,10 +3,11 @@
 // The panel that opens on the right when a lead is clicked in the Leads table: everything about
 // the lead in one place, the team's notes and when to get back to them.
 import { Fragment, useEffect, useRef, useState, useTransition, type ReactNode } from "react"
-import { CalendarClock, Check, Copy, History, MapPin, Megaphone, Phone, Send, StickyNote, Trash2, UserRound, X } from "lucide-react"
+import { CalendarClock, Check, Copy, Gauge, History, MapPin, Megaphone, Phone, Send, StickyNote, Trash2, UserRound, X } from "lucide-react"
 
 import type { LeadRow } from "@/components/leads/leads-table"
 import { googleLabel, gradeStyle, StatusCell, statusLabel } from "@/components/leads/lead-ui"
+import ScoringGuide from "@/components/leads/scoring-guide"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { addLeadNoteAction, deleteLeadNoteAction, setFollowUpAction } from "@/lib/leads/note-actions"
 import type { LeadDetail } from "@/lib/leads/panel"
@@ -292,6 +293,12 @@ export default function LeadPanel({ row, onClose, you, sharing }: Props) {
   const close = useRef(onClose)
   // Who's writing, when DealTrack doesn't know yet (it remembers it once a note or date is saved).
   const [name, setName] = useState("")
+  // The scoring guide, opened from "How scores work" under the score, at the top of the panel.
+  const [guide, setGuide] = useState(false)
+  const body = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (guide) body.current?.scrollTo({ top: 0 })
+  }, [guide])
   useEffect(() => {
     close.current = onClose
   }, [onClose])
@@ -394,13 +401,27 @@ export default function LeadPanel({ row, onClose, you, sharing }: Props) {
                   ))}
                 </ul>
               )}
+              <button
+                type="button"
+                aria-expanded={guide}
+                onClick={() => setGuide(!guide)}
+                className="mt-1 text-xs font-medium text-primary hover:underline"
+              >
+                {guide ? "Hide how scores work" : "How scores work"}
+              </button>
             </div>
           )}
         </div>
         {actions.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{actions}</div>}
       </header>
 
-      <div className="flex-1 overflow-y-auto pb-6">
+      <div ref={body} className="flex-1 overflow-y-auto pb-6">
+        {guide && (
+          <Part title="How scores work" icon={<Gauge />}>
+            <ScoringGuide />
+          </Part>
+        )}
+
         {author.needName && !readOnly && (
           <div className="bg-muted/40 px-5 py-3">
             <label className="flex flex-wrap items-center gap-2 text-sm">

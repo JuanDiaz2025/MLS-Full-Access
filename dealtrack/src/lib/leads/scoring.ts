@@ -7,12 +7,14 @@
 // Points (100 at most): a real phone number 25, an email 10, a property address with a house
 // number 20, a full name 5, a paid ad click 10, a seller search ("sell my house fast") 10, a
 // motivated seller in the message (inherited, foreclosure, repairs...) 15, coming back again 5.
+// The guide on the Leads page (components/leads/scoring-guide.tsx) lists them for the team:
+// change it along with them.
 import { jsonFileStore } from "@/lib/json-file-store"
+import { HOT_AT, WARM_AT } from "@/lib/leads/score-levels"
 import { hasAdClick } from "@/lib/leads/tracking"
 import { CALL_TAP_SOURCE, type Lead, type LeadGrade, type LeadScore, type LeadStatus } from "@/lib/leads/types"
 
-export const HOT_AT = 70
-export const WARM_AT = 40
+export { HOT_AT, WARM_AT }
 
 export const gradeLabels: Record<LeadGrade, string> = { hot: "Hot", warm: "Warm", cold: "Cold", junk: "Junk" }
 
