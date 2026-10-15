@@ -8,11 +8,11 @@ import LeadsTable, { type LeadRow } from "@/components/leads/leads-table"
 import LiveRefresh from "@/components/leads/live-refresh"
 import PhoneCalls from "@/components/leads/phone-calls"
 import ScoringGuide from "@/components/leads/scoring-guide"
+import ScoringGuideTab from "@/components/leads/scoring-guide-tab"
 import SendingCheck from "@/components/leads/sending-check"
 import WebhookSetup from "@/components/leads/webhook-setup"
 import { KpiGrid, PageHeader, Section } from "@/components/report"
 import { buttonVariants } from "@/components/ui/button"
-import Disclosure from "@/components/ui/disclosure"
 import { DATA_MANAGER_LIBRARY } from "@/lib/conversions/data-manager"
 import { getConnection, SHEETS_SCOPE } from "@/lib/conversions/google"
 import { callCounting, getCalls, RECENT_CALL_DAYS } from "@/lib/google-ads/calls"
@@ -283,14 +283,6 @@ export default async function LeadsPage() {
         }
       >
         {stuckEntries.length > 0 && <SendingCheck stuck={stuckEntries.length} lastError={lastError} />}
-        <Disclosure className="rounded-xl border bg-muted/30 px-4 py-3" initialOpen={false}>
-          <summary className="cursor-pointer text-sm font-medium">
-            How lead scores work <span className="font-normal text-muted-foreground">(Hot, Warm, Cold, Junk and the points)</span>
-          </summary>
-          <div className="mt-3">
-            <ScoringGuide />
-          </div>
-        </Disclosure>
         {leads.length || deleted.length ? (
           <LeadsTable
             rows={leads.map((l) => toRow(l, placements, elsewhere))}
@@ -319,6 +311,10 @@ export default async function LeadsPage() {
       </div>
 
       <WebhookSetup websiteLeads={leads.filter((l) => !l.qrCodeId).length} />
+      {/* On the left edge of the screen, wherever you are on the page. */}
+      <ScoringGuideTab>
+        <ScoringGuide />
+      </ScoringGuideTab>
       <LiveRefresh version={version} />
     </>
   )

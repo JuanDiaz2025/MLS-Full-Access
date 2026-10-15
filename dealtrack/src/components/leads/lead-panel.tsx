@@ -303,12 +303,12 @@ export default function LeadPanel({ row, onClose, you, sharing }: Props) {
     close.current = onClose
   }, [onClose])
   // The panel takes focus when it opens, so the keyboard lands in it; Esc closes it (not while
-  // typing, so a half-written note isn't lost).
+  // typing, so a half-written note isn't lost, nor when the scoring guide on the left used it).
   useEffect(() => {
     heading.current?.focus()
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)
-      if (e.key === "Escape" && !typing) close.current()
+      if (e.key === "Escape" && !typing && !e.defaultPrevented) close.current()
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
