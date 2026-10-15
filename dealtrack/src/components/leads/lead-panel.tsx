@@ -3,7 +3,7 @@
 // The panel that opens on the right when a lead is clicked in the Leads table: everything about
 // the lead in one place, the team's notes and when to get back to them.
 import { Fragment, useEffect, useRef, useState, useTransition, type ReactNode } from "react"
-import { CalendarClock, Check, Copy, History, Mail, MapPin, Megaphone, MessageSquare, Phone, Send, StickyNote, Trash2, UserRound, X } from "lucide-react"
+import { CalendarClock, Check, Copy, History, MapPin, Megaphone, Phone, Send, StickyNote, Trash2, UserRound, X } from "lucide-react"
 
 import type { LeadRow } from "@/components/leads/leads-table"
 import { googleLabel, gradeStyle, StatusCell, statusLabel } from "@/components/leads/lead-ui"
@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils"
 export type NotesSharing = "on" | "needs-plugin" | "off"
 
 const mapsUrl = (address: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
-const smsHref = (phone: string) => `sms:${phone.replace(/\s*(?:x|ext\.?|extension)\s*\d+\s*$/i, "").replace(/[^\d+]/g, "")}`
 const input = "rounded-lg border bg-card px-2 text-sm"
 // The quick buttons that are links (cn settles the button's border classes, as the Button does).
 const quick = cn(buttonVariants({ variant: "outline", size: "sm" }))
@@ -341,24 +340,6 @@ export default function LeadPanel({ row, onClose, you, sharing }: Props) {
   const author: Author = { needName: !you, name }
   const g = row.score ? gradeStyle[row.score.grade] : null
   const actions = [
-    row.phone && (
-      <a key="call" href={telHref(row.phone)} className={quick}>
-        <Phone data-icon="inline-start" />
-        Call
-      </a>
-    ),
-    row.phone && (
-      <a key="text" href={smsHref(row.phone)} className={quick}>
-        <MessageSquare data-icon="inline-start" />
-        Text
-      </a>
-    ),
-    row.email && (
-      <a key="email" href={`mailto:${row.email}`} className={quick}>
-        <Mail data-icon="inline-start" />
-        Email
-      </a>
-    ),
     row.phone && <CopyNumber key="copy" phone={row.phone} />,
     row.address && (
       <a key="map" href={mapsUrl(row.address)} target="_blank" rel="noreferrer" className={quick}>
