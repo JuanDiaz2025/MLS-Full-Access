@@ -15,6 +15,10 @@ type Props = {
 
 const duration = (s: number) => (s < 60 ? `${s} sec` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} sec` : ""}`.trim())
 
+// Where the team finds a caller's number: Google Ads only shows it for answered calls over 15
+// seconds, while REI BlackBook (the ring group the ads' number rings) logs every caller.
+const numberHint = (c: Call) => (!c.missed && c.seconds > 15 ? "Number: in REI BlackBook or Google Ads Call details" : "Number: in REI BlackBook only")
+
 // "2026-09-29 14:03:11" → "Sep 29, 2:03 PM" (already in the Google Ads account's time zone).
 function when(start: string) {
   const [date, time = "00:00:00"] = start.split(" ")
@@ -41,8 +45,9 @@ export default function PhoneCalls({ result, addedCalls = [], days = RECENT_CALL
         <div>
           <h2 className="text-lg font-semibold">Phone calls from Google Ads</h2>
           <p className="text-sm text-muted-foreground">
-            Last {days} days. Google Ads gives DealTrack each call&apos;s time, length, area code and campaign; the caller&apos;s full
-            number is in Google Ads&apos; Call details report.
+            Last {days} days. Google Ads gives DealTrack each call&apos;s time, length, area code and campaign, never the caller&apos;s
+            number. Find it in REI BlackBook&apos;s call log at that time; answered calls over 15 seconds also show it in Google
+            Ads&apos; Call details report, next to the recording.
           </p>
         </div>
       </div>
@@ -74,8 +79,9 @@ export default function PhoneCalls({ result, addedCalls = [], days = RECENT_CALL
           {missed > 0 && (
             <p className="mx-5 mt-3 flex gap-2 rounded-xl bg-destructive/10 p-3 text-sm text-destructive sm:mx-6">
               <PhoneMissed className="mt-0.5 size-4 shrink-0" />
-              {missed} call{missed === 1 ? " was" : "s were"} missed. Each one could be a seller: call back from
-              the Google Ads call report, and make sure someone answers during ad hours.
+              {missed} call{missed === 1 ? " was" : "s were"} missed. Each one could be a seller. Google doesn&apos;t show a missed
+              caller&apos;s number: find the call in REI BlackBook&apos;s call log at the time below, call back, then click Add as lead.
+              And make sure someone answers during ad hours.
             </p>
           )}
           {counting !== undefined && counting !== null && (
@@ -140,14 +146,11 @@ export default function PhoneCalls({ result, addedCalls = [], days = RECENT_CALL
                       <span className="text-xs text-muted-foreground"> · from {c.from === "Website" ? "website" : "ad"}</span>
                     </td>
                     <td className="px-5 py-3 sm:px-6">
-                      {c.missed ? (
-                        <span className="text-xs text-muted-foreground">–</span>
-                      ) : (
-                        <CallLeadButton
-                          call={{ start: c.start, areaCode: c.areaCode, campaign: c.campaign, seconds: c.seconds }}
-                          added={addedCalls.includes(callIdOf(c))}
-                        />
-                      )}
+                      <CallLeadButton
+                        call={{ start: c.start, areaCode: c.areaCode, campaign: c.campaign, seconds: c.seconds, missed: c.missed }}
+                        added={addedCalls.includes(callIdOf(c))}
+                        hint={numberHint(c)}
+                      />
                     </td>
                   </tr>
                 ))}

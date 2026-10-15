@@ -103,7 +103,7 @@ export function doToday(input: {
       key: "missed-calls",
       severity: input.missedCalls >= 3 ? "high" : "medium",
       title: `Call back ${input.missedCalls} missed call${input.missedCalls === 1 ? "" : "s"} from the ads`,
-      detail: "Each one may be a seller who didn't get through.",
+      detail: "Each one may be a seller who didn't get through. Their numbers are in REI BlackBook's call log.",
       href: "/leads#calls",
       cost: 0,
     })

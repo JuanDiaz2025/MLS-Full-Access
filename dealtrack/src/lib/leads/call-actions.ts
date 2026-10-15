@@ -2,7 +2,8 @@
 
 // A phone call from a Google Ads ad turned into a lead. Calls carry no Google click ID (Google only
 // shares the time, length and area code), so the lead is matched to the ad click by the caller's
-// phone number instead, the way Google matches form leads without a click ID.
+// phone number instead, the way Google matches form leads without a click ID. The team types that
+// number in from REI BlackBook's call log, which has it for missed calls too.
 import { revalidatePath } from "next/cache"
 
 import { isSignedIn } from "@/lib/auth"
@@ -50,11 +51,17 @@ export async function addCallLeadAction(
   }
 
   const at = await callTime(String(call.start))
+  const missed = call.missed === true
   const lead = await addLead(
     {
-      name: String(input.name ?? "").trim().slice(0, 120) || `Caller from (${call.areaCode || "?"})`,
+      name: String(input.name ?? "").trim().slice(0, 120) || (call.areaCode ? `Caller from (${call.areaCode})` : "Caller from Google Ads"),
       phone: String(input.phone).trim().slice(0, 40),
-      notes: [`Phone call from Google Ads, ${Math.max(1, Math.round(Number(call.seconds) / 60))} min.`, String(input.notes ?? "").trim().slice(0, 2000)].filter(Boolean).join("\n"),
+      notes: [
+        missed ? "Missed call from Google Ads." : `Phone call from Google Ads, ${Math.max(1, Math.round(Number(call.seconds) / 60))} min.`,
+        String(input.notes ?? "").trim().slice(0, 2000),
+      ]
+        .filter(Boolean)
+        .join("\n"),
       source: "Google Ads phone call",
       tracking: { utmSource: "google", utmMedium: "cpc", utmCampaign: String(call.campaign ?? "") || undefined },
       callId,

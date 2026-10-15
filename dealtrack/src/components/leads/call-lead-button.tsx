@@ -9,24 +9,29 @@ import type { CallInfo } from "@/lib/leads/call-id"
 
 const input = "h-9 rounded-lg border bg-card px-2 text-sm"
 
-// "Add as lead" on a Google Ads call: you type the caller's full number (from your phone's call log)
-// and how it went; the lead is then sent to Google Ads like any other, matched by that number.
-export default function CallLeadButton({ call, added }: { call: CallInfo; added: boolean }) {
+// "Add as lead" on a Google Ads call: you type the caller's full number (Google never gives it to the
+// app; `hint` says where it is) and how it went; the lead is then sent to Google Ads like any other,
+// matched by that number. A missed call starts at New, since nobody has spoken to the caller yet.
+export default function CallLeadButton({ call, added, hint }: { call: CallInfo; added: boolean; hint?: string }) {
   const [open, setOpen] = useState(false)
   const [phone, setPhone] = useState(call.areaCode ? `(${call.areaCode}) ` : "")
   const [name, setName] = useState("")
-  const [status, setStatus] = useState("interested")
+  const [status, setStatus] = useState(call.missed ? "new" : "interested")
   const [notes, setNotes] = useState("")
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, start] = useTransition()
 
   if (added || note?.ok) return <span className="text-xs font-medium text-emerald-700">{note?.text ?? "Added as a lead ✓"}</span>
+  const where = hint ? <span className="w-full text-xs text-muted-foreground">{hint}</span> : null
   if (!open) {
     return (
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <UserPlus data-icon="inline-start" />
-        Add as lead
-      </Button>
+      <div className="flex flex-col items-start gap-1">
+        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <UserPlus data-icon="inline-start" />
+          Add as lead
+        </Button>
+        {where}
+      </div>
     )
   }
   return (
@@ -61,6 +66,7 @@ export default function CallLeadButton({ call, added }: { call: CallInfo; added:
       <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
         Cancel
       </Button>
+      {where}
       {note && !note.ok && <span className="w-full text-xs text-destructive">{note.text}</span>}
     </form>
   )

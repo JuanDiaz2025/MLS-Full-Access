@@ -378,7 +378,7 @@ function callRules(): RuleGroup {
           key: "calls:missed",
           severity: missed.length >= 3 ? "high" : "medium",
           title: `${plural(missed.length, "call")} from the ads went unanswered in the last 7 days`,
-          detail: `Out of ${plural(calls.length, "call")}${campaigns.length ? `, from ${campaigns.slice(0, 3).join(", ")}` : ""}. Call them back (Google Ads → Campaigns → Insights and reports → Call details), and make sure ads only run when someone can answer.`,
+          detail: `Out of ${plural(calls.length, "call")}${campaigns.length ? `, from ${campaigns.slice(0, 3).join(", ")}` : ""}. Google doesn't show a missed caller's number: find each call in REI BlackBook's call log at the time shown under Leads & calls, call back, and make sure ads only run when someone can answer.`,
           href: "/leads#calls",
         },
       ]
