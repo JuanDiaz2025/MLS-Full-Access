@@ -1,15 +1,12 @@
 "use server"
 
-import { readFile } from "node:fs/promises"
-import path from "node:path"
-
 import { revalidatePath } from "next/cache"
 
+import { appVersion } from "@/lib/app-version"
 import { isAdmin, isSignedIn } from "@/lib/auth"
 import { activeAccount, forgetConnection } from "@/lib/conversions/google"
 import { checkSending, retryNow, sendPendingConversions, setConversionTarget, type CheckStep } from "@/lib/conversions/offline-conversions"
 import { dryRun } from "@/lib/google-ads/client"
-import { DATA_DIR } from "@/lib/store"
 
 // Picks which Google Ads conversion action a lead stage is sent to (Leads page).
 export async function setConversionTargetAction(kind: string, resourceName: string): Promise<{ error?: string }> {
@@ -31,11 +28,14 @@ export async function setConversionTargetAction(kind: string, resourceName: stri
 // thing sending needs, in order.
 export async function checkSendingAction(): Promise<{ steps: CheckStep[] }> {
   if (!(await isSignedIn())) return { steps: [{ ok: false, title: "Signed in", detail: "Sign in first." }] }
-  let version = "unknown"
-  try {
-    version = (await readFile(path.join(DATA_DIR, "app-version"), "utf8")).trim().slice(0, 7) || version
-  } catch {}
-  const steps: CheckStep[] = [{ ok: true, title: "App version", detail: `${version}. If something below fails, close DealTrack and start it again to get the latest version first.` }]
+  const { running, latest } = await appVersion()
+  const steps: CheckStep[] = [
+    !running
+      ? { ok: true, title: "App version", detail: "unknown. If something below fails, close DealTrack and start it again to get the latest version first." }
+      : latest && latest !== running
+        ? { ok: false, title: "App version", detail: `${running} is running, but ${latest} was downloaded. Close DealTrack and start it again to use it.` }
+        : { ok: true, title: "App version", detail: `${running}, the newest on this computer (git pull brings any update).` },
+  ]
   if (dryRun()) steps.push({ ok: true, title: "Test mode", detail: "DEALTRACK_VALIDATE_ONLY=1 is on: leads wait and nothing is sent until it's off. The checks below still run." })
   // DealTrack's Google client ID starts with its Google Cloud project's number: that's the project
   // Google checks for the Data Manager API.
