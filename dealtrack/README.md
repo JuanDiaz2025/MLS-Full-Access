@@ -206,7 +206,7 @@ If a value is missing, the page that needs it says which one; the other pages ke
 
 ## How it works
 
-- `src/lib/google-ads/client.ts` trades the refresh token for an access token and runs GAQL queries against the Google Ads API (v22). Results are cached for 10 minutes, so clicking around doesn't spend an API operation on every page view (Basic access allows 15,000 a day).
+- `src/lib/google-ads/client.ts` trades the refresh token for an access token and runs GAQL queries against the Google Ads API (v26; Google switches each version off about a year after release, see its sunset dates page). Results are cached for 10 minutes, so clicking around doesn't spend an API operation on every page view (Basic access allows 15,000 a day).
 - `src/lib/google-ads/reports.ts` holds the report queries and turns Google's micros and strings into dollars and numbers. `overview.ts`, `ads.ts`, `quality.ts`, and `invalid-clicks.ts` hold the newer pages' queries.
 - `src/lib/store.ts` reads and writes the saved data file. Saves are queued and written to a temporary file first, so two at once can't overwrite each other and a crash can't leave half a file.
 - `src/lib/alert-rules.ts` holds the alert rules and the alert history; `src/lib/budget.ts` the pacing; `src/lib/audit.ts` the go-live audit; `src/lib/negative-batches.ts` the weekly negatives.

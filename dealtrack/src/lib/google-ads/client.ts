@@ -5,7 +5,9 @@
 
 import { countRequest, markLimitHit, operationsIn } from "@/lib/google-ads/usage"
 
-const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v22"
+// Google switches each version off about a year after it comes out (docs/sunset-dates): v22 was
+// refusing requests by October 2026; v26 runs until November 2027.
+const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v26"
 const ADS_ENDPOINT = "https://googleads.googleapis.com"
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 

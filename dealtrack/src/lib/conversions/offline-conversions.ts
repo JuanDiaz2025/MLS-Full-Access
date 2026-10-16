@@ -719,7 +719,8 @@ type TrackingRow = {
     id?: string
     conversionTrackingSetting?: {
       acceptedCustomerDataTerms?: boolean
-      enhancedConversionsForLeadsEnabled?: boolean
+      // Enhanced conversions, as the account actually has it (its own setting or its manager's).
+      effectiveEnablementSetting?: "ON" | "OFF" | "UNKNOWN" | "UNSPECIFIED"
       conversionTrackingStatus?: string
       googleAdsConversionCustomer?: string
     }
@@ -735,11 +736,11 @@ async function accountSettings(connection: AdsConnection, account: AdsAccount): 
     const rows = (await runQuery(
       connection,
       account,
-      "SELECT customer.id, customer.conversion_tracking_setting.accepted_customer_data_terms, customer.conversion_tracking_setting.enhanced_conversions_for_leads_enabled, customer.conversion_tracking_setting.conversion_tracking_status, customer.conversion_tracking_setting.google_ads_conversion_customer FROM customer LIMIT 1",
+      "SELECT customer.id, customer.conversion_tracking_setting.accepted_customer_data_terms, customer.conversion_tracking_setting.effective_enablement_setting, customer.conversion_tracking_setting.conversion_tracking_status, customer.conversion_tracking_setting.google_ads_conversion_customer FROM customer LIMIT 1",
     )) as TrackingRow[]
     const t = rows[0]?.customer?.conversionTrackingSetting ?? {}
     out.push(
-      t.enhancedConversionsForLeadsEnabled
+      t.effectiveEnablementSetting === "ON"
         ? { ok: true, title: "Enhanced conversions for leads", detail: "On." }
         : {
             ok: false,
