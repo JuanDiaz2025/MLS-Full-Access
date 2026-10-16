@@ -43,12 +43,26 @@ export function cleanTracking(t?: LeadTracking): LeadTracking | undefined {
   return Object.keys(kept).length ? kept : undefined
 }
 
+// A click ID Google could never read: typed in to test the website's form ("TEST123", "testgclid…",
+// "THB_TEST_NOT_REAL") or cut short on the way. Google reports each one sent to it as an
+// "Unparseable gclid". Real ones are long runs of letters, digits, - and _.
+export const madeUpClickId = (v?: string) => Boolean(v && (!/^[A-Za-z0-9_-]{20,}$/.test(v) || /^test/i.test(v) || (v.length < 40 && /test/i.test(v))))
+
+// The typed-in click ID of a test of the website's form, if this lead is one: nothing about it
+// goes to Google Ads.
+export function testClick(tracking?: LeadTracking) {
+  const t = cleanTracking(tracking)
+  return [t?.gclid, t?.gbraid, t?.wbraid].find((v) => madeUpClickId(v) && /test/i.test(v!))
+}
+
 // The Google Ads click a lead came from, each id under its own name, the way Google wants it. A
 // gbraid/wbraid that an older website script copied into gclid (they start with "0AAAA") isn't sent
-// as a gclid, which Google would refuse.
+// as a gclid, which Google would refuse; nor is a click ID Google couldn't read (madeUpClickId).
 export function googleClick(tracking?: LeadTracking) {
-  const t = cleanTracking(tracking)
-  if (!t) return null
+  const c = cleanTracking(tracking)
+  if (!c) return null
+  const readable = (v?: string) => (madeUpClickId(v) ? undefined : v)
+  const t = { gclid: readable(c.gclid), gbraid: readable(c.gbraid), wbraid: readable(c.wbraid) }
   const braid = (v?: string) => Boolean(v && /^0AAAA/.test(v))
   const gbraid = t.gbraid || (braid(t.gclid) && !t.wbraid ? t.gclid : undefined)
   const wbraid = t.wbraid

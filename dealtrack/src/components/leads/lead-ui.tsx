@@ -61,6 +61,8 @@ export const googleLabel = {
   retracted: { text: "Taken back from Google ✓", cls: "bg-muted text-foreground" },
   elsewhere: { text: "Sent by the main computer", cls: "bg-muted text-muted-foreground" },
   retract_failed: { text: "Couldn't take back", cls: "bg-destructive/10 text-destructive" },
+  untaken: { text: "Nothing to take back", cls: "bg-muted text-muted-foreground" },
+  test: { text: "Not sent (test lead)", cls: "bg-muted text-muted-foreground" },
 } as const
 export type GoogleState = keyof typeof googleLabel
 

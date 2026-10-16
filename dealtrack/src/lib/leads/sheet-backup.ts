@@ -91,7 +91,7 @@ const statusLabel = (status?: string) => leadStatuses.find((s) => s.id === (stat
 
 function googleHeard(lead: Lead) {
   return Object.entries(lead.conversions ?? {})
-    .flatMap(([kind, c]) => (c ? [`${kind}: ${c.retraction ? `taken back (${c.retraction.state})` : (c.google?.status ?? c.state)}`] : []))
+    .flatMap(([kind, c]) => (c ? [`${kind}: ${c.retraction ? (c.retraction.state === "none" ? "nothing to take back" : `taken back (${c.retraction.state})`) : c.test ? "test lead, not sent" : (c.google?.status ?? c.state)}`] : []))
     .join(", ")
 }
 

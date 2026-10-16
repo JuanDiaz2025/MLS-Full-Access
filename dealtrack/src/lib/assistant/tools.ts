@@ -305,7 +305,12 @@ export async function recentLeads(days: number) {
       score: l.score && { value: l.score.value, grade: l.score.grade, reasons: l.score.reasons },
       status: l.status ?? "new",
       sentToGoogleAds: l.conversions
-        ? Object.fromEntries(Object.entries(l.conversions).map(([kind, c]) => [kind, c?.retraction ? `taken back (${c.retraction.state})` : (c?.google?.status ?? c?.state)]))
+        ? Object.fromEntries(
+            Object.entries(l.conversions).map(([kind, c]) => [
+              kind,
+              c?.retraction ? (c.retraction.state === "none" ? "nothing to take back (Google never counted it)" : `taken back (${c.retraction.state})`) : c?.test ? "test lead, not sent" : (c?.google?.status ?? c?.state),
+            ]),
+          )
         : undefined,
       tracking: l.tracking,
       roughLocation: l.place && (l.place.google || l.place.posthog) ? { googleAdsClick: l.place.google, searchedAbout: l.place.googleInterest, websiteVisit: l.place.posthog } : undefined,

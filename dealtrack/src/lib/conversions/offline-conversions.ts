@@ -15,11 +15,11 @@ import { AdsApiError, DATA_MANAGER_SCOPE, postToAds, runQuery, type AdsAccount, 
 import { dryRun } from "@/lib/google-ads/client"
 import { jsonFileStore } from "@/lib/json-file-store"
 import { shared } from "@/lib/shared-state"
-import { applyStatus } from "@/lib/leads/status"
+import { applyStatus, takeBackFrom } from "@/lib/leads/status"
 import { listLeads, updateLead } from "@/lib/leads/store"
 import { sharedKey } from "@/lib/leads/team-sync"
 import { conversionKinds, type ConversionKind, type Lead, type LeadStatus } from "@/lib/leads/types"
-import { googleClick } from "@/lib/leads/tracking"
+import { googleClick, testClick } from "@/lib/leads/tracking"
 import { sentElsewhere } from "@/lib/leads/wordpress"
 
 // The actions the app makes when the account has none that accept imported leads. The same names
@@ -291,6 +291,16 @@ async function upload(connection: AdsConnection, account: AdsAccount, lead: Lead
     })
     return
   }
+  // A test of the website's form: Google can't read a typed-in click ID ("Unparseable gclid" in its
+  // diagnostics) and a test isn't a lead, so nothing goes.
+  const typed = testClick(lead.tracking)
+  if (typed) {
+    await updateLead(lead.id, (l) => {
+      const current = l.conversions?.[kind]
+      if (current?.state === "pending") l.conversions![kind] = { ...current, state: "skipped", test: true, error: `A test lead (its click ID is “${typed}”), so it isn't sent to Google Ads.` }
+    })
+    return
+  }
   const click = entry.noClick ? null : googleClick(lead.tracking)
   const ids = identifiers(lead)
   if (!click && !ids.length) {
@@ -436,8 +446,12 @@ const CHECK_FOR_MS = 3 * 24 * 60 * 60_000
 
 // Google Ads' time format: "yyyy-mm-dd hh:mm:ss+00:00".
 const adsTime = (iso: string) => `${new Date(iso).toISOString().slice(0, 19).replace("T", " ")}+00:00`
-// Not found yet usually means Google hasn't finished processing the conversion (it takes hours).
-const RETRACT_RETRY = /CONVERSION_NOT_FOUND|TOO_RECENT|ADJUSTMENT_PRECEDES|INTERNAL|TRANSIENT|UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE/i
+const RETRACT_RETRY = /TOO_RECENT|ADJUSTMENT_PRECEDES|INTERNAL|TRANSIENT|UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE/i
+// Asked a day after it was sent (takeBackFrom), "not found" means Google never counted the conversion:
+// it was never taken in, or was thrown out as invalid (Google's docs). Nothing to take back, and
+// asking again only adds failed uploads to the account's diagnostics. Also matches the message kept
+// on take-backs that failed this way before the app knew.
+const NEVER_COUNTED = /CONVERSION_NOT_FOUND|conversion for this conversion action and conversion identifier can'?t be found/i
 
 type AdjustResult = { partialFailureError?: { message?: string; details?: { errors?: { message?: string; errorCode?: Record<string, string> }[] }[] } }
 
@@ -485,9 +499,11 @@ async function retract(connection: AdsConnection, account: AdsAccount, lead: Lea
     const current = l.conversions?.[kind]?.retraction
     if (!current || current.state !== "pending") return
     const tries = (current.tries ?? 0) + 1
-    l.conversions![kind]!.retraction = error
-      ? { ...current, tries, lastTry: now, error, state: RETRACT_RETRY.test(`${code} ${error}`) && tries < MAX_TRIES ? "pending" : "failed" }
-      : { at: current.at, tries, lastTry: now, state: "sent" }
+    l.conversions![kind]!.retraction = !error
+      ? { at: current.at, tries, lastTry: now, state: "sent" }
+      : NEVER_COUNTED.test(`${code} ${error}`)
+        ? { at: current.at, tries, lastTry: now, state: "none" }
+        : { ...current, tries, lastTry: now, error, state: RETRACT_RETRY.test(`${code} ${error}`) && tries < MAX_TRIES ? "pending" : "failed" }
   })
 }
 
@@ -604,8 +620,20 @@ export function sendPendingConversions(connection: AdsConnection, account: AdsAc
             await checkDecision(connection, lead, kind)
           }
         }
+        // Nothing to take back: a test lead's conversion, sent with its typed-in click ID (Google refused
+        // it), or a take-back Google answered "not found" before the app knew what that meant.
+        const back = entry?.retraction
+        if (entry && back && ((back.state === "pending" && !entry.noClick && testClick(lead.tracking)) || (back.state === "failed" && NEVER_COUNTED.test(back.error ?? "")))) {
+          const none = { at: back.at, tries: back.tries, lastTry: back.lastTry, state: "none" as const }
+          await updateLead(lead.id, (l) => {
+            const c = l.conversions?.[kind]
+            if (c?.retraction?.state === back.state) c.retraction = none
+          })
+          entry.retraction = none
+        }
         const r = entry?.retraction
-        if (r?.state === "pending" && (!r.lastTry || Date.now() - Date.parse(r.lastTry) >= RETRY_AFTER_MS)) {
+        // Not before Google has had the conversion a day (takeBackFrom), then at most hourly.
+        if (entry && r?.state === "pending" && Date.now() >= takeBackFrom(entry) && (!r.lastTry || Date.now() - Date.parse(r.lastTry) >= RETRY_AFTER_MS)) {
           await retract(connection, account, lead, kind)
           continue
         }

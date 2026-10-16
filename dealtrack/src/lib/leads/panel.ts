@@ -1,6 +1,7 @@
 // Everything the lead panel on the Leads page shows about one lead, ready to read: the team's
 // notes and follow-up date, the lead's history, the ad it came from, and what Google Ads heard.
 import { liveNotes, pacificDay } from "@/lib/leads/notes"
+import { takeBackFrom } from "@/lib/leads/status"
 import { cleanTracking, googleClick } from "@/lib/leads/tracking"
 import { leadStatuses, type ConversionKind, type ConversionUpload, type Lead, type LeadGrade } from "@/lib/leads/types"
 
@@ -100,10 +101,17 @@ function googleOf(lead: Lead): LeadDetail["google"] {
     if (c.state === "sent" && c.google?.status === "accepted")
       lines.push({ text: `Accepted by Google ✓${c.google.reason ? ` (${c.google.reason})` : ""}. Checked ${when(c.google.checkedAt)}.`, tone: "good" })
     else if (c.state === "sent" && c.google?.status === "rejected") lines.push({ text: `Rejected by Google: ${c.google.reason ?? "no reason given"}.`, tone: "bad" })
-    else if (c.state === "sent" && c.requestId) lines.push({ text: "Google is checking it (30 minutes to 24 hours)." })
+    // (Not once Google's answer to a take-back showed it never counted it.)
+    else if (c.state === "sent" && c.requestId && c.retraction?.state !== "none") lines.push({ text: "Google is checking it (30 minutes to 24 hours)." })
     const back = c.retraction
-    if (back?.state === "pending") lines.push({ text: "Being taken back from Google Ads." })
+    if (back?.state === "pending")
+      lines.push({
+        text: Date.now() < takeBackFrom(c)
+          ? `To be taken back from Google Ads ${when(new Date(takeBackFrom(c)).toISOString())} (Google only takes a conversion back a day after it got it).`
+          : "Being taken back from Google Ads.",
+      })
     else if (back?.state === "sent") lines.push({ text: `Taken back ${when(back.lastTry ?? back.at)}: Google no longer counts it.` })
+    else if (back?.state === "none") lines.push({ text: "Nothing to take back: Google never counted it." })
     else if (back?.state === "failed") lines.push({ text: `Couldn't take it back: ${back.error ?? "Google Ads refused."}`, tone: "bad" })
     if (c.value !== undefined && c.value !== 1) lines.push({ text: `Value sent: $${c.value}.` })
     if (c.rule) lines.push({ text: `Queued by the Google Ads rule “${c.rule}”.` })
@@ -136,6 +144,7 @@ function historyOf(lead: Lead, withGoogle: boolean): LeadDetail["history"] {
       if (c.state === "sent" && c.google?.status === "rejected") events.push({ at: c.google.checkedAt, text: `Google rejected it (${KIND_SHORT[kind]}): ${c.google.reason ?? "no reason given"}`, tone: "bad" })
       if (c.retraction?.state === "sent") events.push({ at: c.retraction.lastTry ?? c.retraction.at, text: `Taken back from Google Ads (${KIND_SHORT[kind]})` })
       if (c.retraction?.state === "failed") events.push({ at: c.retraction.lastTry ?? c.retraction.at, text: `Couldn't take back from Google Ads (${KIND_SHORT[kind]})`, tone: "bad" })
+      if (c.retraction?.state === "none") events.push({ at: c.retraction.lastTry ?? c.retraction.at, text: `Nothing to take back from Google Ads (${KIND_SHORT[kind]}): Google never counted it` })
     }
   }
   return events

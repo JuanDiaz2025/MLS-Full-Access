@@ -9,7 +9,8 @@ export type JunkLead = { lead: Lead; reasons: string[]; google: string }
 
 function googleNote(lead: Lead) {
   const invalid = lead.conversions?.invalid
-  if (invalid?.retraction) return "Invalid report taken back"
+  if (invalid?.retraction) return invalid.retraction.state === "none" ? "Invalid report never counted by Google" : "Invalid report taken back"
+  if (invalid?.test) return "Test lead, not sent to Google"
   if (invalid?.state === "sent") return "Reported to Google as invalid"
   if (invalid?.state === "pending") return "Waiting to be reported as invalid"
   if (invalid?.state === "failed") return "Couldn't report it as invalid"

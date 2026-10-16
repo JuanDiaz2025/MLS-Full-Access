@@ -85,8 +85,11 @@ export type ConversionUpload = {
   // Google's id for the upload, and what Google decided once it had checked it.
   requestId?: string
   google?: { status: "processing" | "accepted" | "rejected"; reason?: string; checkedAt: string }
-  // Taking it back from Google Ads (a retraction), when the lead turned out Not interested.
-  retraction?: { state: "pending" | "sent" | "failed"; at: string; tries?: number; lastTry?: string; error?: string }
+  // Taking it back from Google Ads (a retraction), when the lead turned out Not interested. "none":
+  // Google never counted it (it refused it, or it was a test lead), so there was nothing to take back.
+  retraction?: { state: "pending" | "sent" | "failed" | "none"; at: string; tries?: number; lastTry?: string; error?: string }
+  // A test of the website's form (its click ID was typed in): never sent to Google Ads.
+  test?: boolean
   // Sent once more after a "not found" refusal, when the app learned to send to the owning account.
   fixRetry?: boolean
   // Retried once after DealTrack learned to use its existing conversion action when Google said the name was taken.

@@ -1,4 +1,10 @@
-import type { ConversionKind, Lead, LeadStatus } from "@/lib/leads/types"
+import type { ConversionKind, ConversionUpload, Lead, LeadStatus } from "@/lib/leads/types"
+
+// Google only takes a conversion back once it has had it a day (TOO_RECENT_CONVERSION before that,
+// or "not found" while it's still taking it in), so a take-back is sent from then on.
+export const TAKE_BACK_AFTER_MS = 24 * 60 * 60_000
+export const takeBackFrom = (c: ConversionUpload) =>
+  Math.max(0, ...[c.at, c.lastTry].map((d) => Date.parse(d ?? "")).filter((t) => !Number.isNaN(t))) + TAKE_BACK_AFTER_MS
 
 // Which conversions each status means for Google Ads. A deal can close without "Interested"
 // being set first; Google still hears about both.
@@ -62,11 +68,12 @@ export function applyStatus(lead: Lead, status: LeadStatus, by: "auto" | "you", 
   for (const kind of KINDS[status] ?? []) {
     // Once sent, a conversion stays sent; a failed one is tried again when set again.
     const entry = lead.conversions[kind]
-    if (entry?.retraction && entry.retraction.state !== "sent") {
+    const back = entry?.retraction?.state
+    if (entry && (back === "pending" || back === "failed")) {
       // Changed your mind before Google was told: keep the conversion, don't take it back.
       delete entry.retraction
-    } else if (entry?.retraction?.state === "sent") {
-      // Taken back earlier and good again: send it as a new conversion.
+    } else if (back === "sent" || back === "none") {
+      // Taken back earlier (or Google never counted it) and good again: send it as a new conversion.
       lead.conversions[kind] = { state: "pending", at: now, transactionId: `${lead.id}-${kind}-${Date.now().toString(36)}` }
     } else if (!entry || entry.state === "failed" || entry.state === "skipped") {
       lead.conversions[kind] = { state: "pending", at: now, transactionId: entry?.transactionId }
@@ -79,8 +86,9 @@ export function applyStatus(lead: Lead, status: LeadStatus, by: "auto" | "you", 
 function reportInvalid(lead: Lead, now: string, rule?: string) {
   lead.conversions ??= {}
   const entry = lead.conversions.invalid
-  if (entry?.retraction && entry.retraction.state !== "sent") delete entry.retraction
-  else if (entry?.retraction?.state === "sent") lead.conversions.invalid = { state: "pending", at: now, value: 0, rule, transactionId: `${lead.id}-invalid-${Date.now().toString(36)}` }
+  const back = entry?.retraction?.state
+  if (entry && (back === "pending" || back === "failed")) delete entry.retraction
+  else if (back === "sent" || back === "none") lead.conversions.invalid = { state: "pending", at: now, value: 0, rule, transactionId: `${lead.id}-invalid-${Date.now().toString(36)}` }
   else if (!entry || entry.state === "failed" || entry.state === "skipped") lead.conversions.invalid = { state: "pending", at: now, value: 0, rule, transactionId: entry?.transactionId }
 }
 

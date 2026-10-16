@@ -24,7 +24,8 @@ import { getLeadBackup } from "@/lib/leads/sheet-backup"
 import { listDeletedLeads, listLeads, listQrCodes } from "@/lib/leads/store"
 import { sharedKey, type Sender } from "@/lib/leads/team-sync"
 import { countSince, timeAgo } from "@/lib/leads/time"
-import { cleanTracking, leadChannel, pagePath } from "@/lib/leads/tracking"
+import { takeBackFrom } from "@/lib/leads/status"
+import { cleanTracking, leadChannel, pagePath, testClick } from "@/lib/leads/tracking"
 import type { Lead, LeadPlace } from "@/lib/leads/types"
 import { getWordPress, sentElsewhere } from "@/lib/leads/wordpress"
 import { siteKeepsNotes } from "@/lib/leads/wordpress-plugin"
@@ -102,10 +103,15 @@ function placeRow(p?: LeadPlace): LeadRow["place"] {
 // One line on what Google Ads has heard about this lead, for the table.
 function googleState(lead: Lead): LeadRow["google"] {
   const main = mainGoogleState(lead)
+  // A test of the website's form: nothing about it goes to Google (a take-back still going on shows).
+  const typed = testClick(lead.tracking)
+  if (typed && !(main && ["retracting", "retract_failed"].includes(main.state))) {
+    return { state: "test", detail: `A test lead (its click ID is “${typed}”), so nothing about it goes to Google Ads.` }
+  }
   // Reported as an invalid lead (reporting only): say so when nothing else is going on with it.
   const invalid = lead.conversions?.invalid
-  if (!invalid || invalid.retraction || (main && !["retracted", "retracting", "held"].includes(main.state))) return main
-  const also = main?.state === "retracted" ? "Its earlier conversion was taken back. " : ""
+  if (!invalid || invalid.retraction || (main && !["retracted", "untaken", "retracting", "held"].includes(main.state))) return main
+  const also = main?.state === "retracted" ? "Its earlier conversion was taken back. " : main?.state === "untaken" ? "Google never counted its earlier conversion. " : ""
   if (invalid.state === "sent") return { state: "invalid", detail: `${also}Reporting only: Google won't bid for leads like this, and its reports show which ads bring them.` }
   if (invalid.state === "pending") return { state: "invalid_pending", detail: `${also}Reporting it to Google as an invalid lead (reporting only).` }
   return main ?? { state: invalid.state === "failed" ? "failed" : "skipped", detail: invalid.error }
@@ -121,8 +127,18 @@ function mainGoogleState(lead: Lead): LeadRow["google"] {
   if (backs.length) {
     const failed = backs.find((r) => r!.state === "failed")
     if (failed) return { state: "retract_failed", detail: failed.error }
-    if (backs.some((r) => r!.state === "pending")) return { state: "retracting", detail: lead.status === "new" ? "Put back as New: telling Google to stop counting it." : "Not interested: telling Google to stop counting it." }
-    return { state: "retracted", detail: lead.status === "new" ? "Put back as New: Google no longer counts it as a good lead." : "Not interested: Google no longer counts it as a good lead." }
+    const why = lead.status === "new" ? "Put back as New" : "Not interested"
+    const waiting = all.find((c) => c?.retraction?.state === "pending")
+    if (waiting) {
+      return {
+        state: "retracting",
+        detail: Date.now() < takeBackFrom(waiting)
+          ? `${why}: Google only takes a conversion back a day after it got it, so DealTrack tells it then.`
+          : `${why}: telling Google to stop counting it.`,
+      }
+    }
+    if (backs.every((r) => r!.state === "none")) return { state: "untaken", detail: `${why}: Google never counted it, so there was nothing to take back.` }
+    return { state: "retracted", detail: `${why}: Google no longer counts it as a good lead.` }
   }
   if (!all.length) return lead.googleBlockedBy ? { state: "held", detail: `Not sent: rule “${lead.googleBlockedBy}”` } : undefined
   const order = ["failed", "pending", "skipped", "sent"] as const
