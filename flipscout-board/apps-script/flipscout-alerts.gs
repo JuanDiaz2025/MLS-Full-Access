@@ -24,22 +24,6 @@
  *    summary a day (the menu can send it again on purpose); none if the list
  *    is empty.
  *
- * 1c) NEW LEADS — fsNewLeads runs hourly between 7:00 and 19:00 Pacific and
- *    posts "🆕 NEW IN SF / SAN MATEO" when a lead lands in a watched county.
- *    This is the only alert here that is about a lead ARRIVING; the other two
- *    are about a deadline. A lead posts once, and only if ALL hold:
- *      - its county is in FS_WATCH_AREAS (default San Francisco + San Mateo);
- *      - MLS Status is live — not sold / withdrawn / off market, and not
- *        pending or contingent;
- *      - Notes do not start with PASS and do not contain "no alerts";
- *      - it has a First Added date.
- *    Nothing posts on the first run: it records what is already on the sheet
- *    so nobody gets 1,300 messages. Run it once by hand before the trigger.
- *
- *    The areas live in Script Properties as FS_WATCH_AREAS, a comma-separated
- *    list of counties. KEEP IT THE SAME as the Lead Board's 🔔 → Areas, or the
- *    pop-up and this alert will disagree about what counts.
- *
  * 2) PASS BRIDGE — deployed as a web app, a link like
  *      <web app URL>?action=pass&mls=SF426163762&why=too%20far&by=Seth
  *    writes "PASS (Board) — Seth, Sep 24: too far" at the front of that lead's
@@ -72,42 +56,12 @@ const FS_DIGEST_DAYS = 3;
 const FS_CLOSED = /sold|withdrawn|expired|cancel|off.?market|closed|duplicate/i;
 const FS_PASSED = /^\s*(?:pass\b|passing\b|passed\b|we'?re passing|rejected\b|not a (?:fit|deal))/i;
 const FS_BOARD_PASS = /^PASS \(Board\) — [^|]*?(?:\s\|\s|$)/;
-const FS_PENDING = /pending|contingent|under contract/i;
-
-/* --- new-lead alerts: the areas we buy in -------------------------------- */
-// The counties worth interrupting the team for. Set FS_WATCH_AREAS in Script
-// Properties to change them ("San Francisco, San Mateo, Santa Clara"); keep it
-// the same as the Lead Board's 🔔 → Areas.
-const FS_WATCH_KEY = 'FS_WATCH_AREAS';
-const FS_WATCH_DEFAULT = ['San Francisco', 'San Mateo'];
-const FS_NEW_KEY = 'FS_NEW_MARK';
-const FS_NEW_MAX = 8;          // leads listed in one message
-const FS_NEW_FROM = 7;         // only post between these hours, Pacific
-const FS_NEW_TO = 19;
-
-// City → county, the same list the Board reads an address with.
-const FS_COUNTY = (() => {
-  const by = {
-    'San Francisco': 'San Francisco',
-    'San Mateo': 'Daly City|Pacifica|South San Francisco|Redwood City|San Bruno|San Mateo|Menlo Park|East Palo Alto|Belmont|El Granada|San Carlos|Burlingame|Foster City|Millbrae|La Honda|Half Moon Bay|Woodside|Moss Beach|Montara|Atherton|Portola Valley|Brisbane|Colma|Hillsborough|Pescadero|Emerald Hills',
-    'Santa Clara': 'San Jose|Morgan Hill|Gilroy|Santa Clara|Milpitas|Campbell|Sunnyvale|Los Gatos|San Martin|Mountain View|Palo Alto|Cupertino|Saratoga|Los Altos|Monte Sereno',
-    'Alameda': 'Oakland|Berkeley|San Leandro|Hayward|Fremont|Livermore|Union City|Castro Valley|Newark|Albany|Alameda|Dublin|Pleasanton|Sunol|San Lorenzo|Emeryville|Piedmont',
-    'Contra Costa': 'Richmond|Antioch|Pittsburg|Concord|Martinez|Pleasant Hill|Oakley|Walnut Creek|Orinda|Brentwood|Lafayette|Clayton|Discovery Bay|San Pablo|El Sobrante|El Cerrito|Pacheco|San Ramon|North Richmond|Moraga|Danville|Pinole|Bay Point|Kensington|Hercules|Rodeo|Crockett|Byron|Knightsen|Alamo',
-    'Marin': 'San Rafael|Mill Valley|Novato|San Anselmo|Fairfax|Bolinas|Larkspur|Corte Madera|Woodacre|Sausalito|Tiburon|Greenbrae|Kentfield|Point Reyes Station|Inverness|Stinson Beach|Forest Knolls|Lagunitas',
-    'Sonoma': 'Santa Rosa|Sebastopol|Petaluma|Guerneville|Sonoma|Cloverdale|Rohnert Park|Healdsburg|Windsor|Cotati|Occidental|Monte Rio|Forestville|Glen Ellen|Timber Cove|The Sea Ranch|Bodega Bay|Kenwood|Geyserville|Penngrove|Cazadero|Jenner',
-    'Napa': 'Napa|Saint Helena|St Helena|American Canyon|Calistoga|Yountville|Angwin',
-    'Solano': 'Vallejo|Vacaville|Fairfield|Suisun City|Dixon|Benicia|Rio Vista|Winters'
-  };
-  const map = {};
-  Object.keys(by).forEach(c => by[c].split('|').forEach(t => { map[t.toLowerCase()] = c; }));
-  return map;
-})();
 
 /* ---------------------------------------------------------------- setup -- */
 
 function fsSetupSchedule() {
   ScriptApp.getProjectTriggers()
-    .filter(t => ['fsAlertCheck', 'fsOnOpen', 'fsMorning', 'fsNewLeads'].indexOf(t.getHandlerFunction()) >= 0)
+    .filter(t => ['fsAlertCheck', 'fsOnOpen', 'fsMorning'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('fsOnOpen').forSpreadsheet(SpreadsheetApp.getActive()).onOpen().create();
   ScriptApp.newTrigger('fsMorning').timeBased().atHour(8).nearMinute(0).everyDays(1)
@@ -115,14 +69,8 @@ function fsSetupSchedule() {
   [[11, 15], [15, 0]].forEach(([h, m]) =>
     ScriptApp.newTrigger('fsAlertCheck').timeBased().atHour(h).nearMinute(m).everyDays(1)
       .inTimezone('America/Los_Angeles').create());
-  // new leads arrive through the day, so this one looks every hour and keeps
-  // itself quiet outside working hours
-  ScriptApp.newTrigger('fsNewLeads').timeBased().everyHours(1).create();
   if (!fsWebhook_()) throw new Error('Schedule is on, but CHAT_WEBHOOK is missing — add it under Project Settings → Script Properties.');
-  Logger.log('Morning summary + alerts at about 8:00, alerts at 11:15 and 15:00 Pacific, new-lead check every hour ' +
-    FS_NEW_FROM + ':00–' + FS_NEW_TO + ':00 Pacific for ' + fsWatched_().join(' / ') +
-    '. Run "New leads — check now" once from the menu before trusting it: the first run posts nothing, it just records what is already on the sheet. ' +
-    'Reload the sheet for the 🚨 FlipScout Alerts menu.');
+  Logger.log('Morning summary + alerts at about 8:00, alerts at 11:15 and 15:00 Pacific. Reload the sheet for the 🚨 FlipScout Alerts menu.');
 }
 
 function fsOnOpen() {
@@ -131,11 +79,6 @@ function fsOnOpen() {
     .addItem('Preview — show what would send, send nothing', 'fsPreview')
     .addSeparator()
     .addItem('Send morning summary now (offers due in 3 days)', 'fsDigestNow')
-    .addSeparator()
-    .addItem('New leads — check now', 'fsNewNow')
-    .addItem('New leads — preview, send nothing', 'fsNewPreview')
-    .addItem('New leads — which areas?', 'fsNewAreas')
-    .addSeparator()
     .addItem('Send test message', 'fsSendTest')
     .addToUi();
 }
@@ -265,126 +208,6 @@ function fsBuild_(now) {
   return { text, shown, sent };
 }
 
-/* ------------------------------------------------------------ new leads -- */
-
-// "1420 Guerrero Street, San Francisco, CA 94110" -> "San Francisco"
-function fsCityOf_(addr) {
-  const m = /,\s*([^,]+?),\s*CA\b/i.exec(String(addr || ''));
-  return m ? m[1].trim().replace(/\b\w/g, c => c.toUpperCase()) : '';
-}
-function fsCountyOf_(addr) { return FS_COUNTY[fsCityOf_(addr).toLowerCase()] || 'Other'; }
-
-function fsWatched_() {
-  const raw = PropertiesService.getScriptProperties().getProperty(FS_WATCH_KEY);
-  if (!raw) return FS_WATCH_DEFAULT.slice();
-  const list = raw.split(',').map(s => s.trim()).filter(Boolean);
-  return list.length ? list : FS_WATCH_DEFAULT.slice();
-}
-
-// Which leads would post right now, newest pull date first.
-function fsNewBuild_() {
-  const watch = fsWatched_();
-  let mark = {};
-  try { mark = JSON.parse(PropertiesService.getScriptProperties().getProperty(FS_NEW_KEY) || '{}') || {}; } catch (e) { mark = {}; }
-  const first = !mark.day;
-  const seen = {};
-  (Array.isArray(mark.mls) ? mark.mls : []).forEach(m => { seen[m] = 1; });
-
-  const fresh = [], all = fsReadLeads_();
-  let newest = mark.day || '';
-  all.forEach(l => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(l.added)) return;
-    if (l.added > newest) newest = l.added;
-    // older than the day we have already worked through: never post it
-    if (mark.day && (l.added < mark.day || (l.added === mark.day && seen[l.mls]))) return;
-    if (watch.indexOf(fsCountyOf_(l.addr)) < 0) return;
-    if (FS_CLOSED.test(l.mstat) || FS_PENDING.test(l.mstat)) return;
-    if (FS_PASSED.test(l.notes) || /no alerts/i.test(l.notes)) return;
-    fresh.push(l);
-  });
-  fresh.sort((a, b) => (a.added < b.added ? 1 : a.added > b.added ? -1 : 0));
-
-  // What to remember: the newest pull date on the sheet, and every MLS # on
-  // that date — so the stored value stays one day long, never 1,300 leads.
-  const next = { day: newest, mls: all.filter(l => l.added === newest).map(l => l.mls) };
-  return { fresh, next, first, watch };
-}
-
-function fsNewSave_(next) {
-  PropertiesService.getScriptProperties().setProperty(FS_NEW_KEY, JSON.stringify(next));
-}
-
-// Returns how many leads it posted (0 when there was nothing, or outside hours).
-function fsNewLeads(force) {
-  const hour = Number(Utilities.formatDate(new Date(), 'America/Los_Angeles', 'H'));
-  if (force !== true && (hour < FS_NEW_FROM || hour >= FS_NEW_TO)) return 0;
-
-  const got = fsNewBuild_();
-  if (got.first) {
-    fsNewSave_(got.next);
-    Logger.log('First run: recorded the ' + got.next.mls.length + ' leads pulled ' + got.next.day + '. Nothing posted.');
-    return 0;
-  }
-  if (!got.fresh.length) { fsNewSave_(got.next); return 0; }
-
-  fsPost_(fsNewText_(got.fresh, got.watch));   // throws on failure, so nothing is marked posted
-  fsNewSave_(got.next);
-  return got.fresh.length;
-}
-
-function fsNewText_(list, watch) {
-  const money = v => { const n = Number(v); return n ? '$' + n.toLocaleString('en-US') : ''; };
-  const blocks = list.slice(0, FS_NEW_MAX).map(l => {
-    const street = (l.addr.split(',')[0] || l.addr).trim();
-    const city = fsCityOf_(l.addr);
-    const bits = [money(l.price), l.ppsf ? '$' + Math.round(Number(l.ppsf)) + '/sqft' : '',
-                  l.bucket ? l.bucket.charAt(0).toUpperCase() + (l.score ? ' ' + l.score : '') : '',
-                  /^active$/i.test(l.mstat) ? '' : l.mstat].filter(Boolean).join(' · ');
-    const dl = fsDeadline_(l.due);
-    return '*' + street + '*' + (city ? ' · ' + city : '') + '\n' + bits +
-      (dl ? '\n⏰ Offer due ' + Utilities.formatDate(dl.when, 'America/Los_Angeles', 'EEE MMM d') +
-            (dl.stated ? ' ' + Utilities.formatDate(dl.when, 'America/Los_Angeles', 'h:mm a') : '') : '') +
-      '\nMLS: https://www.mlslistings.com/Property/' + l.mls;
-  });
-  const rest = list.length - blocks.length;
-  return '🆕 *NEW IN ' + watch.join(' / ').toUpperCase() + '* — ' +
-    list.length + (list.length === 1 ? ' lead' : ' leads') + '\n\n' + blocks.join('\n\n') +
-    (rest ? '\n\n+' + rest + ' more — see the Board' : '') + '\n\nBoard: ' + FS_BOARD_URL;
-}
-
-function fsNewNow() {
-  const n = fsNewLeads(true);
-  SpreadsheetApp.getActive().toast(
-    n ? 'Sent 1 message to Google Chat with ' + n + (n === 1 ? ' new lead.' : ' new leads.')
-      : 'Nothing new in ' + fsWatched_().join(' / ') + ' — no message sent.',
-    'FlipScout Alerts', 6);
-}
-
-function fsNewPreview() {
-  const got = fsNewBuild_(), ui = SpreadsheetApp.getUi();
-  ui.alert('New leads — preview (nothing sent)',
-    got.first
-      ? 'This has never run. The first run posts nothing: it records the leads already on the sheet so nobody gets flooded. Run "New leads — check now" once, then the hourly trigger takes over.'
-      : got.fresh.length
-        ? fsNewText_(got.fresh, got.watch).replace(/\*/g, '')
-        : 'Nothing new in ' + got.watch.join(' / ') + ' since the last check.',
-    ui.ButtonSet.OK);
-}
-
-function fsNewAreas() {
-  const ui = SpreadsheetApp.getUi(), watch = fsWatched_();
-  const counts = {};
-  fsReadLeads_().forEach(l => { const c = fsCountyOf_(l.addr); counts[c] = (counts[c] || 0) + 1; });
-  const lines = Object.keys(counts).sort((a, b) => counts[b] - counts[a])
-    .map(c => (watch.indexOf(c) >= 0 ? '  ✓ ' : '    ') + c + ' — ' + counts[c] + ' leads');
-  ui.alert('New-lead alerts go out for:',
-    watch.join(', ') + '\n\n' + lines.join('\n') +
-    '\n\nTo change them: Extensions → Apps Script → Project Settings → Script Properties → ' +
-    FS_WATCH_KEY + ' = a comma-separated list of counties.\n\n' +
-    'Keep it the same as the Lead Board’s 🔔 → Areas, or the pop-up and this alert will disagree.',
-    ui.ButtonSet.OK);
-}
-
 /* ---------------------------------------------------------- pass bridge -- */
 
 function doGet(e) {
@@ -445,7 +268,6 @@ function fsReadLeads_() {
   return values.slice(1).filter(r => get(r, 'MLS #')).map(r => ({
     mls: get(r, 'MLS #').toUpperCase(), addr: get(r, 'Address'), notes: get(r, 'Notes'),
     bucket: get(r, 'Bucket'), score: get(r, 'Opportunity Score'), due: get(r, 'Offer Due'),
-    added: get(r, 'First Added').slice(0, 10), ppsf: get(r, '$/SqFt').replace(/[^0-9.]/g, ''),
     mstat: get(r, 'MLS Status'), phone: get(r, 'Agent Phone'),
     agent: get(r, 'Listing Agent').split(',')[0].trim(), remarks: get(r, 'Private Remarks'),
     price: get(r, 'Purchase Price').replace(/[^0-9.]/g, '')
