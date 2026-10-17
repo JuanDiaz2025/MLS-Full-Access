@@ -216,14 +216,23 @@ function pnCheck(force) {
 }
 
 function pnText_(list, areas) {
-  const money = v => { const n = Number(v); return n ? '$' + n.toLocaleString('en-US') : ''; };
+  // The sheet stores these as numbers, and a column can come through as
+  // "2634.0" or "2,634" depending on how it is formatted. Read the number and
+  // print it ourselves, so a bed count never reads "4.0 bd".
+  const num = v => {
+    const s = String(v == null ? '' : v).replace(/[^0-9.\-]/g, '');
+    const n = Number(s);
+    return s !== '' && isFinite(n) ? n : null;
+  };
+  const show = v => { const n = num(v); return n === null ? '' : n.toLocaleString('en-US'); };
+  const money = v => { const n = num(v); return n ? '$' + n.toLocaleString('en-US') : ''; };
   const blocks = list.slice(0, PN_MAX).map(l => {
     const facts = [
       money(l.price),
-      l.ppsf ? '$' + Math.round(Number(l.ppsf)) + '/sqft' : '',
-      l.sqft ? l.sqft + ' sqft' : '',
-      l.beds ? l.beds + ' bd' : '',
-      l.bucket ? l.bucket.charAt(0).toUpperCase() + (l.score ? ' ' + l.score : '') : '',
+      num(l.ppsf) ? '$' + Math.round(num(l.ppsf)).toLocaleString('en-US') + '/sqft' : '',
+      show(l.sqft) ? show(l.sqft) + ' sqft' : '',
+      show(l.beds) ? show(l.beds) + ' bd' : '',
+      l.bucket ? l.bucket.charAt(0).toUpperCase() + (show(l.score) ? ' ' + show(l.score) : '') : '',
       /^active$/i.test(l.mstat) ? '' : l.mstat          // say it when it is not plain Active
     ].filter(Boolean).join(' · ');
     // The agent is stored as "Name, Brokerage"; only the first comma is
