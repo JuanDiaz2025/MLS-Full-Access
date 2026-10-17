@@ -3,6 +3,7 @@
 
 import type { DateRange } from "@/lib/date-range"
 import { jsonFileStore } from "@/lib/json-file-store"
+import { formatPhone } from "@/lib/phone"
 import { MINUTE, ServiceError, cached, settings } from "@/lib/services"
 
 const SERVICE = "PostHog"
@@ -50,6 +51,9 @@ const PUBLIC = `properties.$host in ('www.twinhomebuyer.com', 'twinhomebuyer.com
 const between = (r: DateRange) => `timestamp >= toDateTime('${r.from} 00:00:00', 'America/Los_Angeles')
   and timestamp < toDateTime('${r.to} 00:00:00', 'America/Los_Angeles') + interval 1 day`
 
+// A tap (or click) on the site's phone number: PostHog records it as a click on a "tel:" link.
+const PHONE_TAP = `event = '$autocapture' and elements_chain like '%href="tel:%'`
+
 export type Session = {
   id: string
   startedAt: string // ISO, UTC
@@ -66,8 +70,22 @@ export type Session = {
   converted: boolean
   rageClicked: boolean
   secondsToSubmit: number | null
+  // The first tap on the phone number in this visit: when (ISO, UTC) and the number, as people read it.
+  // A tap starts a call; whether it connected is in the phone system.
+  phoneTap: { at: string; number: string } | null
   weekday: number // 0 = Monday
   hour: number // Los Angeles time
+}
+
+// "tel:+1(415)%20415-8946" → "(415) 415-8946"
+function telNumber(href: string) {
+  let number = href.replace(/^tel:/i, "")
+  try {
+    number = decodeURIComponent(number)
+  } catch {
+    // Not URL-encoded after all: keep it as PostHog captured it.
+  }
+  return formatPhone(number)
 }
 
 function sourceOf(url: string, referrer: string): Session["source"] {
@@ -77,11 +95,13 @@ function sourceOf(url: string, referrer: string): Session["source"] {
   return "Direct / other"
 }
 
-export async function getSessions(range: DateRange): Promise<Session[]> {
+// fresh: ask PostHog now instead of using a copy up to 10 minutes old (for finding a visit that
+// just happened).
+export async function getSessions(range: DateRange, { fresh = false } = {}): Promise<Session[]> {
   // Campaign and keyword are read from the landing URL in an outer query, so the heavy
   // per-session aggregation runs once. Page paths are fetched separately, only for the visits
   // shown (see getPaths): building them for every session hits PostHog's time limit.
-  const rows = await hogql(`
+  const rows = await (fresh ? hogqlFresh : hogql)(`
     select *,
       extract(entry_url, 'gad_campaignid=([0-9]+)') as campaign_id,
       decodeURLComponent(extract(entry_url, 'utm_(?:keyword|term)=([^&#]+)')) as keyword
@@ -101,6 +121,9 @@ export async function getSessions(range: DateRange): Promise<Session[]> {
         countIf(event = '$rageclick') as rage_clicks,
         dateDiff('second', min(timestamp),
           minIf(timestamp, event = '$autocapture' and properties.$event_type = 'submit')) as secs_to_submit,
+        countIf(${PHONE_TAP}) as phone_taps,
+        minIf(timestamp, ${PHONE_TAP}) as phone_tapped_at,
+        argMinIf(extract(elements_chain, 'href="(tel:[^"]+)"'), timestamp, ${PHONE_TAP}) as phone_tel,
         toDayOfWeek(toTimeZone(min(timestamp), 'America/Los_Angeles')) as weekday,
         toHour(toTimeZone(min(timestamp), 'America/Los_Angeles')) as hour
       from events
@@ -127,6 +150,7 @@ export async function getSessions(range: DateRange): Promise<Session[]> {
       converted: submits > 0,
       rageClicked: Number(r.rage_clicks ?? 0) > 0,
       secondsToSubmit: submits > 0 ? Number(r.secs_to_submit) : null,
+      phoneTap: Number(r.phone_taps ?? 0) > 0 ? { at: String(r.phone_tapped_at ?? ""), number: telNumber(String(r.phone_tel ?? "")) } : null,
       weekday: Number(r.weekday ?? 1) - 1,
       hour: Number(r.hour ?? 0),
     }
@@ -134,10 +158,10 @@ export async function getSessions(range: DateRange): Promise<Session[]> {
 }
 
 // Pages each session visited, in order (first 12), for a handful of sessions.
-export async function getPaths(range: DateRange, sessionIds: string[]): Promise<Map<string, string[]>> {
+export async function getPaths(range: DateRange, sessionIds: string[], { fresh = false } = {}): Promise<Map<string, string[]>> {
   const ids = [...new Set(sessionIds.filter((id) => /^[0-9a-f-]{8,64}$/i.test(id)))]
   if (!ids.length) return new Map()
-  const rows = await hogql(`
+  const rows = await (fresh ? hogqlFresh : hogql)(`
     select properties.$session_id as session_id,
       arraySlice(arrayMap(x -> x.2, arraySort(x -> x.1, groupArray(tuple(timestamp, properties.$pathname)))), 1, 12) as path
     from events
@@ -196,12 +220,13 @@ export function replayUrl(sessionId: string) {
 
 // Which of these sessions PostHog recorded, with the recording length in seconds. Visits
 // without a recording (blocked, too short, or before recording was on) are simply absent.
-export async function getRecordings(sessionIds: string[]): Promise<Map<string, number>> {
+// fresh: ask PostHog now, for a visit whose recording may have appeared in the last few minutes.
+export async function getRecordings(sessionIds: string[], { fresh = false } = {}): Promise<Map<string, number>> {
   const cfg = settings(SERVICE, KEYS)
   const host = (process.env.POSTHOG_HOST || "https://us.posthog.com").replace(/\/$/, "")
   const ids = [...new Set(sessionIds.filter(Boolean))].sort()
   if (!ids.length) return new Map()
-  return cached(`recordings:${ids.join(",")}`, 10 * MINUTE, async () => {
+  const ask = async () => {
     const params = new URLSearchParams({ session_ids: JSON.stringify(ids), date_from: "-365d", limit: String(ids.length) })
     const res = await fetch(`${host}/api/projects/${cfg.POSTHOG_PROJECT_ID}/session_recordings?${params}`, {
       headers: { authorization: `Bearer ${cfg.POSTHOG_API_KEY}` },
@@ -210,7 +235,8 @@ export async function getRecordings(sessionIds: string[]): Promise<Map<string, n
     if (!res.ok) throw new ServiceError(SERVICE, "PostHog couldn't list session recordings.", (await res.text()).slice(0, 200))
     const body = (await res.json()) as { results?: { id: string; recording_duration?: number }[] }
     return new Map((body.results ?? []).map((r) => [r.id, r.recording_duration ?? 0]))
-  })
+  }
+  return fresh ? ask() : cached(`recordings:${ids.join(",")}`, 10 * MINUTE, ask)
 }
 
 // ---- JavaScript errors (PostHog error tracking) ----------------------------------------------

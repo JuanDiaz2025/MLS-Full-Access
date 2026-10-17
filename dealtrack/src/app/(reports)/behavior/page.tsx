@@ -193,7 +193,7 @@ async function Body({
 
       <Section
         title="Recent visits"
-        description={`The latest ${recent.length} ${allTraffic ? "" : "Google Ads "}visits, newest first. Times are Los Angeles. "Watch" opens PostHog's replay of the visit; older visits may have none, because PostHog deletes recordings after its retention period.`}
+        description={`The latest ${recent.length} ${allTraffic ? "" : "Google Ads "}visits, newest first. Times are Los Angeles. "Tapped phone" means they tapped the phone number on the site, which starts a call. "Watch" opens PostHog's replay of the visit; older visits may have none, because PostHog deletes recordings after its retention period.`}
       >
         {!replays.ok && <p className="text-xs text-muted-foreground">Replays aren&apos;t available right now: {replays.kind === "missing" ? replays.keys.join(", ") : replays.message}</p>}
         <DataTable<Session>
@@ -244,6 +244,11 @@ async function Body({
               render: (s: Session) => (
                 <span className="flex flex-wrap gap-1">
                   {s.converted ? <Pill tone="green">Submitted form</Pill> : bounced(s) ? <Pill tone="red">Left right away</Pill> : <Pill>Browsed</Pill>}
+                  {s.phoneTap && (
+                    <Pill tone="green">
+                      Tapped phone {new Date(s.phoneTap.at).toLocaleTimeString("en-US", { timeZone: ACCOUNT_TIME_ZONE, hour: "numeric", minute: "2-digit" })}
+                    </Pill>
+                  )}
                   {s.rageClicked && <Pill tone="amber">Rage click</Pill>}
                 </span>
               ),

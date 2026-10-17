@@ -56,7 +56,7 @@ export const PAGE_GUIDE =
   "keyword_ideas: keyword idea batches, their review and whether they were added (Optimize → Keyword ideas). " +
   "locations: presence vs interest, regions of California, spend outside California, expensive cities (Optimize → Locations). " +
   "schedule: spend and conversions by day of week and hour (Optimize → Day & hour). " +
-  "behavior: what Google Ads visitors did on the site from PostHog, by campaign, landing page and device (Insights → Behavior). " +
+  "behavior: what Google Ads visitors did on the site from PostHog, by campaign, landing page and device (Insights → Behavior); for single visits and their replay links, use site_visits. " +
   "calls: calls from the ads, missed calls (Leads → Leads & calls). " +
   "fraud: suspicious IP addresses, bots, suspicious days and refund claims (Monitor → Fraud)."
 

@@ -2,7 +2,7 @@
 // connection (the search endpoint can't change an account), the website leads, DealTrack's own
 // saved records (alerts, budget lines, weekly negatives), and PageSpeed tests of the landing pages.
 import { PAGES, PAGE_GUIDE, pageData, type PageName } from "@/lib/assistant/pages"
-import { addDays, dayOf, today } from "@/lib/date-range"
+import { ACCOUNT_TIME_ZONE, addDays, dayOf, today } from "@/lib/date-range"
 import { getClickPatterns } from "@/lib/fraud/clicks"
 import { findJunkLeads } from "@/lib/fraud/leads"
 import { classifyVisits, findClusters, getAdVisits } from "@/lib/fraud/visitors"
@@ -10,12 +10,13 @@ import { getCampaignAds, getCampaignAssets, getCampaignInfo, getCampaignKeywords
 import { adClickUrl, TEST_GCLID } from "@/lib/google-ads/click-url"
 import { GoogleAdsError, gaql } from "@/lib/google-ads/client"
 import { getOverview } from "@/lib/google-ads/overview"
-import { getAllCampaigns, getLocationData, getSearchTerms, isWaste } from "@/lib/google-ads/reports"
+import { getAllCampaigns, getCampaignNames, getLocationData, getSearchTerms, isWaste } from "@/lib/google-ads/reports"
 import { activeAccount } from "@/lib/conversions/google"
 import { leadSource } from "@/lib/leads/source"
 import { listLeads, listQrCodes } from "@/lib/leads/store"
 import { leadChannel } from "@/lib/leads/tracking"
 import { getPageSpeed, type PageSpeed } from "@/lib/pagespeed"
+import { getPaths, getRecordings, getSessions, replayUrl } from "@/lib/posthog"
 import { readCombined } from "@/lib/sheets/sync"
 import { readData } from "@/lib/store"
 
@@ -150,6 +151,26 @@ export const toolSpecs: ToolSpec[] = [
         url: { type: "string", description: "One page's full address (https://...), or an empty string." },
       },
       required: ["campaign", "url"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "site_visits",
+    description:
+      "Single visits to twinhomebuyer.com from PostHog for one day, newest first: when each started and ended (Los Angeles time), where the person came from " +
+      "(Google Ads campaign and keyword, organic search, social or direct), the pages they went through in order, time on site, device, city, whether they " +
+      "sent the form, whether they tapped the phone number (when, and which number), and a link to watch PostHog's recording of the visit when PostHog has one. " +
+      'Use it to find one visitor ("someone was on the site around 4 pm and then called"), to give a replay link, or to see what someone did before calling. ' +
+      "It asks PostHog fresh, so a visit from a few minutes ago shows. Pass an empty string for date to mean today, and for from and to to mean the whole day.",
+    parameters: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "The day, YYYY-MM-DD (Los Angeles), or an empty string for today." },
+        from: { type: "string", description: "Start of the time window, Los Angeles time, like 15:45 or 3:45 pm, or an empty string for the start of the day." },
+        to: { type: "string", description: "End of the time window, like 16:30 or 4:30 pm, or an empty string for the end of the day." },
+        source: { type: "string", enum: ["all", "google_ads"], description: "all: every visit; google_ads: only visits that came from an ad click." },
+      },
+      required: ["date", "from", "to", "source"],
       additionalProperties: false,
     },
   },
@@ -413,6 +434,109 @@ export async function fraudCheck(days: number) {
   }
 }
 
+// A clock time like "16:05", "4:05 pm" or "4pm" → minutes after midnight, or null.
+function minutesOf(time: string): number | null {
+  const m = time
+    .trim()
+    .toLowerCase()
+    .match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?m?\.?$/)
+  if (!m) return null
+  let hour = Number(m[1])
+  const minute = Number(m[2] ?? 0)
+  if (m[3] === "p" && hour < 12) hour += 12
+  if (m[3] === "a" && hour === 12) hour = 0
+  return hour < 24 && minute < 60 ? hour * 60 + minute : null
+}
+
+const clockOf = (time: string | number) =>
+  new Date(time).toLocaleTimeString("en-US", { timeZone: ACCOUNT_TIME_ZONE, hour: "numeric", minute: "2-digit" })
+
+// Minutes after midnight, Los Angeles time, of a moment.
+function laMinutes(time: string) {
+  const [h, m] = new Date(time)
+    .toLocaleTimeString("en-US", { timeZone: ACCOUNT_TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .split(":")
+    .map(Number)
+  return h * 60 + m
+}
+
+// Minutes after midnight → "3:45 PM".
+const howClock = (minutes: number) => {
+  if (minutes >= 24 * 60) return "midnight"
+  const h = Math.floor(minutes / 60)
+  return `${h % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`
+}
+
+const howLong = (seconds: number) => {
+  const s = Math.round(seconds)
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+const VISITS_SHOWN = 25
+
+// One day's visits on the live site (or the ones in a time window), each with its pages, phone tap
+// and PostHog replay link: what the chat uses to find a particular visitor.
+export async function siteVisits(date: string, from: string, to: string, source: string) {
+  const day = date.trim() || today()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { error: `"${date}" isn't a day like ${today()}.` }
+  const start = from.trim() ? minutesOf(from) : 0
+  const end = to.trim() ? minutesOf(to) : 24 * 60
+  if (start === null || end === null) return { error: "Give the times like 15:45 or 3:45 pm (Los Angeles time)." }
+  const range = { from: day, to: day, label: day }
+
+  // Any visit that was on the site at some point in the window, newest first.
+  const found = (await getSessions(range, { fresh: true }))
+    .filter((s) => source !== "google_ads" || s.source === "Google Ads")
+    .filter((s) => {
+      const began = laMinutes(s.startedAt)
+      return began <= end && began + s.durationS / 60 >= start
+    })
+    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+  const shown = found.slice(0, VISITS_SHOWN)
+  const ids = shown.map((s) => s.id)
+  const [paths, recordings, names] = await Promise.all([
+    getPaths(range, ids, { fresh: true }).catch(() => new Map<string, string[]>()),
+    getRecordings(ids, { fresh: true }).catch((e: unknown) => (e instanceof Error ? e.message : "PostHog didn't answer")),
+    getCampaignNames().catch(() => new Map<string, string>()),
+  ])
+
+  return {
+    day,
+    window: from.trim() || to.trim() ? `${howClock(start)} to ${howClock(end)} (Los Angeles)` : "the whole day",
+    source: "PostHog: the live site, with the team's own visits left out",
+    visitsFound: found.length,
+    ...(found.length > shown.length ? { shown: `the newest ${shown.length}; narrow the time window to see the rest` } : {}),
+    visits: shown.map((s) => {
+      const fromAd = s.source === "Google Ads"
+      return {
+        started: clockOf(s.startedAt),
+        ended: clockOf(Date.parse(s.startedAt) + s.durationS * 1000),
+        timeOnSite: howLong(s.durationS),
+        cameFrom: s.source,
+        ...(fromAd ? { campaign: s.campaignId ? (names.get(s.campaignId) ?? `Campaign ${s.campaignId}`) : "not tagged" } : {}),
+        ...(s.keyword ? { keyword: s.keyword } : {}),
+        pages: paths.get(s.id)?.length ? paths.get(s.id) : [s.entryPage],
+        device: s.device,
+        city: s.city || "unknown",
+        sentTheForm: s.converted,
+        tappedThePhoneNumber: s.phoneTap ? { at: clockOf(s.phoneTap.at), number: s.phoneTap.number } : false,
+        replay:
+          typeof recordings === "string"
+            ? `couldn't check: ${recordings}`
+            : recordings.has(s.id)
+              ? { watch: replayUrl(s.id), length: howLong(recordings.get(s.id) ?? 0) }
+              : "no recording",
+      }
+    }),
+    notes: [
+      "Visits reach PostHog a minute or two after they happen.",
+      "A replay link opens the recording in PostHog (sign in with the company's PostHog account). PostHog deletes recordings after its retention period.",
+      "'no recording' means PostHog has none for that visit: it happens when someone leaves within a few seconds, before the recorder starts, or when their browser blocks it.",
+      "A tap on the phone number shows here; a number dialed by hand doesn't. Calls through the ads' call button are on the calls page (Google Ads, can take a few hours to show); any other call is only in the phone system the number rings.",
+    ],
+  }
+}
+
 export async function runTool(name: string, input: unknown): Promise<{ content: string; isError?: boolean }> {
   try {
     if (name === "google_ads_query") {
@@ -446,6 +570,11 @@ export async function runTool(name: string, input: unknown): Promise<{ content: 
       const u = typeof url === "string" ? url : ""
       if (!c.trim() && !u.trim()) return { content: "Say which campaign (name or ID) or which page (its full address) to test.", isError: true }
       return { content: JSON.stringify(await pageSpeedCheck(c, u)).slice(0, MAX_CHARS) }
+    }
+    if (name === "site_visits") {
+      const { date, from, to, source } = input as { date?: unknown; from?: unknown; to?: unknown; source?: unknown }
+      const text = (v: unknown) => (typeof v === "string" ? v : "")
+      return { content: JSON.stringify(await siteVisits(text(date), text(from), text(to), text(source) || "all")).slice(0, MAX_CHARS) }
     }
     if (name === "dealtrack_status") return { content: JSON.stringify(await dealtrackStatus()).slice(0, MAX_CHARS) }
     if (name === "deal_history") {
