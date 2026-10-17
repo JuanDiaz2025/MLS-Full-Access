@@ -60,7 +60,9 @@ const PN_PASSED = /^\s*(?:pass\b|passing\b|passed\b|we'?re passing|rejected\b|no
 const PN_COUNTY = (() => {
   const by = {
     'San Francisco': 'San Francisco',
-    'San Mateo': 'Daly City|Pacifica|South San Francisco|Redwood City|San Bruno|San Mateo|Menlo Park|East Palo Alto|Belmont|El Granada|San Carlos|Burlingame|Foster City|Millbrae|La Honda|Half Moon Bay|Woodside|Moss Beach|Montara|Atherton|Portola Valley|Brisbane|Colma|Hillsborough|Pescadero|Emerald Hills',
+    // every San Mateo county town, including the unincorporated ones the MLS
+    // sometimes uses, so nothing on the Peninsula is ever read as "Other"
+    'San Mateo': 'Daly City|Pacifica|South San Francisco|Redwood City|San Bruno|San Mateo|Menlo Park|East Palo Alto|Belmont|El Granada|San Carlos|Burlingame|Foster City|Millbrae|La Honda|Half Moon Bay|Woodside|Moss Beach|Montara|Atherton|Portola Valley|Brisbane|Colma|Hillsborough|Pescadero|Emerald Hills|Broadmoor|Ladera|West Menlo Park|North Fair Oaks|San Gregorio|Loma Mar|Princeton By The Sea|Palomar Park|Sharp Park|Baywood Park|Burlingame Hills|Devonshire',
     'Santa Clara': 'San Jose|Morgan Hill|Gilroy|Santa Clara|Milpitas|Campbell|Sunnyvale|Los Gatos|San Martin|Mountain View|Palo Alto|Cupertino|Saratoga|Los Altos|Monte Sereno',
     'Alameda': 'Oakland|Berkeley|San Leandro|Hayward|Fremont|Livermore|Union City|Castro Valley|Newark|Albany|Alameda|Dublin|Pleasanton|Sunol|San Lorenzo|Emeryville|Piedmont',
     'Contra Costa': 'Richmond|Antioch|Pittsburg|Concord|Martinez|Pleasant Hill|Oakley|Walnut Creek|Orinda|Brentwood|Lafayette|Clayton|Discovery Bay|San Pablo|El Sobrante|El Cerrito|Pacheco|San Ramon|North Richmond|Moraga|Danville|Pinole|Bay Point|Kensington|Hercules|Rodeo|Crockett|Byron|Knightsen|Alamo',
@@ -150,7 +152,8 @@ function pnReadLeads_() {
     ppsf: get(r, '$/SqFt').replace(/[^0-9.]/g, ''),
     beds: get(r, 'Beds'),
     sqft: get(r, 'SqFt'),
-    agent: get(r, 'Listing Agent').split(',')[0].trim(),
+    // the whole "Name, Brokerage" the sheet holds, not just the name
+    agent: get(r, 'Listing Agent'),
     phone: get(r, 'Agent Phone')
   }));
 }
@@ -215,8 +218,6 @@ function pnCheck(force) {
 function pnText_(list, areas) {
   const money = v => { const n = Number(v); return n ? '$' + n.toLocaleString('en-US') : ''; };
   const blocks = list.slice(0, PN_MAX).map(l => {
-    const street = (l.addr.split(',')[0] || l.addr).trim();
-    const city = pnCityOf_(l.addr);
     const facts = [
       money(l.price),
       l.ppsf ? '$' + Math.round(Number(l.ppsf)) + '/sqft' : '',
@@ -225,11 +226,17 @@ function pnText_(list, areas) {
       l.bucket ? l.bucket.charAt(0).toUpperCase() + (l.score ? ' ' + l.score : '') : '',
       /^active$/i.test(l.mstat) ? '' : l.mstat          // say it when it is not plain Active
     ].filter(Boolean).join(' · ');
-    const who = [l.agent, l.phone].filter(Boolean).join(' ');
-    return '*' + street + '*' + (city ? ' · ' + city : '') +
+    // The agent is stored as "Name, Brokerage"; only the first comma is
+    // swapped, so a brokerage with commas of its own stays intact.
+    const agent = l.agent ? l.agent.replace(/,\s*/, ' · ') : '';
+    return '*' + l.addr + '*' +                         // the whole address, street through zip
       (facts ? '\n' + facts : '') +
       (l.due && !/^T\.?B\.?D/i.test(l.due) ? '\n⏰ Offers due ' + l.due : '') +
-      (who ? '\n📞 ' + who : '') +
+      (agent ? '\n👤 ' + agent : '') +
+      // said out loud when missing: about one lead in four has no phone on the
+      // sheet, and a silently absent line reads as "no agent to call"
+      (l.phone ? '\n📞 ' + l.phone : agent ? '\n📞 no phone on the sheet — see the Board' : '') +
+      (!agent && !l.phone ? '\n👤 No agent details on the sheet — see the Board' : '') +
       '\nMLS: https://www.mlslistings.com/Property/' + l.mls;
   });
   const rest = list.length - blocks.length;
