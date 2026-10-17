@@ -1,5 +1,6 @@
 /**
- * FlipScout — "NEW LEAD" Google Chat alerts for San Francisco and the Peninsula.
+ * FlipScout — "NEW LEAD" Google Chat alerts for San Francisco, the Peninsula,
+ * San Jose and Oakland.
  *
  * This file does ONE thing: when a new lead lands on the sheet in an area we
  * buy in, it posts it to Google Chat. Nothing here is about offer deadlines —
@@ -10,7 +11,8 @@
  * all the .gs files in one Apps Script project share a single namespace.
  *
  * WHAT POSTS. A lead posts once, and only if ALL of these hold:
- *   - its city or county is in PN_AREAS (San Francisco + San Mateo by default);
+ *   - its city or county is in PN_AREAS (San Francisco county, San Mateo
+ *     county, and the cities of San Jose and Oakland by default);
  *   - MLS Status is live — not sold, withdrawn, expired, cancelled or off
  *     market, and not pending or contingent;
  *   - Notes do not start with PASS (the app's own rule, and what the Board's
@@ -55,7 +57,12 @@
 
 const PN_LEADS = 'Leads';
 const PN_BOARD_URL = 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1';
-const PN_AREAS = ['San Francisco', 'San Mateo'];   // counties and/or cities
+// Counties and/or cities. 'San Francisco' and 'San Mateo' are whole COUNTIES
+// (so San Mateo takes Daly City, Pacifica, Half Moon Bay and the rest of the
+// Peninsula with it). 'San Jose' and 'Oakland' are single CITIES — the rest of
+// Santa Clara and Alameda county stays out, so Fremont, Sunnyvale, Hayward and
+// the like do not start arriving. Add a whole county by naming it instead.
+const PN_AREAS = ['San Francisco', 'San Mateo', 'San Jose', 'Oakland'];
 const PN_MARK_KEY = 'PN_NEW_MARK';
 const PN_MAX = 8;        // leads listed in one message; the rest are counted
 // The check runs every hour, all week, but only posts inside this window:
