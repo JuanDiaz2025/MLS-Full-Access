@@ -27,7 +27,9 @@
  *      leads already on the sheet so nobody gets a thousand messages. It will
  *      say "no message sent". That is correct.
  *
- * After that it checks every hour between 7:00 and 19:00 Pacific.
+ * After that it checks EVERY HOUR, EVERY DAY, from 8:00 to 19:00 Pacific
+ * (8am, 9am, 10am … 6pm — twelve checks a day). Each message is stamped with
+ * the date and time it went out.
  *
  * THE WEBHOOK. It reuses CHAT_WEBHOOK, the Script Property your existing
  * alerts already post with, so there is nothing new to create. To send new
@@ -48,7 +50,10 @@ const PN_BOARD_URL = 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1';
 const PN_AREAS = ['San Francisco', 'San Mateo'];   // counties and/or cities
 const PN_MARK_KEY = 'PN_NEW_MARK';
 const PN_MAX = 8;        // leads listed in one message; the rest are counted
-const PN_FROM = 7;       // post only between these hours, Pacific
+// The check runs every hour, all week, but only posts inside this window:
+// from 8:00 up to (not including) 19:00 Pacific. So 8, 9, 10 … 18 — twelve
+// checks a day, every day, and silence overnight.
+const PN_FROM = 8;
 const PN_TO = 19;
 const PN_TZ = 'America/Los_Angeles';
 
@@ -90,7 +95,7 @@ function pnSetup() {
     throw new Error('Trigger is on, but no webhook is set. Add CHAT_WEBHOOK (or PN_WEBHOOK) ' +
       'under Project Settings → Script Properties.');
   }
-  Logger.log('New-lead alerts on, every hour ' + PN_FROM + ':00–' + PN_TO + ':00 Pacific, for ' +
+  Logger.log('New-lead alerts on. Every hour, every day, ' + PN_FROM + ':00 to ' + PN_TO + ':00 Pacific, for ' +
     pnAreas().join(' / ') + '.\nReload the sheet, then run "🆕 New Lead Alerts → Check now" ONCE: ' +
     'the first run posts nothing, it only writes down what is already on the sheet.');
 }
@@ -238,7 +243,11 @@ function pnText_(list, areas) {
     // The agent is stored as "Name, Brokerage"; only the first comma is
     // swapped, so a brokerage with commas of its own stays intact.
     const agent = l.agent ? l.agent.replace(/,\s*/, ' · ') : '';
+    // The day the lead reached the sheet, said only when it is not today —
+    // a message sent after a quiet spell can carry yesterday's leads too.
+    const pulled = l.added && l.added !== pnToday_() ? '\n📅 Pulled ' + pnDay_(l.added) : '';
     return '*' + l.addr + '*' +                         // the whole address, street through zip
+      pulled +
       (facts ? '\n' + facts : '') +
       (l.due && !/^T\.?B\.?D/i.test(l.due) ? '\n⏰ Offers due ' + l.due : '') +
       (agent ? '\n👤 ' + agent : '') +
@@ -249,11 +258,24 @@ function pnText_(list, areas) {
       '\nMLS: https://www.mlslistings.com/Property/' + l.mls;
   });
   const rest = list.length - blocks.length;
+  // The date and time this went out, so a message in the space is never
+  // ambiguous about which day it is reporting on.
+  const stamp = Utilities.formatDate(new Date(), PN_TZ, 'EEE, MMM d yyyy · h:mm a');
   return '🆕 *NEW IN ' + areas.join(' / ').toUpperCase() + '* — ' +
-    list.length + (list.length === 1 ? ' lead' : ' leads') + '\n\n' +
+    list.length + (list.length === 1 ? ' lead' : ' leads') + '\n' +
+    '🗓 ' + stamp + '\n\n' +
     blocks.join('\n\n') +
     (rest ? '\n\n+' + rest + ' more — see the Board' : '') +
     '\n\nBoard: ' + PN_BOARD_URL;
+}
+
+// Today in Pacific, as "2026-10-17" — the same shape First Added uses.
+function pnToday_() { return Utilities.formatDate(new Date(), PN_TZ, 'yyyy-MM-dd'); }
+
+// "2026-10-16" -> "Thu, Oct 16". Read at midday so the day never slips a zone.
+function pnDay_(iso) {
+  const d = new Date(String(iso).slice(0, 10) + 'T12:00:00Z');
+  return isNaN(d) ? String(iso) : Utilities.formatDate(d, 'UTC', 'EEE, MMM d');
 }
 
 /* --------------------------------------------------------------- menu ---- */
@@ -298,7 +320,8 @@ function pnShowAreas() {
 
 function pnTest() {
   pnPost_('🧪 *TEST — FlipScout new-lead alerts*\nWatching ' + pnAreas().join(' / ') +
-    '. New leads there will post here, hourly between ' + PN_FROM + ':00 and ' + PN_TO + ':00 Pacific.' +
+    '.\n🗓 ' + Utilities.formatDate(new Date(), PN_TZ, 'EEE, MMM d yyyy · h:mm a') +
+    '\nNew leads post here every hour, every day, from ' + PN_FROM + ':00 to ' + PN_TO + ':00 Pacific.' +
     '\n\nBoard: ' + PN_BOARD_URL);
   SpreadsheetApp.getActive().toast('Test message sent to Google Chat.', '🆕 New Lead Alerts', 5);
 }
