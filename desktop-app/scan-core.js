@@ -384,7 +384,27 @@ const FINISH_KW = [
   /new (?:kitchen|bathrooms?|appliances|cabinets?|countertops?|flooring|floors)/i,
   /(?:updated|refaced|new) cabinet/i, /tile back[- ]?splash/i,
   /recessed light/i, /updated (?:kitchen|bath)/i,
+  // Work done to the house (v1.72.2, Seth 17 Oct): 1928 Camargo Dr — "New
+  // laminate floors throughout, New paint, New cooktop, refurbished counter
+  // tops… staged" — read as "silent on condition" and "good bones" carried it
+  // to A. A "needs / could use" in front never counts.
+  /(?<!(?:old|older|worn|original|dated|aged|damaged|tired|scratched) )(?:laminate (?:floor|flooring|wood)|vinyl plank|engineered (?:hard)?wood)|(?<!(?:needs?|could use|requires?|wants?) )new (?:\w+ ){1,2}(?:floors|flooring)\b/i,
+  /(?:refurbished|resurfaced|refinished|reglazed) (?:counter|cabinet|tub|bath|kitchen)/i,
 ];
+// Light touches: fresh paint, new carpet, one new appliance. Sellers do these
+// before listing a house that still has its original kitchen and bath, and a
+// flipper still has a full job there (the 844 Brunswick lesson) — so on their
+// own, even together, they never drop a house; one real finish above plus two
+// of these does. Two real finishes drop as before (Camargo: laminate floors +
+// refurbished counters, with paint and a cooktop on top).
+const LIGHT_FINISH_KW = [
+  /(?<!(?:needs?|could use|requires?|wants?) )(?:new (?:interior |exterior )?paint|fresh(?:ly)? paint(?:ed)?|newly painted|new carpet(?:ing)?)/i,
+  /(?<!(?:needs?|could use|requires?|wants?) )new (?:cooktop|range|stove|oven|dishwasher|refrigerator|fridge)/i,
+];
+const finishHits = t => ({
+  heavy: FINISH_KW.map(re => (t.match(re) || [''])[0]).filter(Boolean),
+  light: LIGHT_FINISH_KW.map(re => (t.match(re) || [''])[0]).filter(Boolean),
+});
 
 // There is deliberately NO "nice house" rule any more. It dropped on
 // "immaculate", "pristine", "pride of ownership", "meticulously maintained" —
@@ -434,8 +454,8 @@ function rulesDecide(meta) {
   }
   // Two or more separate finishes redone = the kitchen and bath are already
   // someone else's work. One on its own is a line item and stays.
-  const finishes = FINISH_KW.map(re => (t.match(re) || [''])[0]).filter(Boolean);
-  if (finishes.length >= 2) {
+  const fh = finishHits(t), finishes = fh.heavy.concat(fh.light);
+  if (fh.heavy.length >= 2 || (fh.heavy.length >= 1 && fh.light.length >= 2)) {
     return { decision: 'drop', reason: `${finishes.length} finishes already done — "${finishes.slice(0, 3).join('", "')}" (Rule #0)` };
   }
   // Only trust a low count that came off the full photo grid. When the grid
@@ -559,8 +579,8 @@ function qualify(m) {
   if (dom >= 21) add(5, `${dom} days on market`);
 
   // Retail-ready signals that are not disqualifying on their own.
-  const finishes = FINISH_KW.map(re => (t.match(re) || [''])[0]).filter(Boolean);
-  if (finishes.length === 1 && !NEEDS_WORK_KW.test(t)) add(-5, `one updated finish — "${finishes[0]}"`);
+  const fh = finishHits(t), finishes = fh.heavy.concat(fh.light);
+  if (finishes.length && !NEEDS_WORK_KW.test(t)) add(-5, finishes.length === 1 ? `one updated finish — "${finishes[0]}"` : `freshened up — "${finishes.join('", "')}"`);
   if (STAGED_KW.test(t)) add(-5, `staged — "${hit(STAGED_KW)}"`);
   if (!text.trim()) signals.push({ pts: 0, what: 'no remarks — nothing to read, needs a look' });
 

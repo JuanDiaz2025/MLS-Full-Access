@@ -132,12 +132,39 @@ ipcMain.on('set-config', (_e, c) => {
 // One stuck AI request used to hang the whole run (and Test key): every call
 // is abandoned after AI_TIMEOUT_MS and counts as a failed call, not a verdict.
 const AI_TIMEOUT_MS = 120000;
+// A busy AI is not a failed one (v1.72.2): 16 Oct's MLS scan put 36 leads on
+// the sheet with no photo verdict at all — three refusals in a row switch the
+// check off for the run, and a rate limit ("too many requests", 20 photos a
+// call) is exactly that. A 429 / 5xx / overloaded answer now waits and tries
+// again, up to 3 times; out-of-credit is said plainly and not retried.
+let lastAiError = '';   // the last reason an AI call failed, for the end-of-run summary
 async function aiCall(photos, text, maxTokens) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), AI_TIMEOUT_MS);
-  try { return await aiCallOnce(photos, text, maxTokens, ac.signal); }
-  catch (e) { throw ac.signal.aborted ? new Error(`no answer from the AI within ${AI_TIMEOUT_MS / 1000} s`) : e; }
-  finally { clearTimeout(t); }
+  for (let attempt = 0; ; attempt++) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), AI_TIMEOUT_MS);
+    try { return await aiCallOnce(photos, text, maxTokens, ac.signal); }
+    catch (e) {
+      const err = ac.signal.aborted ? new Error(`no answer from the AI within ${AI_TIMEOUT_MS / 1000} s`) : e;
+      const busy = !err.noRetry && (err.status === 429 || err.status === 529 || (err.status >= 500 && err.status < 600));
+      if (!busy || attempt >= 3) { lastAiError = err.message; throw err; }
+      const wait = Math.min(60, err.retryAfter > 0 ? err.retryAfter : 15 * 2 ** attempt);
+      log(`  ${aiName(cfg.apiKey)} is busy (${err.status}: ${String(err.message).slice(0, 90)}) — waiting ${wait} s and trying again`, 'warn');
+      await new Promise(r => setTimeout(r, wait * 1000));
+    } finally { clearTimeout(t); }
+  }
+}
+// The service's own error, with what aiCall needs to decide whether to retry.
+function aiError(r, j, prov) {
+  const e = new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  e.status = r.status;
+  e.retryAfter = Number(r.headers.get('retry-after')) || 0;
+  const code = (j.error && (j.error.code || j.error.type)) || '';
+  if (code === 'insufficient_quota' || /credit balance|billing/i.test(e.message)) {
+    e.noRetry = true;
+    e.message = (prov === 'openai' ? 'the ChatGPT key is out of credit — add billing at platform.openai.com → Billing'
+      : 'the Claude key is out of credit — add credit at console.anthropic.com → Billing') + ' (' + e.message.slice(0, 80) + ')';
+  }
+  return e;
 }
 async function aiCallOnce(photos, text, maxTokens, signal) {
   const key = String(cfg.apiKey || '').trim(), model = aiModel();
@@ -150,7 +177,7 @@ async function aiCallOnce(photos, text, maxTokens, signal) {
       body: JSON.stringify({ model, max_tokens: maxTokens || 1024, messages: [{ role: 'user', content }] }),
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.type === 'error') throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+    if (!r.ok || j.type === 'error') throw aiError(r, j, 'anthropic');
     return { text: (j.content || []).filter(b => b.type === 'text').map(b => b.text).join(' '), model, provider: 'Claude' };
   }
   // OpenAI Chat Completions: images go in as data URLs.
@@ -165,7 +192,7 @@ async function aiCallOnce(photos, text, maxTokens, signal) {
     body: JSON.stringify({ model, max_completion_tokens: Math.max(maxTokens || 1024, photos.length ? 4000 : 200), messages: [{ role: 'user', content }] }),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.error) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  if (!r.ok || j.error) throw aiError(r, j, 'openai');
   const msg = j.choices && j.choices[0] && j.choices[0].message;
   return { text: (msg && typeof msg.content === 'string' ? msg.content : '') || '', model, provider: 'ChatGPT' };
 }
@@ -212,7 +239,7 @@ const KPI_FILE = () => path.join(app.getPath('userData'), 'kpi-history.json');
 const KPI_FIELDS = ['runs', 'scanned', 'candidates', 'skippedAlreadyChecked', 'reviewed', 'kept',
   'dropped', 'droppedRenovated', 'droppedMultiUnit', 'droppedFire',
   'droppedFewPhotos', 'droppedOther', 'leads', 'gateCleared', 'pushed', 'pushSkipped',
-  'bucketA', 'bucketB', 'bucketC'];
+  'bucketA', 'bucketB', 'bucketC', 'photoChecked'];
 const todayKey = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -943,7 +970,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
   if (!areas.length) { log('No areas selected — tick at least one in section 3.', 'warn'); return { ok: false }; }
   control.running = true; control.stopped = false; control.paused = false;
   samplesThisRun = 0;
-  aiFailStreak = 0;
+  aiFailStreak = 0; lastAiError = '';
   const runKpi = Object.assign(blankKpi(), { runs: 1 });
   // Only a run that actually started closes the browser window at the end.
   // Bailing out for "not signed in" and then shutting the window the user is
@@ -1116,7 +1143,11 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         const csTooFew = c._comingSoon && n <= 4;   // none posted yet counts too
         if (csTooFew) q.why += ' + AI photo check waits for the photos to post';
         let aiJudged = false;   // a photo verdict was reached (makes a Coming Soon verdict final)
-        if (aiReady() && aiFailStreak < 3 && !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C' && !csTooFew) {
+        // Why the photos were not judged, said on the lead itself (v1.72.2):
+        // a lead with no photo verdict used to look exactly like one the AI kept.
+        const askAi = !core.isConfirmed(c.addr) && !q.hard && q.bucket !== 'C' && !csTooFew;
+        let aiMiss = !askAi ? '' : !aiReady() ? 'AI photo check off' : aiFailStreak >= 3 ? 'AI check stopped after 3 failed calls' : '';
+        if (aiReady() && aiFailStreak < 3 && askAi) {
           // AI vision still has the final say on condition when it is on: a
           // DROP from the photos is an auto-pass whatever the text scored.
           const v = await autoDecide({ ...c, _cityKey: cityOf(c), _sqft: c._sqft, _price: c._price, _gal: gal });
@@ -1124,6 +1155,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             // the text verdict stands; three failures in a row = stop asking this run
             // (photos that would not download are not the AI failing)
             if (!v.noPhotos) aiFailStreak++;
+            aiMiss = v.noPhotos ? 'no photos could be loaded' : 'AI call failed';
             log(`  ${v.reason} — kept the text rules' verdict`, 'warn');
             if (aiFailStreak >= 3) log('AI vision failed 3 times in a row — turned off for the rest of this run. Check the key and model in section 2 (Test key).', 'error');
           } else if (v.decision !== 'keep') {
@@ -1134,6 +1166,10 @@ ipcMain.handle('start-scan', async (_e, opts) => {
             aiFailStreak = 0; aiJudged = true;
             q.why = q.why + ' + AI (vision) keep: ' + v.reason;
           }
+        }
+        if (q.decision === 'keep') {
+          if (aiJudged) runKpi.photoChecked++;
+          else if (aiMiss) q.why += ` + photos NOT checked (${aiMiss}) — look at them before calling`;
         }
         c._q = q;
         c._gal = { origPrice: gal.origPrice, listPrice: gal.listPrice, listedBy: gal.listedBy,
@@ -1325,6 +1361,15 @@ function finishRun(runKpi, day, started) {
       + `${runKpi.reviewed} reviewed → ${runKpi.bucketA} A — Work Now · ${runKpi.bucketB} B — AI Review · `
       + `${runKpi.bucketC} C — Auto-Pass · sheet: ${runKpi.pushed} new, ${runKpi.pushSkipped} updated.`;
   log(line, 'good');
+  // How many kept leads the AI actually looked at — 16 Oct put 36 on the sheet
+  // with none checked and nothing on screen said so.
+  let photoLine = '';
+  if (runKpi.kept) {
+    photoLine = `Photos checked by the AI on ${runKpi.photoChecked} of ${runKpi.kept} kept lead(s)`
+      + (runKpi.photoChecked < runKpi.kept ? ` — the other ${runKpi.kept - runKpi.photoChecked} had no photo verdict (their Why says why)`
+        + (lastAiError ? `. Last AI error: ${String(lastAiError).slice(0, 160)}` : !aiReady() ? ' (AI photo check is off in section 2)' : '') : '') + '.';
+    log(photoLine, runKpi.photoChecked < runKpi.kept && aiReady() ? 'error' : runKpi.photoChecked < runKpi.kept ? 'warn' : 'good');
+  }
   // Hand today's leads to the Lead Board: on the clipboard, ready to paste.
   const board = boardStatus();
   if (board.count) {
@@ -1337,7 +1382,7 @@ function finishRun(runKpi, day, started) {
   send('board', board);
   log('Nothing else is running. Start scan again whenever you want the next pass.', 'good');
   send('done', {
-    stopped: control.stopped, summary: line,
+    stopped: control.stopped, summary: line + (photoLine ? ' ' + photoLine : ''),
     scanned: runKpi.scanned, reviewed: runKpi.reviewed, kept: runKpi.kept,
     dropped: runKpi.dropped, pushed: runKpi.pushed,
     skipped: runKpi.skippedAlreadyChecked, day: day,

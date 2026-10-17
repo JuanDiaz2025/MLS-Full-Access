@@ -957,6 +957,31 @@ the start; with it off they behave exactly as v1.72 (descriptions decide,
 no saved key is picked up behind the user's back. Also carries the offer-date
 TBD fix (above).
 
+**v1.72.2 — "taking good properties like 1928 Camargo Drive" (Seth 17 Oct).**
+Camargo (ML82057649, MLS scan, 16 Oct) reached A with no photo verdict: none
+of that day's 36 MLS leads had one, though Seth ran v1.72.1 (15 Oct: 20 of 23
+checked). Most likely the AI calls were refused (rate limit / credit) and three
+in a row switch the check off for the run — said once in the log, nowhere
+else. Fixes: (1) **busy is not failed** — a 429 / 5xx / overloaded answer waits
+(retry-after, else 15·2ⁿ s, ≤ 60 s) and retries up to 3 times; out-of-credit
+(`insufficient_quota`, "credit balance") is said plainly and not retried
+(`aiError` in `main.js`); (2) every kept MLS lead without a photo verdict says
+**"photos NOT checked (AI photo check off | AI call failed | no photos could be
+loaded | AI check stopped after 3 failed calls)"** in its Why, like Redfin
+leads; (3) the end of every scan says **"Photos checked by the AI on N of M
+kept lead(s)"** with the last AI error (red when the check was on), also in
+the status box; KPI field `photoChecked`. (4) **"Freshened up" is work done**
+(`FINISH_KW` + `LIGHT_FINISH_KW`): laminate / vinyl-plank / engineered floors
+and "new ___ floors" (not after worn/old/original), refurbished / resurfaced /
+refinished / reglazed counters, cabinets, tubs count as finishes; new or fresh
+paint, new carpet and a single new appliance are LIGHT touches — they never
+drop a house on their own (a flipper still has the kitchen and bath, the 844
+Brunswick lesson), but one real finish + two light ones does, as do two real
+finishes. "needs / could use new paint" never counts. Replay over the board's
+1,497 A/B leads with remarks: only Camargo changes (→ C "4 finishes already
+done"). Camargo text: "New laminate floors throughout, New paint, New cooktop,
+refurbished counter tops… staged… good bones" (it was "silent on condition").
+
 **Redfin links: only the house's own page, never a search or an area page.**
 Redfin page URLs carry Redfin's home id, so they cannot be built from the
 address. The app asks Redfin's location lookup from the user's machine for each

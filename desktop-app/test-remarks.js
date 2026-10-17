@@ -348,5 +348,20 @@ const eq = (a, b, m) => {
   eq(t(''), '', 'model: blank stays blank (the default is used)');
 }
 
+// ---- a "freshened up" house is work done (Seth, 17 Oct: 1928 Camargo Dr) ----
+{
+  const c = require('./scan-core');
+  const d = t => c.rulesDecide({ remarks: t, propClass: 'Single Family', photos: 25, yearBuilt: 1970 }).decision;
+  eq(d('Vacant, staged, and cleaned up and ready for your buyer. New laminate floors throughout, New paint, New cooktop, refurbished counter tops in kitchen, separate laundry room. This home has good bones and a nice floor plan.'),
+     'drop', 'finishes: 1928 Camargo (laminate floors + paint + cooktop + refurbished counters) is work done');
+  eq(c.qualify({ remarks: 'New laminate floors throughout, New paint, New cooktop, refurbished counter tops. Good bones.', propClass: 'Single Family', photos: 25 }).bucket,
+     'C', 'finishes: "good bones" no longer lifts a refreshed house to A');
+  eq(d('Fresh paint and new carpet throughout, original kitchen.'), 'manual', 'finishes: paint + carpet alone never drop (a flipper still has the kitchen)');
+  eq(d('Fresh paint, new laminate flooring, original baths.'), 'manual', 'finishes: one real finish + one light touch is not a flip');
+  eq(d('Home needs new paint and flooring.'), 'manual', 'finishes: "needs new paint" is a fixer, not work done');
+  eq(d('Worn laminate floors, dated kitchen.'), 'manual', 'finishes: worn laminate is not new');
+  eq(d('Quartz counters and new cabinets.'), 'drop', 'finishes: the old two-finish rule still drops');
+}
+
 if (fails) { console.error(`\n${fails} failing`); process.exit(1); }
 console.log('\nall board hand-off tests pass');
