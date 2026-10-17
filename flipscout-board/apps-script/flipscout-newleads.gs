@@ -32,6 +32,13 @@
  * (8am, 9am, 10am … 6pm — twelve checks a day). Each message is stamped with
  * the date and time it went out.
  *
+ * IT POSTS EVERY SINGLE DAY, without fail. New leads the moment they land,
+ * and on a day with none, one "✅ checked — nothing new" note at the first
+ * check after 8am. So a morning with NO message from this script means the
+ * script is broken, never that the Peninsula was quiet. If it ever does go
+ * quiet for a few days, the next message it sends says so, out loud, at the
+ * bottom. Menu → "Is it running? (health check)" answers it on the spot.
+ *
  * THE WEBHOOK. It reuses CHAT_WEBHOOK, the Script Property your existing
  * alerts already post with, so there is nothing new to create. To send new
  * leads to a DIFFERENT space instead, add a second property PN_WEBHOOK and
@@ -96,9 +103,11 @@ function pnSetup() {
     throw new Error('Trigger is on, but no webhook is set. Add CHAT_WEBHOOK (or PN_WEBHOOK) ' +
       'under Project Settings → Script Properties.');
   }
+  const on = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'pnCheck').length;
+  if (!on) throw new Error('The hourly trigger did not get created. Run pnSetup again.');
   Logger.log('New-lead alerts on. Every hour, every day, ' + PN_FROM + ':00 to ' + PN_TO + ':00 Pacific, for ' +
-    pnAreas().join(' / ') + '.\nReload the sheet, then run "🆕 New Lead Alerts → Check now" ONCE: ' +
-    'the first run posts nothing, it only writes down what is already on the sheet.');
+    pnAreas().join(' / ') + '.\nIt posts EVERY day — the new leads, or a "nothing new" note.' +
+    '\nReload the sheet, then run "🆕 New Lead Alerts → Check now" ONCE.');
 }
 
 function pnOnOpen() {
@@ -106,6 +115,7 @@ function pnOnOpen() {
     .addItem('Check now', 'pnCheckNow')
     .addItem('Preview — show what would send, send nothing', 'pnPreview')
     .addItem('Post today again (catch up)', 'pnCatchUp')
+    .addItem('Is it running? (health check)', 'pnHealth')
     .addSeparator()
     .addItem('Which areas?', 'pnShowAreas')
     .addItem('Send test message', 'pnTest')
@@ -194,8 +204,10 @@ function pnBuild_() {
   // What gets remembered: the newest pull date, and the MLS numbers on that
   // date only. A Script Property value stops at 9 KB, so the whole sheet
   // would not fit — one day's worth always does, and it resets by itself.
-  const next = { day: newest, mls: all.filter(l => l.added === newest).map(l => l.mls) };
-  return { fresh, next, first, areas };
+  // said = the last day a message went out, so the daily "all quiet" note
+  // fires once a day and not once an hour.
+  const next = { day: newest, mls: all.filter(l => l.added === newest).map(l => l.mls), said: mark.said || '' };
+  return { fresh, next, first, areas, said: mark.said || '' };
 }
 
 function pnSave_(next) {
@@ -207,29 +219,69 @@ function pnCheck(force) {
   const hour = Number(Utilities.formatDate(new Date(), PN_TZ, 'H'));
   if (force !== true && (hour < PN_FROM || hour >= PN_TO)) return 0;
 
+  const today = pnToday_();
   const got = pnBuild_();
+
+  // Every post below happens BEFORE pnSave_, so if Chat refuses the message
+  // nothing is written down and the next hourly check tries the same leads again.
+
   if (got.first) {
     // Never run before. The whole sheet looks new, and nobody wants a thousand
     // messages — so everything older than today is written down silently.
     // TODAY'S leads still post: the day you switch this on is the day you most
     // want to hear about, and the hour before you installed it still counts.
-    const today = pnToday_();
     const todays = got.fresh.filter(l => l.added === today);
-    if (todays.length) pnPost_(pnText_(todays, got.areas));   // throws => nothing marked
+    pnPost_(todays.length ? pnText_(todays, got.areas) : pnQuiet_(got.areas, ''));
+    got.next.said = today;
     pnSave_(got.next);
     Logger.log('First run: wrote down the ' + got.next.mls.length + ' lead(s) pulled ' +
       got.next.day + ', and posted the ' + todays.length + ' from today.');
     return todays.length;
   }
-  if (!got.fresh.length) { pnSave_(got.next); return 0; }
 
-  pnPost_(pnText_(got.fresh, got.areas));   // throws if Chat refuses, so nothing is marked posted
+  if (got.fresh.length) {
+    pnPost_(pnText_(got.fresh, got.areas, got.said));
+    got.next.said = today;
+    pnSave_(got.next);
+    Logger.log('Posted ' + got.fresh.length + ' new lead(s).');
+    return got.fresh.length;
+  }
+
+  // Nothing new today. Say so anyway, once per day, on the first check after
+  // 8am. That is the whole point: a day with no message from this script now
+  // means the script is BROKEN, not that the Peninsula was quiet. If Chat is
+  // silent one morning, something needs fixing — you never have to wonder.
+  if (got.said !== today) {
+    pnPost_(pnQuiet_(got.areas, got.said));
+    got.next.said = today;
+    Logger.log('Nothing new. Posted the daily all-clear.');
+  }
   pnSave_(got.next);
-  Logger.log('Posted ' + got.fresh.length + ' new lead(s).');
-  return got.fresh.length;
+  return 0;
 }
 
-function pnText_(list, areas) {
+// The daily "checked, nothing new" note.
+function pnQuiet_(areas, said) {
+  return '✅ *FlipScout checked — nothing new in ' + areas.join(' / ') + '*' +
+    '\n🗓 ' + Utilities.formatDate(new Date(), PN_TZ, 'EEE, MMM d yyyy · h:mm a') +
+    '\nNo new listings in our areas since the last check.' + pnGap_(said) +
+    '\n\nBoard: ' + PN_BOARD_URL;
+}
+
+// Warns in the message itself when the script has not spoken for a while —
+// so a stopped trigger announces itself the moment it starts again.
+function pnGap_(said) {
+  if (!said) return '';
+  const a = new Date(said + 'T12:00:00Z'), b = new Date(pnToday_() + 'T12:00:00Z');
+  const days = Math.round((b - a) / 86400000);
+  return days > 1
+    ? '\n\n⚠️ Heads up: the last message was ' + pnDay_(said) + ', ' + days +
+      ' days ago. The hourly trigger stopped and has only just started again — ' +
+      'check Extensions → Apps Script → ⏰ Triggers.'
+    : '';
+}
+
+function pnText_(list, areas, said) {
   // The sheet stores these as numbers, and a column can come through as
   // "2634.0" or "2,634" depending on how it is formatted. Read the number and
   // print it ourselves, so a bed count never reads "4.0 bd".
@@ -275,6 +327,7 @@ function pnText_(list, areas) {
     '🗓 ' + stamp + '\n\n' +
     blocks.join('\n\n') +
     (rest ? '\n\n+' + rest + ' more — see the Board' : '') +
+    pnGap_(said) +
     '\n\nBoard: ' + PN_BOARD_URL;
 }
 
@@ -296,6 +349,32 @@ function pnCheckNow() {
     n ? 'Sent 1 message to Google Chat with ' + n + (n === 1 ? ' new lead.' : ' new leads.')
       : 'Nothing new in ' + areas + ' — no message sent.',
     '🆕 New Lead Alerts', 6);
+}
+
+// Is this thing actually on? Answers the only question that matters when
+// Chat has been quiet: is there an hourly trigger, is there a webhook, and
+// when did it last say anything.
+function pnHealth() {
+  const ui = SpreadsheetApp.getUi();
+  const trig = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'pnCheck');
+  let mark = {};
+  try { mark = JSON.parse(PropertiesService.getScriptProperties().getProperty(PN_MARK_KEY) || '{}') || {}; } catch (e) {}
+  const p = PropertiesService.getScriptProperties();
+  const which = p.getProperty('PN_WEBHOOK') ? 'PN_WEBHOOK (its own space)'
+    : p.getProperty('CHAT_WEBHOOK') ? 'CHAT_WEBHOOK (shared with the deadline alerts)'
+      : 'NONE — nothing can be sent';
+  const lines = [
+    (trig.length ? '\u2705' : '\u274C') + ' Hourly trigger: ' + (trig.length ? 'on' : 'MISSING — run pnSetup'),
+    (which.indexOf('NONE') < 0 ? '\u2705' : '\u274C') + ' Webhook: ' + which,
+    (mark.said ? '\u2705' : '\u274C') + ' Last message: ' + (mark.said ? pnDay_(mark.said) : 'never'),
+    '     Last pull date it has seen: ' + (mark.day || 'none'),
+    '     Watching: ' + pnAreas().join(' / '),
+    '     Posting hours: ' + PN_FROM + ':00 to ' + PN_TO + ':00 Pacific, every day'
+  ];
+  ui.alert('New-lead alerts — health check', lines.join('\n') +
+    '\n\nThis script posts to Chat EVERY DAY: either the new leads, or a ' +
+    '"nothing new" note. A day with no message at all means it is broken.',
+    ui.ButtonSet.OK);
 }
 
 // Forget everything this has posted and treat the sheet as brand new, so
