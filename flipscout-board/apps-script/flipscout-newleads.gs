@@ -289,11 +289,22 @@ function pnTest() {
 
 /* ------------------------------------------------------------- posting --- */
 
-// Reuses the webhook the other alerts already post with; PN_WEBHOOK overrides
-// it when new leads should go to a different space.
+// Where the webhook comes from, best first:
+//   PN_WEBHOOK     Script Property — new leads to their own space
+//   CHAT_WEBHOOK   Script Property — the space the other alerts already use
+//   PN_FALLBACK    the constant below, for when there was no time to set one
+// Script Properties always win, so dropping a new URL in there replaces the
+// constant without touching code — which is how you rotate the webhook after
+// one has been pasted somewhere it should not have been.
+//
+// KEEP PN_FALLBACK EMPTY IN THIS REPO. A webhook URL is a password: anyone
+// holding it can post into the space as the bot. Fill it in only in the copy
+// living in Apps Script, which is private to the Google account.
+const PN_FALLBACK = '';
+
 function pnWebhook_() {
   const p = PropertiesService.getScriptProperties();
-  return p.getProperty('PN_WEBHOOK') || p.getProperty('CHAT_WEBHOOK') || '';
+  return p.getProperty('PN_WEBHOOK') || p.getProperty('CHAT_WEBHOOK') || PN_FALLBACK;
 }
 
 function pnPost_(text) {
