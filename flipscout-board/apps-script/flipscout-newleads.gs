@@ -23,9 +23,10 @@
  *   2. Pick pnSetup from the function dropdown and press Run. Approve the
  *      permissions it asks for.
  *   3. Reload the sheet. A "🆕 New Lead Alerts" menu appears.
- *   4. Menu → "Check now". THE FIRST RUN POSTS NOTHING — it writes down the
- *      leads already on the sheet so nobody gets a thousand messages. It will
- *      say "no message sent". That is correct.
+ *   4. Menu → "Check now". The first run posts TODAY'S leads in our areas and
+ *      quietly writes down everything older, so nobody gets a thousand
+ *      messages. If nothing was pulled today it says "no message sent".
+ *      Missed a day? Menu → "Post today again (catch up)".
  *
  * After that it checks EVERY HOUR, EVERY DAY, from 8:00 to 19:00 Pacific
  * (8am, 9am, 10am … 6pm — twelve checks a day). Each message is stamped with
@@ -104,6 +105,7 @@ function pnOnOpen() {
   SpreadsheetApp.getUi().createMenu('🆕 New Lead Alerts')
     .addItem('Check now', 'pnCheckNow')
     .addItem('Preview — show what would send, send nothing', 'pnPreview')
+    .addItem('Post today again (catch up)', 'pnCatchUp')
     .addSeparator()
     .addItem('Which areas?', 'pnShowAreas')
     .addItem('Send test message', 'pnTest')
@@ -207,10 +209,17 @@ function pnCheck(force) {
 
   const got = pnBuild_();
   if (got.first) {
+    // Never run before. The whole sheet looks new, and nobody wants a thousand
+    // messages — so everything older than today is written down silently.
+    // TODAY'S leads still post: the day you switch this on is the day you most
+    // want to hear about, and the hour before you installed it still counts.
+    const today = pnToday_();
+    const todays = got.fresh.filter(l => l.added === today);
+    if (todays.length) pnPost_(pnText_(todays, got.areas));   // throws => nothing marked
     pnSave_(got.next);
     Logger.log('First run: wrote down the ' + got.next.mls.length + ' lead(s) pulled ' +
-      got.next.day + '. Nothing posted, which is what should happen.');
-    return 0;
+      got.next.day + ', and posted the ' + todays.length + ' from today.');
+    return todays.length;
   }
   if (!got.fresh.length) { pnSave_(got.next); return 0; }
 
@@ -289,12 +298,25 @@ function pnCheckNow() {
     '🆕 New Lead Alerts', 6);
 }
 
+// Forget everything this has posted and treat the sheet as brand new, so
+// today's leads in our areas go out again. For the day it was installed and
+// swallowed them, or any time Chat missed a day.
+function pnCatchUp() {
+  PropertiesService.getScriptProperties().deleteProperty(PN_MARK_KEY);
+  const n = pnCheck(true);
+  SpreadsheetApp.getActive().toast(
+    n ? 'Posted ' + n + ' lead' + (n === 1 ? '' : 's') + ' from today to Google Chat.'
+      : 'No leads pulled today in ' + pnAreas().join(' / ') + ' — nothing sent.',
+    '🆕 New Lead Alerts', 6);
+}
+
 function pnPreview() {
   const got = pnBuild_(), ui = SpreadsheetApp.getUi();
   ui.alert('New leads — preview (nothing is sent)',
     got.first
-      ? 'This has never run.\n\nThe first run posts nothing: it writes down the leads already on ' +
-        'the sheet so nobody gets flooded. Run "Check now" once, then the hourly check takes over.'
+      ? 'This has never run.\n\nThe first run posts TODAY\u2019s leads in our areas and quietly ' +
+        'writes down everything older, so nobody gets flooded. Run "Check now" once, then the ' +
+        'hourly check takes over.'
       : got.fresh.length
         ? pnText_(got.fresh, got.areas).replace(/\*/g, '')
         : 'Nothing new in ' + got.areas.join(' / ') + ' since the last check.',
