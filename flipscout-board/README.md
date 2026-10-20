@@ -1,4 +1,4 @@
-# FlipScout Lead Board
+# Twin Network Lead Board
 
 > **24 Sep 2026 — the Test board's page is now the real Board's page.**
 > `index.html` here is published at https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1
@@ -10,7 +10,7 @@
 > (`edits/<pull date>` → `{MLS: {s, r, d, by, at}}`, the same shape both pages
 > use): 172 records carried over unchanged, 97 Pass · 30 Reviewing · 45 removed.
 > Don't republish an older `index.html` over it — edit this file instead.
-> Daily refresh: the "FlipScout Lead Board — daily 11am refresh" Routine in
+> Daily refresh: the "Twin Network Lead Board — daily 11am refresh" Routine in
 > Seth's session publishes both boards from this branch.
 
 The notes below describe the original page and still hold for the parts it
@@ -120,7 +120,7 @@ nothing).
 
 - **Board:** https://claude.ai/code/artifact/864f77f8-9101-43d3-a7c8-c50e1872478c
 - **Source sheet:** `1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ`, the **Leads** tab
-- **Refreshed:** daily at 11:00 Pacific by the "FlipScout board — daily 11am refresh" Routine
+- **Refreshed:** daily at 11:00 Pacific by the "Twin Network board — daily 11am refresh" Routine
 
 ## The one thing to get right
 

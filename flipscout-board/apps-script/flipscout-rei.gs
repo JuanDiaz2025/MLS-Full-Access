@@ -1,5 +1,5 @@
 /**
- * FlipScout → REI BlackBook bridge.
+ * Twin Network → REI BlackBook bridge.
  *
  * Google hosts this, on Twin Home Buyer's own account, for nothing. That is the
  * whole point: the Lead Board cannot call REI BlackBook itself (a published
@@ -280,9 +280,9 @@ function page_(title, detail, ok) {
     '.p{display:inline-block;background:' + bg + ';color:' + fg + ';border-radius:999px;' +
     'padding:3px 11px;font-size:12px;font-weight:700;margin-bottom:12px}' +
     'p{margin:0;color:#57687C}</style>' +
-    '<div class="c"><div class="p">FlipScout → REI BlackBook</div>' +
+    '<div class="c"><div class="p">Twin Network → REI BlackBook</div>' +
     '<h1>' + esc_(title) + '</h1><p>' + esc_(detail) + '</p></div>';
-  return HtmlService.createHtmlOutput(html).setTitle('FlipScout → REI');
+  return HtmlService.createHtmlOutput(html).setTitle('Twin Network → REI');
 }
 
 function esc_(s) {
@@ -307,7 +307,7 @@ function esc_(s) {
  *   trigger. Run reiRemoveTimer() to stop.
  */
 
-var REI_DROP_FOLDER = '13PbzvxhyIZDrBayETV3ymNXUQQik_sFr';   // "FlipScout REI queue"
+var REI_DROP_FOLDER = '13PbzvxhyIZDrBayETV3ymNXUQQik_sFr';   // "Twin Network REI queue"
 
 function reiInstallTimer() {
   reiRemoveTimer();

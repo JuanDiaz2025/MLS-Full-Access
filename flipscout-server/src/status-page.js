@@ -42,7 +42,7 @@ export function statusPage({ counts, jobs, base }) {
 
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FlipScout server</title>
+<title>Twin Network server</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 :root{color-scheme:light;--ground:#EDF2F8;--surface:#FFFFFF;--ink:#14202E;--muted:#57687C;--line:#D3DEEB;--line-soft:#E6EDF6;
@@ -85,8 +85,8 @@ td small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
 .empty b{display:block;font:600 15px Archivo,sans-serif;color:var(--ink);margin-bottom:4px}
 a{color:var(--brand-2);font-weight:600}
 </style></head><body>
-<header><div class="wrap"><h1>FlipScout server</h1>
-<div class="sub">pushes from the Lead Board into REI BlackBook</div></div></header>
+<header><div class="wrap"><h1>Twin Network server</h1>
+<div class="sub">Connect the agent. Close the deal.</div></div></header>
 <div class="wrap">
   <dl class="tiles">
     ${tile("In REI", counts.done || 0, "ok")}

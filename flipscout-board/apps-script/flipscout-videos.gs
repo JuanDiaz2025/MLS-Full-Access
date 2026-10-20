@@ -1,5 +1,5 @@
 /**
- * FlipScout — property video uploads to Google Drive.
+ * Twin Network — property video uploads to Google Drive.
  *
  * The Lead Board's own file storage stops at 20 MB a file and its Drive
  * connector at 16 MB, so a 5-10 minute walkthrough (~50 MB) cannot go
@@ -8,7 +8,7 @@
  * the script streams them into one file in Drive with a resumable upload,
  * so there is no size limit worth worrying about.
  *
- *   Drive:  FlipScout property videos / <address> · <MLS #> / <video>
+ *   Drive:  Twin Network property videos / <address> · <MLS #> / <video>
  *           each video: anyone at Twin Home Buyer with the link can view
  *   Sheet:  "Videos" tab of the prod sheet (Updated Flip Scout Agent) —
  *           one row per video. The board reads it when you come back to
@@ -27,7 +27,7 @@
  */
 
 var SHEET_ID = '1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ';
-var ROOT_NAME = 'FlipScout property videos';
+var ROOT_NAME = 'Twin Network property videos';
 var ROOT_ID = '1RCHgifHH80Fzi9nwtl3cXeA31K2yKWmr';
 // A small copy of the Videos tab that the board reads — a few hundred bytes
 // instead of the whole lead sheet. Rewritten after every upload.

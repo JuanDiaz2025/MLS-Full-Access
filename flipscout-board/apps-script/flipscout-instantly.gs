@@ -1,5 +1,5 @@
 /**
- * FlipScout — automatic listing-agent emails through Instantly.
+ * Twin Network — automatic listing-agent emails through Instantly.
  *
  * Lives in the prod sheet next to flip-scout-reject.gs and flipscout-alerts.gs,
  * and uses FS_LEADS, FS_PASSED, FS_CLOSED, fsPost_, fsPage_ and fsSafeEmail_
@@ -44,9 +44,9 @@
  */
 
 const FSI_CAMPAIGNS = [
-  '98ab8360-fe96-4bf5-812a-d8903f8bd5a8',   // 1  FlipScout – Listing agents
-  '36bf11e0-b532-4a57-96e3-a08af4ecb938',   // 2  FlipScout – Listing agents Pt. 2
-  '1d8d854a-2085-4140-9662-69678d7c61e4'    // 3  FlipScout – Listing agents Pt. 3
+  '98ab8360-fe96-4bf5-812a-d8903f8bd5a8',   // 1  Twin Network – Listing agents
+  '36bf11e0-b532-4a57-96e3-a08af4ecb938',   // 2  Twin Network – Listing agents Pt. 2
+  '1d8d854a-2085-4140-9662-69678d7c61e4'    // 3  Twin Network – Listing agents Pt. 3
 ];
 const FSI_API = 'https://api.instantly.ai/api/v2';
 const FSI_TAB = 'Agent Emails';
@@ -91,13 +91,13 @@ function fsiSetup() {
   fsiTab_();
   const names = FSI_CAMPAIGNS.map(id => fsiApi_('get', '/campaigns/' + id).name);   // throws if a key or id is wrong
   Logger.log('Connected to ' + names.map((n, i) => (i + 1) + ') "' + n + '"').join(', ') +
-             '. Automatic adding is ' + ({ off: 'OFF', test: 'TEST leads only', on: 'ON' }[fsiMode_()]) + '. Reload the sheet for the ✉️ FlipScout Emails menu.');
+             '. Automatic adding is ' + ({ off: 'OFF', test: 'TEST leads only', on: 'ON' }[fsiMode_()]) + '. Reload the sheet for the ✉️ Twin Network Emails menu.');
 }
 
 function fsiOnOpen() {
   const mode = fsiMode_();
   const label = { off: 'OFF', test: 'TEST leads only', on: 'ON (real A leads)' }[mode];
-  SpreadsheetApp.getUi().createMenu('✉️ FlipScout Emails')
+  SpreadsheetApp.getUi().createMenu('✉️ Twin Network Emails')
     .addItem('Check Instantly connection', 'fsiCheck')
     .addItem('Preview — who would be added next (adds nothing)', 'fsiPreview')
     .addSeparator()
@@ -216,7 +216,7 @@ function fsiPutTests() {
     n++;
   });
   SpreadsheetApp.getUi().alert(n ? n + ' TEST lead(s) added to the bottom of the Leads tab.' : 'The TEST leads are already on the Leads tab.',
-    'Next: ✉️ FlipScout Emails → Automatic adding → TEST leads only, then "Run the hourly check now" (or wait for the hour).\n\n' +
+    'Next: ✉️ Twin Network Emails → Automatic adding → TEST leads only, then "Run the hourly check now" (or wait for the hour).\n\n' +
     'Do not run the app\'s Refresh while testing — it would look the TEST numbers up on the MLS, not find them, and the script would then stop them as "not active".',
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
@@ -253,18 +253,18 @@ function fsiChooseMode() {
 function fsiRepliesNow() {
   const n = fsiReplies();
   SpreadsheetApp.getActive().toast(n ? n + ' new repl' + (n === 1 ? 'y' : 'ies') + ' — see the Agent Emails tab and Google Chat.'
-                                     : 'No new replies.', 'FlipScout Emails', 8);
+                                     : 'No new replies.', 'Twin Network Emails', 8);
 }
 
 function fsiHourlyNow() {
   fsiHourly();
-  SpreadsheetApp.getActive().toast('Done — see the Agent Emails tab.', 'FlipScout Emails', 6);
+  SpreadsheetApp.getActive().toast('Done — see the Agent Emails tab.', 'Twin Network Emails', 6);
 }
 
 
 function fsiAddNow() {
   const n = fsiLocked_(() => fsiAddNew_(new Date())) || 0;
-  SpreadsheetApp.getActive().toast(n ? n + ' house(s) handed to Instantly.' : 'Nothing to add (see Preview for why).', 'FlipScout Emails', 8);
+  SpreadsheetApp.getActive().toast(n ? n + ' house(s) handed to Instantly.' : 'Nothing to add (see Preview for why).', 'Twin Network Emails', 8);
 }
 
 // Rows selected on the Agent Emails or Leads tab.
@@ -475,7 +475,7 @@ const FSI_VERSION = '2026-09-25e';   // shown on the Check screen and the Board 
 function fsiWebEmail_(mls, by) {
   const fsPage_ = (t, b) => fsPageBase_(t, b + ' (code ' + FSI_VERSION + ')');
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) return fsPage_('Busy', 'FlipScout is updating right now. Close this tab and click the button again in a minute.');
+  if (!lock.tryLock(20000)) return fsPage_('Busy', 'Twin Network is updating right now. Close this tab and click the button again in a minute.');
   try {
     let l;
     const test = fsiIsTest_(mls) && !fsiLeads_().some(x => x.mls === mls);   // a TEST lead that is not on the sheet

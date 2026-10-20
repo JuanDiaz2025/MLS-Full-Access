@@ -1,6 +1,6 @@
-# FlipScout server
+# Twin Network server
 
-The always-on half of the FlipScout Lead Board.
+The always-on half of the Twin Network Lead Board.
 
 A published Artifact can only call the viewer's own connectors, so the board can
 record that somebody pressed **⬆ Push to REI** but cannot carry it out. This

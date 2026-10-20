@@ -1,5 +1,5 @@
 /**
- * FlipScout — "NEW LEAD" Google Chat alerts for San Francisco, the Peninsula,
+ * Twin Network — "NEW LEAD" Google Chat alerts for San Francisco, the Peninsula,
  * San Jose and Oakland.
  *
  * This file does ONE thing: when a new lead lands on the sheet in an area we
@@ -7,7 +7,7 @@
  * flipscout-alerts.gs already does those, and the two never overlap.
  *
  * Lives in the prod sheet ("Updated Flip Scout Agent") beside the other
- * FlipScout scripts. Everything is prefixed pn so it cannot collide with them:
+ * Twin Network scripts. Everything is prefixed pn so it cannot collide with them:
  * all the .gs files in one Apps Script project share a single namespace.
  *
  * WHAT POSTS. A lead posts once, and only if ALL of these hold:
@@ -269,7 +269,7 @@ function pnCheck(force) {
 
 // The daily "checked, nothing new" note.
 function pnQuiet_(areas, said) {
-  return '✅ *FlipScout checked — nothing new in ' + areas.join(' / ') + '*' +
+  return '✅ *Twin Network checked — nothing new in ' + areas.join(' / ') + '*' +
     '\n🗓 ' + Utilities.formatDate(new Date(), PN_TZ, 'EEE, MMM d yyyy · h:mm a') +
     '\nNo new listings in our areas since the last check.' + pnGap_(said) +
     '\n\nBoard: ' + PN_BOARD_URL;
@@ -427,7 +427,7 @@ function pnShowAreas() {
 }
 
 function pnTest() {
-  pnPost_('🧪 *TEST — FlipScout new-lead alerts*\nWatching ' + pnAreas().join(' / ') +
+  pnPost_('🧪 *TEST — Twin Network new-lead alerts*\nWatching ' + pnAreas().join(' / ') +
     '.\n🗓 ' + Utilities.formatDate(new Date(), PN_TZ, 'EEE, MMM d yyyy · h:mm a') +
     '\nNew leads post here every hour, every day, from ' + PN_FROM + ':00 to ' + PN_TO + ':00 Pacific.' +
     '\n\nBoard: ' + PN_BOARD_URL);

@@ -1,4 +1,4 @@
-# FlipScout Board — Test copy
+# Twin Network Board — Test copy
 
 The team's sandbox for the Lead Board. The real board (see `../README.md`) is
 left as it is, as the backup; changes are tried here first.
@@ -6,7 +6,7 @@ left as it is, as the backup; changes are tried here first.
 - **Page:** https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9 — this folder's `index.html`
 - **Data:** the same `data.js` the real board uses, built by `../build_data.py`
   from the prod sheet's **Leads** tab (`1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ`)
-- **Refreshed:** daily at 11:00 Pacific by the "FlipScout Test board — daily
+- **Refreshed:** daily at 11:00 Pacific by the "Twin Network Test board — daily
   11am refresh" Routine
 
 ## What this page adds over the real board
@@ -23,7 +23,7 @@ left as it is, as the backup; changes are tried here first.
 - **Pass with a reason**: picking Pass asks for an optional reason, saved with
   the pass in the board database and shown under the status and in the side panel
 
-All of it comes from columns the FlipScout app writes at the end of the Leads
+All of it comes from columns the Twin Network app writes at the end of the Leads
 tab. `build_data.py` appends them after the eleven columns the real board
 reads, so the real board ignores them and a rebuild cannot change it.
 
@@ -70,7 +70,7 @@ rejections script. It runs on Google's servers, needs no Claude session:
 Alert rules: A lead, MLS Status Active, Notes not PASS and no "no alerts", a
 real offer date, at most two alerts per lead, five leads per message.
 The webhook lives in Script Properties (`CHAT_WEBHOOK`), never in git.
-Menu "🚨 FlipScout Alerts": Check now · Preview · Send morning summary now ·
+Menu "🚨 Twin Network Alerts": Check now · Preview · Send morning summary now ·
 Send test message. Trigger code runs as saved ("Head"); only a change to
 `doGet` needs Deploy → Manage deployments → Edit → New version (same URL).
 

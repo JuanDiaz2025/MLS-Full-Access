@@ -75,7 +75,7 @@ chown -R "$SVC_USER:$SVC_USER" "$DIR"
 say "Installing the service"
 cat > /etc/systemd/system/flipscout.service <<UNIT
 [Unit]
-Description=FlipScout server — Lead Board pushes into REI BlackBook
+Description=Twin Network server — Lead Board pushes into REI BlackBook
 After=network-online.target
 Wants=network-online.target
 

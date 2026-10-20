@@ -1,4 +1,4 @@
-// The FlipScout server.
+// The Twin Network server.
 //
 // It exists because a published Artifact cannot call anything but the viewer's
 // own connectors, so the Lead Board can record that somebody pressed

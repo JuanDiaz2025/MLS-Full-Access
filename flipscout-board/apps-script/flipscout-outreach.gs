@@ -1,5 +1,5 @@
 /**
- * FlipScout — agent outreach: email DRAFTS to listing agents, never sent by code.
+ * Twin Network — agent outreach: email DRAFTS to listing agents, never sent by code.
  *
  * Lives in the prod sheet next to flip-scout-reject.gs and flipscout-alerts.gs
  * (it uses FS_PASSED, FS_CLOSED, fsDeadline_, fsPost_ and fsSafeEmail_ from the
@@ -28,7 +28,7 @@
  *
  * SETUP (once)
  *   Paste this as a new file, save, run fsoSetup, approve the permissions,
- *   reload the sheet → "✉️ FlipScout Outreach" menu.
+ *   reload the sheet → "✉️ Twin Network Outreach" menu.
  */
 
 const FSO_TAB = 'Outreach';
@@ -60,11 +60,11 @@ function fsoSetup() {
   ScriptApp.newTrigger('fsoHourly').timeBased().everyHours(1).create();
   fsoTab_();
   GmailApp.getDrafts();            // asks for the Gmail permission now, not on first use
-  Logger.log('Outreach is set up. Reload the sheet for the ✉️ FlipScout Outreach menu.');
+  Logger.log('Outreach is set up. Reload the sheet for the ✉️ Twin Network Outreach menu.');
 }
 
 function fsoOnOpen() {
-  SpreadsheetApp.getUi().createMenu('✉️ FlipScout Outreach')
+  SpreadsheetApp.getUi().createMenu('✉️ Twin Network Outreach')
     .addItem('Preview — who would get a draft (creates nothing)', 'fsoPreview')
     .addItem('Draft ONE test email to myself', 'fsoTestDraft')
     .addSeparator()
@@ -98,7 +98,7 @@ function fsoTestDraft() {
   if (!l) throw new Error('No lead with an agent email to use as the example.');
   const m = fsoMessage_(l);
   GmailApp.createDraft(me, '[TEST] ' + m.subject, m.text, { htmlBody: m.html });
-  SpreadsheetApp.getActive().toast('Test draft for ' + fsoShortAddr_(l.addr) + ' is in your Gmail Drafts, addressed to you.', 'FlipScout Outreach', 8);
+  SpreadsheetApp.getActive().toast('Test draft for ' + fsoShortAddr_(l.addr) + ' is in your Gmail Drafts, addressed to you.', 'Twin Network Outreach', 8);
 }
 
 function fsoDraftNew() {
@@ -137,7 +137,7 @@ function fsoDraftSelected() {
 function fsoUpdateNow() {
   const r = fsoUpdate_();
   SpreadsheetApp.getActive().toast(r.checked ? r.checked + ' of your drafts checked · ' + r.sent + ' newly sent · ' + r.replied + ' new repl' + (r.replied === 1 ? 'y' : 'ies')
-                                             : 'You have no open drafts on the Outreach tab.', 'FlipScout Outreach', 8);
+                                             : 'You have no open drafts on the Outreach tab.', 'Twin Network Outreach', 8);
 }
 
 function fsoHourly() { fsoUpdate_(); }
@@ -159,7 +159,7 @@ function fsoCreate_(list) {
       done[l.mls] = true;
       made++;
     });
-    SpreadsheetApp.getActive().toast(made + ' draft(s) in your Gmail → Drafts. Fill in the offer amount, then send.', 'FlipScout Outreach', 10);
+    SpreadsheetApp.getActive().toast(made + ' draft(s) in your Gmail → Drafts. Fill in the offer amount, then send.', 'Twin Network Outreach', 10);
   } finally {
     lock.releaseLock();
   }

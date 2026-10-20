@@ -1,5 +1,5 @@
 /**
- * FlipScout — "NEEDS JUAN" Google Chat alerts + the Board's Pass bridge.
+ * Twin Network — "NEEDS JUAN" Google Chat alerts + the Board's Pass bridge.
  *
  * Lives in the prod sheet ("Updated Flip Scout Agent") next to
  * flip-scout-reject.gs. Everything here is prefixed fs so the two files never
@@ -40,7 +40,7 @@
  *     Who has access: Anyone within twinhomebuyer.com → Deploy → copy the URL.
  *   Optional: run fsSendTest to post a test message.
  *
- * MENU — fsSetupSchedule also adds a "🚨 FlipScout Alerts" menu to the sheet
+ * MENU — fsSetupSchedule also adds a "🚨 Twin Network Alerts" menu to the sheet
  * (reload the sheet once to see it): Check now · Preview (sends nothing) ·
  * Send morning summary now · Send test message. It is a separate menu because flip-scout-reject.gs owns
  * onOpen; this one is opened by an installable trigger instead.
@@ -70,11 +70,11 @@ function fsSetupSchedule() {
     ScriptApp.newTrigger('fsAlertCheck').timeBased().atHour(h).nearMinute(m).everyDays(1)
       .inTimezone('America/Los_Angeles').create());
   if (!fsWebhook_()) throw new Error('Schedule is on, but CHAT_WEBHOOK is missing — add it under Project Settings → Script Properties.');
-  Logger.log('Morning summary + alerts at about 8:00, alerts at 11:15 and 15:00 Pacific. Reload the sheet for the 🚨 FlipScout Alerts menu.');
+  Logger.log('Morning summary + alerts at about 8:00, alerts at 11:15 and 15:00 Pacific. Reload the sheet for the 🚨 Twin Network Alerts menu.');
 }
 
 function fsOnOpen() {
-  SpreadsheetApp.getUi().createMenu('🚨 FlipScout Alerts')
+  SpreadsheetApp.getUi().createMenu('🚨 Twin Network Alerts')
     .addItem('Check now (send what is due)', 'fsCheckNow')
     .addItem('Preview — show what would send, send nothing', 'fsPreview')
     .addSeparator()
@@ -87,18 +87,18 @@ function fsOnOpen() {
 function fsCheckNow() {
   const n = fsAlertCheck();
   SpreadsheetApp.getActive().toast(n ? 'Sent 1 message to Google Chat with ' + n + (n === 1 ? ' lead.' : ' leads.')
-                                     : 'Nothing due right now — no message sent.', 'FlipScout Alerts', 6);
+                                     : 'Nothing due right now — no message sent.', 'Twin Network Alerts', 6);
 }
 
 function fsPreview() {
   const got = fsBuild_(new Date());
   const ui = SpreadsheetApp.getUi();
-  ui.alert('FlipScout Alerts — preview (nothing sent)',
+  ui.alert('Twin Network Alerts — preview (nothing sent)',
     got ? got.text.replace(/\*/g, '') : 'Nothing is due right now, so a check would send nothing.', ui.ButtonSet.OK);
 }
 
 function fsSendTest() {
-  fsPost_('🧪 *TEST — FlipScout alerts from Apps Script*\nThe 8am / 11am / 3pm checks will post here.\n\nBoard: ' + FS_BOARD_URL);
+  fsPost_('🧪 *TEST — Twin Network alerts from Apps Script*\nThe 8am / 11am / 3pm checks will post here.\n\nBoard: ' + FS_BOARD_URL);
 }
 
 /* ------------------------------------------------------ morning summary -- */
@@ -111,7 +111,7 @@ function fsMorning() {
 function fsDigestNow() {
   const n = fsDigest_(true);
   SpreadsheetApp.getActive().toast(n ? 'Sent the summary with ' + n + (n === 1 ? ' offer.' : ' offers.')
-                                     : 'No A or B offers due in the next 3 days — nothing sent.', 'FlipScout Alerts', 6);
+                                     : 'No A or B offers due in the next 3 days — nothing sent.', 'Twin Network Alerts', 6);
 }
 
 // Returns how many leads it listed. force = send even if today's already went.
@@ -219,7 +219,7 @@ function doGet(e) {
     return fsiWebEmail_(mls, String(p.by || '').trim().slice(0, 40));
   }
   if (!/^(pass|unpass)$/.test(action) || !/^[A-Z0-9]{5,20}$/.test(mls)) {
-    return fsPage_('Nothing to do', 'This link is missing the lead or the action. Open it from the FlipScout Board.');
+    return fsPage_('Nothing to do', 'This link is missing the lead or the action. Open it from the Twin Network Board.');
   }
   const email = fsSafeEmail_();
   const by = String(p.by || '').trim().slice(0, 40) || (email ? email.split('@')[0] : 'Someone');
@@ -336,5 +336,5 @@ function fsPage_(title, body) {
   return HtmlService.createHtmlOutput(
     '<div style="font:16px/1.5 system-ui,sans-serif;max-width:520px;margin:48px auto;padding:0 16px">' +
     '<h2 style="margin:0 0 8px">' + esc(title) + '</h2><p style="margin:0;color:#444">' + esc(body) + '</p></div>'
-  ).setTitle('FlipScout');
+  ).setTitle('Twin Network');
 }
