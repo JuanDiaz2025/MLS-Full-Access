@@ -2273,17 +2273,22 @@ const LEAD_HEADERS = [
   // yr, use, why}], use 1 = counted in the ARV. The boards read it through
   // flipscout-board/test/comps.py.
   'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On',
+  // The listing's public remarks ("Public:" on Client Full) — read on every
+  // review but never written until v1.73, so the boards saw none.
+  'Public Remarks',
 ];
+// Remarks are capped like the parsers cap them (privateRemarks, parseDetail).
+const REMARKS_MAX = 1500;
 // Read fresh off the listing on every review, so a re-review replaces them —
 // an offer date goes from "TBD" to a real date, remarks get edited. The comps
 // too: a re-review's comps replace the old ones (a blank never wipes them).
 const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
   'Agent Phone', 'Agent Email', 'Showing', 'Disclosures',
-  'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On'];
+  'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On', 'Public Remarks'];
 // Facts re-read by "Refresh leads on the board" — the listing's own data, never
 // the reviewer's columns. Bucket / score are only filled where still blank.
 const FACT_HEADERS = ['Price Cut', 'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
-  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures', 'Public Remarks'];
 const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
@@ -2315,6 +2320,7 @@ const leadRecord = r => ({
   'Disclosures': r.disclosures || '',
   'ARV': r.arv || '', 'ARV $/SqFt': r.arvPpsf || '', 'Comp Confidence': r.compConf || '',
   'Comps': r.comps || '', 'Comps Run On': r.compsAt || '',
+  'Public Remarks': String(r.remarks || '').slice(0, REMARKS_MAX),
 });
 
 const rejectRecord = r => ({
@@ -2508,7 +2514,7 @@ function gateFields(c) {
       remarks: c._remarks || g.remarks, privateRemarks: g.privateRemarks }),
     agentPhone: g.agentPhone || '', agentEmail: g.agentEmail || '', showing: g.showing || '',
     disclosures: g.disclosures || '',
-    remarks: c._remarks || '', redfin: c._redfin || '',
+    remarks: c._remarks || g.remarks || '', redfin: c._redfin || '',
     priceCut: orig > list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
   };
 }
@@ -2530,6 +2536,7 @@ function toSheetRow(l) {
     bucket: l.bucketLabel || '', oppScore: l.oppScore, why: l.why || '',
     priceCut: l.priceCut || '', listedBy: l.listedBy || '',
     offerDue: l.offerDue || '', privateRemarks: l.privateRemarks || '', occupiedBy: l.occupiedBy || '',
+    remarks: l.remarks || '',
     mlsStatus: l.mlsStatus || '',
     agentPhone: l.agentPhone || '', agentEmail: l.agentEmail || '', showing: l.showing || '',
     disclosures: l.disclosures || '',
@@ -2706,6 +2713,7 @@ ipcMain.handle('refresh-board', async () => {
           'Price Cut': orig > list && list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
           'Listing Agent': gal.listedBy || '', 'Offer Due': offer,
           'Private Remarks': gal.privateRemarks || '', 'Occupied By': gal.occupiedBy || '',
+          'Public Remarks': String(gal.remarks || '').slice(0, REMARKS_MAX),
           'MLS Status': gal.status || '',
           'MLS Link': core.mlsUrl(mls),
           'Agent Phone': gal.agentPhone || '', 'Agent Email': gal.agentEmail || '',

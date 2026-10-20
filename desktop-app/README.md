@@ -85,7 +85,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
      Confidence · Comps · Comps Run On**. *Comps* is the sold homes as compact
      JSON (`[{mls, addr, price, sqft, ppsf, sold, bd, ba, yr, use, why}]`, at
      most 16, `use: 1` = counted in the ARV) — the board reads it; nobody types
-     in it. An older 27-column tab is widened by the app on its first write.
+     in it. **Public Remarks** follows (the listing's own "Public:" text,
+     replaced on a re-review or a Refresh, like Private Remarks). An older
+     27-column tab is widened by the app on its first write.
    - **Rejected** — everything dropped, with the reason and the stage it fell out at
    - **KPI** — one row per day, upserted
 

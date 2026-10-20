@@ -549,37 +549,57 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     eq(p.forget.indexOf('AA3') + p.forget.indexOf('BB3') + p.forget.indexOf('CC3'), -3, 'nothing from another day');
   }
 
-  // 17. Comps columns (v1.73). The prod Leads tab was exactly 27 columns wide
-  //     (header ends at "Disclosures", grid 27 columns — checked 20 Oct), and the
-  //     Sheets API refuses a write past the grid's edge. The five comps columns
-  //     must widen the grid first, keep every existing cell, and a later push
-  //     with no comps must not blank an ARV already there.
+  // 17. Comps + Public Remarks columns (v1.73). The prod Leads tab was exactly
+  //     27 columns wide (header ends at "Disclosures", grid 27 columns —
+  //     checked 20 Oct), and the Sheets API refuses a write past the grid's
+  //     edge. The new columns must widen the grid first, keep every existing
+  //     cell, be replaced on a re-review / refresh, and a later push without
+  //     them must not blank what is there. The header lists are read out of
+  //     main.js itself (it needs Electron, so it cannot be required here).
   {
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'main.js'), 'utf8');
+    const list = name => {
+      const m = src.match(new RegExp('const ' + name + ' = (\\[[\\s\\S]*?\\]);'));
+      return m ? new Function('return ' + m[1])() : null;
+    };
+    const LEAD = list('LEAD_HEADERS'), GATE = list('GATE_HEADERS'), FACT = list('FACT_HEADERS');
     const H27 = ['Status', 'MLS #', 'Address', 'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
       'Purchase Price', '$/SqFt', 'Notes', 'MLS Link', 'First Added', 'Bucket', 'Opportunity Score', 'Why', 'Price Cut',
       'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status', 'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
-    const COMP_H = ['ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On'];
-    const H32 = H27.concat(COMP_H);
+    const NEW_H = ['ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On', 'Public Remarks'];
+    eq(LEAD, H27.concat(NEW_H), "main.js: the live 27 columns unchanged, then the comps, then Public Remarks, at the END");
+    eq(NEW_H.every(h => GATE.includes(h)), true, 'main.js: the new columns are app-owned (replaced on a re-review)');
+    eq(FACT.includes('Public Remarks') && FACT.includes('Private Remarks'), true, 'main.js: a refresh re-reads Public Remarks, like Private Remarks');
+    eq(/'Public Remarks': String\(r\.remarks \|\| ''\)\.slice\(0, REMARKS_MAX\)/.test(src) && /const REMARKS_MAX = 1500;/.test(src), true,
+      'main.js: Public Remarks are written, capped at 1500 like Private Remarks');
+    const H = LEAD, n = H.length, at = h => H.indexOf(h);
     const old = H27.map((h, i) => h === 'MLS #' ? 'ML1' : h === 'Notes' ? 'called the agent' : 'v' + i);
     const lim = { cols: { Leads: 27 } };
     const tabs = fakeSheets({ Leads: [H27.slice(), old.slice()] }, lim);
     const comps = JSON.stringify([{ mls: 'ML9', addr: '9 Oak St', price: 900000, sqft: 1500, ppsf: 600, sold: '2026-05-01', use: 1, why: 'fully remodeled' }]);
-    const rec = { 'MLS #': 'ML1', 'Notes': 'auto', 'ARV': 900000, 'ARV $/SqFt': 600, 'Comp Confidence': 'High', 'Comps': comps, 'Comps Run On': '2026-10-20' };
+    const pub = 'Sold as-is. Original 1950s kitchen, bring your contractor.';
+    const rec = { 'MLS #': 'ML1', 'Notes': 'auto', 'ARV': 900000, 'ARV $/SqFt': 600, 'Comp Confidence': 'High', 'Comps': comps,
+      'Comps Run On': '2026-10-20', 'Public Remarks': pub };
     let err = '';
-    try { await gs.syncRows('tok', 'ID', 'Leads', H32, 'MLS #', [rec], { overwrite: COMP_H }); } catch (e) { err = e.message; }
-    eq(err, '', 'a 27-column tab takes the 5 comps columns without "exceeds grid limits"');
-    eq(lim.cols.Leads, 32, 'the grid was widened to 32 columns first');
-    eq(tabs.Leads[0], H32, 'the header row gains the comps columns at the end');
+    try { await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [rec], { overwrite: GATE }); } catch (e) { err = e.message; }
+    eq(err, '', 'a 27-column tab takes the new columns without "exceeds grid limits"');
+    eq(lim.cols.Leads, n, 'the grid was widened to ' + n + ' columns first');
+    eq(tabs.Leads[0], H, 'the header row gains the new columns at the end');
     eq(tabs.Leads[1].slice(0, 27), old, 'every existing cell of the row is kept (Notes too)');
-    eq(tabs.Leads[1].slice(27), [900000, 600, 'High', comps, '2026-10-20'], 'the comps land in their own columns');
-    await gs.syncRows('tok', 'ID', 'Leads', H32, 'MLS #', [{ 'MLS #': 'ML1', 'ARV': '', 'Comps': '', 'Comp Confidence': '' }], { overwrite: COMP_H });
-    eq(tabs.Leads[1][27], 900000, 'a push without comps (comps off, or a Stop) never blanks an ARV');
-    await gs.syncRows('tok', 'ID', 'Leads', H32, 'MLS #', [{ 'MLS #': 'ML1', 'ARV': 950000, 'Comp Confidence': 'Medium' }], { overwrite: COMP_H });
-    eq([tabs.Leads[1][27], tabs.Leads[1][29]], [950000, 'Medium'], "a re-review's comps replace the old ones");
+    eq(tabs.Leads[1].slice(27), [900000, 600, 'High', comps, '2026-10-20', pub], 'the comps and the public remarks land in their own columns');
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [{ 'MLS #': 'ML1', 'ARV': '', 'Comps': '', 'Comp Confidence': '', 'Public Remarks': '' }], { overwrite: GATE });
+    eq([tabs.Leads[1][at('ARV')], tabs.Leads[1][at('Public Remarks')]], [900000, pub],
+      'a push without comps or remarks (comps off, a Stop, a report not read) never blanks them');
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [{ 'MLS #': 'ML1', 'ARV': 950000, 'Comp Confidence': 'Medium' }], { overwrite: GATE });
+    eq([tabs.Leads[1][at('ARV')], tabs.Leads[1][at('Comp Confidence')]], [950000, 'Medium'], "a re-review's comps replace the old ones");
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [{ 'MLS #': 'ML1', 'Public Remarks': 'Price reduced! ' + pub }],
+      { overwrite: [...FACT, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link'], patchOnly: true });
+    eq(tabs.Leads[1][at('Public Remarks')], 'Price reduced! ' + pub, 'a refresh replaces edited public remarks');
+    eq(tabs.Leads[1][at('Notes')], 'called the agent', 'a refresh never touches Notes');
     // a sheet already wide enough is left alone
     const lim2 = { cols: { Leads: 40 } };
     fakeSheets({ Leads: [H27.slice()] }, lim2);
-    await gs.syncRows('tok', 'ID', 'Leads', H32, 'MLS #', [rec], { overwrite: COMP_H });
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [rec], { overwrite: GATE });
     eq(lim2.cols.Leads, 40, 'a grid that is already wide enough is not widened');
   }
 

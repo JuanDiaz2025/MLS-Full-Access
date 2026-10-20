@@ -1201,7 +1201,7 @@ widening · **Low** = < 3 reno. No sold homes → blank ARV, Comp Confidence
 "None — <reason>". Sold homes read are cached in `comps-cache.json` (userData,
 180 days, with the report's sale price); a report that fails to load is not
 cached. Five columns at the END of Leads: `ARV · ARV $/SqFt · Comp Confidence
-· Comps · Comps Run On` — app-owned, replaced on a re-review, never blanked by
+· Comps · Comps Run On` (then `Public Remarks`, below) — app-owned, replaced on a re-review, never blanked by
 a push without comps. `Comps` = compact JSON `[{mls, addr, price, sqft, ppsf,
 sold, bd, ba, yr, use: 1|0, why}]` (≤ 16, the counted ones first);
 `core.boardLead` carries `arv · arvPpsf · compConf · comps` (each field
@@ -1218,6 +1218,13 @@ lead(s) valued (H high · M medium · L low), N without comps.` Tests:
 xlsx into the board's `comps.js`. **Not yet run against live Matrix** — on the
 first run check the log's ARV lines, the sold grid headings and
 `<userData>/report-samples/*-comp.txt` (the first 3 sold reports).
+**Also in v1.73.0: a `Public Remarks` column** after the comps (Seth: the
+Contrarian found "public remarks are empty" on 6225 Tevis — the app read
+`Public:` off Client Full on every review but never wrote it). App-owned like
+Private Remarks: replaced on a re-review and by ↻ Refresh (`FACT_HEADERS`),
+never blanked by an empty read, capped at 1500 chars (`REMARKS_MAX`, the
+parsers' own limit); `core.boardLead` already carried it as `remarks`. §17 of
+`test-google-sheets.js` reads the header lists out of `main.js` itself.
 
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope
