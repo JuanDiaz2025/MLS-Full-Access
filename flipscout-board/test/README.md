@@ -89,6 +89,28 @@ history window with every listing and contact (Seth, 20 Oct).
   "↻ Refresh from sheet" on the board also reads it for the person who
   pressed it.
 
+## Agent photos
+
+`agentphotos.py` takes each agent's photo from the "Listing Agent" box of the
+public MLS page of their newest listing (up to 3 listings, until one has the
+box): name, brokerage, license number and, when the agent has put one on
+MLSListings, a photo. The box must name the same agent as the sheet (same
+last name, or the same phone). The photo is cut to a 96x96 tile; tiles go into
+`agphotos/a<day>.jpg` sheets of up to 120, and `agphotos/index.js` maps
+`lic` (MLS # -> license) and `at` (license -> [sheet, slot]).
+
+- Only MLSListings (ML) board agents have photos there: 130 of 1,331 agents on
+  20 Oct (129 of 209 ML agents, none on BA, CC, EB, BE or SF). The rest keep
+  their initials.
+- The same license on two cards makes them one card (20 Oct: Michael
+  Bardales, at Twin Oaks and then Compass). The card shows the license, and
+  the newest listing's brokerage.
+- A license with no photo is checked again after 30 days; a lead with no
+  usable box is tried on 3 days. A flat grey silhouette is not a photo.
+- Gravatar was tried and left out: 2 agents in 100 have one, and many are a
+  pet, a flower or a logo.
+- They are the agents' public MLS photos: private board only, never in git.
+
 ## Daily refresh
 
 1. Read the live Test board's `thumbs/index.js` (Artifact read, path
@@ -99,9 +121,12 @@ history window with every listing and contact (Seth, 20 Oct).
    `index.js`.
 3. Upload the zoomed photos and record their ids (above).
 4. Run `python3 -I agents.py <prod sheet .xlsx> <out>/agents.js`.
-5. Publish the live page with `data.js`, `agents.js`, `thumbs/index.js` and
-   the new sheets. Files left out of a publish are kept, so earlier sheets
-   stay.
+5. Read the live `agphotos/index.js` into `<out>/agphotos/index.js`, then run
+   `python3 -I agentphotos.py <new data.js> <out>`. It looks up only agents it
+   has not settled yet, and prints NEW FILES.
+6. Publish the live page with `data.js`, `agents.js`, `thumbs/index.js`, the
+   new sheets and the agentphotos NEW FILES. Files left out of a publish are
+   kept, so earlier sheets stay.
 
 The photos are listing photos. Keep them on the private board only: never in
 git, and never on a shared page.
