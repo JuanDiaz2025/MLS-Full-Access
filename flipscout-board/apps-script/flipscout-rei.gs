@@ -292,6 +292,103 @@ function esc_(s) {
 }
 
 /* ------------------------------------------------------------------ *
+ *  The drop folder — how the board pushes without opening anything
+ * ------------------------------------------------------------------ *
+ *
+ * A published Artifact cannot call REI, and it cannot call this web app
+ * either: it may only reach the viewer's own connectors. But Google Drive IS
+ * one of those connectors, and the board already uses it. So the button writes
+ * push-<MLS>.json into the folder below from inside the board — no tab, no
+ * paste — and reiTick() picks it up here, creates the contact, and writes
+ * done-<MLS>.json back. The board watches for that and turns the button green.
+ *
+ * SETUP, once:
+ *   Run reiInstallTimer() below. That is all — it creates the every-minute
+ *   trigger. Run reiRemoveTimer() to stop.
+ */
+
+var REI_DROP_FOLDER = '13PbzvxhyIZDrBayETV3ymNXUQQik_sFr';   // "FlipScout REI queue"
+
+function reiInstallTimer() {
+  reiRemoveTimer();
+  ScriptApp.newTrigger('reiTick').timeBased().everyMinutes(1).create();
+  Logger.log('Timer installed — reiTick() now runs every minute.');
+}
+
+function reiRemoveTimer() {
+  var all = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].getHandlerFunction() === 'reiTick') ScriptApp.deleteTrigger(all[i]);
+  }
+}
+
+/**
+ * Every minute: create a contact for each push waiting in the folder.
+ *
+ * A push is claimed by renaming it to doing-<MLS>.json before any work starts,
+ * so two overlapping ticks can never create the same contact twice. Whatever
+ * happens, an answer is written — a push that fails silently is worse than one
+ * that fails loudly, because the board would spin forever.
+ */
+function reiTick() {
+  var folder;
+  try { folder = DriveApp.getFolderById(REI_DROP_FOLDER); }
+  catch (e) { Logger.log('Cannot open the drop folder: ' + e.message); return; }
+
+  var files = folder.getFiles(), todo = [];
+  while (files.hasNext()) {
+    var f = files.next();
+    if (/^push-[A-Za-z0-9]{5,20}\.json$/.test(f.getName())) todo.push(f);
+  }
+  if (!todo.length) return;
+
+  for (var i = 0; i < todo.length; i++) {
+    var file = todo[i];
+    var mls = file.getName().replace(/^push-/, '').replace(/\.json$/, '').toUpperCase();
+    var answer;
+    try {
+      // claim it first, so an overlapping tick skips it
+      file.setName('doing-' + mls + '.json');
+      var req = JSON.parse(file.getBlob().getDataAsString());
+      var c = req.contact || {};
+      if (!c.first && !c.last) {
+        answer = { ok: false, err: 'that push carried no name' };
+      } else if (reiDuplicate_(c)) {
+        answer = { ok: false, err: 'already in REI BlackBook — nothing was created' };
+      } else {
+        var r = reiCreateContact(c);
+        answer = r.ok
+          ? { ok: true, id: r.id || '', at: new Date().toISOString() }
+          : { ok: false, err: r.code === 'signed_out'
+                ? 'the bridge\'s REI session has expired — run reiSetSession()'
+                : (r.code + (r.detail ? ': ' + r.detail : '')) };
+      }
+    } catch (err) {
+      answer = { ok: false, err: String(err.message || err).slice(0, 200) };
+    }
+    try {
+      folder.createFile('done-' + mls + '.json', JSON.stringify(answer), 'application/json');
+      file.setTrashed(true);
+      Logger.log(mls + ' -> ' + (answer.ok ? 'created' + (answer.id ? ' #' + answer.id : '') : 'FAILED ' + answer.err));
+    } catch (err2) {
+      Logger.log(mls + ': could not write the answer — ' + err2.message);
+    }
+  }
+}
+
+/** Housekeeping: clear answers older than a week. Harmless to run any time. */
+function reiTidy() {
+  var folder = DriveApp.getFolderById(REI_DROP_FOLDER);
+  var cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  var files = folder.getFiles(), n = 0;
+  while (files.hasNext()) {
+    var f = files.next();
+    if (/^done-/.test(f.getName()) && f.getLastUpdated() < cutoff) { f.setTrashed(true); n++; }
+  }
+  Logger.log('Tidied ' + n + ' old answer(s).');
+}
+
+/* ------------------------------------------------------------------ *
  *  When the session dies
  * ------------------------------------------------------------------ *
  *
