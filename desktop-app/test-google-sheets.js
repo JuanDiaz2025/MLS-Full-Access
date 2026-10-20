@@ -19,26 +19,42 @@ const eq = (a, b, m) => {
 /** An in-memory stand-in for one spreadsheet, wired to the endpoints the
  *  module actually calls. Anything else throws, so a silent API change in the
  *  module shows up here as a loud failure. */
-function fakeSheets(initial) {
+function fakeSheets(initial, limits) {
   const tabs = JSON.parse(JSON.stringify(initial));
+  // limits.cols: { tab: columnCount } — model a tab's grid width, so a write
+  // past its edge fails the way the real API does ("exceeds grid limits").
+  const cols = (limits && limits.cols) || null;
+  const names = () => Object.keys(tabs);
+  const tooWide = (tab, row) => cols && cols[tab] != null && row.length > cols[tab];
+  const gridErr = tab => json({ error: { message: `Range (${tab}) exceeds grid limits. Max columns: ${cols[tab]}` } }, false);
+  const json = (o, ok) => ({ ok: ok !== false, status: ok === false ? 400 : 200, json: async () => o });
   global.fetch = async (url, opts) => {
     opts = opts || {};
     const u = new URL(url);
     const body = opts.body ? JSON.parse(opts.body) : null;
-    const json = (o, ok) => ({ ok: ok !== false, status: ok === false ? 400 : 200, json: async () => o });
 
-    // /v4/spreadsheets/<id>...
-    const rest = u.pathname.replace(/^\/v4\/spreadsheets\/[^/]+/, '');
+    // /v4/spreadsheets/<id>...  (the id stops at ':' too, or ":batchUpdate"
+    // is swallowed and read as the root GET)
+    const rest = u.pathname.replace(/^\/v4\/spreadsheets\/[^/:]+/, '');
 
     if (rest === '' || rest === '/') {
       return json({ properties: { title: 'Flip Scout Agent' },
-        sheets: Object.keys(tabs).map(t => ({ properties: { title: t } })) });
+        sheets: names().map((t, i) => ({ properties: cols
+          ? { title: t, sheetId: i + 1, gridProperties: { columnCount: cols[t] != null ? cols[t] : 26 } }
+          : { title: t } })) });
     }
     if (rest === ':batchUpdate') {
-      body.requests.forEach(r => { if (r.addSheet) tabs[r.addSheet.properties.title] = []; });
+      body.requests.forEach(r => {
+        if (r.addSheet) tabs[r.addSheet.properties.title] = [];
+        if (r.appendDimension && cols) {
+          const t = names()[r.appendDimension.sheetId - 1];
+          cols[t] = (cols[t] != null ? cols[t] : 26) + r.appendDimension.length;
+        }
+      });
       return json({});
     }
     if (rest === '/values:batchUpdate') {                // write many rows at once
+      for (const d of body.data) if (tooWide(d.range.split('!')[0], d.values[0])) return gridErr(d.range.split('!')[0]);
       body.data.forEach(d => {
         const [tab, range] = d.range.split('!');
         const row = parseInt(range.match(/\d+/)[0], 10) - 1;
@@ -56,10 +72,12 @@ function fakeSheets(initial) {
       const grid = tabs[tab];
 
       if (mVal[2] === ':append') {                       // append rows
+        if (body.values.some(r => tooWide(tab, r))) return gridErr(tab);
         body.values.forEach(r => grid.push(r.slice()));
         return json({});
       }
       if (opts.method === 'PUT') {                       // write one row
+        if (tooWide(tab, body.values[0])) return gridErr(tab);
         const row = parseInt(range.match(/\d+/)[0], 10) - 1;
         while (grid.length <= row) grid.push([]);
         grid[row] = body.values[0].slice();
@@ -529,6 +547,40 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     eq(p.forget.indexOf('AA2'), -1, "never a person's rejection");
     eq(p.forget.indexOf('BB2'), -1, 'never a lead the team passed in Notes');
     eq(p.forget.indexOf('AA3') + p.forget.indexOf('BB3') + p.forget.indexOf('CC3'), -3, 'nothing from another day');
+  }
+
+  // 17. Comps columns (v1.73). The prod Leads tab was exactly 27 columns wide
+  //     (header ends at "Disclosures", grid 27 columns — checked 20 Oct), and the
+  //     Sheets API refuses a write past the grid's edge. The five comps columns
+  //     must widen the grid first, keep every existing cell, and a later push
+  //     with no comps must not blank an ARV already there.
+  {
+    const H27 = ['Status', 'MLS #', 'Address', 'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
+      'Purchase Price', '$/SqFt', 'Notes', 'MLS Link', 'First Added', 'Bucket', 'Opportunity Score', 'Why', 'Price Cut',
+      'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status', 'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
+    const COMP_H = ['ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On'];
+    const H32 = H27.concat(COMP_H);
+    const old = H27.map((h, i) => h === 'MLS #' ? 'ML1' : h === 'Notes' ? 'called the agent' : 'v' + i);
+    const lim = { cols: { Leads: 27 } };
+    const tabs = fakeSheets({ Leads: [H27.slice(), old.slice()] }, lim);
+    const comps = JSON.stringify([{ mls: 'ML9', addr: '9 Oak St', price: 900000, sqft: 1500, ppsf: 600, sold: '2026-05-01', use: 1, why: 'fully remodeled' }]);
+    const rec = { 'MLS #': 'ML1', 'Notes': 'auto', 'ARV': 900000, 'ARV $/SqFt': 600, 'Comp Confidence': 'High', 'Comps': comps, 'Comps Run On': '2026-10-20' };
+    let err = '';
+    try { await gs.syncRows('tok', 'ID', 'Leads', H32, 'MLS #', [rec], { overwrite: COMP_H }); } catch (e) { err = e.message; }
+    eq(err, '', 'a 27-column tab takes the 5 comps columns without "exceeds grid limits"');
+    eq(lim.cols.Leads, 32, 'the grid was widened to 32 columns first');
+    eq(tabs.Leads[0], H32, 'the header row gains the comps columns at the end');
+    eq(tabs.Leads[1].slice(0, 27), old, 'every existing cell of the row is kept (Notes too)');
+    eq(tabs.Leads[1].slice(27), [900000, 600, 'High', comps, '2026-10-20'], 'the comps land in their own columns');
+    await gs.syncRows('tok', 'ID', 'Leads', H32, 'MLS #', [{ 'MLS #': 'ML1', 'ARV': '', 'Comps': '', 'Comp Confidence': '' }], { overwrite: COMP_H });
+    eq(tabs.Leads[1][27], 900000, 'a push without comps (comps off, or a Stop) never blanks an ARV');
+    await gs.syncRows('tok', 'ID', 'Leads', H32, 'MLS #', [{ 'MLS #': 'ML1', 'ARV': 950000, 'Comp Confidence': 'Medium' }], { overwrite: COMP_H });
+    eq([tabs.Leads[1][27], tabs.Leads[1][29]], [950000, 'Medium'], "a re-review's comps replace the old ones");
+    // a sheet already wide enough is left alone
+    const lim2 = { cols: { Leads: 40 } };
+    fakeSheets({ Leads: [H27.slice()] }, lim2);
+    await gs.syncRows('tok', 'ID', 'Leads', H32, 'MLS #', [rec], { overwrite: COMP_H });
+    eq(lim2.cols.Leads, 40, 'a grid that is already wide enough is not widened');
   }
 
   // 16. The composed sheet value, end to end.

@@ -148,6 +148,11 @@
       <input id="comingSoon" type="checkbox" checked style="width:auto">
       Also scan <b>Coming Soon</b> listings — homes not on the open market yet
     </label>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink);margin:6px 0 0">
+      <input id="runComps" type="checkbox" checked style="width:auto">
+      <span>Run <b>comps</b> on A/B leads — sold homes in the zip, the ARV, and the homes it rests on
+        <span class="hint" style="display:block;margin:2px 0 0">About a minute per lead (one sold search, then up to 8 sold reports — fewer once they are remembered). The board works out rehab and profit from its own Settings.</span></span>
+    </label>
     <div class="row" style="margin-top:8px">
       <label style="display:flex;align-items:center;gap:6px;margin:0">
         Reading time per listing
@@ -424,7 +429,7 @@
     boardUrl: ($('boardUrl').value||'').trim() || BOARD_URL,
     whenUnsure: $('whenUnsure').value,
     comingSoon: $('comingSoon').checked,
-    runComps: false,   // comping is off; see CLAUDE.md §5
+    runComps: $('runComps').checked,   // sold comps + ARV (v1.73)
   }); }
   $('useAI').onchange = () => { $('aiFields').style.display = $('useAI').checked ? 'block' : 'none'; pushConfig(); saveAiFields(); };
   // which service the key belongs to, and a model that suits it
@@ -523,6 +528,8 @@
   { let v = null; try { v = localStorage.getItem('fs.scrollPause'); } catch(_) {} if (v) $('scrollPause').value = v; }
   $('comingSoon').onchange = () => { try { localStorage.setItem('fs.comingSoon', $('comingSoon').checked ? '1' : '0'); } catch(_) {} pushConfig(); };
   { let v = null; try { v = localStorage.getItem('fs.comingSoon'); } catch(_) {} if (v === '0') $('comingSoon').checked = false; }
+  $('runComps').onchange = () => { try { localStorage.setItem('fs.runComps', $('runComps').checked ? '1' : '0'); } catch(_) {} pushConfig(); };
+  { let v = null; try { v = localStorage.getItem('fs.runComps'); } catch(_) {} if (v === '0') $('runComps').checked = false; }
   $('whenUnsure').onchange = () => { localStorage.setItem('fs.whenUnsure', $('whenUnsure').value); pushConfig(); };
   { const v = localStorage.getItem('fs.whenUnsure'); if (v) $('whenUnsure').value = v; }
 
@@ -740,14 +747,14 @@
       $('reportCard').style.display = 'block';
       return;
     }
-    const surf = lastLeads.filter(l => l.surface);
     const noComps = lastLeads.length && lastLeads.every(l => l.needsComps);
+    const valued = lastLeads.filter(l => l.arv).length;
     let html = `<div class="hint">${noComps
-      ? `${lastLeads.length} listing(s) on the board — A before B, highest Opportunity Score first. Comps off, so no ARV or profit yet.`
-      : `${surf.length} of ${lastLeads.length} kept leads clear the profit gate.`} Generated ${p.generatedAt}</div>`;
+      ? `${lastLeads.length} listing(s) on the board — A before B, highest Opportunity Score first. No ARV yet (comps off, or no sold comps found).`
+      : `${lastLeads.length} listing(s) on the board, ${valued} with an ARV from sold comps. The board works out rehab and profit.`} Generated ${p.generatedAt}</div>`;
     html += noComps
       ? '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>Offer due</th><th>DOM</th><th>SqFt</th><th>Price</th><th>$/sqft</th><th>Why</th></tr></thead><tbody>'
-      : '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>Offer due</th><th>DOM</th><th>Price</th><th>Worth after repair</th><th>Gross (Light)</th><th>Rec</th></tr></thead><tbody>';
+      : '<table><thead><tr><th>Bucket</th><th>Score</th><th>Property</th><th>Offer due</th><th>DOM</th><th>Price</th><th>ARV</th><th>ARV $/sqft</th><th>Confidence</th></tr></thead><tbody>';
     for (const l of lastLeads) {
       const esc = t => String(t == null ? '' : t).replace(/[<>&]/g, '');
       const head = `<td><b>${esc(l.bucket)||'—'}</b></td><td class="mono">${l.oppScore!=null&&l.oppScore!==''?l.oppScore:'—'}</td>`+
@@ -758,9 +765,9 @@
         ? `<tr class="surface">${head}<td class="mono">${l.sqft||'—'}</td>`+
           `<td class="mono">${money(l.price)}</td><td class="mono">$${l.ppsf||'—'}</td>`+
           `<td class="hint">${esc(l.why)}</td></tr>`
-        : `<tr class="${l.surface?'surface':''}">${head}`+
+        : `<tr class="${l.arv?'surface':''}">${head}`+
           `<td class="mono">${money(l.price)}</td><td class="mono">${l.arv?money(l.arv):'—'}</td>`+
-          `<td class="mono">${money(l.grossLight)}</td><td>${escH(l.recommendation)}</td></tr>`;
+          `<td class="mono">${l.arvPpsf?'$'+esc(l.arvPpsf):'—'}</td><td class="hint">${escH(l.compConf||'')}</td></tr>`;
     }
     html += '</tbody></table>';
     $('report').innerHTML = html; $('reportCard').style.display='block';

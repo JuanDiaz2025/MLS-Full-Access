@@ -26,7 +26,7 @@ const cfg = {
   // anything wrong — with that rejection feeding straight back into the ledger.
   whenUnsure: 'keep',
   comingSoon: true,    // also scan Coming Soon listings (section 3 checkbox)
-  runComps: false,     // OFF for now — qualify on CONDITION first, comp later
+  runComps: true,      // sold comps + ARV for A/B leads (v1.73; section 3 checkbox)
   scrollPauseMs: 700,  // pause per screen while scrolling a report — reading slowly
   boardUrl: 'https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1',   // FlipScout Lead Board
 };
@@ -239,7 +239,8 @@ const KPI_FILE = () => path.join(app.getPath('userData'), 'kpi-history.json');
 const KPI_FIELDS = ['runs', 'scanned', 'candidates', 'skippedAlreadyChecked', 'reviewed', 'kept',
   'dropped', 'droppedRenovated', 'droppedMultiUnit', 'droppedFire',
   'droppedFewPhotos', 'droppedOther', 'leads', 'gateCleared', 'pushed', 'pushSkipped',
-  'bucketA', 'bucketB', 'bucketC', 'photoChecked'];
+  'bucketA', 'bucketB', 'bucketC', 'photoChecked',
+  'compsValued', 'compsHigh', 'compsMedium', 'compsLow', 'compsNone'];
 const todayKey = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -787,26 +788,128 @@ function saveReportSample(mls, kind, text) {
   } catch (_) {}
 }
 
-async function compFor(mls, zip, sqft) {
+// ---------- comps: sold homes and the ARV (v1.73) ----------
+// Seth, 20 Oct: the app fetches the comps and the ARV while it is signed in;
+// the board does rehab, holding and selling costs from its own Settings.
+// Nothing here may fail a scan: any problem costs that lead its comps, says
+// so in the log, and the lead still goes to the sheet.
+
+/** Every Sold single-family home in a zip with a list date in the last ~14
+ *  months. The List Date window is what makes the zip filter bite: an
+ *  unbounded Sold search returns MLS's "2500+" cap of all history
+ *  (scripts/mls-comps.js, verified). */
+async function soldSearch(zip) {
   await nav(core.SEARCH_URL, 2200);
-  await js(selectByLabel(core.FIELDS.status, 'Sold')); await sleep(400);
+  // "Sold", or a variant such as "Sold (Closed)" — but never a status that merely contains the word
+  const st = await js(selectOnly(core.FIELDS.status, ['^sold\\b'])).catch(() => null);
+  if (!st || !st.length) throw new Error('the search form has no "Sold" status');
+  await sleep(400);
   await js(selectByLabel(core.FIELDS.propType, 'Single Family Home')); await sleep(400);
   await js(setInput(core.FIELDS.zip, zip)); await sleep(1000);
   const to = new Date(); const from = new Date(to.getFullYear(), to.getMonth() - 14, 1);
   const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`)); await sleep(1600);
+  const count = await js(core.JS_MATCH_COUNT).catch(() => '?');
+  if (count === '0') return { count, rows: [] };
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
-  await sleep(2600);
   let all = [], prev = '';
-  for (let pg = 1; pg <= 8; pg++) {   // comps only need the nearest few pages
-    const rows = await js(core.JS_SCRAPE_GRID).catch(() => []);
-    if (!rows.length || rows[0].addr === prev) break;
-    prev = rows[0].addr; all = all.concat(rows);
+  for (let pg = 1; pg <= 8; pg++) {   // a zip's year of sales is a few pages
+    if (control.stopped) break;
+    const until = Date.now() + (pg === 1 ? 20000 : 15000);
+    let rows = [];
+    for (;;) {   // poll: a slow grid used to read as "no rows"
+      rows = await js(core.JS_SCRAPE_SOLD).catch(() => []);
+      if ((rows.length && rows[0].mls !== prev) || Date.now() > until || control.stopped) break;
+      await sleep(1000);
+    }
+    if (!rows.length || rows[0].mls === prev) break;
+    prev = rows[0].mls; all = all.concat(rows);
     const moved = await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/^\\s*Next/i.test(x.textContent)); if(a){a.click(); return true;} return false; })()`).catch(() => false);
     if (!moved) break;
-    await sleep(2600);
+    await sleep(1500);
   }
-  return core.arvFromComps(all, sqft);
+  return { count, rows: all };
+}
+
+/** One sold home's Client Full report — remarks, year, sold price and date.
+ *  Lighter than showGallery: no Agent Full, no photo grid, no dwell. */
+let compSamples = 0;
+async function compReport(mls) {
+  await nav(core.SEARCH_URL, 2200);
+  await js(selectOnly(core.FIELDS.status, ['.'])).catch(() => null);
+  await sleep(300);
+  await js(setInput(core.FIELDS.mls, mls)); await sleep(1600);
+  await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
+  await sleep(2600);
+  const hasRow = await js(`(() => { const cb=document.querySelector('tr.DisplayRegRow input[type=checkbox], tr.DisplayAltRow input[type=checkbox]'); if(cb && !cb.checked) cb.click(); return !!cb; })()`).catch(() => false);
+  if (!hasRow) return null;
+  await sleep(400);
+  const selId = await js(`(() => { const s=[...document.querySelectorAll('select')].find(se=>[...se.options].some(o=>/Client Full/i.test(o.text))); return s?s.id:null; })()`).catch(() => null);
+  if (!selId) return null;
+  await js(`(() => { const s=document.getElementById(${JSON.stringify(selId)}); if(!s) return; const o=[...s.options].find(o=>/Client Full/i.test(o.text)); if(o){ s.value=o.value; s.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
+  await sleep(2600);
+  const raw = await js('document.body.innerText').catch(() => '');
+  // the first few, so the sold report's labels can be checked against the real page
+  if (raw && compSamples < 3) { compSamples++; saveReportSample(mls, 'comp', raw); }
+  const r = core.parseCompReport(raw, mls);
+  return r.mismatch ? null : r;
+}
+
+// Sold homes already read, by MLS # — comps in one zip overlap from lead to
+// lead, and a sale does not change. userData/comps-cache.json
+const COMP_CACHE_FILE = () => path.join(app.getPath('userData'), 'comps-cache.json');
+const COMP_CACHE_DAYS = 180;
+function loadCompCache() {
+  try {
+    const j = JSON.parse(fs.readFileSync(COMP_CACHE_FILE(), 'utf8')) || {};
+    const cut = new Date(Date.now() - COMP_CACHE_DAYS * 864e5).toISOString().slice(0, 10);
+    Object.keys(j).forEach(k => { if (!j[k] || !(j[k].at >= cut)) delete j[k]; });
+    return j;
+  } catch (_) { return {}; }
+}
+function saveCompCache(c) { try { fs.writeFileSync(COMP_CACHE_FILE(), JSON.stringify(c)); } catch (_) {} }
+
+/** The comps and ARV for one kept lead. */
+async function compsFor(c, cache) {
+  // the report's zip, else the one ending the full address ("…, CA 94112")
+  const zip = (String(c.zip || '').match(/9[0-5]\d{3}/) || String(c.fullAddr || '').match(/9[0-5]\d{3}(?=(?:-\d{4})?\D*$)/) || [''])[0];
+  if (!zip) return { arv: 0, reason: 'no zip on the listing', list: [] };
+  if (!core.num(c._sqft)) return { arv: 0, reason: 'no square feet on the listing', list: [] };
+  const found = await soldSearch(zip);
+  const comps = core.compRows(found.rows, c.mls);
+  const band = core.compBand(comps, c._sqft);
+  let read = 0;
+  for (const r of band.rows.slice(0, core.COMP_READ)) {
+    if (await stopRequested()) break;
+    const hit = cache[r.mls];
+    if (hit) {
+      Object.assign(r, { k: hit.k, why: hit.why, sold: r.sold || hit.sold || '', yr: r.yr || hit.yr || '' });
+      if (hit.price && !r.gridSold) { r.price = hit.price; r.ppsf = Math.round(hit.price / r.sqft); }
+      continue;
+    }
+    const rep = await compReport(r.mls).catch(() => null);
+    if (!rep) { r.k = 'unknown'; r.why = 'report not read'; continue; }   // not cached: tried again next time
+    read++;
+    const cl = core.classifyComp(rep.remarks, rep.yearBuilt || r.yr);
+    Object.assign(r, cl, { sold: r.sold || rep.soldDate || '', yr: r.yr || core.num(rep.yearBuilt) || '' });
+    // the report's labelled sale price beats the grid's Price when the grid had no sold-price column
+    if (rep.soldPrice && !r.gridSold) { r.price = rep.soldPrice; r.ppsf = r.sqft ? Math.round(rep.soldPrice / r.sqft) : r.ppsf; }
+    cache[r.mls] = { k: r.k, why: r.why, sold: r.sold, yr: r.yr, price: rep.soldPrice || '', at: todayKey() };
+  }
+  const out = core.compArv(c._sqft, band, comps.length);
+  out.zip = zip; out.read = read;
+  return out;
+}
+
+/** The comp fields carried on a lead (sheet, backup, Lead Board file). */
+function compFields(comp) {
+  const ok = !!(comp && comp.arv);
+  return {
+    // with no ARV the confidence column says why, so the sheet explains the blank
+    arv: ok ? comp.arv : '', arvPpsf: ok ? comp.ppsf : '', compConf: ok ? comp.conf : comp ? 'None — ' + (comp.reason || 'no comps') : '',
+    comps: ok ? core.compsJson(comp.list) : '', compsAt: comp ? todayKey() : '',
+    arvBasis: comp ? core.compSummary(comp) : 'not comped yet',
+  };
 }
 
 // ---------- AI auto-verify (Claude vision applies the buy-box rules) ----------
@@ -1216,61 +1319,54 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         else ledgerRecord(c.mls, decision === 'keep' ? 'kept' : 'dropped', { addr: c.addr, city: cityOf(c) });
       }
 
-      // --- comps: OFF by default for now ---
-      // Comping is the slow stage (a second Matrix search per kept listing).
-      // With it off the run stops at CONDITION-QUALIFIED: everything that
-      // survived photo review goes to the sheet with its listing facts, no ARV
-      // and no deal math. Turn it back on in section 3 to restore ARV, profit
-      // and the gate.
+      // --- comps: sold homes and the ARV for every kept lead (v1.73) ---
+      // Seth, 20 Oct: the app fetches the comps and the ARV; the board turns
+      // them into rehab, holding, selling costs and profit from its own
+      // Settings. So EVERY kept lead goes to the sheet, comped or not — there is
+      // no profit gate here any more (that needs selling costs the app does not
+      // have). Section 3's "Run comps on A/B leads" turns this step off.
       const cityLeads = [];
-      if (!cfg.runComps) {
-        for (const c of kept) {
-          cityLeads.push({
-            mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
-            beds: c.bds, baths: c.baths || '', sqft: c._sqft,
-            lotSqft: core.num(c.lotSqft || 0) || '',
-            // The report's own year beats 2026 - Age, which reads "2026" when
-            // the grid's Age column is blank.
-            yearBuilt: c._yearBuilt || (c._age > 0 ? new Date().getFullYear() - c._age : ''),
-            dom: domOf(c), price: c._price, ppsf: c._ppsf,
-            arv: 0, arvBasis: 'not comped yet',
-            recommendation: 'Needs Comps', flipQuality: '', score: '',
-            risks: 'Condition-qualified only — ARV and profit not yet calculated',
-            ...gateFields(c),
-            link: core.mlsUrl(c.mls),
-            // Push these: with no ARV there is no gate to clear, and the point
-            // of this mode is to get the qualified list in front of you.
-            surface: true, needsComps: true,
-          });
-        }
-        log(`[${label}] comps skipped — ${cityLeads.length} condition-qualified listing(s)`, 'good');
-      } else {
-      send('city', { label, index: ai + 1, total: areas.length, phase: 'comping', count: kept.length });
+      const comping = cfg.runComps !== false && kept.length > 0;
+      if (comping) send('city', { label, index: ai + 1, total: areas.length, phase: 'comping', count: kept.length });
+      const compCache = comping ? loadCompCache() : null;
       for (const c of kept) {
-        if (await stopRequested()) break;   // save what was read, then stop
-        log(`[${label}] Comping ${c.addr}…`);
-        const zip = (c.zip || '').match(/9\d{4}/) ? c.zip : await js(`(() => { const m=document.body.innerText.match(/\\b(9[45]\\d{3})\\b/); return m?m[1]:''; })()`).catch(() => '');
-        let comp = { arv: 0, medianPpsf: 0, band: 'n/a', n: 0 };
-        try { comp = await compFor(c.mls, zip || c.zip || '', c._sqft); } catch (e) { log(`  comp failed: ${e.message}`, 'warn'); }
-        const deal = core.scoreDeal({ price: c._price, sqft: c._sqft, arv: comp.arv });
-        cityLeads.push({ mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip, beds: c.bds, baths: c.baths || '',
-          sqft: c._sqft, lotSqft: core.num(c.lotSqft || 0) || '',
-          yearBuilt: c._yearBuilt || (c._age > 0 ? new Date().getFullYear() - c._age : ''), dom: domOf(c), price: c._price,
-          arv: comp.arv, arvPpsf: comp.medianPpsf, compBand: comp.band, compN: comp.n,
-          arvBasis: comp.arv ? `${comp.band} band, ${comp.n} comps @ $${comp.medianPpsf}/sf` : 'no comps found',
+        // A Stop skips the comps of the rest, never the leads themselves: they
+        // were reviewed and the ledger already counts them as checked.
+        let comp = null;
+        if (comping && !(await stopRequested())) {
+          log(`[${label}] Comps for ${c.addr}…`);
+          try { comp = await compsFor(c, compCache); }
+          catch (e) { comp = { arv: 0, reason: 'comps failed: ' + e.message, list: [] }; log(`  comps failed: ${e.message} — the lead goes to the sheet without an ARV`, 'warn'); }
+          const k = comp.arv ? 'comps' + comp.conf : 'compsNone';
+          runKpi[k] = (runKpi[k] || 0) + 1;
+          if (comp.arv) runKpi.compsValued++;
+          log(`  ${core.compSummary(comp)}${comp.read ? ` · ${comp.read} sold report(s) read` : ''}`, comp.arv ? 'good' : 'warn');
+        }
+        cityLeads.push({
+          mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
+          beds: c.bds, baths: c.baths || '', sqft: c._sqft,
+          lotSqft: core.num(c.lotSqft || 0) || '',
+          // The report's own year beats 2026 - Age, which reads "2026" when
+          // the grid's Age column is blank.
+          yearBuilt: c._yearBuilt || (c._age > 0 ? new Date().getFullYear() - c._age : ''),
+          dom: domOf(c), price: c._price, ppsf: c._ppsf,
+          ...compFields(comp),
+          recommendation: comp && comp.arv ? '' : 'Needs Comps', flipQuality: '', score: '',
+          risks: comp && comp.arv ? '' : 'Condition-qualified only — ARV and profit not yet calculated',
+          ...gateFields(c),
           link: core.mlsUrl(c.mls),
-          ...deal, ...gateFields(c) });
+          // Every kept lead is pushed: the board does the profit math.
+          surface: true, needsComps: !(comp && comp.arv),
+        });
       }
-      }
+      if (compCache) saveCompCache(compCache);
+      if (!comping && kept.length) log(`[${label}] comps off — ${cityLeads.length} condition-qualified listing(s)`, 'good');
 
       leads.push(...cityLeads);
-      // Without comps there is no profit to rank by — fall back to the best
-      // value signal we do have, cheapest $/sqft first.
-      // A before B, then the higher Opportunity Score; profit (with comps) or
-      // cheapest $/sqft (without) breaks ties.
+      // A before B, then the higher Opportunity Score; cheapest $/sqft breaks ties.
       leads.sort((a, b) => String(a.bucket || 'Z').localeCompare(String(b.bucket || 'Z'))
         || (b.oppScore || 0) - (a.oppScore || 0)
-        || (cfg.runComps ? b.grossLight - a.grossLight : (a.ppsf || Infinity) - (b.ppsf || Infinity)));
+        || (a.ppsf || Infinity) - (b.ppsf || Infinity));
       runKpi.leads = leads.length;
       runKpi.gateCleared = leads.filter(l => l.surface).length;
       send('report', { leads, generatedAt: new Date().toString(), partial: ai + 1 < areas.length });
@@ -1323,9 +1419,9 @@ ipcMain.handle('start-scan', async (_e, opts) => {
       return { ok: true, leads: [] };
     }
     // Leads were already written city by city above — don't re-send them here.
-    log(cfg.runComps
-      ? `Done. ${runKpi.gateCleared} of ${leads.length} kept leads clear the profit gate.`
-      : `Done. ${leads.length} lead(s) on the board — comps are off, so no profit figures yet.`, 'good');
+    log(cfg.runComps !== false
+      ? `Done. ${leads.length} lead(s) on the board, ${runKpi.compsValued} with an ARV from sold comps — the board works out the profit.`
+      : `Done. ${leads.length} lead(s) on the board — comps are off, so no ARV yet.`, 'good');
     return { ok: true, leads };
   } catch (e) {
     if (e.message === 'stopped') { log('Scan stopped.', 'warn'); return { ok: false, stopped: true }; }
@@ -1370,6 +1466,11 @@ function finishRun(runKpi, day, started) {
         + (lastAiError ? `. Last AI error: ${String(lastAiError).slice(0, 160)}` : !aiReady() ? ' (AI photo check is off in section 2)' : '') : '') + '.';
     log(photoLine, runKpi.photoChecked < runKpi.kept && aiReady() ? 'error' : runKpi.photoChecked < runKpi.kept ? 'warn' : 'good');
   }
+  // What the ARVs rest on, said once at the end (v1.73).
+  const compsRun = runKpi.compsValued + runKpi.compsNone;
+  const compsLine = compsRun ? `Comps: ${runKpi.compsValued} lead(s) valued (${runKpi.compsHigh} high · ${runKpi.compsMedium} medium · `
+    + `${runKpi.compsLow} low), ${runKpi.compsNone} without comps.` : '';
+  if (compsLine) log(compsLine, runKpi.compsNone ? 'warn' : 'good');
   // Hand today's leads to the Lead Board: on the clipboard, ready to paste.
   const board = boardStatus();
   if (board.count) {
@@ -1382,7 +1483,7 @@ function finishRun(runKpi, day, started) {
   send('board', board);
   log('Nothing else is running. Start scan again whenever you want the next pass.', 'good');
   send('done', {
-    stopped: control.stopped, summary: line + (photoLine ? ' ' + photoLine : ''),
+    stopped: control.stopped, summary: line + (photoLine ? ' ' + photoLine : '') + (compsLine ? ' ' + compsLine : ''),
     scanned: runKpi.scanned, reviewed: runKpi.reviewed, kept: runKpi.kept,
     dropped: runKpi.dropped, pushed: runKpi.pushed,
     skipped: runKpi.skippedAlreadyChecked, day: day,
@@ -2167,11 +2268,18 @@ const LEAD_HEADERS = [
   'Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Listing Agent',
   'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
   'Agent Phone', 'Agent Email', 'Showing', 'Disclosures',
+  // Comps (v1.73) — also at the END, for the same reason. "Comps" is the
+  // sold homes as compact JSON: [{mls, addr, price, sqft, ppsf, sold, bd, ba,
+  // yr, use, why}], use 1 = counted in the ARV. The boards read it through
+  // flipscout-board/test/comps.py.
+  'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On',
 ];
 // Read fresh off the listing on every review, so a re-review replaces them —
-// an offer date goes from "TBD" to a real date, remarks get edited.
+// an offer date goes from "TBD" to a real date, remarks get edited. The comps
+// too: a re-review's comps replace the old ones (a blank never wipes them).
 const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
-  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures',
+  'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On'];
 // Facts re-read by "Refresh leads on the board" — the listing's own data, never
 // the reviewer's columns. Bucket / score are only filled where still blank.
 const FACT_HEADERS = ['Price Cut', 'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
@@ -2205,6 +2313,8 @@ const leadRecord = r => ({
   'MLS Status': r.mlsStatus || '',
   'Agent Phone': r.agentPhone || '', 'Agent Email': r.agentEmail || '', 'Showing': r.showing || '',
   'Disclosures': r.disclosures || '',
+  'ARV': r.arv || '', 'ARV $/SqFt': r.arvPpsf || '', 'Comp Confidence': r.compConf || '',
+  'Comps': r.comps || '', 'Comps Run On': r.compsAt || '',
 });
 
 const rejectRecord = r => ({
@@ -2413,6 +2523,7 @@ function toSheetRow(l) {
     yearBuilt: l.yearBuilt, dom: l.dom, price: l.price, ppsf: l.ppsf || '',
     notes: l.risks || '', link: l.link || '',
     arv: l.arv || '', arvBasis: l.arvBasis || '',
+    arvPpsf: l.arvPpsf || '', compConf: l.compConf || '', comps: l.comps || '', compsAt: l.compsAt || '',
     rehabLight: l.rehabLight || '', rehabHeavy: l.rehabHeavy || '',
     holding: l.holding || '', maxOffer: l.recommendedMaxOffer || '',
     score: l.score || '', recommendation: l.recommendation || '', flipQuality: l.flipQuality || '',
@@ -2808,7 +2919,7 @@ ipcMain.handle('export', async (_e, { leads }) => {
   if (canceled || !filePath) return { ok: false };
   if (filePath.endsWith('.json')) { fs.writeFileSync(filePath, JSON.stringify(leads, null, 2)); return { ok: true, filePath }; }
   // The gate's columns lead: they are what decides which rows to work first.
-  const cols = ['bucketLabel', 'oppScore', 'offerDue', 'agentPhone', 'agentEmail', 'showing', 'disclosures', 'why', 'priceCut', 'listedBy', 'occupiedBy', 'privateRemarks', 'score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'rehabLight', 'rehabHeavy', 'holding', 'totalLight', 'grossLight', 'grossHeavy', 'recommendedMaxOffer', 'arvBasis'];
+  const cols = ['bucketLabel', 'oppScore', 'offerDue', 'agentPhone', 'agentEmail', 'showing', 'disclosures', 'why', 'priceCut', 'listedBy', 'occupiedBy', 'privateRemarks', 'score', 'recommendation', 'flipQuality', 'mls', 'address', 'city', 'zip', 'beds', 'sqft', 'yearBuilt', 'dom', 'price', 'arv', 'arvPpsf', 'compConf', 'compsAt', 'arvBasis'];
   const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
   const csv = [cols.join(',')].concat(leads.map(l => cols.map(c => esc(l[c])).join(','))).join('\n');
   fs.writeFileSync(filePath, csv);

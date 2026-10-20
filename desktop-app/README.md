@@ -60,9 +60,19 @@ install (creates a desktop shortcut) or run the portable exe directly.
    **Test key** before a scan. The key is saved on this computer only. A failed
    AI call never drops a listing: the text rules decide and the log says why,
    and after 3 failures in a row the run carries on without AI.
-4. **Report** — kept candidates get size-matched sold comps → ARV (what it's worth
-   after repair), Light/Heavy rehab, holding, days on market, and the dollar profit
-   gate (Strong Deal / Marginal / Pass, with a Flip Quality label). **Export** to
+4. **Comps** (v1.73, section 3's **Run comps on A/B leads**, on by default) —
+   for every A/B lead the app searches the MLS for **Sold** single-family homes
+   in its zip listed in the last ~14 months, takes the ones within ±20% of its
+   square feet (±40%, then ±60%, only while fewer than 3 fit), reads the remarks
+   of the 8 nearest in size and sets the **ARV** = median $/sqft of the ones
+   whose remarks say the work was done (renovated / remodeled / 2+ finishes) ×
+   the lead's square feet. Confidence: **High** = 5+ renovated sales inside ±20%
+   · **Medium** = 3–4, or the band had to widen · **Low** = fewer than 3
+   renovated, so every sale that is not a fixer or a new build was used. No
+   sold homes → no ARV, and Comp Confidence says why. About a minute per lead;
+   sold homes already read are cached (`comps-cache.json`, 180 days). The
+   **Lead Board** does rehab, holding, selling costs and profit from its own
+   Settings, so the app no longer filters leads on a profit gate. **Export** to
    CSV or JSON.
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
@@ -71,7 +81,11 @@ install (creates a desktop shortcut) or run the portable exe directly.
    - **Leads** — the A and B properties, A first, with **Bucket · Opportunity Score ·
      Why · Price Cut · Listing Agent** at the end of each row. **Address is one column with the whole
      thing** — `1326 Palou Avenue, San Francisco, CA 94124` — not split across
-     City and Zip.
+     City and Zip. The comps columns come last: **ARV · ARV $/SqFt · Comp
+     Confidence · Comps · Comps Run On**. *Comps* is the sold homes as compact
+     JSON (`[{mls, addr, price, sqft, ppsf, sold, bd, ba, yr, use, why}]`, at
+     most 16, `use: 1` = counted in the ARV) — the board reads it; nobody types
+     in it. An older 27-column tab is widened by the app on its first write.
    - **Rejected** — everything dropped, with the reason and the stage it fell out at
    - **KPI** — one row per day, upserted
 

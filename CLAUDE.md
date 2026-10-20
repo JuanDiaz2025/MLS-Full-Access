@@ -1176,6 +1176,49 @@ drops are still pulled into every computer's ledger (verdict `scan-dropped`) so
 a second computer does not redo the first one's work. Tested in
 `test-google-sheets.js` §18.
 
+**v1.73.0 — comps (Seth 20 Oct: the app fetches sold comps + ARV; the board
+does rehab, holding and selling costs from its Settings).** Built on
+`claude/wizardly-darwin-xfi8js` after merging Flip-scout-Filters. After each
+area's review, every kept A/B lead (never a C or a hard exclusion) gets
+`compsFor()` in `main.js`: a **Sold** search (`selectOnly(status, ['^sold\\b'])`,
+Single Family Home, the lead's zip, List Date window = the last ~14 months —
+an unbounded Sold search hits the 2500+ cap), every results page read by
+`JS_SCRAPE_SOLD` (headings found by pattern: a Sold/Close Price and Sold/COE
+Date column when the display has one, else Price), then `core.compRows` (drops
+the lead itself, repeats, sqft < 300, price < $50k; a "2|0" baths cell is 2) →
+`core.compBand` (±20% of sqft, widened to ±40% / ±60% only while fewer than 3
+fit, nearest first) → the **8 nearest** sold homes' Client Full reports
+(`compReport`, `core.parseCompReport` — anchored to the MLS # like
+parseDetail; `Sale Price:` / `Sale:` / `COE:` at most one tab away) →
+`core.classifyComp`: the scan's wording rules read the other way round —
+completed-work wording or 2+ finishes = **reno**, needs-work / as-is /
+distressed = **fixer** (tested first after the strong done phrases, so
+"renovation opportunity" is a fixer), built in the last 10 years = **new**,
+else unknown. `core.compArv`: ARV = median $/sqft of the reno sales × sqft;
+fewer than 3 reno → every sale that is not a fixer or new (or simply every
+sale). **High** = 5+ reno inside ±20% · **Medium** = 3–4 reno, or 5+ after
+widening · **Low** = < 3 reno. No sold homes → blank ARV, Comp Confidence
+"None — <reason>". Sold homes read are cached in `comps-cache.json` (userData,
+180 days, with the report's sale price); a report that fails to load is not
+cached. Five columns at the END of Leads: `ARV · ARV $/SqFt · Comp Confidence
+· Comps · Comps Run On` — app-owned, replaced on a re-review, never blanked by
+a push without comps. `Comps` = compact JSON `[{mls, addr, price, sqft, ppsf,
+sold, bd, ba, yr, use: 1|0, why}]` (≤ 16, the counted ones first);
+`core.boardLead` carries `arv · arvPpsf · compConf · comps` (each field
+checked by `boardComps`). **The live Leads grid is exactly 27 columns** and the
+Sheets API refuses a write past it ("exceeds grid limits"), so `ensureTab`
+widens the grid (`appendDimension`) before writing a longer header. **No
+profit gate in the app any more** — every kept lead goes to the sheet (the old
+`scoreDeal` surface filter needed selling costs the app does not have). A Stop
+skips the remaining comps, never the leads. Section 3's **Run comps on A/B
+leads** (on, remembered) turns it off; the end of a scan says `Comps: N
+lead(s) valued (H high · M medium · L low), N without comps.` Tests:
+`node desktop-app/test-comps.js` (in `npm test`) and §17 of
+`test-google-sheets.js`. `flipscout-board/test/comps.py` turns a prod-sheet
+xlsx into the board's `comps.js`. **Not yet run against live Matrix** — on the
+first run check the log's ARV lines, the sold grid headings and
+`<userData>/report-samples/*-comp.txt` (the first 3 sold reports).
+
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope
 `spreadsheets` only) and pastes the spreadsheet URL; as each city finishes, the

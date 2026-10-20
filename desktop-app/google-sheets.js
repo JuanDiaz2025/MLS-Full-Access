@@ -216,11 +216,29 @@ async function ensureTab(token, id, tab, headers) {
   const matches = cur.length >= headers.length
     && headers.every((h, i) => String(cur[i] || '').trim() === h);
   if (!matches) {
+    await ensureColumns(token, id, tab, headers.length);
     const row = headers.slice();
     for (let i = headers.length; i < cur.length; i++) row.push('');
     await writeRow(token, id, tab, 1, row);
   }
   return info.title;
+}
+
+/**
+ * Widen a tab's grid to at least `n` columns. A tab is only as wide as its
+ * grid (26 columns when made; the prod Leads tab was 27 on 20 Oct), and the
+ * Sheets API refuses any write past the edge — "exceeds grid limits" — so new
+ * header columns (the comps, v1.73) need the room made first.
+ */
+async function ensureColumns(token, id, tab, n) {
+  const j = await api(token, `/${id}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`);
+  const p = ((j && j.sheets) || []).map(s => s.properties || {}).find(s => s.title === tab);
+  const have = p && p.gridProperties ? Number(p.gridProperties.columnCount) || 0 : 0;
+  if (!p || !have || have >= n) return;
+  await api(token, `/${id}:batchUpdate`, {
+    method: 'POST',
+    body: JSON.stringify({ requests: [{ appendDimension: { sheetId: p.sheetId, dimension: 'COLUMNS', length: n - have } }] }),
+  });
 }
 
 /** A1 column letter for a 0-based index — two-letter columns included, because

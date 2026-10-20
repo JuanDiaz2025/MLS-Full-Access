@@ -97,6 +97,40 @@ const JS_SCRAPE_GRID = `(() => {
   return out;
 })()`;
 
+// The SOLD results grid, for comps (v1.73). Same rows as JS_SCRAPE_GRID, plus
+// the sold price and the close date when the display has columns for them.
+// Their headings have not been seen on the live sold grid yet, so they are
+// found by pattern ("Sold Price", "Close Price", "SP", "Sold Date", "COE Date"
+// …), and Price is the fallback — on a Sold search Matrix's Price is the sale price.
+const JS_SCRAPE_SOLD = `(() => {
+  const clean = t => (t||'').replace(/\\s+/g,' ').trim();
+  let head = [], rows = [];
+  const h = document.querySelector('.singleLineTableHeader');
+  if (h) { head = Array.from(h.children).map(c => clean(c.innerText)); rows = Array.from(document.querySelectorAll('tr.DisplayRegRow, tr.DisplayAltRow')); }
+  else {
+    const trs = Array.from(document.querySelectorAll('tr'));
+    const cellsOf = r => Array.from(r.children).map(c => clean(c.innerText));
+    const hi = trs.findIndex(r => { const t = cellsOf(r); return t.includes('MLS #') && t.some(x => /price/i.test(x)); });
+    if (hi >= 0) { head = cellsOf(trs[hi]); const tbl = trs[hi].closest('table'); rows = trs.slice(hi + 1).filter(tr => !tbl || tr.closest('table') === tbl); }
+  }
+  const find = re => head.findIndex(x => re.test(x));
+  const ix = {
+    mls: find(/^MLS ?#$/i), addr: find(/^(street )?address$/i), price: find(/^(list )?price$/i),
+    sold: find(/^(sold|sale|selling|close|closing) ?price$|^SP$/i), date: find(/^(sold|sale|close|closing|coe)( of escrow)? ?date$|^COE$/i),
+    sqft: find(/^sq ?ft$/i), bds: find(/^(bds|beds)$/i), baths: find(/^(bths|baths)$/i), age: find(/^age$/i), yr: find(/^(yr|year) ?(blt|built)$/i),
+  };
+  const out = [];
+  rows.forEach(tr => {
+    const cells = Array.from(tr.children).map(c => clean(c.innerText));
+    const p = k => ix[k] >= 0 ? (cells[ix[k]] || '') : '';
+    const mls = p('mls');
+    if (!/^[A-Z]{0,6}\\d{5,}$/.test(mls)) return;
+    out.push({ mls, addr: p('addr'), price: p('price'), soldPrice: p('sold'), sold: p('date'),
+      sqft: p('sqft'), bds: p('bds'), baths: p('baths'), age: p('age'), yr: p('yr') });
+  });
+  return out;
+})()`;
+
 // What the results page looked like when no rows could be read — saved so a
 // "matches but 0 rows" area can be diagnosed from the user's machine.
 const JS_GRID_DEBUG = `(() => {
@@ -518,6 +552,138 @@ const NEWER_BUILD = 1975;
 function saysNeedsWork(t) {
   t = String(t || '');
   return NEEDS_WORK_KW.test(t) || FIXER_KW.test(t) || COSMETIC_KW.test(t) || DISTRESSED_SALE_KW.test(t);
+}
+
+// ---------- comps: the after-repair value from sold homes (v1.73) ----------
+// Seth, 20 Oct: the app fetches the sold comps and the ARV; the board does the
+// rehab, holding and selling-cost math from its own Settings, so those numbers
+// can change without a new app. ARV is AFTER repair: only sold homes whose own
+// remarks say the work was done set it. An as-is sale next door is another
+// fixer, not the price a finished house sells for.
+const COMP_BANDS = [0.20, 0.40, 0.60];
+const COMP_READ = 8;          // sold homes whose remarks are read per lead, nearest in size first
+const COMP_LIST_MAX = 16;     // entries kept in the sheet's Comps column
+const COMP_NEW_YEARS = 10;    // a sold house this new is a different product, not an ARV comp
+
+/** Sold-search grid rows → comps. The subject itself, a repeat, and anything
+ *  too small or too cheap to be a real house sale are left out. */
+function compRows(rows, subjectMls) {
+  const self = String(subjectMls || '').trim().toUpperCase(), seen = new Set(), year = new Date().getFullYear();
+  // the first number only: a "2|0" or "3 (3/0)" baths cell is 2 or 3, never 20 or 330
+  const lead = s => { const m = String(s || '').match(/\d+(?:\.\d+)?/); return m ? Number(m[0]) : 0; };
+  return (rows || []).map(r => {
+    const price = num(r.soldPrice) || num(r.price), sqft = num(r.sqft), age = num(r.age);
+    return {
+      mls: String(r.mls || '').trim().toUpperCase(), addr: String(r.addr || '').replace(/\s+/g, ' ').trim(),
+      price, sqft, ppsf: price && sqft ? Math.round(price / sqft) : 0, sold: dayKey(r.sold), gridSold: !!num(r.soldPrice),
+      bd: lead(r.bds) || '', ba: lead(r.baths) || '',
+      yr: num(r.yr) || (age > 0 && age < 200 ? year - age : ''),
+    };
+  }).filter(c => c.mls && c.mls !== self && c.sqft >= 300 && c.price >= 50000 && c.ppsf >= 50
+    && !seen.has(c.mls) && seen.add(c.mls));
+}
+
+/** The size band: ±20% of the subject's square feet, widened to ±40% and then
+ *  ±60% only while fewer than 3 sold homes fit. Nearest in size first. */
+function compBand(comps, sqft) {
+  const s = num(sqft);
+  if (!s) return { band: '', pct: 0, widened: false, rows: [] };
+  let rows = [], pct = COMP_BANDS[0];
+  for (const p of COMP_BANDS) {
+    pct = p;
+    rows = (comps || []).filter(c => Math.abs(c.sqft - s) / s <= p);
+    if (rows.length >= 3) break;
+  }
+  rows.sort((a, b) => Math.abs(a.sqft - s) - Math.abs(b.sqft - s));
+  return { band: '±' + Math.round(pct * 100) + '%', pct, widened: pct > COMP_BANDS[0], rows };
+}
+
+/** What a sold home's own remarks say about it when it sold: 'reno' (the work
+ *  was done, so its price is an after-repair price), 'fixer' (as-is, needs
+ *  work, an estate or distressed sale: not an after-repair price), 'new' (a
+ *  newer build: a different product), or 'unknown'. The scan's own wording
+ *  rules, read the other way round: what drops a listing makes a comp count. */
+function classifyComp(remarks, yearBuilt) {
+  const t = String(remarks || '').replace(/\s+/g, ' ').trim();
+  const yr = num(yearBuilt);
+  if (yr && new Date().getFullYear() - yr < COMP_NEW_YEARS) return { k: 'new', why: 'built ' + yr };
+  if (!t) return { k: 'unknown', why: 'no remarks' };
+  const hit = re => (t.match(re) || [''])[0];
+  if (DONE_STRONG_KW.test(t)) return /new construction|newly built|brand[- ]new home/i.test(hit(DONE_STRONG_KW))
+    ? { k: 'new', why: hit(DONE_STRONG_KW) } : { k: 'reno', why: hit(DONE_STRONG_KW) };
+  const fixer = [NEEDS_WORK_KW, FIXER_KW, COSMETIC_KW, DISTRESSED_SALE_KW, KEEP_KW, DISTRESS_KW].find(re => re.test(t));
+  if (fixer) return { k: 'fixer', why: hit(fixer) };
+  if (DONE_HOUSE_KW.test(t)) return { k: 'reno', why: hit(DONE_HOUSE_KW) };
+  const f = finishHits(t);
+  if (f.heavy.length >= 2) return { k: 'reno', why: f.heavy.slice(0, 3).join(', ') };
+  if (f.heavy.length === 1) return { k: 'unknown', why: 'one updated finish — ' + f.heavy[0] };
+  return { k: 'unknown', why: 'silent on condition' };
+}
+
+/** The ARV, from a size band whose nearest rows carry a classification (k).
+ *  Median $/sqft of the renovated sales when there are 3 or more; otherwise of
+ *  every sale in the band that is not a known fixer or new build (or simply
+ *  every sale), and the confidence says so.
+ *    High   — 5+ renovated sales inside ±20%
+ *    Medium — 3–4 renovated sales, or 5+ once the band had to widen
+ *    Low    — fewer than 3 renovated sales: a rough number to check by hand */
+function compArv(sqft, band, total) {
+  const s = num(sqft), rows = (band && band.rows) || [];
+  const empty = reason => ({ arv: 0, ppsf: 0, conf: '', band: (band && band.band) || '', widened: !!(band && band.widened),
+    nReno: 0, nUsed: 0, nBand: rows.length, total: total || 0, basis: '', list: [], reason });
+  if (!s) return empty('no square feet on the listing');
+  if (!rows.length) return empty(total ? 'no sold home within 60% of its size' : 'no sold single-family homes in its zip in the last 14 months');
+  const reno = rows.filter(r => r.k === 'reno');
+  let used = reno, basis = 'renovated';
+  if (reno.length < 3) {
+    const plain = rows.filter(r => r.k !== 'fixer' && r.k !== 'new');
+    used = plain.length >= 3 ? plain : rows; basis = 'all';
+  }
+  const ppsf = median(used.map(r => r.ppsf));
+  const conf = reno.length >= 5 && !band.widened ? 'High' : reno.length >= 3 ? 'Medium' : 'Low';
+  const on = new Set(used.map(r => r.mls));
+  // counted first, nearest in size within each
+  const list = rows.slice().sort((a, b) => on.has(b.mls) - on.has(a.mls)).slice(0, COMP_LIST_MAX)
+    .map(r => ({ mls: r.mls, addr: r.addr, price: r.price, sqft: r.sqft, ppsf: r.ppsf, sold: r.sold || '',
+      bd: r.bd, ba: r.ba, yr: r.yr, use: on.has(r.mls) ? 1 : 0,
+      why: String(r.k ? r.why || '' : 'remarks not read').slice(0, 80) }));
+  return { arv: Math.round(ppsf * s), ppsf, conf, band: band.band, widened: !!band.widened,
+    nReno: reno.length, nUsed: used.length, nBand: rows.length, total: total || 0, basis, list, reason: '' };
+}
+
+/** One line for the log and the lead: what the ARV rests on. */
+function compSummary(c) {
+  if (!c || !c.arv) return 'no ARV — ' + ((c && c.reason) || 'comps not run');
+  return `ARV $${c.arv.toLocaleString('en-US')} · $${c.ppsf}/sqft · ${c.nUsed} of ${c.nBand} sold homes `
+    + `(${c.band}${c.basis === 'renovated' ? ', renovated sales' : ', not enough renovated sales — all sales'}) · ${c.conf} confidence`;
+}
+
+/** The sheet's Comps column: compact JSON, kept well under a cell's 50,000 characters. */
+function compsJson(list) {
+  let l = (list || []).slice(0, COMP_LIST_MAX), s = JSON.stringify(l);
+  while (s.length > 40000 && l.length) { l = l.slice(0, -1); s = JSON.stringify(l); }
+  return l.length ? s : '';
+}
+
+/** A sold home's Client Full report: its remarks, year and (where the report
+ *  labels them) sold price and date. Anchored to the MLS # asked for, like
+ *  parseDetail, so a different listing left on screen is never read as this one. */
+function parseCompReport(text, mls) {
+  const d = parseDetail(text, mls);
+  if (d.mismatch) return { mismatch: true, showing: d.showing };
+  const t = String(text || '').replace(/\r/g, '');
+  const at = t.toUpperCase().indexOf(String(mls || '').trim().toUpperCase());
+  const block = at >= 0 ? t.slice(at, at + 6000) : t;
+  const grab = re => { const m = block.match(re); return m ? m[1].trim() : ''; };
+  // Client Full: "Sale Price:\t$1,250,000\tSale:\t09/15/2026" and "COE:\t09/15/2026".
+  // A label's value is at most ONE tab away — two tabs means the field is blank.
+  const date = '(\\d{1,2}\\/\\d{1,2}\\/\\d{2,4})', gap = ':?[ ]*\\t?[ ]*';
+  return {
+    mismatch: false, remarks: d.remarks || '', yearBuilt: d.yearBuilt || '',
+    soldPrice: num(grab(new RegExp('\\b(?:Sold|Sale|Selling|Close|Closing) ?Price' + gap + '\\$?([\\d,]{5,})', 'i'))) || '',
+    soldDate: dayKey(grab(new RegExp('\\b(?:Sold|Sale|Close|Closing|COE) ?Date' + gap + date, 'i'))
+      || grab(new RegExp('\\b(?:COE|Sale|Sold)' + gap + date, 'i'))),
+  };
 }
 
 /**
@@ -1062,7 +1228,21 @@ function boardLead(l) {
     agentPhone: /^\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}$/.test(phone) ? phone : '',
     agentEmail: /^[^\s@<>"']{1,64}@[^\s@<>"']{1,190}\.[A-Za-z]{2,}$/.test(clip(l.agentEmail, 254)) ? clip(l.agentEmail, 254) : '',
     mlsStatus: clip(l.mlsStatus, 30),
+    // Comps (v1.73): the ARV and the sold homes it rests on.
+    arv: num(l.arv), arvPpsf: num(l.arvPpsf), compConf: clip(l.compConf, 80),
+    comps: boardComps(l.comps),
   };
+}
+/** The Comps column (JSON text, or a list) as the board stores it, every field checked. */
+function boardComps(v) {
+  let a = v;
+  if (typeof a === 'string') { try { a = a ? JSON.parse(a) : []; } catch (_) { a = []; } }
+  const n = x => (x === '' || x == null || !isFinite(Number(x))) ? null : Number(x);
+  return (Array.isArray(a) ? a : []).slice(0, COMP_LIST_MAX).filter(c => c && typeof c === 'object').map(c => ({
+    mls: clip(c.mls, 20).toUpperCase(), addr: clip(c.addr, 120), price: n(c.price), sqft: n(c.sqft), ppsf: n(c.ppsf),
+    sold: /^\d{4}-\d{2}-\d{2}$/.test(String(c.sold || '')) ? c.sold : '', bd: n(c.bd), ba: n(c.ba), yr: n(c.yr),
+    use: c.use ? 1 : 0, why: clip(c.why, 80),
+  })).filter(c => /^[A-Z0-9]{5,20}$/.test(c.mls));
 }
 
 // ---------- re-reviewing a past scan (v1.46) ----------
@@ -1612,6 +1792,8 @@ module.exports = {
   isComingSoon, COMING_SOON_RE, isPrivateListing, PRIVATE_LISTING_RE, listingLabel,
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
+  compRows, compBand, classifyComp, compArv, compSummary, compsJson, parseCompReport, JS_SCRAPE_SOLD,
+  COMP_BANDS, COMP_READ, COMP_LIST_MAX,
   boardLead,
   redfinUrlFrom,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
