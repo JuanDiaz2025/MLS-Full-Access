@@ -19,12 +19,18 @@ export function statusPage({ counts, jobs, base }) {
     const name = [c.first, c.last].filter(Boolean).join(" ") || j.id;
     const where = [c.street, c.city].filter(Boolean).join(", ");
     const link = j.result && j.result.id ? `${base}/contacts/${esc(j.result.id)}` : "";
-    const state = {
-      done: '<span class="p done">✓ in REI</span>',
-      working: '<span class="p work">creating…</span>',
-      queued: '<span class="p queued">queued</span>',
-      error: '<span class="p err">failed</span>'
-    }[j.status] || esc(j.status);
+    // A queued job that already carries an error is not waiting its first turn,
+    // it is waiting out a backoff — saying "queued" there reads as a
+    // contradiction next to the error beside it.
+    const retrying = j.status === "queued" && j.error;
+    const state = retrying
+      ? `<span class="p queued">retrying (${j.attempts || 1}/3)</span>`
+      : {
+          done: '<span class="p done">✓ in REI</span>',
+          working: '<span class="p work">creating…</span>',
+          queued: '<span class="p queued">queued</span>',
+          error: '<span class="p err">failed</span>'
+        }[j.status] || esc(j.status);
     return `<tr>
       <td>${state}</td>
       <td><b>${esc(name)}</b><small>${esc(where)}</small></td>
