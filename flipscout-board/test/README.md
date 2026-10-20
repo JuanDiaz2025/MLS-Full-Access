@@ -30,8 +30,10 @@ tiles per row. A board showing one day therefore downloads one picture.
 `window.__THUMBS__ = {w, h, cols, sheets: [[file, count]], at: {MLS: [sheet, slot]}, pg, miss, ph}`.
 
 `miss` records leads with no photo: tries, last day tried, and why. A lead
-with no page or no photo is tried on 3 days, then left alone. A network error
-does not count as a try.
+with no MLS page is tried on 3 days, then left alone. A lead showing MLS's
+"photos coming soon" picture is tried on 7 days, because its photos usually
+follow within a week. A network error does not count as a try. `ph` lists
+pictures seen on three or more listings: stand-ins, never the house.
 
 ## Daily refresh
 

@@ -26,8 +26,9 @@ UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 TW, TH, COLS = 112, 96, 12          # tile size (16-px aligned: no JPEG bleed), tiles per sheet row
 OG = re.compile(rb'<meta\s+property="og:image"\s+content="([^"]+)"')
 TITLE = re.compile(rb'<title>([^<]{0,300})')
-BAD_IMG = re.compile(r'nophoto|no-photo|no_photo|placeholder|mlslpub-cdn|/images/home/', re.I)
+BAD_IMG = re.compile(r'nophoto|no-photo|no_photo|placeholder|coming[_-]?soon|mlslpub-cdn|mlslistings\.com/images/', re.I)
 TRIES = 3                            # a lead with no photo is tried on this many days, then left
+TRIES_SOON = 7                       # "photos coming soon": the photos usually follow within a week
 
 
 def load_data(path):
@@ -164,7 +165,7 @@ def main():
         if not candidates(mls):
             continue
         ms = ix['miss'].get(mls)
-        if ms and (ms[0] >= TRIES or ms[1] == today):
+        if ms and (ms[0] >= (TRIES_SOON if 'placeholder' in ms[2] else TRIES) or ms[1] == today):
             continue
         leads.append({'mls': mls, 'addr': str(r[ci['addr']] or ''), 'date': str(r[ci['date']] or today)[:10]})
     if only:
