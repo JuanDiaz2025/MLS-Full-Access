@@ -227,3 +227,8 @@ flipscout-board/recon.json
 flipscout-board/recon.png
 .mlsenv
 flipscout-board/test/data.js
+
+# Claude Code local settings — machine-specific, never shared.
+# Holds per-machine permission rules (e.g. allowing a local script to write to
+# a live CRM), so it must not follow the branch to anyone else.
+.claude/settings.local.json
