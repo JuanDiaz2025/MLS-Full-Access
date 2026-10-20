@@ -71,7 +71,10 @@ history window with every listing and contact (Seth, 20 Oct).
 
 - The page groups the leads into agents itself: same email, or same phone AND
   same name (an office line is shared by many agents), or a name alone when no
-  other agent has it.
+  other agent has it. A placeholder in the name column ("REDFIN") is not a
+  person and makes no card. Two cards with the same name and a different
+  email, phone and brokerage stay apart: nothing proves they are one person
+  (20 Oct: only Michael Bardales, Twin Oaks and Compass).
 - "Last contacted" is an email sent from the board, or a call, text or
   meeting logged on the card. Agent replies and REI BlackBook tags are left
   out on purpose until that is worked out (Seth, 20 Oct).

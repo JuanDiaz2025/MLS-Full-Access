@@ -36,8 +36,8 @@ def main():
         if not MLS.match(mls) or ',' not in la:
             continue
         b = la.split(',', 1)[1].strip(' ,')
-        # a licence number is not a brokerage
-        if b and not re.match(r'^(?:dre|lic|cal ?bre|#)\b', b, re.I):
+        # a licence number, or a stray "$3", is not a brokerage
+        if b and re.search(r'[A-Za-z]', b) and not re.match(r'^(?:dre|lic|cal ?bre|#)\b', b, re.I):
             bk[mls] = b[:80]
     body = {'v': 1, 'built': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'bk': bk}
     with open(out, 'w', encoding='utf8') as f:
