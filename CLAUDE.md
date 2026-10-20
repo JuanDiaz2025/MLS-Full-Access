@@ -1,0 +1,1222 @@
+# MLS Full Access — navigation memory
+
+Operational memory for reaching and driving the MLSListings Pro system headlessly
+from Claude Code on the web, and for turning listings into "Property Review" leads.
+
+## 🚫 HARD RULE #0 — NEVER surface already-renovated properties
+
+Do **NOT** present, rank, comp, or recommend any home that is already
+**renovated / remodeled / updated / refreshed / move-in-ready / turnkey / a
+newer build**. We only want **genuine value-add fixers** (as-is, probate/estate,
+dated/original, needs work, below-market $/sqft). Drop renovated listings on
+sight — do not even include them in a list. This is non-negotiable, every market,
+every search. (Detection cues + the full method: `docs/investigation-playbook.md`.)
+
+## 🔑 HARD RULE #1 — always be logged in before doing anything
+
+Session cookies expire mid-session. **Before any search/scrape/lookup, confirm
+the MLS session is alive; if logged out, LOG IN FIRST** (re-run login →
+`title = "MLSListings Pro Dashboard - <id>"`) and only then proceed. Never run a
+search on a dead session. Log in + run the task in the **same browser context**
+(the storageState can go stale), and re-save `.mls-state.json` right after the
+dashboard loads. Re-login may hit a **2FA step** (`/auth/PreTFA`) needing a code
+sent to the account owner. What to do then depends on the run:
+
+- **Interactive session** (Bryan is here): stop and ask for the code.
+- **Unattended hourly run** (§4b): **stop silently and retry next hour** — do not
+  notify, do not ask. The saved cookie often outlives the block, so a later run
+  usually reconnects on its own. Log the skip and exit cleanly; never leave a
+  half-finished scan or a partially-written ledger behind.
+
+## 🖼️ HARD RULE #2 — review ALL photos before judging a property
+
+Do **NOT** decide fixer-vs-renovated (or recommend/drop) from the cover photo or
+remarks alone. **Open the full photo gallery and look at EVERY picture** — kitchen,
+bathrooms, flooring, and any interior shots — before making a call. The listing
+detail's first image is usually the exterior and hides the real condition. Click
+the **Photos** tab / gallery on each listing and review the full set every time.
+
+**"Clean" is NOT a drop — only "renovated" is.** (Updated per Bryan; this
+reverses the old rule.) The single question the photos must answer is: *has work
+been done to this house?*
+
+- **Drop — renovated:** new/refaced kitchen cabinets, quartz/granite counters,
+  new stainless appliances, redone bathrooms (new tile/vanity/fixtures), new
+  flooring throughout, recessed lighting, fresh whole-house paint over updated
+  finishes, or a newer build. Work has been done → no value left to add.
+- **KEEP — merely clean:** the house is tidy, empty, swept, staged, or
+  well-photographed, but the **finishes are still original/dated** — old cabinets,
+  tile counters, dated bath, worn or original flooring. Clean ≠ updated. **Add
+  these to the list.** A well-kept dated house is still a fixer.
+
+So: judge the *finishes*, not the housekeeping or the staging. When photos are
+genuinely ambiguous between "clean but dated" and "lightly updated," keep it and
+note the uncertainty on the lead rather than dropping it.
+
+### ⚠️ UPDATE 26 Sep (Seth) — dated is NOT enough; it must LOOK like it needs work
+
+This overrides the "merely clean → KEEP" bullet above for **photo review**. Juan
+buys **as-is houses that visibly need renovation**. A house that is dated but in
+good repair — old oak or painted cabinets, tile counters, tidy and livable as it
+stands — is a **DROP** ("dated but in good condition").
+
+- **KEEP (Seth confirmed):** 31 Laurel Ln, Richmond (CC41149486) — cabinet doors
+  missing, stripped and patched walls, torn flooring · 3223 San Jose Ave, Daly
+  City (CC41149536) — doors missing, broken counter edge, patched wall, 1950s
+  yellow-tile bath · 359 Aspenridge, Milpitas (BE41149496) — empty, scuffed walls,
+  worn tile counters, tired original bath.
+- **DROP (Seth: "looking good", Juan won't buy):** 305 Virginia Ave SF, 3564 Smith
+  St Union City, 2271 46th Ave SF, 2027 21st Ave SF — all original finishes, all
+  tidy and intact.
+
+Enforced in the AI vision prompt (`rulesPrompt` in `main.js`, "question 2").
+Still true: staging and furniture are not finishes, one updated surface is not
+a flip, and when torn between "worn" and "dated but fine" the AI keeps it and
+says so. The text rules cannot see wear, so without an AI key these still reach
+the sheet for the reviewer to prune.
+
+### ⚠️ UPDATE 28 Sep (Seth's manual check of an Alameda run, 36 leads)
+
+5 approved · 11 "double check" · 20 "looks good / refurbished". The patterns:
+
+- **Every approval had the remarks say it needs work or is a distressed sale**
+  (as-is, fixer, "bring your", "great bones--cosmetic remodel", Xome auction);
+  **none of the 20 rejects did.** $/sqft, vacancy, price cuts and age did not
+  separate them (2244 E 20th was 43% of the median and "refurbished").
+  → `qualify()` now **holds A at B** without needs-work wording, and reads
+  `COSMETIC_KW` (great bones, cosmetic remodel, lots of potential) and
+  `DISTRESSED_SALE_KW` (auction, Xome, HomePath/Fannie Mae, REO, bank-owned).
+- **Probate / trust alone is not a fixer** (3 rejects): +5, was +10.
+- **No approval was built after 1974**; nine rejects/checks were 1978–1999 → −5.
+- **The AI said KEEP on all 36** while writing "dated but intact", "clean",
+  "in good condition" about the rejects. It now returns `wear: heavy|some|none`
+  and `core.aiVerdict()` decides: KEEP with `none` = DROP "dated but in good
+  condition", unless the remarks say it needs work. The prompt now gets the
+  private remarks too (where most of the needs-work words were).
+- **Photos of all 16 non-rejects, pulled from the public mlslistings.com pages
+  (28 Sep): "old style" ≠ original.** Every approval has **1950s–80s original
+  finishes, worn or dirty** — stained wall-to-wall or shag carpet, sheet
+  linoleum, wood panelling, dark 60s–70s cabinets, textured ceilings, drapes —
+  or a stripped/damaged interior (6225 Tevis). The AI kept the "double checks"
+  because a **1995–2015 refresh looks dated today**: cherry/maple + granite +
+  stainless + laminate/engineered floors (1629 68th, 37735 Blacow, 2825
+  Hillcrest, 9024 Olive, 1027 76th); **9014 A St is a full recent flip** (LVP,
+  white shaker, new tile) the AI called "dated, patched walls". The prompt now
+  asks for `era: original | prior-update | new`; `aiVerdict()` drops
+  prior-update / new unless wear is heavy, and a bare boilerplate "as-is" no
+  longer overrules photos showing no wear. Public photo URLs: MLSL
+  `media.mlslmedia.com/property/MLSL/<n>/…`, Bay East/CCAR
+  `zimg.paragon.ice.com/…/<n>/…`, SFAR/MetroList `…/listingpics/bigphoto/…`.
+- Replay of the 36 (v1.45.0): A = all 5 approvals + 1 check; 19 of 20 rejects
+  drop. The photo step was estimated from the AI's recorded descriptions.
+
+### ⚠️ "Renovation" cuts BOTH ways — the word alone means nothing
+
+**Never drop on `/renovat/`.** The same root describes the deal we want and the
+deal we don't:
+
+- **KEEP — work still to do:** "Renovation **Opportunity**", "a chance **to
+  renovate** this 1914 Edwardian", "**needs** a full renovation", "**never**
+  renovated", "requires updating", "bring your imagination", "deferred
+  maintenance", "ripe **for** renovation", "remodel **project**".
+- **DROP — work already done:** "**beautifully** renovated", "**fully**
+  remodeled", "renovated **top to bottom**", "turnkey", "move-in ready",
+  "nothing to do but move in", "new construction", "**tastefully** updated".
+
+**Real miss:** 21 College Terrace (SF426150277) — *"Exceptional Renovation
+Opportunity… to renovate this 1914 Edwardian… significant deferred maintenance…
+bring your imagination"* — was **dropped as renovated** by a bare `/renovat/`.
+It is a deal Bryan wants. Needs-work context is now tested **first** and wins;
+only unambiguous completed-work phrasing drops. Single finish brags (quartz,
+stainless) drop **only** when no needs-work language is present anywhere.
+
+**ONE finish is not a flip — TWO or more is.** A single mention (quartz counters,
+a new roof, one updated bath) is a light-rehab line item and stays; two or more
+distinct finishes redone, with no needs-work language anywhere, is a kitchen and
+bath already done by someone else. Enforced by `FINISH_KW` needing 2+ hits.
+Whole-house wording ("renovated", "remodeled", "updated throughout") drops on
+its own via `DONE_HOUSE_KW`.
+
+**There is deliberately NO "nice house" keyword rule.** One was added and
+removed: it dropped on "immaculate", "pristine", "pride of ownership",
+"meticulously maintained" — every one of which describes **housekeeping**, which
+HARD RULE #2 says in as many words not to judge on. A spotless house with a
+1950s kitchen is the target, not a disqualification.
+
+### ⚠️ "in-law" / "ADU" is POTENTIAL, not a second unit
+
+**The MLS's own `Class:` outranks any word in the remarks.** Every search asks
+for Property Type = Single Family Home and the Client Full report repeats it
+(`Class: Res. Single Family / Attached, Single Family`). Dropping such a listing
+as multi-unit because the remarks contain "in-law" or "ADU" is overruling the
+MLS with a keyword — and SF remarks mention those constantly, as *potential*.
+
+**Real miss:** 347 Faxon Avenue (SF426134156), a 1924 single-family — *"bonus
+room and bath down… could serve as a 3rd bedroom, home office, family room,
+studio and/or **in-law setup**"* and *"room to make a nice garden or **add an
+ADU**"* — dropped as multi-unit. Neither unit exists. It is a genuine fixer:
+*"1st time on the market in 50 years… sold in its present 'as is' condition."*
+Bryan: *"there's a lot of leads you mentioned it as multi family this is
+wrong."*
+
+`MULTI_KW` now matches only an **existing** second dwelling (duplex / triplex /
+fourplex / "two separate units" / "two full kitchens" / "legal second unit"),
+never fires when `Class` says Single Family, and is suppressed by
+`POTENTIAL_RE` ("could serve as", "room to add", "potential for", "possible").
+Same lesson as `/renovat/`: **the word alone means nothing — the framing does.**
+
+### ⚠️ Calibration — ONE updated surface is not a flip (learned the hard way)
+
+The drop list above is a list of **cues, not triggers**. Spotting a single item
+from it does NOT end the analysis. The real question is always:
+**has the value already been extracted from this house?**
+
+- **KEEP — partially updated:** an older house where *one* element was redone at
+  some point (granite counters on 20-year-old cherry cabinets, a re-tiled tub
+  surround, a replaced water heater) while everything else is original — carpet
+  in the bedrooms, dated paint, original bath fittings, occupied and cluttered.
+  That is a **light-rehab line item**, not a completed flip. There is still a
+  full renovation's worth of value to add.
+- **DROP — actually flipped:** the *whole* kitchen is new (cabinets AND counters
+  AND appliances), the bathrooms are new end to end, flooring is new throughout,
+  and the place is professionally staged and empty. Several systems redone at
+  once, recently, together.
+
+Ask: *would a flipper still have a full job here?* If yes → KEEP.
+
+**Real miss to learn from:** 844 Brunswick St (ML82056071), $999k / 1,883 sqft /
+$531 per sqft = 65% of the SF median. Dropped as "granite counters, updated
+baths". Wrong. The house is a 1904 original with wall-to-wall carpet, dated
+paint, an old tiled tub surround, a cluttered occupied garage and a basic
+secondary kitchenette. One 2000s kitchen update on an otherwise untouched
+house. **Should have been a KEEP.** A below-market $/sqft on a large old house
+is strong evidence the value is still there — weigh that against the finish
+cues rather than dropping on the cue alone.
+
+### 📷 Pulling the photos so they can actually be looked at
+
+`node scripts/mls-photos.js <MLS#> [...]` (`MAX_PHOTOS=n`) saves a listing's
+photos to `.mls-artifacts/photos/<MLS#>/NN.jpg`, ready to open and judge.
+
+The route matters. The Client Full report shows a **carousel** — one frame, three
+or four preloaded — so scraping it yields ~4 of 26. The `Open All` control
+(`font.print.icon[title="Open All"]`) opens **PhotoPopup.aspx … &View=G**, a grid
+of *every* photo, in a new tab. Read `document.images` there; `JS_PHOTOS` buckets
+by `Size=` and the popup serves a different size, so it finds nothing. Photo 1 is
+the exterior, so the download skips it and spreads across the rest.
+
+**Proof this matters — 21 College Terrace:** the living-room shot is staged with
+new flooring, fresh paint and good furniture and reads as a "nice house"; the
+kitchen two frames later is dark original cabinets and **red tile counters**,
+untouched since the 1950s. Judging on the staging would have discarded Bryan's
+own confirmed deal. **Furniture is not a finish.**
+
+## 1. Browser access (do this first, every fresh session)
+
+Browsing only works after fixing the egress proxy + TLS. Run once:
+
+```bash
+bash scripts/setup-browser.sh
+```
+
+It (a) installs the `playwright` npm package (browser binaries are pre-installed
+at `/opt/pw-browsers`), (b) trusts the proxy CA in the NSS store, and (c) installs
+a Chromium enterprise policy disabling the **post-quantum key share** and
+**Encrypted Client Hello**. Without (c), every HTTPS request dies with
+`ERR_CONNECTION_RESET` (the egress resets Chromium's oversized ClientHello) even
+though `curl` works. Full write-up: `docs/browser-access.md`.
+
+Always launch Chromium with:
+- `executablePath: /opt/pw-browsers/chromium-1194/chrome-linux/chrome`
+- `--no-sandbox` and `--proxy-server=$HTTPS_PROXY` (scheme stripped)
+
+Helper: `scripts/mls-lib.js` (`launch()` + state path).
+
+## 2. Login
+
+- Entry URL: `https://prodashboard.mlslistings.com/` → redirects to Azure AD B2C
+  sign-in at `mlslpro.b2clogin.com` (username/password; also Google/Facebook SSO).
+- **Credentials come from env vars `MLS_USER` / `MLS_PASS` — never commit them.**
+- `node scripts/mls-login.js` fills the form, signs in, and saves session cookies
+  to `.mls-state.json` (gitignored). Post-login flow: `mlsllogin.mlslistings.com/auth/PostLogin`
+  → dashboard. Success signal: page title `MLSListings Pro Dashboard - <agent id>`.
+- Reuse the session by loading `storageState: .mls-state.json` — skips re-login and
+  carries over to the Matrix domain.
+
+## 3. Dashboard
+
+- Top nav: Search · Listings · Products & Tools · Support · MLS Rules · Profile.
+- Blue toolbar: **Matrix Search** · Matrix Dashboard · My Listings · Realist II ·
+  Agent Search · Aculist · Pro Support.
+- **Matrix Search opens CoreLogic Matrix in a NEW TAB** →
+  `https://search.mlslistings.com/Matrix/Search/Residential/ResidentialSearch`.
+  With a saved `storageState` you can navigate there directly (no click needed).
+
+## 4. Matrix Residential Search — field IDs
+
+Matrix uses dynamic `Fm9_CtrlNNNN` ids. Observed (re-introspect if a `<select>`
+comes back empty — the form may have changed):
+
+| Field | Selector | Notes |
+|---|---|---|
+| Status (multi) | `#Fm9_Ctrl1161_LB` | Active, Contingent, Pending, Sold, … |
+| Property Type (multi) | `#Fm9_Ctrl65_LB` | Single Family Home, Condominium, Townhouse, … |
+| County (multi) | `#Fm9_Ctrl1738_LB` | **San Francisco = the whole city** |
+| City (multi) | `#Fm9_Ctrl1739_LB` | filter box `#Fm9_Ctrl1739_LB_TB` |
+| Area (multi) | `#Fm9_Ctrl1740_LB` | |
+| List Date | `#Fm9_Ctrl1162_TB` | range `MM/DD/YYYY-MM/DD/YYYY` |
+| List Price | `#Fm9_Ctrl63_TB` | "(000s)" box is checked → enter thousands; max = `0-1500` ($1.5M) |
+| Beds / SqFt / Age / Zip / MLS# | `#Fm9_Ctrl56_TB` / `#Fm9_Ctrl59_TB` / `#Fm9_Ctrl74_TB` / `#Fm9_Ctrl1780_TextBox` / `#Fm9_Ctrl75_TextBox` | |
+
+- Match count updates live on change (`"N matches"`). Click the **Results** tab/button
+  to load the grid (`Results.aspx`). Speed-bar shorthand for the SF example reads
+  `RESI A $0-1500 San Francisco`.
+
+Reusable runner:
+```bash
+COUNTY="San Francisco" STATUS=Active MAX_PRICE_K=1500 \
+  node scripts/mls-matrix-search.js
+```
+`DAYS` is optional and now **unset by default** — no List Date filter is applied,
+so the scan sees all Active listings regardless of age. Set `DAYS=45` to restore
+a rolling window. Screenshots land in `.mls-artifacts/`. Earlier verified example
+(SF · Active · ≤$1.5M · listed last 45 days) returned **228 matches**; with no
+date filter the count will be higher.
+
+## 4b. Recurring scan — order, cadence, and the seen-ledger
+
+**Scan order: San Francisco FIRST, always.** SF is the priority market — run it
+before anything else so its new listings reach the sheet first, then continue
+through the rest of the buy box (Peninsula → Sunnyvale → San Jose → Oakland →
+Berkeley → San Leandro → Hayward → Richmond). `DEFAULT_CITIES` in
+`scripts/mls-multi-scan.js` is already in this order — keep SF at the top.
+
+**Ledger cleared 1 Aug 2026** at Bryan's request — every verdict before that was
+made with the truncated-remarks bug (judging on the Open House teaser), the bare
+`/renovat/` drop that lost 21 College Terrace, and before the tenant and
+quick-flip screens existed. Those calls were not trustworthy, so the slate was
+wiped and the buy box is being re-reviewed from scratch. Bryan cleared the
+spreadsheet at the same time.
+
+**Cadence: hourly.** Each run looks for listings that are new *since the last
+run*. Runs are incremental, not full re-reviews. Requires `MLS_USER` / `MLS_PASS`
+in the environment's variables. If login is blocked by 2FA, the run stops
+silently and retries the next hour (Rule #1) — no notification.
+
+**🧠 Never re-check a listing you have already checked.** A persistent ledger at
+`data/scanned-ledger.json` (tracked in git, so it survives the ephemeral
+container) records every MLS # ever scanned, with the date and the verdict.
+Anything already in the ledger — from yesterday or any earlier run — is **skipped
+outright**: no photo pull, no comps, no scoring. Only genuinely new MLS #s cost
+any time. This is the whole point: the expensive stages (photo review, comps)
+must never run twice on the same property.
+
+Headless SF run (the same pipeline as the app — it imports `scan-core.js`, so
+the two cannot disagree about what qualifies): `node scripts/mls-sf-scan.js`
+(`MAX_LISTINGS=n` to sample). Writes `.mls-artifacts/sf-scan.json` and records
+its verdicts in the ledger.
+
+```bash
+node scripts/mls-ledger.js filter .mls-artifacts/candidates.json   # → new only
+node scripts/mls-ledger.js record .mls-artifacts/candidates.json kept
+node scripts/mls-ledger.js stats
+```
+
+Run `filter` immediately after the scan/filter stage and before photo review;
+run `record` after judging so the verdict is remembered. **Commit
+`data/scanned-ledger.json` at the end of every run** — an uncommitted ledger is
+lost when the container is reclaimed, and the next run re-checks everything.
+
+**Output goes to the spreadsheet first.** New qualifying leads are appended to
+the Property Review sheet (§6) as the primary deliverable — do that before
+writing up any summary.
+
+## 5. Lead investigation — Flip Scout methodology (CANONICAL)
+
+**`docs/flip-scout-SOP.md` is the governing SOP — follow it exactly.** Summary of
+what binds every analysis (see also `docs/investigation-playbook.md` for the
+headless-scrape workflow):
+
+- **Buy box (max price is a RULE):** **Peninsula (San Mateo County) = $2.5M max** (Bryan, 2 Oct — was $2.0M);
+  **ALL other areas = $1.5M max.** SFR, **no price floor** (a `SANITY_MIN_PRICE`
+  data floor only guards against garbled prices).
+  **Areas = THE WHOLE BAY AREA, all nine counties, every city** (Bryan, 1 Aug):
+  San Francisco · San Mateo · Santa Clara · Alameda · Contra Costa · Marin ·
+  Sonoma · Napa · Solano. Each is scanned as a **whole county** (`city: '*'`), so
+  no city list has to be kept up to date and no town is missed. **SF stays first.**
+  Never change the buy box without Bryan's explicit instruction.
+
+  Scale, measured live on 1 Aug (Active · SFR · under the cap · listed in the last
+  60 days): SF 60 · San Mateo 167 · Santa Clara 283 · Alameda 574 · Contra Costa
+  804 · Marin 56 · Sonoma 345 · Napa 95 · Solano 492 = **~2,900 listings**. The
+  results-grid pager is therefore capped at **60 pages** and **logs a warning if
+  the cap is ever hit** — the old 12-page cap silently truncated Contra Costa at
+  about 600 and the run still reported a clean finish.
+- **🚫 REMOVED screens — do not reinstate without Bryan's say-so:**
+  - the **"≤85% of city median $/sqft"** cut, and
+  - the **"oversized for the area"** cut (sqft > 1.5× the city median).
+
+  Both are gone. The oversize rule was provably wrong: 21 College Terrace was
+  **$455/sqft — 56% of the SF median, genuinely cheap** — and was discarded only
+  for being 2,185 sqft against a 1,333 median. A big cheap house is an
+  opportunity, not a trap.
+
+  **The only pre-photo screen left is age (25+ years, when the MLS reports it).**
+  $/sqft is still computed, still shown, and still sorts the output — it just
+  never excludes anything. Consequence to expect: almost every old SFR in the
+  buy box now reaches photo review, so photo review is the real filter and the
+  volume is far higher.
+- **Hard exclusions (drop outright, not flag):** already-renovated / turnkey (Rule #0),
+  multi-unit, vacant lot, **fire-damaged** (any listing noting a
+  past fire / fire damage / fire-gutted interior — drop even if it reads as a genuine
+  as-is fixer).
+- **Tenant-occupied is a DROP again** (Seth, 26 Sep: *"Juan won't take tenant
+  occupied"* — reverses the 23 Sep rule that scored it as an opportunity). A hard
+  exclusion in `rulesDecide`, so the AI is never asked: `Occupied By: Tenant` on
+  Agent Full, or tenant wording in the remarks (`TENANT_KW`). **Exception:** the
+  listing says it is delivered **vacant at close** ("tenant is expected to vacate
+  prior to Close of Escrow", "delivered vacant" — `VACANT_AT_CLOSE_RE`); that
+  stays, and its Why says "confirm with the agent". "↻ Refresh leads on the
+  board" moves tenant A/B leads already on the sheet to C "(found on refresh)".
+  Foundation / roof / fire / water / non-permitted, DOM over 45 and too few
+  interior photos all stay auto-passed.
+- **🚦 Qualification gate — Opportunity Score + A / B / C** (Seth, 23 Sep).
+  Nothing enters the working board until the gate finds a plausible value-add
+  opportunity. `core.qualify()` in `scan-core.js` scores every reviewed listing
+  0–100 (base 40) from the public **and private** remarks, the price cut
+  (`Orig Price` vs `List Price` on the report), $/sqft against the area median,
+  age and DOM, and returns a bucket:
+  **A — Work Now** (70+) · **B — AI Review** (35–69) · **C — Auto-Pass** (<35 or
+  any hard exclusion from `rulesDecide`). A and B go to `Leads` sorted A first,
+  highest score first; C goes to `Rejected` with the score and the why (stage
+  *Qualification gate*, or *Photo review* for a hard exclusion). Photos are not
+  scored yet — AI vision, when on, can still turn a keep into a C.
+  Private remarks come from the **Agent Full** report (Client Full does not have
+  them), labelled **`Private:`** — verified on the first live run (23 Sep, 15 of
+  15 read). Agent Full also carries **`Occupied By:`** (Vacant / Tenant / Owner),
+  which the gate uses ahead of any word in the remarks. The app saves raw report
+  text to `report-samples/` under userData (first 10 listings per run).
+  Live-run fixes: `\bheirs?\b` (a bare `heirs?` matched "**their**" and scored
+  ordinary listings as probate), and `Prop Condition:` must have its colon and
+  may not cross a tab/line (blank fields were swallowing the next field, and a
+  disclaimer's "property condition" was read as the condition).
+- **⚡ QUICK FLIPS ONLY** (Bryan, 1 Aug). A quick flip is a **cosmetic** job — paint,
+  floors, kitchen, bath, done in one pass without drawings or engineers. **Drop**
+  anything structural or permit-heavy even when it is a genuine fixer: foundation
+  issues, structural damage, visible settlement, red-tagged / uninhabitable,
+  unpermitted work, permits or plans pending, entitlement plays, tear-down /
+  land-value listings, stripped-to-the-studs shells, extensive water damage or mould.
+  A dated house needing everything *cosmetically* is exactly the target; a house
+  needing an engineer is not. Enforced in `SLOW_KW` (`scan-core.js`) and in the vision
+  prompt, which returns a `quickFlip: cosmetic | structural` field.
+  Note `tear-down` was previously in KEEP_KW — it is the opposite of a quick flip.
+- **Days on market: 45 days or less. BACK ON** (Bryan, 1 Aug — the removal was
+  temporary). Anything with DOM > 45 is dropped, with the reason logged. Applied
+  to the MLS's own DOM field rather than a List Date search window, so a relisted
+  property is judged on the DOM the sheet will actually show. A **blank** DOM is
+  not grounds to drop — missing is not stale.
+
+  After the first pass, each run is **incremental**: the seen-ledger means only
+  MLS #s never checked before cost any time, so day two surfaces the newest
+  listings and nothing else.
+- **ARV = size-matched sold comps:** median $/sqft of comps within **±20%** of
+  subject sqft (widen to ±40%, then ±60% only if <3 comps), × subject sqft. Never a
+  flat zip-wide median. Watch large-home / location-pocket / wrong-zip traps.
+- **Rehab (always both):** Light **$70/sqft** (cosmetic), Heavy **$140–150/sqft**
+  (full) + itemized add-ons for called-out issues (foundation, knob-and-tube, roof).
+- **Holding (3 mo):** 10%/yr financing prorated + insurance ($2,000 per $1M price) +
+  property tax (1.25%/yr prorated) + $400 flat utilities. (NOT a flat 3%.)
+- **Profit gate (dollars, under LIGHT):** ARV ≥ $1M → **$100k** min · $500k–$1M →
+  **$70k** · < $500k → **$50k**. Clears only under Light = **"Marginal"**; clears
+  under Heavy too = **"Strong Deal."** (Do not use an arbitrary $200k bar.)
+- **Equity ≠ profit.** The model's gross is a *screen* (step 1 of ~13), never the
+  decision — real profit must still absorb closing, commissions, permits, surprises.
+  Every surfaced lead carries a concrete "verify X before offering" next action.
+- **Loss profile to flag (from `DEAL_HISTORY.md`):** East Bay sub-$1M flips with
+  rehab < ~17% of purchase are the reliable engine; every historical loss was a
+  high-price **Peninsula/premium** buy with **heavy rehab (>25–30% of purchase, or
+  price > $1.5M** in Redwood City / Menlo Park / Foster City / San Carlos / Walnut
+  Creek). Flag any lead matching this even if it clears the dollar gate.
+- **Do NOT use:** ADU Potential, "Reno Budget" label, or seismic/pre-1940 wiring
+  risk flags (all removed per standing instruction).
+- **User-rejected (do not resurface):** 183 Victoria St, 1430 Shafter Ave (SF);
+  322 1st Ave (Redwood City) — plus the sheet's Rejected Redfin list.
+- **✅ CONFIRMED DEALS — never drop these, whatever a rule says:**
+  **21 College Terrace, San Francisco, CA 94112** (SF426150277 · 2,185 sqft ·
+  $455/sqft · built 1914). Bryan: *"THIS IS SOMETHING WE CAN DEAL."* Enforced by
+  `CONFIRMED_ADDR` / `core.isConfirmed()` in `scan-core.js`, which short-circuits
+  every screen *and* the vision model — the mirror of `REJECTED_ADDR`. Add to it
+  whenever Bryan names a property he wants; a rule that can silently swallow a
+  live deal needs a backstop that doesn't depend on the rule being right.
+
+## 6. Lead output → Google Sheets
+
+Header order + value vocabulary for both sheets: `docs/lead-format.md`.
+Recommendation vocab: `Strong Deal` / `Marginal`. Flip Quality: `Good Flip` /
+`Thin Flip` / `Flip W/ Caution` / `Negative`.
+
+**Primary — "Updated Flip Scout Agent"** (`1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ`) — the
+prod sheet the app is connected to since 24 Sep. The old "Flip Scout Agent"
+(`1u7YXGGUp_TeJUP3nYDqTJDJgu5IjLtkX0KPlSkI4TE4`) now holds only an old KPI tab;
+TEST sheet: `12Vr7PN5zb84rOwqyk7HjnkOybir_N1EIWfCMWw9suhQ`.
+The desktop app writes here **directly over the Sheets API** (§7) — there is no
+web app, no deployment and no shared secret any more. Three tabs:
+
+- **`Leads`** — `Status · MLS # · Address · Beds · Baths · SqFt · Lot SqFt ·
+  Year Built · DOM · Purchase Price · $/SqFt · Notes · MLS Link · First Added ·
+  Bucket · Opportunity Score · Why · Price Cut · Listing Agent · Offer Due ·
+  Private Remarks · Occupied By · MLS Status · Agent Phone · Agent Email ·
+  Showing · Disclosures`. The last four come off Agent Full (`LA Ph:`, `LA Em:`,
+  `Instructions:` + `Show Contact:`, `Disclosures URL:`); the Disclosures field
+  was blank on 8 of 10 live samples, so `core.disclosuresLink()` falls back to a
+  link in the remarks next to "disclos…" or on a known host (glide, homelight…).
+  **A label's value is at most ONE tab away** — two tabs means the field is
+  blank; `[ \t]*` let a blank "Show Contact" read "Show type:" as its value.
+  Keyed on `MLS #`; rows are append-or-backfill. The gate columns were added at
+  the **end** so existing rows and the reject script (which reads by header
+  name) keep lining up; `Bucket`, `Opportunity Score`, `Why`, `Price Cut`,
+  `Offer Due`, `Private Remarks` and `Occupied By` are app-owned and replaced on
+  a re-review, everything else is never overwritten.
+
+  **Offer Due has no MLS field** — every label on live Agent Full pages was
+  checked (23 Sep). Agents write it into the remarks ("All offers due Monday
+  9/21/26 6:00 PM", "Offer date: 9/30/26 by Noon", "Offer Date TBD"), so
+  `core.offerDue()` reads it from the private + public remarks and writes
+  `2026-09-30 (Wed) 12:00 PM`, `TBD`, or blank when nothing says when. Only a
+  sentence about an offer *deadline* counts; "offer to include a deposit copy"
+  and "seller may reject any offer" do not. Also read (Seth's live misses, 23
+  Sep): "Offers **will be accepted** Monday Sept 28th", and a day with no month
+  — "Offers Due Wednesday **the 23rd**" takes the month where the 23rd is a
+  Wednesday. Open-house / broker-tour dates (OH, SOH, BT) are never read as one.
+  **TBD wins over any date after it** (v1.72.1, Seth 10 Oct): "Offer date TBD after
+  first weekend of open houses, open Sat 10/10 2-4 PM" alerted as due Sat 4 PM, and
+  "to be determined after 10/11" as due 10/11 — the date after a TBD is an open
+  house or a "not before". `offerDue()` now tests TBD/TBA/to be determined first.
+  (Shipped as v1.59 and again as v1.71 on Flip-scout-Filters; both numbers were
+  also built from claude/inspiring-ride-6er6pe and those downloads overwrote this
+  fix. It finally ships in v1.72.1 — **never reuse a version number another
+  branch has released or is about to**: check the Releases page first, and use
+  a patch number (1.72.1) when the other branch is bumping the minor one.)
+- **`Board`** — **owned by the app, rebuilt from `Leads` after every scan and
+  every refresh** (nothing on it is typed by hand; notes belong on `Leads`).
+  Top: today's funnel (Scanned · Auto-Pass C · AI Review B · Work Now A · New)
+  and the board counts (A · B · offers due in 48h · TBD · passed in Notes).
+  Below: the live A/B leads in **work order** — A before B, soonest future
+  offer deadline first, then TBD, then no date, then past deadlines; a live
+  `Time Left` formula counts down between rebuilds. Rows whose Notes start
+  with PASS / "we're passing" / rejected are counted, not listed
+  (`core.PASSED_NOTE`). **Closed listings** (MLS Status Sold / Withdrawn /
+  Expired / Canceled / Off Market — `core.CLOSED_STATUS`) are counted, not
+  listed; **Pending / Contingent** stay on, after every active lead; **C —
+  Auto-Pass** rows are counted, not listed. Agent Phone and Showing sit right
+  after the Address.
+  `core.buildBoard()` is pure and tested.
+- **MLS Link = `https://www.mlslistings.com/Property/<MLS#>`** (`core.mlsUrl`),
+  the public listing page — opens with no sign-in, checked for SF / ML / CROC /
+  BE numbers, active and sold. The old `Matrix/Public/Portal.aspx?ID=<MLS#>` is
+  MLS's client **email** portal: it wants an id from an agent's email, not an
+  MLS number, so every one of those links showed "The email URL you are using
+  is either not valid or it has expired". The Board and every Refresh rewrite
+  old links (`core.fixLink`).
+- **Leads already on the sheet are never re-reviewed by a scan** — every scan
+  pulls the `Leads` MLS #s into the ledger as `on-board` (the first test re-
+  reviewed 15 of 16 for nothing). **"↻ Refresh leads on the board"** is what
+  keeps them current: it re-reads only the Leads rows not passed in Notes and
+  not closed and not C, **A first, then B, then unscored** (newest row first
+  inside each). Sorting on First Added alone put the day's SF leads at #59 —
+  every row carried the same Aug 1 date. It also **re-checks the hard
+  exclusions on already-scored rows**: a private remark like "This is not a
+  cosmetic remodel" / "plans approved by the City" moves an A/B lead to C with
+  "(found on refresh)" in Why — only ever down, never up. Reports only
+  (no photos, ~12 s each), and updates `Price Cut · Listing Agent ·
+  Offer Due · Private Remarks · Occupied By · MLS Status` — a TBD becomes a
+  date, a pending listing says so, a listing gone from the Active search is
+  flagged "Not found in Active search — check". Rows never scored get a bucket
+  and score (without $/sqft or photos, and the Why says so). Notes are never
+  touched.
+- **`Rejected`** — `Rejected On · MLS # · Address · Price · $/SqFt · SqFt · DOM ·
+  Reason · Stage · By · MLS Link`. Everything dropped lands here with the reason
+  and the stage it fell out at.
+
+  **`Address` is ONE column holding the whole thing** — `1326 Palou Avenue, San
+  Francisco, CA 94124`. Separate City/Zip columns are gone.
+
+### Where the listing facts actually come from
+
+Verified against live Matrix, not assumed. The **results grid has no zip column
+at all** (headers are `MLS # · Street Address · Price · DOM · Bds · Bths · SqFt ·
+Lot Size · Postal City · Class · Age`) and its `Street Address` is street-only.
+So the full address, the zip, the year built and the real remarks are read off
+the **Client Full report** during photo review, by `core.parseDetail(text, mls)`:
+
+- Address line — `844 Brunswick Street, San Francisco 94112`
+- `Age/Yr Blt: 122/1904` → year built. Beats `2026 - Age`, which reads **2026**
+  whenever the grid's Age cell is blank.
+- Remarks are labelled **`Public:`**, not "Public Remarks:". A bare `/Remarks:/`
+  matched the *truncated Open House teaser* instead — so the rules engine was
+  judging condition on the wrong text.
+
+**🚨 Matrix sometimes ignores the MLS # filter and leaves a DIFFERENT listing on
+screen.** Caught in testing: asking for `SF426146279` served `CRPW26161101`
+(220 Saddlehorn Loop, **Lincoln**). `parseDetail` is therefore anchored to the
+MLS # asked for and returns `{mismatch:true, showing:'<other id>'}` rather than
+reading whatever is displayed; the app skips that listing **without a ledger
+entry**, so the next run retries instead of writing it off. Never read "the
+first address on the page."
+
+**Coming Soon listings are scanned too** (v1.48, Bryan 1 Oct; the section 3
+checkbox, on by default). Each area gets a second search with Status = Coming
+Soon and **no List Date window** — a Coming Soon listing may have no list date
+yet. The rows are tagged and go through the same buy box, review and gate.
+Two rules differ: a Coming Soon listing with ≤4 photos is **not** dropped as
+"exterior-only" (its photos are usually not posted yet) and is not sent to the
+AI photo check until they are; its Why says "Coming Soon". Renovated, fire,
+structural and every other hard exclusion still apply. The single-listing
+lookup (`showGallery`, used by review AND the board refresh) now selects
+**Active + Coming Soon** explicitly — the form defaults to Active, so a Coming
+Soon MLS # came back "not found". The status picker is `selectOnly()`; if the
+MLS has no Coming Soon option the run says so instead of searching the wrong
+status. Not yet seen against the live form — check the first run's log.
+Since v1.57 a Coming Soon listing judged without an AI photo verdict is a
+**first look only** — rechecked every 2 days up to 7 times (see the CURRENT
+behaviour block below).
+
+**Both reports are scrolled top to bottom before being read** (v1.40,
+`readWholePage()` in `main.js`; the "Scroll pause per screen" setting). The
+facts-only refresh skips the scroll. Private remarks, offer due and the
+agent's phone/email are read by the live-verified parsers described under the
+qualification gate and the `Leads` columns above.
+
+**Leads also go to the FlipScout Lead Board artifact** (v1.40; Bryan does not
+want to depend on the Google Sheet — it stays optional). Every A/B lead is
+merged into `Documents/FlipScout/FlipScout-scan-<date>.json` by
+`core.boardLead()` — public + private remarks, offer date and time (split from
+`core.offerDue()`'s "2026-09-30 (Wed) 12:00 PM"), listing agent name/phone/
+email, MLS status, bucket + score, and the house's exact Redfin page — copied
+to the clipboard when a run ends, and added on the board with **Add scan**. An
+artifact's shared data can only be written from the page, hence the paste.
+The field names are the board's `scanLead()` names; change both together.
+
+**Listing-type label (v1.49).** Every board lead carries `mlsStatus` from
+`core.listingLabel()`, never blank: **Active** (green), **Coming Soon** (blue,
+solid ring), **Private Listing** (grey, dashed ring), Pending/Contingent
+(orange), Sold/Withdrawn/Expired (red) — the colours in the Team Guide doc,
+drawn by the board's `mlsStatusHTML()`. Private = a Private / Office Exclusive
+status, or "private listing" / "office exclusive" / "pocket listing" / "off-MLS"
+in the remarks (whole phrases — "private remarks", "private yard" are not).
+The Coming Soon pass also ticks a Private / Office Exclusive status when the
+search form offers one.
+
+### Coming Soon & Early Access — CURRENT behaviour (v1.61, read this first)
+
+The version notes below are history; where they disagree, this block wins.
+
+- **Two sources.** (1) the MLS scan's own Coming Soon pass (Status = Coming
+  Soon, needs the MLS sign-in); (2) **🏠 Scan Redfin** in section 3 — no MLS
+  sign-in, drives a visible Redfin window on the user's PC (Redfin 403s cloud
+  servers). "Early Access" is Redfin's label ("Early Access Redfin/Compass
+  Coming Soon") and those homes show in full only to a signed-in Redfin user —
+  **Sign in to Redfin** once (cookies persist in `persist:redfin`).
+- **Same buy box as the MLS scan, enforced by the app** (`core.redfinBuyBox`,
+  MLS grid backstop in `filterCandidates`): single-family only · San Mateo
+  **≤ $2.5M**, every other county ≤ $1.5M · **never over $3M** · 25+ years old
+  when the year is known. Search filters are never trusted.
+- **Single-family must be CONFIRMED (v1.58, Bryan 10 Oct: "not a single
+  family as well on redfin scan").** Redfin `uiPropertyType` 1 or
+  `propertyType` 6 (`isSfrType`), or the page's own "Property type" label /
+  key-details line (`core.redfinPageType` — never the description). Once the
+  page is read, an unknown type is DROPPED (it used to pass). An address with a
+  unit (`#3`, `Unit B`, `Apt 12`, `Spc 44` — `UNIT_ADDR_RE`) is a condo/unit.
+  A stray page line only counts when Redfin's data has not already said house.
+- **Per Redfin home, in this order:** buy box from Redfin's data → open the
+  page, scroll it, buy box again (true type/year) → skip if an MLS scan already
+  checked its MLS # → **PHOTOS FIRST**: every photo stepped through in Redfin's
+  viewer and sent to the AI; a not-a-fixer photo verdict drops it here → read
+  the listing agent ("Listed by" block only, never the Contact-agent card) →
+  text rules (`qualify`, Rule #0 still drops "remodeled/turnkey") → **fixers
+  only, decided by the PHOTOS** (v1.58, Bryan 10 Oct: "I'm getting a good
+  property"): `core.redfinPhotoFixer(raw AI answer)` — a fixer only with
+  **heavy** wear, or **some** wear on **original** finishes; "dated but in
+  good condition", a prior 1995–2015 update, new finishes or a structural job
+  drop, and **no description can overrule the photos** (a "bring your vision"
+  used to rescue tidy houses through `aiVerdict`). **No photo verdict** (too
+  few photos posted, AI failed, photos would not download) = **held**, never a
+  lead: a `recheck` entry, opened again later. **The Redfin scan will not start
+  with the AI photo check off** — that fallback to the description is how good
+  houses got through.
+- **Memory (seen-ledger).** Ledger key `RF<homeId>` for Redfin, the MLS # for
+  the MLS pass. **A verdict reached without a photo check is a first look
+  only** (`core.comingSoonVerdict`): verdict `recheck`, opened again after
+  `RECHECK_DAYS` = 2, at most `RECHECK_MAX` = 7 times (~2 weeks), then the last
+  verdict stands. A photo verdict, a buy-box/type drop, a remarks hard
+  exclusion (renovated, fire, tenant, structural) and a confirmed deal are final
+  at once. `core.ledgerSkips()` is the only skip test; every other verdict is
+  skipped for good. A recheck that comes round is put on the re-review list
+  (`markRecheck`), so a lead already on the sheet that now fails moves to C in
+  place. Live-tested in the real app twice over (mock Redfin): first run marks
+  the two photo-less verdicts `recheck`, a run after their date opens exactly
+  those two and skips the final ones.
+- **Output.** Leads (full address, Coming Soon / Coming Soon · Early Access /
+  Private Listing label, agent name/phone/email, the house's own Redfin URL)
+  go to the sheet and to the Lead Board file; a run that finds leads opens the
+  board with them on the clipboard for **Add scan**. Every Redfin answer is in
+  `<userData>/redfin-last-run.txt`; zero homes read → `grid-debug/redfin-*`.
+- **v1.59 bug sweep (Bryan 10 Oct: "make sure to fix all the bugs"; 12
+  findings from an independent review, all fixed):** only THIS listing's
+  photos are judged (`core.redfinSubjectPhotos` — Redfin's "similar homes" /
+  "recently sold" thumbnails share the CDN and used to be sent to the AI and
+  counted toward the ≤4 rule; grouped by the listing-number file stem); a
+  photo-confirmed fixer can't be dropped by the text score (only a hard
+  exclusion can; it becomes at least B); an MLS Coming Soon with 0 photos is
+  held, not a final C (`autoDecide` with no photos = no verdict); Redfin
+  buy-box skips are keyed `RF<homeId>` (an MLS # on Rejected blocks the MLS
+  scan) and logged once per reason (ledger `buybox`, which never blocks a
+  later price cut); re-review keys always cleared (`clearRecheck`, also on a
+  failed run); "property type" only read as a label at the start of a line;
+  exact `/home/<id>` match; the window must be on the home before reading
+  (redirect = skip, retry next run) and again after the photo viewer; AI calls
+  time out after 120 s, photo downloads 20 s incl. the body; Redfin buttons
+  disabled during any run; MLS fallback grid reads Class; the MLS scan skips a
+  house the Redfin scan already kept (digits match, e.g. 41149486 vs
+  BE41149486); the year is the current year, not 2026; a held home whose
+  description has a hard exclusion is dropped at once. Re-tested end to end in
+  the real app (mock Redfin + mock AI, 13 homes, two runs).
+- **v1.60 — cheap checks before any navigating or photos (Bryan 10 Oct:
+  "they keep navigating property that has already renovated… 2.5M up and not
+  single family").** Order per home: (1) **before opening** — buy box on
+  Redfin's data + Rule #0/fire/tenant/structural wording in Redfin's data
+  description (`listingRemarks`) → dropped, never opened; (2) **page opened,
+  no scrolling** — price (page asking price, never the Redfin Estimate or a
+  /mo payment), type, renovated wording → dropped in seconds; (3) full read →
+  single-family must be confirmed, **asking price must be known** (unknown =
+  skip; it used to read as $0 and pass), hard text exclusions; (4) only then
+  the photo walk + AI. `core.parsePrice` reads "$2.7M"/"$950K" (a "$2.7M" card
+  was $0 and passed every cap). If the AI fails 3 times the run stops opening
+  homes instead of holding the rest.
+- **v1.61 — 🧹 Clear cache & clean up (Bryan 10 Oct: "clear a cache all
+  the bugs").** The live board held **62 Redfin leads from older builds**
+  ($25M 1001 Vallejo, $7.85M Hillsborough, Woodside $4–5.5M, units #306/#805/
+  Unit 5A/Unit CU1, 2018–2025 builds, most "photos viewed but not judged").
+  Section 3's **🧹** button: clears browser caches for the app, MLS and Redfin
+  windows (cookies/sign-ins kept); forgets `RF*`, `recheck` and `buybox`
+  ledger entries; empties rereview.json; takes Redfin leads failing a hard
+  fact (price/unit/age) out of today's Lead Board file; on the sheet, every
+  Redfin lead (Why starts "Redfin", not C, not passed) failing
+  `core.oldRedfinLeadProblem` (cap by zip via `capForAddress` — San Mateo
+  zips $2.5M, 94303 by city — unit, < 25 yrs, never photo-checked) moves to C
+  with "(cleanup <date>: why)". Dry-run on the live data: 54 of 62 move, 8
+  photo-confirmed stay. Browser caches are also cleared automatically the
+  first time a new version starts (`last-version.txt`). A Redfin lead's Why now
+  starts with "photos show a fixer" (the board file clips Why at 240 chars).
+- **Refresh "Not found" bug (v1.48–v1.60).** `showGallery` searched only
+  Active + Coming Soon, so leads gone Pending / Contingent / Sold couldn't be
+  found by their own MLS # and "↻ Refresh leads on the board" stamped **572**
+  "Not found…" (over 142 Pending, 39 Contingent). The lookup now selects EVERY
+  status (`selectOnly(…, ['.'])`) and the refresh skips Redfin-only ids
+  (RF…/Redfin listing ids — nothing to look up). The next refresh restores the
+  real statuses.
+- **Not yet run against live Redfin** — the first real run's log and
+  `redfin-last-run.txt` are what to ask for if it finds nothing.
+
+**Redfin Coming Soon / Early Access scan (v1.50, Bryan 2 Oct — no MLS
+sign-in).** Section 3's **🏠 Scan Redfin** button drives a visible Redfin
+window (`persist:redfin`) from the user's PC — Redfin 403s cloud servers, so it
+cannot be tested from here. Per ticked county: Redfin's location lookup →
+county page (`core.redfinCountyPath`) → `…/filter/property-type=house,
+max-price=<cap>,sort=lo-days[/page-N]` (≤25 pages) → every `/home/<id>` card
+read class-agnostically (`JS_REDFIN_CARDS`, `core.redfinCard`) → kept only when
+the badge ABOVE the price says Coming Soon / Early Access / private or broker
+exclusive (`REDFIN_EARLY_RE`; a description saying "coming soon" does not
+count). Each kept card's page is scrolled and read (`core.parseRedfinHome`:
+About this home, Built in, Listed by, days on Redfin, Source … #MLS — an SFAR
+number gets its `SF` prefix), judged by `qualify()` with `comingSoon:true`, and
+its Redfin photos (`redfinPhotoUrls`, now fetched through the Redfin window's session + nativeImage)
+go to the AI check (photos-first since v1.56). Ledger keys `RF<homeId>`; a house whose MLS #
+an MLS scan already checked is skipped. Leads carry `mlsStatus` Coming Soon /
+Coming Soon · Early Access / Private Listing and the card's own Redfin URL; MLS
+id is the MLS # when Redfin shows one, else `RF<homeId>`. Zero cards read →
+the page text + screenshot go to `<userData>/grid-debug/redfin-*` — ask for
+those before guessing at Redfin's layout. **Not yet run against live Redfin.** *(History: badge-on-card selection was replaced by Redfin's own data in v1.52.)*
+
+**Listing agent off Redfin (v1.51, Bryan 2 Oct: "open it 1 by 1, access
+contact agent by scrolling down").** After each home page is scrolled and
+read, `JS_REDFIN_AGENT` clicks only the safe "Show more / See all" toggles,
+scrolls the **"Listed by"** block into view, pauses, and widens from that line
+to its block — never into the page's **"Contact agent"** card, which is
+Redfin's own agent (its buttons are never clicked; `BAD` regex). Its text +
+tel:/mailto: links → `core.parseRedfinAgent` → name, brokerage, phone
+`(415) 555-0142`, email (never @redfin.com), DRE. They fill `Listing Agent ·
+Agent Phone · Agent Email` on the sheet and the board lead; a run ends with the
+sheet's Board tab rebuilt and the leads on the clipboard for **Add scan** (the
+board's **↻ Refresh from sheet** also picks them up). Checked in Chromium on a
+mock page with a decoy Redfin phone; not yet on live Redfin.
+
+**v1.52 — first live Redfin run found nothing** (Bryan 2 Oct: "you're just
+filtering the county, not opening them 1 by 1, not checking any image"). The
+search-card badge never matched, so no home was opened. Now the county comes
+from **Redfin's own data**, fetched inside the Redfin window after the search
+page loads: `/stingray/api/gis` JSON (`core.redfinGisHomes` — `mlsStatus` +
+`sashes[].sashTypeName`, e.g. "Early Access Redfin Coming Soon"), then the
+`gis-csv` download (`core.redfinCsvHomes`, STATUS column), then the cards
+(`JS_REDFIN_CARDS`, now widened to the whole card so the photo's badge is
+inside). `region_type=5` county · `uipt=1` house · `status=9` · `max_price` ·
+350/page; `market=sanfrancisco` tried first, then none. Each home is then
+opened ONE BY ONE: page scrolled, **every photo stepped through in Redfin's
+viewer** (`viewRedfinPhotos`: click the biggest photo, ArrowRight until no new
+photo, Escape; `redfinPhotoUrls` dedupes sizes), agent read, then judged. With
+no AI key the log says loudly that photos were viewed but not judged.
+**Early Access homes need a Redfin sign-in** — section 3's "Sign in to Redfin"
+opens redfin.com/login in the scan's own window (cookies persist). SF county is
+region 340. Mock-tested in Chromium; still not run against live Redfin.
+
+**v1.53 — "not pulling any leads, and the searching is non-stop" (Bryan 2
+Oct).** Every wait on the Redfin window now has a limit (`timeLimit`: page
+load 30 s, snippet 30 s, in-page `rfFetch` 20 s with AbortController): an
+`executeJavaScript` on a page that redirected, or a fetch Redfin held open,
+waited for ever. `readWholePage` scrolls at most 40 screens (a page that loads
+more as it scrolls never ended). The home description is read when Redfin runs
+it onto one line (`parseRedfinHome` — the first run read none, so a "remodeled
+top to bottom, turnkey" home stayed B). Each data page logs its count; every
+Redfin answer is saved to `<userData>/redfin-last-run.txt`; a run that finds
+leads opens the Lead Board with them on the clipboard. **End-to-end tested in
+the real Electron app under xvfb against a mock redfin.com** (scratchpad
+harness intercepting `persist:redfin` https): finds 2 of 3, opens each, steps
+15 photos, reads agent (not the Redfin decoy), drops the renovated one, writes
+the board file; with every data call held open it times out and finishes in
+~70 s.
+
+**v1.54 — same buy box on Redfin as on the MLS (Bryan 2 Oct: "make it the
+same command: single family home only and we don't buy 3M above").** Redfin's
+search filters are not trusted: `core.redfinBuyBox()` checks every Coming Soon
+/ Early Access home twice — from Redfin's data (before the page is opened) and
+from the home's own page (before any photo) — single-family only (Redfin
+`uiPropertyType` 1, or a "Single Family" label; condo / townhouse / multi /
+land / mobile drop), price ≤ the area cap (San Mateo $2.5M, else $1.5M) and
+**never over $3M** (`REDFIN_PRICE_CEILING`), 25+ years old when the year is
+known. Drops go to Rejected with stage *Buy-box filter*. The MLS grid got the
+same backstop: `JS_SCRAPE_GRID` now reads the **Class** column and
+`filterCandidates` drops a non-single-family class or a price over the area
+cap / $3M even if the search ignored those boxes. Confirmed deals are never
+dropped. The area caps are unchanged — $3M is a ceiling, not a new cap.
+
+**v1.55 — Redfin Coming Soon / Early Access: FIXERS ONLY (Bryan 2 Oct).** A
+Redfin find that passes the buy box and the rules is kept only when
+`core.redfinFixerGate()` sees it is a fixer: the description says it needs
+work (`saysNeedsWork` — as-is, fixer, original condition, "bring your",
+cosmetic remodel, distressed sale) **or** the AI photo check kept it (which
+already means wear was seen). A home whose description says nothing about its
+condition — or has none yet — and no AI check → C "not a fixer". Turn the AI
+check on so a quiet description with a worn interior is not lost. Confirmed
+deals are never dropped. The MLS scan's own Coming Soon pass is unchanged.
+
+**v1.56 — Peninsula cap $2.5M, and Redfin judges the PHOTOS FIRST (Bryan 2
+Oct: "maximum 2.5m for peninsula area… only fixer property, look on the photo
+first").** `DEFAULT_BUYBOX` San Mateo `maxk: 2500` (MLS search box, grid
+backstop, Redfin buy box and `scripts/mls-multi-scan.js` all follow it; $3M
+ceiling unchanged). On each Redfin home, right after the buy-box check, every
+photo is stepped through and sent to the AI **before** the agent, the
+description or the score: a "not a fixer" photo verdict drops it there (stage
+*Photo review*). A photo download that fails is **not** a verdict — it falls
+back to the description and does not count toward the 3-failures AI cut-off
+(the first test dropped every home as "no photos could be loaded"). Photos are
+fetched through the Redfin window's own session with a redfin.com referrer.
+Tested end to end with a mock AI: renovated and "dated but tidy" drop on the
+photos, the worn original house is kept.
+
+**v1.62 — wrong-data audit of the live board (Bryan 10 Oct: "make sure you're
+not pulling wrong data").** All 1,608 rows checked field by field. Fixed:
+new construction built 2026 (Meritage, SummerHill, "Lot 778") reached the
+board as B — the grid's Age reads 0 for a new house, which passes as
+"unknown"; `rulesDecide` now drops a report year under 25 years old as a hard
+exclusion, and Refresh re-checks it. Redfin's own listing ids
+(`2199662030468543705`, `120807`) and unprefixed bridgeMLS numbers
+(`41149866`) are no longer used as MLS #s — `redfinMlsId` keeps only real
+ones (SF/BA prefixes it can be sure of), the lead keeps `RF<homeId>`, and
+`redfinMlsDigits` still matches the MLS / board. The Redfin scan now pulls
+the sheet into the ledger first (1559 Grand Ave was on twice). A sqft under
+300 is a placeholder ("1" read $210,000/sqft). A zip loses stray punctuation.
+The Board lists a relisted house once, under its newest MLS #. Left as the
+MLS has it: agents' typos ("an ff" as an address, Benicia 90045) and
+@redfin.com emails on MLS leads (Redfin's own agents listing those homes).
+
+**v1.63 — bug check of v1.62 (Bryan 10 Oct).** Refresh judges "too new" on
+the MLS report's year only, never the sheet's Year Built (older rows can
+carry a bogus 2026). The Board's relisted-house key is the whole street line
++ zip ("100 N Main" and "100 N Oak" never merge), and the MLS copy of a
+house beats its Redfin copy. Checked against the live board: 15 duplicate
+rows hidden, all true twins.
+
+**v1.64 — independent review of v1.62/1.63, all fixed.** The sheet→ledger
+sync skips `RF<homeId>` ids (a blanket `scan-dropped`/`on-board` locked out
+the homes 🧹 frees and the buy-box skips a price cut should bring back);
+Redfin photo filtering anchors on `h.mls || h.mlsDigits` (a bare bridgeMLS
+number lost its anchor and "similar homes" thumbnails could win again); a
+sqft under 300 (or blank) is rejected WITH a reason, kept out of the
+medians, and never stops a confirmed deal; Board dedupe maps suffixes to one
+spelling (Oak St ≠ Oak Ct; "Avenal" = "Avenal Avenue") and takes the last
+zip; `scripts/mls-sf-scan.js` passes `yearBuilt` like the app.
+
+**v1.65 — "I don't see Redfin scanning" (Bryan 10 Oct).** Every way the
+Redfin scan can refuse to start now says so in red in the status box, not
+only in the log: AI photo check off (the scan needs it), no area ticked, or
+another run still finishing (that one used to do nothing at all and grey out
+the buttons). The Redfin window is brought to the front when a scan starts,
+and the log says "Opening redfin.com…" / "Reading the sheet first…" (that
+read is capped at 90 s). Checked in the real app: AI off → red message,
+button usable; AI on → full mock run unchanged.
+
+**v1.66 — "Redfin scan NOT started" (Bryan 10 Oct, screenshot).** The
+Redfin scan now uses an AI key saved earlier even when "Use AI" is unticked
+(that box only governs the MLS scan; the flag is restored after the run),
+and reads the key from `ai-settings.json` if the screen had not pushed it.
+With no key at all, the red message carries a **🔑 Set up the AI key**
+button that ticks Use AI, opens the fields and puts the cursor in the key
+box. Both cases checked in the real app.
+
+**v1.68 — UI bug sweep (independent review, Bryan 10 Oct "lots of bugs").**
+A run owns the buttons until its `done` arrives: Stop only disables
+Stop/Pause/Resume (it used to re-enable Start while the old run was still
+shutting down), `control.running` is cleared LAST in every finally (a new run
+could start under the old one's Board rebuild and have its window closed),
+"Check session" no longer re-enables Start mid-run, "Open MLS sign-in" is
+disabled during a run and `login` refuses while running. Every "already
+running" refusal says so (`busy()` in the renderer). Redfin homes being opened
+show "… reviewing", not "✕ DROP". The Redfin report/Export/Send cover every
+county (`allKept`), not the last. Refresh / Clean up failures are logged;
+Refresh when not signed in says so instead of "✓ finished". "No new
+qualifying listings" instead of an empty report. Backup + ledger lines
+refresh after each run. Section refs fixed (Google Sheet is section 8). Text
+from listings / the sheet is escaped before it goes into the page (`escH`).
+
+**v1.69 — full bug sweep, MLS + sheet + Redfin (three independent reviews).**
+MLS: a listing whose report did not load / window closed / number not found
+is SKIPPED with no ledger entry (`showGallery` returns `failed` / `notFound`;
+it used to be scored on nothing and written off); `nav()` reopens a closed MLS
+window; an AI answer that does not parse is an error, not a DROP; photos that
+won't download don't count toward the 3-AI-failures cut-off; a person's
+rejection replaces a `recheck` in the ledger and is never re-written by a
+re-review (its By stayed an email) nor added to the Lead Board file; refresh /
+re-review / cleanup sheet writes are `patchOnly` (a row deleted mid-refresh
+never comes back as a skeleton); sheet dates are the local day (UTC stamped
+evening scans tomorrow); Baths + Lot SqFt are read off the grid (`lotOf`,
+double-escaped regex!); MLS buy-box rejects sync as `buybox` (re-checkable
+after a price cut). Refresh leaves a row alone when its report fails to load.
+Redfin: `core.resolveRedfinType` — the page label wins only when decisive
+(single-family or clearly not a house), so "Property Type: Residential" no
+longer drops a house Redfin's data calls house; page-phase buy-box skips are
+`buybox` not final; each home is in its own try/catch (one error no longer
+loses the area's leads), a closed window ends the area cleanly; Stop during
+the photo walk judges nothing and pays no AI call; a buy-box skip never
+overwrites a final verdict; homes the MLS already checked are skipped BEFORE
+opening; a held home whose description turns "remodeled" is closed out.
+
+**v1.70 — 🔑 Sign in to Claude (Bryan 10 Oct, third ask: "just log in to Claude,
+no key").** A claude.ai chat login still can NOT be used by the app
+(Anthropic does not allow it) — so the button signs in to Claude's developer
+site, console.anthropic.com (same email), in the app's own window
+(`persist:anthropic`) on the API Keys page; the user clicks Create Key → Copy,
+the app watches the clipboard for `sk-ant-…`, saves it, ticks Use AI, tests it
+with one tiny call, clears the clipboard and closes the window. Nothing to
+paste. The button is in section 2 and on the Redfin "NOT started" message.
+Billing is the console's pay-as-you-go API credit, not a claude.ai plan.
+
+**v1.71 — NO KEY NEEDED (Bryan 12 Oct: "I don't need a key, please remove
+that").** The Redfin scan no longer refuses to start without Claude. With no
+key (`noAI`), a home is kept only when its own description says it needs work
+(`redfinFixerGate` → `saysNeedsWork`), never "held"; every lead's Why ends
+"photos NOT checked (no Claude) — look at them before calling". The key /
+🔑 Sign in to Claude controls sit behind the now-optional "let Claude look at
+every photo" box in section 2. The MLS scan's no-AI warning is a plain
+reminder, not a red alarm. Bryan asked again for a claude.ai sign-in instead —
+still not possible (Anthropic does not allow apps to use a claude.ai login).
+Trade-off to remember: without the photo check, "bring your vision" houses
+that are tidy inside can reach the sheet again — the reviewer is the backstop.
+
+**v1.72 — key section REMOVED from the screen (Bryan 12 Oct: "please remove
+the key here… I will use direct access to Claude").** Section 2's AI block is
+wrapped in a hidden `#aiSection` (kept only so the script's element lookups
+still work); at startup the renderer pushes `useAI:false` and an empty key, so
+a key saved by an older version is never used; the Redfin scan no longer
+picks up `ai-settings.json`. Both scans judge on the descriptions; leads say
+"photos NOT checked". Do not bring a key prompt back unless Bryan asks.
+
+**v1.72.1 — AI photo check BACK, ChatGPT or Claude (Seth 12 Oct: "can you put
+it back? the chatgpt api key instead? i can switch to claude or chatgpt").**
+Built on Flip-scout-Filters from v1.72 (Seth was told Bryan had asked for it
+off and chose to build it). Section 2 shows the AI block again, OFF unless
+"AI photo check" is ticked: one key box — `sk-ant-…` = Claude, anything else
+= ChatGPT (OpenAI Chat Completions, photos as `image_url` data URLs,
+`max_completion_tokens` ≥ 4000 for photo calls); a **Model dropdown** filled
+from the key's own `/v1/models` list (built-in list until Test key), with
+"Other…" for any name, tidied by `core.tidyModel` ("GPT 4.1mini" →
+`gpt-4.1-mini`); a Claude model on a ChatGPT key (or the reverse) falls back
+to that service's default (`gpt-4.1` / `claude-opus-5-5`). The saved key comes
+back on launch. Both scans log "AI photo check is on — ChatGPT · gpt-4.1" at
+the start; with it off they behave exactly as v1.72 (descriptions decide,
+"photos NOT checked"). The Redfin scan uses the check only when it is ticked —
+no saved key is picked up behind the user's back. Also carries the offer-date
+TBD fix (above).
+
+**v1.72.2 — "taking good properties like 1928 Camargo Drive" (Seth 17 Oct).**
+Camargo (ML82057649, MLS scan, 16 Oct) reached A with no photo verdict: none
+of that day's 36 MLS leads had one, though Seth ran v1.72.1 (15 Oct: 20 of 23
+checked). Most likely the AI calls were refused (rate limit / credit) and three
+in a row switch the check off for the run — said once in the log, nowhere
+else. Fixes: (1) **busy is not failed** — a 429 / 5xx / overloaded answer waits
+(retry-after, else 15·2ⁿ s, ≤ 60 s) and retries up to 3 times; out-of-credit
+(`insufficient_quota`, "credit balance") is said plainly and not retried
+(`aiError` in `main.js`); (2) every kept MLS lead without a photo verdict says
+**"photos NOT checked (AI photo check off | AI call failed | no photos could be
+loaded | AI check stopped after 3 failed calls)"** in its Why, like Redfin
+leads; (3) the end of every scan says **"Photos checked by the AI on N of M
+kept lead(s)"** with the last AI error (red when the check was on), also in
+the status box; KPI field `photoChecked`. (4) **"Freshened up" is work done**
+(`FINISH_KW` + `LIGHT_FINISH_KW`): laminate / vinyl-plank / engineered floors
+and "new ___ floors" (not after worn/old/original), refurbished / resurfaced /
+refinished / reglazed counters, cabinets, tubs count as finishes; new or fresh
+paint, new carpet and a single new appliance are LIGHT touches — they never
+drop a house on their own (a flipper still has the kitchen and bath, the 844
+Brunswick lesson), but one real finish + two light ones does, as do two real
+finishes. "needs / could use new paint" never counts. Replay over the board's
+1,497 A/B leads with remarks: only Camargo changes (→ C "4 finishes already
+done"). Camargo text: "New laminate floors throughout, New paint, New cooktop,
+refurbished counter tops… staged… good bones" (it was "silent on condition").
+
+**Redfin links: only the house's own page, never a search or an area page.**
+Redfin page URLs carry Redfin's home id, so they cannot be built from the
+address. The app asks Redfin's location lookup from the user's machine for each
+kept lead and keeps a result only when the slug's house number and zip match
+(`core.redfinUrlFrom`, tested). Redfin blocks this lookup from cloud servers.
+For the older board leads the links were filled in by web search into the
+board's `links/_found` document; ~56% of addresses have a findable page.
+
+`core.fullAddress()` composes the sheet value, stripping a trailing zip/state
+off the street line before recomposing — appending blindly gave
+"…San Francisco 94112, CA". Fixtures of real report text live in
+`desktop-app/fixtures/`; `node desktop-app/test-google-sheets.js` covers all of
+the above.
+
+Also: **"All San Francisco" is a log heading, never a city.** Data rows use the
+listing's own `Postal City` (the only right answer on a county-wide scan), with
+the `All ` prefix stripped as the fallback.
+- **`KPI`** — **four columns, numbers, no chart**:
+  `Date · Rejected · On List · Scan Rejected`.
+  - `Rejected` — taken off the list by a **person** that day (Rejected rows whose
+    Stage is *Reviewer* or *Deleted by hand*; scan drops are not manual)
+  - `On List` — qualified leads still on the `Leads` tab (a live count, so only
+    today's row carries it)
+  - `Scan Rejected` — thrown out by the scan itself that day
+
+  **The Apps Script builds the whole tab** from the `Rejected` and `Leads` tabs —
+  the app writes none of it. Both rejection figures come off `Rejected`, split by
+  **who did it**: an **email address in `By`** (`bryan@twinhomebuyer.com`) means a
+  person, `FlipScout` means the scan. `Stage` is checked too — a row deleted by
+  hand has a stage but no email — but an email is enough on its own, whatever
+  the stage says. One source, so the two numbers
+  cannot disagree, and nothing accumulates — a corrected row shows up at once.
+
+  Splitting ownership (app writes some columns, script others) was tried and
+  produced a tab reading **`Scan Rejected: 0`** after a scan that had rejected
+  hundreds: the app's figures were wiped when the header row got corrected and
+  nothing rewrote them until the next run.
+
+  **Every buy-box rejection is logged**, not a sample. The old 25-per-city cap
+  made `Scan Rejected` an undercount, and a number that quietly means "some of
+  them" is worse than no number.
+
+  **Header rows are compared in FULL, never just cell A1.** A tab from an older
+  layout still began with "Date", so the old headings survived and values landed
+  under the wrong ones — the 23-column KPI tab kept its headers while the app
+  wrote into the first few columns, and a chart titled "Manually removed per
+  day" plotted *Runs* and *Candidates*. `ensureTab()` (app) and `kpiSheet_()`
+  (script) both rewrite a mismatched header row and blank the stale extras, so
+  an old tab heals itself instead of needing to be deleted by hand.
+
+The only Apps Script left is **`apps-script/flip-scout-reject.gs`**, and it does
+one job: when a reviewer takes a QUALIFIED lead off `Leads`, record the date and
+the reason. `⚡ Flip Scout → 🚫 Reject selected lead(s)` prompts for the reason
+and moves the row; an installable `onChange` trigger ("Turn on delete tracking")
+catches rows deleted by hand and logs them as *removed with no reason given*, so
+nothing vanishes silently. It also owns the KPI tab (above). Paste-and-save only
+— nothing to deploy.
+
+**Legacy — "Property Review"** (`10kBdkMqQ6_7xiLt8peF0WfU3R1Go8bOZnYiUmNFJSIA`,
+gid `1510205894`) via `apps-script/append-lead.gs`, POST `{secret, lead}`.
+De-dupes on Redfin Link. Kept for the existing headless pipeline.
+
+## 6b. Lead Board, Google Chat alerts, Pass bridge (branch `claude/keen-meitner-t4gora`)
+
+All of this lives on the Board's branch, not this one — `flipscout-board/`:
+
+- **Real Lead Board** (`864f77f8…`) is kept as it is, as the backup. Another
+  session also edits its code; check before touching it.
+- **Test board** https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9 —
+  `flipscout-board/test/` (README there is the manual). Built from the prod
+  sheet by `flipscout-board/build_data.py`; refreshed daily at 11:00 PT by a
+  Routine in Seth's session, and on demand by its own **↻ Refresh from sheet**
+  button (viewer's Google Drive connector). Adds agent phone/email, MLS link,
+  offer time, MLS status, remarks panel, bucket/score (A first), Show views,
+  Area filter, Pass with a reason, confirmed saves.
+- **Chat alerts** — `flipscout-board/apps-script/flipscout-alerts.gs`, pasted
+  into the prod sheet next to `flip-scout-reject.gs`: 8:00 "Offers due in 3
+  days" summary + 🚨 NEEDS JUAN (under 24h) / 🔴 final call (under 5h) at 8:00,
+  11:15 and 15:00 PT. Webhook in Script Properties `CHAT_WEBHOOK`, never in git.
+- **Pass bridge** — the same script's web app: the Board's "Pass ↗" writes
+  `PASS (Board) — who, date: why` into the lead's Notes, which the app's
+  Refresh (`core.PASSED_NOTE`) and the alerts already skip.
+- The artifacts cannot write the sheet directly (Drive connector is read-only
+  for cells; a page cannot post in the background) — hence the link-in-a-tab
+  bridge. Don't reintroduce a "Copy for the board" button in the app.
+
+## 7. FlipScout desktop app
+
+`desktop-app/` (Electron). Sign in → scan the buy box → photo-review with
+pause/resume → deal report → the leads land in the spreadsheet. Sections in the
+control window: 1 login · 2 how listings are judged · 3 scan · 4 now reviewing ·
+5 report · 6 daily KPI · 7 Google Sheet. Renovated properties never reach the
+sheet — they are dropped at photo review (Rule #0/#2).
+
+**You pick the areas.** Section 3 has a checkbox per buy-box area (plus All /
+None / San Francisco only), remembered between runs; only ticked areas are
+scanned. The renderer sends **indexes**, not area objects, so `DEFAULT_BUYBOX`
+stays the single definition of the buy box. San Francisco alone takes minutes;
+the whole box takes hours.
+
+**And it stops by itself.** When the last city is done the app closes the MLS
+window, clears "Now reviewing", resets the buttons and prints
+`Scan COMPLETE — N scanned · N skipped · N reviewed · N kept · N dropped · N
+written to the sheet`. Nothing is left running. A run that never started (not
+signed in) leaves the browser window alone, so it cannot shut the window you are
+about to log in through. `finishRun()` in `main.js`.
+
+**The photo grid never actually opened until 23 Sep.** The snippet that reads
+the media `Key` sits inside a template string, and its single-backslash `\d`
+reached the page as a bare `d`, so the regex never matched and every listing
+fell back to the ~4-photo carousel — which is what dropped 844 Brunswick (29
+photos) as "exterior-only". Fixed (`\\d`), and `gridOk` now tells the rules
+whether a low photo count came off the real grid; a carousel count is never
+read as "no interior access".
+
+**The AI sees EVERY photo now.** `showGallery()` used to read the Client Full
+carousel, which yields ~4 of 26 and starts with the exterior — so vision was
+judging kitchens it had never been shown. It now navigates to
+`PhotoPopup.aspx?…&View=G` (URL built from the media `Key` on any carousel
+image) and reads the whole grid, and `spreadPhotos()` skips the cover shot and
+spreads the 20 sent across the set instead of taking the first 20. This was
+live-verified with `scripts/mls-photos.js`.
+
+**AI model id:** the default was `claude-opus-5`, which is not a model id, so
+AI vision would have failed on its first call. It is now `claude-opus-5-5`
+(`claude-sonnet-5` is the cheaper option), and a saved old value is migrated.
+
+**⚠ v1.67: Claude ONLY — OpenAI support removed (Bryan, 10 Oct: "do not use ChatGPT, use Claude itself").** A non-`sk-ant-` key is refused with a message, never sent; `aiReady()` = Use AI + a Claude key; old `gpt-*` / `claude-opus-5` / `claude-sonnet-5` model names map to valid Claude ids; section 2 links to console.anthropic.com → API Keys. A claude.ai sign-in can NOT replace the key (Anthropic does not allow apps to use a claude.ai login) — Bryan asked, and was told so. History below. **(was) OpenAI works too (v1.41.0, Seth, 26 Sep — the team has a ChatGPT key).** The
+provider comes from the key: `sk-ant-…` = Anthropic, anything else = OpenAI
+Chat Completions (`gpt-4.1` by default; photos go as `image_url` data URLs;
+`max_completion_tokens`, which the newer models require). Same prompt, same
+KEEP/DROP parsing (`aiCall()` in `main.js`). A Claude model name on an OpenAI
+key (or the reverse) is swapped for that provider's default. **Test key** in
+section 2 makes one tiny call. Key + model persist in `ai-settings.json` under
+userData. They are written only on an edit to the AI fields (`aiSave`): the
+screen's startup settings push carries an empty key box and would wipe it.
+
+v1.41.0 is built from `Flip-scout-Filters` after merging `claude/inspiring-ride-6er6pe`,
+which shipped the Sep 24 "Flip Scout Filters v1.40.0" — so the new download keeps
+that line's Lead Board hand-off, Redfin links and report scrolling.
+
+**v1.42.0 (Seth's first live AI run, 26 Sep):**
+- *San Francisco: "280 matches → scraped 0 rows".* The grid was read ONCE, 3.5 s
+  after clicking Results; a slow MLS left it empty and the area was skipped as
+  "nothing new". `scanArea` now polls up to 25 s for rows, waits for each next
+  page's first MLS # to change (20 s) instead of a fixed 3.2 s, and logs an
+  error when matches > 0 but no rows were read.
+- *147 Sweetberry Ct dropped for ONE remodeled bath* next to a dated kitchen
+  with formica counters. The vision prompt now carries the calibration rule
+  ("one updated surface is not a flip") and says `structural` means
+  foundation/framing/settlement/roof/water only — gpt-4o-mini was labelling
+  renovated finishes "structural".
+- Only **A and B** go to AI vision (it can only move a lead down, so a C was a
+  paid call that changed nothing).
+- An empty or unreadable AI reply is treated like a failed call, not a DROP;
+  OpenAI gets 4000 completion tokens so "thinking" models can answer.
+
+**v1.44.0 — San Francisco still read 0 rows after the 25 s wait** (Seth, 26 Sep,
+12:02 PM: "280 matches → scraped 0 rows"; San Mateo and Santa Clara read fine in
+the same session). So it is not timing: SF's results page does not match the
+`tr.DisplayRegRow / tr.DisplayAltRow` grid the reader expects. `JS_SCRAPE_GRID`
+now falls back to finding the header row by its cells (`MLS #` + `Price`) and
+reading every later row of that table with an MLS-shaped id. If that also finds
+nothing, `scanArea` saves `JS_GRID_DEBUG` (URL, title, frame count, row class
+counts, where "MLS #" appears, page text) plus a screenshot to
+`<userData>/grid-debug/` and logs the path — **ask for those two files before
+guessing at SF's grid again.**
+
+**A failed AI call is not a verdict.** It used to return DROP, so one typo in
+the model name auto-passed every listing in a run. Now the text rules' verdict
+stands, the log says `AI call failed: <provider message>`, and after 3
+failures in a row AI is off for the rest of that run.
+
+**The run never stops to ask.** There is no Keep/Drop approval step — it was
+removed per Bryan. AI vision decides when an API key is set, otherwise the text
+rules do, and `whenUnsure` (keep/drop) settles the cases the rules cannot read.
+Section 4 is a live read-out, not a prompt. The sheet reviewer is the backstop,
+and every rejection she makes flows back into the ledger.
+
+**v1.46 — "Re-review a past scan" (Seth, 29 Sep: a teammate scanned with an
+outdated version).** Section 6 takes a date; `core.rereviewPlan()` frees that
+day's verdicts — the scan's own Rejected rows (By = FlipScout, `Rejected On` =
+the date), the Leads rows `First Added` that day (not passed in Notes) and this
+computer's ledger entries — and lists them in `rereview.json` (userData). The
+next scan of that area judges them again: a kept one is re-scored in place, a
+lead that now fails is moved to C on the Leads tab (Why ends "(re-review
+<date>)"), its Rejected row takes the new reason. **Only a person's rejection
+(email in By, or stage Reviewer / Deleted by hand — `core.isPersonRejection`)
+is permanent**: the writer's "never comes back" guard now checks person rows
+only, so a re-review can keep a listing the old scan dropped. The scan's own
+drops are still pulled into every computer's ledger (verdict `scan-dropped`) so
+a second computer does not redo the first one's work. Tested in
+`test-google-sheets.js` §18.
+
+**Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
+his own Google account inside the app (OAuth loopback + PKCE, scope
+`spreadsheets` only) and pastes the spreadsheet URL; as each city finishes, the
+app writes to the **Leads**, **Rejected** (with reason + stage) and **KPI** tabs
+over the Sheets API. Rows are append-or-backfill — a blank cell gets filled on a
+later pass, a non-empty one is never overwritten, so hand edits survive. On KPI
+the app replaces only its own counters and leaves the reviewer's columns alone.
+Needs a one-time **OAuth Client ID (Desktop app type)** from the user's own
+Google Cloud project — that cannot be shipped in the app or created for them;
+the five console steps are in the app UI and `desktop-app/README.md`.
+Credentials persist in `google-account.json` under userData.
+
+**Google Sheets quota: ~60 reads and ~60 writes per minute per user.**
+`syncRows` used to read and write ONE ROW PER CALL, so the first v1.36 refresh
+(fixing links on ~92 closed/passed rows at once) died with *"Quota exceeded for
+quota metric 'Read requests' … per minute per user"*. It now reads the whole
+tab once and writes every changed row in one `values:batchUpdate` (90 rows = 4
+calls, tested), and `api()` waits out a quota refusal (20 s, 40 s, 65 s) before
+giving up. Never reintroduce a per-row read or write loop against the sheet.
+
+**Stop saves first.** `waitIfPaused()` THROWS on Stop, which skipped every
+write after the loop: a Stop mid-Refresh lost the unsaved leads (up to 9 — it
+flushes every 10) and never rebuilt the Board (live, 23 Sep: leads 21–29 lost
+their phones), and a Stop mid-Scan lost reviewed leads the ledger already
+marked checked, so they were never looked at again. Loops that have read
+listings use `stopRequested()` instead, which breaks out, so the flush / sheet
+write / Board rebuild still run. Only the search-paging steps (nothing
+reviewed yet) still throw.
+
+**A rejected lead never comes back.** Two guards, because the ledger alone is
+not enough: every scan starts by pulling the `Rejected` tab into the seen-ledger,
+and the writer re-checks that tab before appending. The second guard is the one
+that matters — a lead reviewed *before* it was rejected is still in the batch,
+and once the reviewer deletes the `Leads` row there is no duplicate left for the
+`MLS #` key to catch, so it would append clean.
+
+Local backup (written every run, before anything can fail):
+`flipscout-leads.json` under userData — the app's own safety net, not a
+hand-off. Contract tests for the writer: `node desktop-app/test-google-sheets.js`.
+
+## Notes
+
+- Environment is ephemeral — re-run `setup-browser.sh` and `mls-login.js` each session.
+- `.mls-state.json` holds live auth cookies; it is gitignored and must never be committed.
