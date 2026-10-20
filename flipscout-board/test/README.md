@@ -1,4 +1,4 @@
-# FlipScout Test board — house photos
+# FlipScout Test board — house photos and agent cards
 
 The Test board (https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9) shows each
 lead's cover photo in its row, in the View panel and in the Acquisitions
@@ -61,6 +61,31 @@ At about 25 new leads a day, the 5,000-file limit is reached around March
 2027. Before then, delete the assets of leads that are gone from `data.js`
 (Artifact delete with `path` = the asset id) and drop them from `z`.
 
+## Agent cards
+
+The left menu's **Agent Relationships** (and each lead's View panel, and the
+Agent box in Acquisitions) shows one card per listing agent: listings to us
+(and how many are still active), in discussion (Juan interested, visit booked
+or done, offer out), closed deals (Won), last contacted, follow-up, and a
+history window with every listing and contact (Seth, 20 Oct).
+
+- The page groups the leads into agents itself: same email, or same phone AND
+  same name (an office line is shared by many agents), or a name alone when no
+  other agent has it.
+- "Last contacted" is an email sent from the board, or a call, text or
+  meeting logged on the card. Agent replies and REI BlackBook tags are left
+  out on purpose until that is worked out (Seth, 20 Oct).
+- Hot = a lead of theirs in discussion, or won. Warm = contacted in the last
+  14 days. Cold = contacted before that. Not contacted = never.
+- Follow-up dates and logged contacts are saved in the board's database
+  under `agents/<id>` (`e-<email>`, `p-<phone>` or `n-<name>`). That is the
+  team's own record: the refresh never touches it.
+- The brokerage comes from `agents.js`, which `agents.py` writes from the
+  sheet's "Listing Agent" column ("Name, Brokerage" — `data.js` keeps only
+  the name): `window.__AGENTS__ = {v, built, bk: {MLS: brokerage}}`.
+  "↻ Refresh from sheet" on the board also reads it for the person who
+  pressed it.
+
 ## Daily refresh
 
 1. Read the live Test board's `thumbs/index.js` (Artifact read, path
@@ -70,8 +95,10 @@ At about 25 new leads a day, the 5,000-file limit is reached around March
    photos still missing. Then it writes the new sheet(s) and a new
    `index.js`.
 3. Upload the zoomed photos and record their ids (above).
-4. Publish the live page with `data.js`, `thumbs/index.js` and the new sheets.
-   Files left out of a publish are kept, so earlier sheets stay.
+4. Run `python3 -I agents.py <prod sheet .xlsx> <out>/agents.js`.
+5. Publish the live page with `data.js`, `agents.js`, `thumbs/index.js` and
+   the new sheets. Files left out of a publish are kept, so earlier sheets
+   stay.
 
 The photos are listing photos. Keep them on the private board only: never in
 git, and never on a shared page.
