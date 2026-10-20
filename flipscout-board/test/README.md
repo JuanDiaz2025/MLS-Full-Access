@@ -118,6 +118,38 @@ last name, or the same phone). The photo is cut to a 96x96 tile; tiles go into
   pet, a flower or a logo.
 - They are the agents' public MLS photos: private board only, never in git.
 
+## Comps
+
+The FlipScout app (v1.73+) values every A/B lead from sold homes on the MLS
+and writes five columns at the end of the sheet's Leads tab: **ARV · ARV
+$/SqFt · Comp Confidence · Comps · Comps Run On**. `comps.py` turns them into
+`comps.js` for the board's comps table:
+
+    python3 -I comps.py <prod sheet .xlsx> <out>/comps.js
+
+`window.__COMPS__ = {v, built, by: {MLS: {arv, ppsf, conf, at, list}}}`, where
+`list` holds up to 16 sold homes `{mls, addr, price, sqft, ppsf, sold, bd, ba,
+yr, use, why}`, and `use: 1` marks the ones the ARV was taken from.
+
+- **ARV** is the median $/sqft of the sold homes whose own remarks say the
+  work was done (renovated, remodeled, 2+ finishes), multiplied by the lead's
+  square feet. The sold homes must be in the same zip, listed in the last ~14
+  months, and within ±20% of its size (widened to ±40% / ±60% only while
+  fewer than 3 fit).
+- **Confidence:** High = 5+ renovated sales inside ±20%. Medium = 3–4, or the
+  band had to widen. Low = fewer than 3 renovated sales, so the ARV is the
+  median of every sale that is not a fixer or a new build (rough: check it by
+  hand).
+- Leads without an ARV are left out of the file; the sheet's Comp Confidence
+  says why ("None — no sold home within 60% of its size").
+- Rehab, holding, selling costs and profit are **not** in this file. The board
+  works them out from its own Settings (rehab $/sqft per county, light 70 /
+  heavy 145 by default; selling costs blank until set, so profit reads
+  "before selling costs").
+- Every field is checked again here, as the app does: a hand-typed or
+  cut-short Comps cell only ever reaches the page as numbers, dates and plain
+  text.
+
 ## Daily refresh
 
 Steps 1–3 run once per board, each in its own out dir and its own upload
@@ -132,11 +164,12 @@ run once.
    `index.js`.
 3. Upload the zoomed photos to THAT board's asset store and record their ids
    (above).
-4. Run `python3 -I agents.py <prod sheet .xlsx> <out>/agents.js`.
+4. Run `python3 -I agents.py <prod sheet .xlsx> <out>/agents.js` and
+   `python3 -I comps.py <prod sheet .xlsx> <out>/comps.js`.
 5. Read the Test board's `agphotos/index.js` into `<out>/agphotos/index.js`,
    then run `python3 -I agentphotos.py <new data.js> <out>`. It looks up only
    agents it has not settled yet, and prints NEW FILES.
-6. Publish each board's live page with `data.js`, `agents.js`, its own
+6. Publish each board's live page with `data.js`, `agents.js`, `comps.js`, its own
    `thumbs/index.js` and new sheets, and the agentphotos NEW FILES. Files left
    out of a publish are kept, so earlier sheets stay.
 
