@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """House photos for the FlipScout Test board.
 
-    python3 -I thumbs.py <data.js> <out dir> [--only N] [--workers 4]
+    python3 -I thumbs.py <data.js> <out dir> [--zoom DIR] [--only N] [--workers 4]
 
 <out dir>/thumbs/index.js is the live Test board's copy when there is one
 (Artifact read, path "thumbs/index.js"): leads already in it are not fetched
@@ -11,6 +11,12 @@ to a 112x96 tile. New tiles go into one JPEG sheet per pull date, so a board
 showing one day loads one sheet. Writes the new sheets and a new index.js to
 <out dir>/thumbs/ and prints the paths to publish (files left out of a
 publish are kept, so only the new ones go up).
+
+With --zoom DIR it also saves the photo the board shows when a tile is
+clicked, at most 960x640, as DIR/<MLS #>.jpg: for every new lead, and for
+every lead with a tile but no zoomed photo yet. Those are uploaded to the
+board's asset store (Artifact publish, asset: true, 25 a call, from inside
+the working directory) and their ids recorded with zoom_ids.py.
 
 Redfin-only leads (RF..., Redfin's own listing ids) have no MLS page and keep
 the house icon. The page is anchored to the MLS # asked for: a redirect to
@@ -24,11 +30,13 @@ from PIL import Image, ImageOps
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/129.0 Safari/537.36')
 TW, TH, COLS = 112, 96, 12          # tile size (16-px aligned: no JPEG bleed), tiles per sheet row
+ZW, ZH = 960, 640                    # the zoomed photo fits in this box
 OG = re.compile(rb'<meta\s+property="og:image"\s+content="([^"]+)"')
 TITLE = re.compile(rb'<title>([^<]{0,300})')
 BAD_IMG = re.compile(r'nophoto|no-photo|no_photo|placeholder|coming[_-]?soon|mlslpub-cdn|mlslistings\.com/images/', re.I)
 TRIES = 3                            # a lead with no photo is tried on this many days, then left
 TRIES_SOON = 7                       # "photos coming soon": the photos usually follow within a week
+ZOOM_DIR = None
 
 
 def load_data(path):
@@ -39,11 +47,12 @@ def load_data(path):
 
 def load_index(path):
     if not os.path.exists(path):
-        return {'v': 1, 'w': TW, 'h': TH, 'cols': COLS, 'sheets': [], 'at': {}, 'pg': {}, 'miss': {}, 'ph': []}
-    src = open(path, encoding='utf8').read()
-    ix = json.loads(src[src.index('{'):src.rindex('}') + 1])
-    assert ix.get('w') == TW and ix.get('h') == TH and ix.get('cols') == COLS, 'tile size changed'
-    for k, v in (('pg', {}), ('miss', {}), ('ph', [])):
+        ix = {'v': 1, 'w': TW, 'h': TH, 'cols': COLS, 'sheets': [], 'at': {}}
+    else:
+        src = open(path, encoding='utf8').read()
+        ix = json.loads(src[src.index('{'):src.rindex('}') + 1])
+        assert ix.get('w') == TW and ix.get('h') == TH and ix.get('cols') == COLS, 'tile size changed'
+    for k, v in (('pg', {}), ('miss', {}), ('ph', []), ('z', {}), ('zmiss', {})):
         ix.setdefault(k, v)
     return ix
 
@@ -96,6 +105,12 @@ def small(url):
     return u if u != url else None   # fits 300 x 200
 
 
+def big(url):
+    """The copy for the zoomed photo, where the host can size it (MLSL's is 1440 wide)."""
+    u = re.sub(r'^(https://zimg\.paragon\.ice\.com/ParagonImages/Property/PD/[^/]+/\d+)/0/0/0/', r'\1/0/%d/%d/' % (ZW, ZH), url)
+    return u if u != url else None
+
+
 def fetch_img(url):
     r, cap = get(url, 'image/*', 8_000_000)
     with r:
@@ -129,25 +144,39 @@ def one(lead):
             # a guessed board prefix that belongs to a different listing
             why = 'MLS page is %s, not %s' % (title.split(' - ')[0][:60], addr[:60])
             continue
-        last = None
-        for u in [x for x in (small(url), url) if x]:
+        last, raw = None, None
+        for u in [x for x in ((big(url) if lead['zoom'] else small(url)), url) if x]:
             try:
                 raw, im = fetch_img(u)
                 break
             except Exception as e:
                 last = e
-                raw = None
         if raw is None:
             return {'mls': mls, 'why': 'photo would not download: %s' % str(last)[:80], 'err': True}
-        tile = ImageOps.fit(im.convert('RGB'), (TW, TH), Image.LANCZOS)
-        return {'mls': mls, 'pid': pid, 'url': url, 'md5': hashlib.md5(raw).hexdigest(), 'tile': tile}
+        out = {'mls': mls, 'pid': pid, 'url': url, 'md5': hashlib.md5(raw).hexdigest()}
+        rgb = im.convert('RGB')
+        if lead['tile']:
+            out['tile'] = ImageOps.fit(rgb, (TW, TH), Image.LANCZOS)
+        if lead['zoom']:
+            rgb.thumbnail((ZW, ZH), Image.LANCZOS)
+            out['zoom'] = os.path.join(ZOOM_DIR, mls + '.jpg')
+            rgb.save(out['zoom'], 'JPEG', quality=72, optimize=True, progressive=True)
+        return out
     return {'mls': mls, 'why': why, 'err': why.startswith('page error')}
 
 
+def blocked(ms, today):
+    return ms and (ms[0] >= (TRIES_SOON if 'placeholder' in ms[2] else TRIES) or ms[1] == today)
+
+
 def main():
+    global ZOOM_DIR
     args = sys.argv[1:]
     only = int(args[args.index('--only') + 1]) if '--only' in args else 0
     workers = int(args[args.index('--workers') + 1]) if '--workers' in args else 4
+    ZOOM_DIR = args[args.index('--zoom') + 1] if '--zoom' in args else None
+    if ZOOM_DIR:
+        os.makedirs(ZOOM_DIR, exist_ok=True)
     data_js, out = args[0], args[1]
     tdir = os.path.join(out, 'thumbs')
     os.makedirs(tdir, exist_ok=True)
@@ -159,18 +188,18 @@ def main():
     leads, seen = [], set()
     for r in D['rows']:
         mls = str(r[ci['mls']] or '').strip().upper()
-        if not mls or mls in seen or mls in ix['at']:
+        if not mls or mls in seen or not candidates(mls):
             continue
         seen.add(mls)
-        if not candidates(mls):
-            continue
-        ms = ix['miss'].get(mls)
-        if ms and (ms[0] >= (TRIES_SOON if 'placeholder' in ms[2] else TRIES) or ms[1] == today):
-            continue
-        leads.append({'mls': mls, 'addr': str(r[ci['addr']] or ''), 'date': str(r[ci['date']] or today)[:10]})
+        tile = mls not in ix['at'] and not blocked(ix['miss'].get(mls), today)
+        zoom = bool(ZOOM_DIR) and mls not in ix['z'] and (tile or mls in ix['at']) and not blocked(ix['zmiss'].get(mls), today)
+        if tile or zoom:
+            leads.append({'mls': mls, 'addr': str(r[ci['addr']] or ''), 'date': str(r[ci['date']] or today)[:10],
+                          'tile': tile, 'zoom': zoom})
     if only:
         leads = leads[:only]
-    print('leads to fetch: %d (already have %d photos)' % (len(leads), len(ix['at'])), flush=True)
+    print('leads to fetch: %d new, %d for the zoomed photo only (already have %d photos, %d zoomed)' % (
+        sum(1 for l in leads if l['tile']), sum(1 for l in leads if not l['tile']), len(ix['at']), len(ix['z'])), flush=True)
 
     res, t0 = [], time.time()
     with ThreadPoolExecutor(workers) as ex:
@@ -187,21 +216,30 @@ def main():
     ph = set(ix['ph']) | {h for h, n in count.items() if n >= 3}
     ix['ph'] = sorted(ph)
 
-    by_date, date_of = {}, {l['mls']: l['date'] for l in leads}
-    whys = {}
+    by_date, lead_of = {}, {l['mls']: l for l in leads}
+    whys, zooms = {}, 0
     for x in res:
-        mls = x['mls']
-        if 'tile' in x and x['md5'] not in ph:
-            by_date.setdefault(date_of[mls], []).append(x)
+        mls, l = x['mls'], lead_of[x['mls']]
+        good = 'md5' in x and x['md5'] not in ph
+        if good and 'tile' in x:
+            by_date.setdefault(l['date'], []).append(x)
             ix['miss'].pop(mls, None)
             if x['pid'] != mls:
                 ix['pg'][mls] = x['pid']
+        if good and 'zoom' in x:
+            zooms += 1
+            ix['zmiss'].pop(mls, None)
+        elif 'zoom' in x:
+            os.remove(x['zoom'])
+        if good:
             continue
         w = x.get('why') or 'placeholder photo'
         whys[w.split(':')[0]] = whys.get(w.split(':')[0], 0) + 1
-        prev = ix['miss'].get(mls, [0, '', ''])
         # a page or download error is the network's fault; it is retried every day
-        ix['miss'][mls] = [prev[0] + (0 if x.get('err') else 1), today, w]
+        for key, want in (('miss', l['tile']), ('zmiss', l['zoom'] and not l['tile'])):
+            if want:
+                prev = ix[key].get(mls, [0, '', ''])
+                ix[key][mls] = [prev[0] + (0 if x.get('err') else 1), today, w]
 
     names = {s[0] for s in ix['sheets']}
     new_files = []
@@ -226,6 +264,8 @@ def main():
     got = sum(len(v) for v in by_date.values())
     print('photos added: %d of %d tried in %.0fs · total with a photo: %d · no photo: %s' % (
         got, len(leads), time.time() - t0, len(ix['at']), json.dumps(whys)))
+    if ZOOM_DIR:
+        print('ZOOM FILES: %d in %s (upload them, then record the ids with zoom_ids.py)' % (zooms, ZOOM_DIR))
     print('NEW FILES: ' + ' '.join(['thumbs/index.js'] + new_files))
 
 

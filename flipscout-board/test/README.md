@@ -2,7 +2,9 @@
 
 The Test board (https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9) shows each
 lead's cover photo in its row, in the View panel and in the Acquisitions
-detail. Clicking a photo opens the public MLS listing with every photo.
+detail. Clicking a photo zooms in on the board: the same photo about 960 px
+wide, with the address and a link to every photo on the MLS listing (Seth,
+20 Oct: zoom rather than leave the board).
 
 ## Where the photos come from
 
@@ -35,14 +37,40 @@ with no MLS page is tried on 3 days, then left alone. A lead showing MLS's
 follow within a week. A network error does not count as a try. `ph` lists
 pictures seen on three or more listings: stand-ins, never the house.
 
+## The zoomed photo
+
+The large copy is not a published file: a version holds at most 511 files.
+Each one is an asset in the board's asset store instead (5,000 files, 1 GB),
+and `index.js` maps the MLS # to its asset id in `z`. The page shows it from
+`/_blob/<id>`. A lead with a tile and no `z` entry shows its tile blown up,
+and says so. `zmiss` records zoomed photos that failed, as `miss` does for
+tiles.
+
+`thumbs.py --zoom DIR` saves a zoomed photo (at most 960x640) as
+`DIR/<MLS #>.jpg` for every new lead, and for every lead with a tile and no
+`z` entry yet. DIR must be inside the working directory: files outside it
+upload one per call. Upload them 25 a call with Artifact publish
+(`asset: true`, `file_paths`). Then write each result line as
+`<MLS #> <asset id> <bytes>` in a text file, and run
+`python3 -I zoom_ids.py <out>/thumbs/index.js <ids.txt> --zoom DIR --delete`.
+The byte count must match the file, so a line copied against the wrong file
+is refused. `--delete` removes the recorded files, so whatever is left in
+DIR still needs uploading.
+
+At about 25 new leads a day, the 5,000-file limit is reached around March
+2027. Before then, delete the assets of leads that are gone from `data.js`
+(Artifact delete with `path` = the asset id) and drop them from `z`.
+
 ## Daily refresh
 
 1. Read the live Test board's `thumbs/index.js` (Artifact read, path
    `thumbs/index.js`) into `<out>/thumbs/index.js`.
-2. Run `python3 -I thumbs.py <new data.js> <out>`. It fetches only the leads
-   that are not in the index yet, then writes the new sheet(s) and a new
+2. Run `python3 -I thumbs.py <new data.js> <out> --zoom <repo>/.zoom-upload`.
+   It fetches only the leads that are not in the index yet, plus zoomed
+   photos still missing. Then it writes the new sheet(s) and a new
    `index.js`.
-3. Publish the live page with `data.js`, `thumbs/index.js` and the new sheets.
+3. Upload the zoomed photos and record their ids (above).
+4. Publish the live page with `data.js`, `thumbs/index.js` and the new sheets.
    Files left out of a publish are kept, so earlier sheets stay.
 
 The photos are listing photos. Keep them on the private board only: never in
