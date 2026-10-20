@@ -1,10 +1,17 @@
-# FlipScout Test board — house photos and agent cards
+# FlipScout boards — house photos and agent cards
 
 The Test board (https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9) shows each
 lead's cover photo in its row, in the View panel and in the Acquisitions
 detail. Clicking a photo zooms in on the board: the same photo about 960 px
 wide, with the address and a link to every photo on the MLS listing (Seth,
 20 Oct: zoom rather than leave the board).
+
+Since 20 Oct the real board (https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1)
+has the same photos, zoom, agent cards and agent photos (Seth: "put the
+changes on the test artifact towards the real board"). Everything below
+applies to both, with one difference: each board has its own asset store, so
+each keeps its own `thumbs/index.js` (its `z` ids point into that board's
+store). `agents.js` and `agphotos/` are the same files on both.
 
 ## Where the photos come from
 
@@ -113,20 +120,25 @@ last name, or the same phone). The photo is cut to a 96x96 tile; tiles go into
 
 ## Daily refresh
 
-1. Read the live Test board's `thumbs/index.js` (Artifact read, path
-   `thumbs/index.js`) into `<out>/thumbs/index.js`.
-2. Run `python3 -I thumbs.py <new data.js> <out> --zoom <repo>/.zoom-upload`.
+Steps 1–3 run once per board, each in its own out dir and its own upload
+folder (`<repo>/.zoom-upload-real`, `<repo>/.zoom-upload-test`); steps 4–5
+run once.
+
+1. Read that board's live `thumbs/index.js` (Artifact read, path
+   `thumbs/index.js`) into `<out>/<board>/thumbs/index.js`.
+2. Run `python3 -I thumbs.py <new data.js> <out>/<board> --zoom <repo>/.zoom-upload-<board>`.
    It fetches only the leads that are not in the index yet, plus zoomed
    photos still missing. Then it writes the new sheet(s) and a new
    `index.js`.
-3. Upload the zoomed photos and record their ids (above).
+3. Upload the zoomed photos to THAT board's asset store and record their ids
+   (above).
 4. Run `python3 -I agents.py <prod sheet .xlsx> <out>/agents.js`.
-5. Read the live `agphotos/index.js` into `<out>/agphotos/index.js`, then run
-   `python3 -I agentphotos.py <new data.js> <out>`. It looks up only agents it
-   has not settled yet, and prints NEW FILES.
-6. Publish the live page with `data.js`, `agents.js`, `thumbs/index.js`, the
-   new sheets and the agentphotos NEW FILES. Files left out of a publish are
-   kept, so earlier sheets stay.
+5. Read the Test board's `agphotos/index.js` into `<out>/agphotos/index.js`,
+   then run `python3 -I agentphotos.py <new data.js> <out>`. It looks up only
+   agents it has not settled yet, and prints NEW FILES.
+6. Publish each board's live page with `data.js`, `agents.js`, its own
+   `thumbs/index.js` and new sheets, and the agentphotos NEW FILES. Files left
+   out of a publish are kept, so earlier sheets stay.
 
 The photos are listing photos. Keep them on the private board only: never in
 git, and never on a shared page.
