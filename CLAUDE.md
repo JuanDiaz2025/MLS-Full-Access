@@ -16,8 +16,8 @@ comps, and connect with the listing agent. Nothing gets missed.*
 | **Lead Board** | A published Artifact: https://claude.ai/artifact/HawhBkTkvpFaqz8YFLArh1 — the live board the team works. Source is NOT in this repo; it is the artifact itself. |
 | `flipscout-board/apps-script/` | The Google Apps Script bridges the board calls — pass, alerts, outreach, Instantly, videos, and REI. |
 | `flipscout-server/` | An always-on service that creates REI BlackBook contacts. Written and tested; **nowhere to run it yet**. |
-| **The scan app** | Produces the leads. **Not in this repo.** This matters — see below. |
-| The prod sheet | `1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ`, tab `Leads`, 27 columns. |
+| **The scan app** | **A Windows .exe, not a repository.** `FlipScout-1.31.0-portable.exe` (78 MB) lives in the Drive folder now called *Twin Network*; an older `FlipScout-1.2.0.exe` is in *Twin Network App*. It runs on somebody's machine and writes the Leads tab. The two GitHub repos named after it — `Flip-Scout-Agent` and `Juan-s-Autonomous-Real-Estate-Flip-Scout-Agent` — are **empty shells**: README and .gitignore only. Checked 20 Oct. So its source is nowhere we can reach, which is why the scan rules below cannot be changed from here. |
+| The prod sheet | `1DAZ_FrU_I8Yh2cKpa10U05EueLl7ctrBlVi6eFErXGQ`, tab `Leads`, 27 columns. Titled **Twin Network — Leads**. Everything references it by id, never by name, so renaming it is safe. |
 
 ## The open problem: the scan grades houses it has not looked at
 
