@@ -232,3 +232,8 @@ flipscout-board/test/data.js
 # Holds per-machine permission rules (e.g. allowing a local script to write to
 # a live CRM), so it must not follow the branch to anyone else.
 .claude/settings.local.json
+
+# flipscout-server: live credentials and runtime state, never committed.
+flipscout-server/.env
+flipscout-server/data/
+flipscout-server/node_modules/

@@ -1,0 +1,17 @@
+{
+  "name": "flipscout-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Always-on service behind the FlipScout Lead Board: creates REI BlackBook contacts and runs the scan without anyone watching.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "4.21.2",
+    "imapflow": "1.0.171",
+    "mailparser": "3.7.2"
+  }
+}
