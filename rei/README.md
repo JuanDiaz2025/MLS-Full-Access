@@ -94,3 +94,34 @@ Capturing from the About panel has its own trap: walking up from the
 `Contacts (N)` heading only reaches the caption/value list once that panel has
 been opened for editing. Reading the page's text from that heading onward works
 in both states.
+
+## replies.js — detecting a response
+
+```
+node rei/replies.js [--line "Realtor"] [--since <ISO>] [--state <file>]
+```
+
+Reads **ProfitDial → Inbox → Texts**, which is one page for the whole account
+and carries a **PD Number** column — the line the reply came in on. That is what
+separates agent-outreach replies on `Realtor` from PPC, TV and postcard traffic,
+without opening a single contact.
+
+`--state` stores the newest Received timestamp and reports only rows newer than
+it next run, so nothing is counted twice.
+
+**Do not trigger off the unread badge.** `/profitdial/indicators/get` returns
+`{"text":13,"call":35,…}` in one request and is tempting, but that count drops
+as soon as a person opens the inbox in a browser — a reply someone glanced at
+is a reply the counter forgets. The high-water mark does not forget.
+
+Two limits worth stating before anyone builds a number on it:
+
+- **The Outbox is not our sent side.** `/profitdial/outbox/text` holds scheduled
+  and broadcast texts only; one-off sends from the Chat tab never appear there.
+  The sent side has to be logged by whatever does the sending.
+- **REI shows no delivery receipt.** The bubble goes `Processing…` → sent, and
+  that is all. This measures *replied*, never *delivered*.
+
+Rows are `<tr>` whose first cell is an empty checkbox, so anchor on the cell
+that matches the date rather than on column 0. The table prints no year —
+a parsed date more than a day in the future belongs to last year.
