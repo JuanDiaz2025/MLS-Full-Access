@@ -70,6 +70,14 @@ its repo before promising otherwise.
   `POST /profitdial/contacts/getNewContact` rather than hardcoding ids.
   Auth is a session cookie; REI emails a code on an unrecognised login.
   **Phone Type is required and is always "Mobile"** (Bryan's rule).
+  The working scripts are in `rei/` — `rei/README.md` has the gotchas. Read it
+  before touching REI; it is all hard-won and none of it is guessable.
+- **Texting works**, through the contact's **Chat** tab, from any of the ~142
+  ProfitDial numbers (`rei/sendtext.js`). The From picker is a react-select —
+  wait for the option itself to render or the old number stays selected. The
+  reply box is **TinyMCE in a `srcdoc` iframe**, invisible to `querySelector`.
+  Proof a text went out: the bubble's `Processing…` clears and the line reads
+  `PD #: … · Sent to: … · <time>`. Tested 21 Oct from `Realtor (510) 800-1607`.
 - A published Artifact can only reach the **viewer's connectors** — no
   arbitrary fetch. That is why the board pushes through Google Drive
   (folder `13PbzvxhyIZDrBayETV3ymNXUQQik_sFr`) and Apps Script picks it up.

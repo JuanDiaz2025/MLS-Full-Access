@@ -237,3 +237,9 @@ flipscout-board/test/data.js
 flipscout-server/.env
 flipscout-server/data/
 flipscout-server/node_modules/
+
+# REI BlackBook browser profile = a live signed-in session cookie. Never commit.
+# The per-lead queue files and debug screenshots are scratch, not source.
+rei/profile/
+rei/*.png
+rei/q-*.json
