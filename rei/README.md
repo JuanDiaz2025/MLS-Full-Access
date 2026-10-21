@@ -234,3 +234,28 @@ inbox feed alone would have talked over a colleague two minutes behind her.
 Scope the text to the conversation before parsing — the left rail and right
 panels share the page's innerText, and without that the first message comes
 back with "Cold Primary Details (925) …" glued to the front.
+
+## autoreply.json — which threads may be answered without a person
+
+`replywatch.js` reads this file and tags each new reply as eligible or not.
+It only *reports* eligibility; the caller decides and sends.
+
+**It fails closed.** A missing file, or one that will not parse, means nothing
+is eligible — verified both ways. A typo in an allowlist must never be what
+starts a machine talking to real agents.
+
+Turned on 21 Oct with exactly one entry: Bryan's own TEST line, so the thing
+could be proven somewhere harmless first. Barton Smith and Michelle Loeza are
+deliberately absent.
+
+Before any auto-reply goes out:
+
+- read the whole thread (`thread.js`), never the one line from the inbox feed;
+- if a human answered within 30 minutes, stay quiet and say so — Gen answered
+  Michelle two minutes after the alert, and a bot would have talked over her;
+- never state a price, an offer figure, or a commitment. If the right answer
+  needs a number, say a person will follow up and flag it.
+
+Adding a real agent to `allow` is a decision about letting software speak for
+the business, one contact at a time. There is no wildcard, and there should
+not be one.

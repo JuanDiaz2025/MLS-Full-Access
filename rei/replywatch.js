@@ -28,7 +28,19 @@ const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? proces
 const STATE = arg("--state", "");
 const LINE = arg("--line", "");
 const DAYS = +arg("--days", "14");
+const AUTO = arg("--auto", path.join(__dirname, "autoreply.json"));
 const digits = (s) => String(s || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+
+// Which threads may be answered without a person looking first. Everything
+// absent from this file is alert-only, and a file that will not parse means
+// NOTHING is eligible — a broken allowlist must fail closed, or a typo starts
+// a machine talking to real agents.
+let allow = [];
+try {
+  const a = JSON.parse(fs.readFileSync(AUTO, "utf8"));
+  allow = Array.isArray(a.allow) ? a.allow : [];
+} catch (e) { allow = []; }
+const allowed = (phone) => allow.find(a => digits(a.phone) === digits(phone)) || null;
 
 let since = "";
 if (STATE && fs.existsSync(STATE)) {
@@ -93,11 +105,22 @@ if (fresh.length === 1) {
           (fresh.length > 3 ? " and " + (fresh.length - 3) + " more" : "");
 }
 
+// Mark each reply with whether the watch may answer it on its own, and who
+// it would be answering as. Eligibility is reported, never acted on here.
+const eligible = fresh.map(r => {
+  const a = allowed(r.from);
+  return a ? { at: r.at, name: human(r.name), from: r.from, contactId: a.contactId,
+               body: r.body, line: r.line, note: a.note || "" } : null;
+}).filter(Boolean);
+
 console.log(JSON.stringify({
   ok: true,
   since: since || "(no mark yet — first run)",
   scanned: feed.scanned,
   newReplies: fresh,
+  autoReplyAllowed: eligible,
+  autoReplyFile: AUTO,
+  autoReplyListSize: allow.length,
   writes,
   alert,
   // The caller writes this to the state file ONLY after the writes land.

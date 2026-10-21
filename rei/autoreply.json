@@ -1,0 +1,20 @@
+{
+  "_": "Threads the watch may answer BY ITSELF. Everything not listed here is alert-only. Adding a real agent here means a machine talks to them unsupervised — that is Bryan's call, one contact at a time, never a wildcard.",
+  "allow": [
+    {
+      "contactId": "20585230",
+      "phone": "(510) 394-5339",
+      "name": "Mr TEST",
+      "note": "Bryan's own test line. Added 21 Oct so auto-reply could be proven somewhere harmless first."
+    }
+  ],
+  "guards": {
+    "quietIfHumanRepliedWithinMin": 30,
+    "maxRepliesPerThreadPerHour": 4,
+    "neverSay": [
+      "a price, an offer figure, or any number we would be held to",
+      "a commitment to close, to fund, or to a date",
+      "anything the thread does not already support"
+    ]
+  }
+}
