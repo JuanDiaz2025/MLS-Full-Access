@@ -24,8 +24,27 @@ if (!since && STATE && fs.existsSync(STATE)) {
   try { since = JSON.parse(fs.readFileSync(STATE, "utf8")).lastSeen || ""; } catch (e) {}
 }
 
-// "Oct 21, 8:19 AM" -> Date. The table omits the year; a date more than a day
-// ahead of now is last year's.
+// "Oct 21, 8:19 AM" -> Date.
+//
+// Two traps in that one string. The table omits the year, so a date more than
+// a day ahead of now belongs to last year. And the time is the ACCOUNT's wall
+// clock, not UTC — reading it as UTC put every reply seven hours early and
+// would have quietly made every time-to-reply wrong. Interpret it in the
+// account's zone instead; --tz overrides if the account ever moves.
+const TZ = arg("--tz", "America/Los_Angeles");
+const zoned = (y, mon, d, h, mi) => {
+  const f = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const asUTC = (ms) => { const o = {};
+    f.formatToParts(new Date(ms)).forEach(x => { o[x.type] = x.value; });
+    return Date.UTC(+o.year, +o.month - 1, +o.day, +o.hour % 24, +o.minute); };
+  const want = Date.UTC(y, mon, d, h, mi);
+  let ts = want - (asUTC(want) - want);
+  // Re-check rather than correct twice: one pass is right everywhere except
+  // the DST changeover, and a blind second pass would undo a good answer.
+  if (asUTC(ts) !== want) ts -= asUTC(ts) - want;
+  return new Date(ts);
+};
 const parseWhen = (s) => {
   const m = String(s).trim().match(/^([A-Z][a-z]{2})\s+(\d{1,2}),\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (!m) return null;
@@ -34,8 +53,8 @@ const parseWhen = (s) => {
   if (mon < 0) return null;
   let h = +m[3] % 12; if (/pm/i.test(m[5])) h += 12;
   const now = new Date();
-  let d = new Date(Date.UTC(now.getUTCFullYear(), mon, +m[2], h, +m[4]));
-  if (d.getTime() - now.getTime() > 86400000) d = new Date(Date.UTC(now.getUTCFullYear() - 1, mon, +m[2], h, +m[4]));
+  let d = zoned(now.getUTCFullYear(), mon, +m[2], h, +m[4]);
+  if (d.getTime() - now.getTime() > 86400000) d = zoned(now.getUTCFullYear() - 1, mon, +m[2], h, +m[4]);
   return d;
 };
 

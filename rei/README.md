@@ -153,3 +153,34 @@ cannot double-log it — which matters once this feeds a KPI.
 
 `logtoboard.js` prints the document and writes nothing unless given `--write`.
 Verified end to end on 21 Oct: written, read back, removed again.
+
+## kpi.js — the outreach numbers
+
+```
+node rei/kpi.js --replies <replies.js output> [--line "Realtor"] [--days 30]
+                [--sent sent.jsonl] [--board <dir of agents/*.json>]
+```
+
+Reports: contacts texted, texts sent, contacts that replied, **reply rate**,
+median hours to first reply, how many are still awaiting one, and
+`repliesNotMatchedToASend`.
+
+Four decisions behind those numbers, so nobody reads them wrong:
+
+- **Reply rate is per contact, not per message.** Texting one agent four times
+  and getting one answer is one conversation that replied, not 25%.
+- **A reply only counts if it arrived after our first text to that number.**
+  An inbound text that predates our outreach is someone else's conversation.
+- **`repliesNotMatchedToASend` is not noise** — it is replies on a line we have
+  no logged send for. Today that is Barton Smith on the Realtor line: either he
+  was texted from somebody's own phone, or the send predates this logging.
+  A number that climbs means outreach is happening outside the system, and the
+  reply rate is flattering itself.
+- **`--board` folds in what the team logged by hand**, so the figure describes
+  the business rather than only what this machine did.
+
+Verified 21 Oct on a real round trip: sent 1:24 PM, outreach 1:45 PM, reply
+1:54 PM → 1 contact, 2 sent, replied, 0.5 h to first reply.
+
+`sent.jsonl` is gitignored: it grows, it holds agents' phone numbers, and the
+container it lives in is reclaimed. Its durable home is the board's agent log.

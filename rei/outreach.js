@@ -11,11 +11,15 @@
 // Prints the captured fields and the exact message before sending, so a bad
 // capture is visible rather than silently texted to a real agent.
 const { chromium } = require("playwright");
+const fs = require("fs");
 const PROFILE = process.env.REI_PROFILE || __dirname + "/profile";
 const ID = process.argv[2];
 const FROM = process.argv[3] || "Realtor";
 const SENDER = process.argv[4] || "Bryan";
 const DRY = process.argv.includes("--dry");
+// Every send is appended here as one JSON object per line. Nothing else
+// records a Chat-tab send, so this file is the sent side of the KPI.
+const SENTLOG = arg("--log", __dirname + "/sent.jsonl");
 
 const until = async (fn, ms, step) => {
   const end = Date.now() + ms;
@@ -54,8 +58,10 @@ const until = async (fn, ms, step) => {
   await until(async () => { panel = await readPanel(); return !!valueOf(panel, "Name"); }, 20000, 800);
   const fullName = valueOf(panel, "Name");
   const rawAddr = valueOf(panel, "Property Address");
+  const toPhone = valueOf(panel, "Phone (Mobile)") || valueOf(panel, "Phone (Home)");
   out.capturedName = fullName || "(empty)";
   out.capturedAddress = rawAddr || "(empty)";
+  out.capturedPhone = toPhone || "(empty)";
   if (!fullName || !rawAddr) {
     console.log(JSON.stringify({ ok: false, err: "could not capture name or property address", ...out }));
     await ctx.close(); return;
@@ -153,6 +159,17 @@ const until = async (fn, ms, step) => {
     const i = t.indexOf(m.slice(0, 40));
     return i < 0 ? "(not found in thread)" : t.slice(i, i + 220).trim();
   }, MSG);
+
+  // The send is the only record of itself: REI's Outbox holds scheduled and
+  // broadcast texts only, so a Chat-tab send appears nowhere we can query
+  // later. Append it here, before anything else can fail.
+  const sent = {
+    at: new Date().toISOString(), kind: "text", dir: "out",
+    contactId: ID, name: fullName, phone: toPhone, line: out.fromPicked || FROM,
+    address: shortAddr, by: SENDER, body: MSG
+  };
+  try { fs.appendFileSync(SENTLOG, JSON.stringify(sent) + "\n"); out.loggedTo = SENTLOG; }
+  catch (e) { out.logErr = String(e.message || e).slice(0, 120); }
   await pg.screenshot({ path: __dirname + "/outreach-proof.png" });
   console.log(JSON.stringify({ ok: true, ...out }));
   await ctx.close();

@@ -243,3 +243,7 @@ flipscout-server/node_modules/
 rei/profile/
 rei/*.png
 rei/q-*.json
+# The send log is operational data, not source: it grows, and it holds the
+# agents' phone numbers. Its durable home is the board's agent log.
+rei/sent.jsonl
+rei/*.jsonl
