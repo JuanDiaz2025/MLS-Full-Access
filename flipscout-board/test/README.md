@@ -150,13 +150,18 @@ yr, use, why}`, and `use: 1` marks the ones the ARV was taken from.
   cut-short Comps cell only ever reaches the page as numbers, dates and plain
   text.
 
-## Public remarks and photo sheets (Test board)
+## Public remarks and photo sheets (both boards)
 
 The sheet has no public remarks, so the board only ever showed the agent-only
 remarks (Seth, 20 Oct: the Contrarian read "no remarks" as a warning sign).
 `listing.py` reads them off the same public MLS page `thumbs.py` uses:
 
-    python3 -I listing.py <data.js> <out> --thumbs <out>/test/thumbs/index.js --sheets <repo>/.sheets-upload-test [--since YYYY-MM-DD]
+    python3 -I listing.py <data.js> <out>/shared --thumbs <out>/<board>/thumbs/index.js --sheets <repo>/.sheets-upload-<board> [--since YYYY-MM-DD]
+
+`remarks.js` is the same file on both boards; the photo sheets are not (each
+board's asset ids differ). So run it once per board with the same
+`<out>/shared`: the second run finds every remark on file and only makes that
+board's sheets.
 
 - `<out>/remarks.js` = `window.__REMARKS__ = {v, built, by: {MLS: text}, miss}`:
   the "About this Property" paragraph, for every lead with an MLS page. The
@@ -170,25 +175,25 @@ remarks (Seth, 20 Oct: the Contrarian read "no remarks" as a warning sign).
   month's leads get one): up to 12 of the listing's own gallery photos, 4 to
   a row, each numbered with its place in the gallery (`3/26`), photo 1 = the
   cover. It is the board's **All photos** button and what the Contrarian
-  shows Claude. Upload DIR to the Test board's asset store 25 a call and
+  shows Claude. Upload DIR to THAT board's asset store 25 a call and
   record the ids with
-  `python3 -I zoom_ids.py <out>/test/thumbs/index.js <ids.txt> --zoom DIR --delete --key cs`
+  `python3 -I zoom_ids.py <out>/<board>/thumbs/index.js <ids.txt> --zoom DIR --delete --key cs`
   (same `<MLS #> <asset id> <bytes>` lines and byte check as the zoomed
   photos). `index.js` keeps them in `cs` (MLS # -> asset id), `csn`
   (MLS # -> [photos on the sheet, photos in the gallery]) and `csmiss`
-  (sheets that could not be made: no MLS page, no gallery). 20 Oct: 479
-  sheets (345 for October leads; 134 older ones uploaded before the
-  this-month rule).
+  (sheets that could not be made: no MLS page, no gallery). 20 Oct, Test
+  board: 479 sheets (345 for October leads; 134 older ones uploaded before
+  the this-month rule). 21 Oct, real board: 337 sheets, October leads only.
 - Run it after `thumbs.py`: both rewrite `thumbs/index.js`, and each keeps the
   other's keys.
 
-## Permit history (Test board)
+## Permit history (both boards)
 
 `permits.py` reads each A/B lead's own Redfin page (Redfin's location lookup,
 kept only when the page's house number and zip are the lead's) and every permit
-card on it:
+card on it; `permits.js` is the same file on both boards:
 
-    python3 -I permits.py <data.js> <out> [--gap 1.5]
+    python3 -I permits.py <data.js> <out>/shared [--gap 1.5]
 
 `<out>/permits.js` = `window.__PERMITS__ = {v, built, by: {MLS: {u, at, p: [{d, st, w, t, g}]}}, miss}`.
 The board shows them as **Permits** in the lead's panel, marks "past fire" and
@@ -204,7 +209,8 @@ refused.
 
 Steps 1–3 run once per board, each in its own out dir and its own upload
 folder (`<repo>/.zoom-upload-real`, `<repo>/.zoom-upload-test`); steps 4–5
-run once; steps 6–8 are the Test board's.
+run once; steps 6–8 cover both boards (since 21 Oct the real board has the
+Contrarian too).
 
 1. Read that board's live `thumbs/index.js` (Artifact read, path
    `thumbs/index.js`) into `<out>/<board>/thumbs/index.js`.
@@ -219,19 +225,19 @@ run once; steps 6–8 are the Test board's.
 5. Read the Test board's `agphotos/index.js` into `<out>/agphotos/index.js`,
    then run `python3 -I agentphotos.py <new data.js> <out>`. It looks up only
    agents it has not settled yet, and prints NEW FILES.
-6. Test board: read its live `remarks.js` and `permits.js` into `<out>/test/`
-   (a first run starts without them), then, after step 2, run
-   `python3 -I listing.py <new data.js> <out>/test --thumbs <out>/test/thumbs/index.js --sheets <repo>/.sheets-upload-test`
-   (only this month's leads get a sheet) and
-   `python3 -I permits.py <new data.js> <out>/test`.
-7. Upload `<repo>/.sheets-upload-test/*.jpg` to the Test board's asset store,
-   25 a call, and record them with `zoom_ids.py … --key cs --delete` (above).
-   At about 15 new October-style sheets a day on top of the zoomed photos,
-   watch the 5,000-file limit.
-8. Publish each board's live page with `data.js`, `agents.js`, `comps.js`, its own
-   `thumbs/index.js` and new sheets, and the agentphotos NEW FILES; the Test
-   board also with `remarks.js` and `permits.js`. Files left out of a publish
-   are kept, so earlier sheets stay.
+6. Read the Test board's live `remarks.js` and `permits.js` into
+   `<out>/shared/` (a first run starts without them). Then, after step 2, run
+   `python3 -I listing.py <new data.js> <out>/shared --thumbs <out>/<board>/thumbs/index.js --sheets <repo>/.sheets-upload-<board>`
+   once per board (only this month's leads get a sheet), and
+   `python3 -I permits.py <new data.js> <out>/shared` once.
+7. Upload each `<repo>/.sheets-upload-<board>/*.jpg` to that board's asset
+   store, 25 a call, and record them with `zoom_ids.py … --key cs --delete`
+   (above). At about 15 new October-style sheets a day on top of the zoomed
+   photos, watch the 5,000-file limit.
+8. Publish each board's live page with `data.js`, `agents.js`, `comps.js`,
+   `remarks.js`, `permits.js`, its own `thumbs/index.js` and new sheets, and
+   the agentphotos NEW FILES. Files left out of a publish are kept, so earlier
+   sheets stay.
 
 The photos are listing photos. Keep them on the private board only: never in
 git, and never on a shared page.
