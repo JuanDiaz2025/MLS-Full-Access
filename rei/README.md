@@ -125,3 +125,31 @@ Two limits worth stating before anyone builds a number on it:
 Rows are `<tr>` whose first cell is an empty checkbox, so anchor on the cell
 that matches the date rather than on column 0. The table prints no year —
 a parsed date more than a day in the future belongs to last year.
+
+## logtoboard.js — the email & SMS log on the Lead Board
+
+The log already exists on the board; it was never missing. Every agent card has
+`＋ Log a call, text or meeting`, and a **History** timeline that merges those
+entries with Instantly emails, visits, stage changes and notes. That log is what
+drives **Last contacted** and the hot / warm / cold badge. Email feeds itself
+from Instantly (sheet tab `Agent Emails`). Texts were the hand-typed part.
+
+So nothing on the page has to change. Writing the documents the page already
+reads is enough — **no republish, no new UI**:
+
+```
+agents/<id> = { name, log: { <entryId>: { k, t, by, at, del? } } }
+k ∈ call | text | email | met | other      (any other k is ignored by the board)
+<id> = "e-<slug(email)>" | "p-<digits(phone)>" | "n-<slug(name)>"
+```
+
+The board's own reader (`agDoc`) walks **every id an agent has gone by**, so a
+document keyed by phone appears on the card even when that agent's canonical id
+is the email one. That is what makes this writable from outside the page: an
+inbound reply hands us a phone number, never an email.
+
+The entry id is derived from kind + timestamp, so replaying the same event
+cannot double-log it — which matters once this feeds a KPI.
+
+`logtoboard.js` prints the document and writes nothing unless given `--write`.
+Verified end to end on 21 Oct: written, read back, removed again.
