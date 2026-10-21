@@ -78,6 +78,17 @@ its repo before promising otherwise.
   reply box is **TinyMCE in a `srcdoc` iframe**, invisible to `querySelector`.
   Proof a text went out: the bubble's `Processing…` clears and the line reads
   `PD #: … · Sent to: … · <time>`. Tested 21 Oct from `Realtor (510) 800-1607`.
+- Replies arrive in **ProfitDial → Inbox → Texts**, one page for the whole
+  account, with a **PD Number** column saying which line each came in on
+  (`rei/replies.js`). That table prints the ACCOUNT's wall clock, not UTC.
+  Do not drive a watch off `/profitdial/indicators/get`: its unread counts
+  drop the moment a person opens the inbox in a browser.
+- The board's **Email & SMS Log** screen (`#messages`) was built 21 Oct —
+  `scripts/patch-board-msglog.py` holds the exact patch. It only READS what
+  the board already stores: the `agents` log, the Instantly rows, board-sent
+  emails. Texts reach it by writing `agents/<id>.log` (`rei/logtoboard.js`),
+  which needs no republish. `Analytics` and `Reports` in the nav are still
+  stubs (`class="soon"`).
 - A published Artifact can only reach the **viewer's connectors** — no
   arbitrary fetch. That is why the board pushes through Google Drive
   (folder `13PbzvxhyIZDrBayETV3ymNXUQQik_sFr`) and Apps Script picks it up.
