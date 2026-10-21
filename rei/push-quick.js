@@ -15,7 +15,7 @@
 // failure, it is the contact we wanted, so stage 2 runs against that id.
 const fs = require("fs");
 const { chromium } = require("playwright");
-const PROFILE = __dirname + "/profile";
+const PROFILE = process.env.REI_PROFILE || __dirname + "/profile";
 const TAGS = ["Agent/Realtor", "Twin Network"];
 const FILE = process.argv[2];
 const out = (o) => console.log("RESULT " + JSON.stringify(o));

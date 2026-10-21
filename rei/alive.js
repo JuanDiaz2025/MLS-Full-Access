@@ -1,6 +1,6 @@
 // READ ONLY — is the REI session still signed in, and what does the contact page show?
 const { chromium } = require("playwright");
-const PROFILE = __dirname + "/profile";
+const PROFILE = process.env.REI_PROFILE || __dirname + "/profile";
 const ID = process.argv[2] || "20683934";
 (async () => {
   const ctx = await chromium.launchPersistentContext(PROFILE, {

@@ -1,6 +1,6 @@
 // READ ONLY — search the contacts list for a term and report the rows found.
 const { chromium } = require("playwright");
-const PROFILE = __dirname + "/profile";
+const PROFILE = process.env.REI_PROFILE || __dirname + "/profile";
 const TERM = process.argv[2] || "";
 (async () => {
   const ctx = await chromium.launchPersistentContext(PROFILE, {

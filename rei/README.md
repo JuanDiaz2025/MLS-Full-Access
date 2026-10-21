@@ -6,11 +6,15 @@ profile at `rei/profile/` — that folder is a live session cookie and is
 gitignored. On an unrecognised login REI emails a code, so the profile has to be
 signed in by hand once.
 
-Every script takes absolute paths and prints one JSON line.
+Every script takes absolute paths and prints one JSON line. Set `REI_PROFILE`
+to point at the signed-in profile if it is not `rei/profile` — a script run
+against an empty profile lands on the login page, which looks exactly like REI
+having signed us out. Check which it is before reporting a sign-out.
 
 | | |
 |---|---|
 | `push-quick.js <lead.json>` | Creates the listing agent as a contact, in three stages. |
+| `outreach.js <contactId> "<From label>" "<sender>"` | Sends the agent-outreach text, filling the blanks from the contact's own record. `--dry` captures and prints without sending. |
 | `sendtext.js <contactId> "<From label>" "<message>"` | Texts a contact through a named ProfitDial number. |
 | `alive.js <contactId>` | Read-only: are we still signed in, and does that contact still exist? |
 | `findby.js <term>` | Read-only: search contacts. |
@@ -66,3 +70,27 @@ Send is the button with `aria-label="Send Text"`. The bubble first shows
 `PD #: <from> · Sent to: <to> · <time>`, which is the proof it went out.
 
 Verified 21 Oct 2026: contact 20585230 (TEST), from `Realtor (510) 800-1607`.
+
+## outreach.js — the agent-outreach text
+
+Fills the template from the contact's own record, so nobody retypes a name or
+an address:
+
+> Hi **[first name]**, **[sender]** with Twin Home Buyer. We're interested in
+> **[property address]**. When are you reviewing offers? We have 120 Google
+> reviews. We're also looking to build long-term relationships with local
+> agents. Can I ask you a couple quick questions about the property?
+
+The address is trimmed to **street + city** — the stored value carries the zip
+and `, UNITED STATES`, which read as noise in an SMS (and the zip is sometimes
+wrong: the TEST record holds `9470`). ~270 characters, so it bills as two
+segments.
+
+Run `--dry` first on anything that matters: it prints what it captured and the
+exact message without sending, which turns a bad capture into a line of output
+rather than a text to a real agent.
+
+Capturing from the About panel has its own trap: walking up from the
+`Contacts (N)` heading only reaches the caption/value list once that panel has
+been opened for editing. Reading the page's text from that heading onward works
+in both states.

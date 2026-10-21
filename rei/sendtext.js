@@ -2,7 +2,7 @@
 //   node sendtext.js <contactId> "<from number label>" "<message>"
 // Picks the From: number first, types the message, then presses Send Text.
 const { chromium } = require("playwright");
-const PROFILE = __dirname + "/profile";
+const PROFILE = process.env.REI_PROFILE || __dirname + "/profile";
 const ID = process.argv[2];
 const FROM = process.argv[3];
 const MSG = process.argv[4];
