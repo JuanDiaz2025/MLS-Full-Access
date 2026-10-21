@@ -205,6 +205,28 @@ a captcha page) it stops and saves, and the next run carries on. 20 Oct: 761
 of 790 checked in 51 minutes, 501 with permits, 260 with none, Redfin never
 refused.
 
+## Historical agent (Test board)
+
+`history.py` takes the deals we can trust from the Master Property List
+(Cherry's artifact, saved as a page) and writes `history.js`:
+
+    python3 -I history.py <master list page .html> <out> [--cap 1500000]
+
+Only Sold deals with a purchase price, a sale price AND the QuickBooks net
+go in, in the nine counties, bought at or under the cap ($1.5M for now — Seth,
+21 Oct), with a date and nothing unresolved in the notes. A deal with a blank
+stays out until it is filled in ("be picky" — Novato is a loss with no
+numbers yet). It prints what it kept and what it left out and why. 21 Oct: 12
+deals kept (2 lost money: 404 Ridge Gate Orinda, 340 Vallejo #50 Millbrae),
+57 with a blank, 4 outside the Bay Area, 2 over the cap.
+
+The board compares each lead with the deals in its city bought within 40% of
+its price, or its county's when the city has none: red when one in the same
+city lost money, amber for a loss elsewhere in the county or a lead over the
+cap, green when they all made money, grey when there is nothing to compare.
+`history.js` holds company deal figures — publish it, never commit it. Rerun
+it when the Master Property List changes, not on the daily refresh.
+
 ## Daily refresh
 
 Steps 1–3 run once per board, each in its own out dir and its own upload
