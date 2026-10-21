@@ -214,3 +214,23 @@ than lost.
 REI login is alive. The signed-in browser profile lives in a container that is
 reclaimed, so there is no unattended alerting until that login lives somewhere
 that persists.
+
+## thread.js — the conversation, before you answer it
+
+```
+node rei/thread.js <contactId> [--json]
+```
+
+Read-only. Prints the whole SMS exchange in order with direction, taken from
+REI's own wording (`Sent to:` is ours, `Received from:` is theirs) rather than
+from guessing by position.
+
+Any reply has to be written against this, not against the one line the inbox
+feed hands you. The first time it was run in anger it showed exactly why:
+Michelle Loeza's "Please text me." at 2:58 PM had **already been answered by
+Gen at 3:00 PM**, by phone and then a long text. An auto-reply firing off the
+inbox feed alone would have talked over a colleague two minutes behind her.
+
+Scope the text to the conversation before parsing — the left rail and right
+panels share the page's innerText, and without that the first message comes
+back with "Cold Primary Details (925) …" glued to the front.
