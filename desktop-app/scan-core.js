@@ -791,6 +791,100 @@ function qualify(m) {
     hard: false, why, signals, needsWork };
 }
 
+/* ---------- the second look: our own past deals (v1.74, Seth 21 Oct) ----------
+ * The ~$180k deal Juan lost was thrown away by one step of the line, and
+ * nothing compared it with houses we had already bought. So a listing the gate
+ * scores C (a low score — never a hard exclusion) is not dropped when we bought
+ * in the SAME city, within 40% of its price, and made money there: it goes to
+ * B for a person to look at. A loss among those deals means no second look.
+ *
+ * The deals come from the sheet's "Past Deals" tab, kept by Cherry and Juan.
+ * Only deals with every number known count (Seth: "for those that are blank do
+ * not include them yet ... be picky"), bought at or under $1.5M (Seth, 21 Oct).
+ * Hard exclusions — renovated (Rule #0), fire, tenant, multi-unit, structural,
+ * too new, too few photos — and the buy box are never overruled, and the AI
+ * photo check still judges the house like any B. */
+const PAST_DEALS_TAB = 'Past Deals';
+const PAST_DEAL_HEADERS = ['Address', 'City', 'Bought', 'Sold', 'Net', 'Bought On', 'Sold On', 'Status', 'Notes'];
+const PAST_DEAL_CAP = 1500000, PAST_DEAL_BAND = 0.4;
+const UNRESOLVED_DEAL = /status conflict|unresolved|not an acquisition|never took title/i;
+
+/** "$1,350,000", "1.35M", "$950K", "-71,477", "−$71k", "(71,477)" → a number; anything else → null. */
+function money(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  let s = String(v == null ? '' : v).trim().replace(/[\s,$]/g, '').replace(/[−–]/g, '-');
+  if (!s) return null;
+  let neg = false;
+  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+  if (s.charAt(0) === '-') { neg = !neg; s = s.slice(1); }
+  const m = /^(\d+(?:\.\d+)?)([km])?$/i.exec(s);
+  if (!m) return null;
+  const n = parseFloat(m[1]) * (m[2] ? (/k/i.test(m[2]) ? 1e3 : 1e6) : 1);
+  return Math.round(neg ? -n : n);
+}
+
+const dealCity = c => String(c || '').split(',')[0].toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+
+/** The "Past Deals" tab (header row first) → { deals, left, error }. A row with
+ *  a blank in Bought / Sold / Net, no city, over the cap, a Status other than
+ *  Sold, or an unresolved note is left out and listed in `left` with the why. */
+function pastDealsFromGrid(grid) {
+  const head = ((grid && grid[0]) || []).map(h => String(h || '').trim().toLowerCase());
+  const at = h => head.indexOf(h.toLowerCase());
+  const need = ['Address', 'City', 'Bought', 'Sold', 'Net'];
+  const missing = need.filter(h => at(h) < 0);
+  if (!grid || !grid.length) return { deals: [], left: [], error: 'the tab is empty' };
+  if (missing.length) return { deals: [], left: [], error: `the tab has no ${missing.join(' / ')} column — it needs ${PAST_DEAL_HEADERS.slice(0, 5).join(' · ')}` };
+  const deals = [], left = [];
+  grid.slice(1).forEach(r => {
+    const g = h => (at(h) >= 0 && r ? String(r[at(h)] == null ? '' : r[at(h)]).trim() : '');
+    const a = g('Address'), c = g('City');
+    if (!a && !c) return;
+    const b = money(g('Bought')), s = money(g('Sold')), n = money(g('Net')), st = g('Status');
+    const why = !a || !c ? 'no address or city'
+      : b === null || s === null || n === null ? 'a blank in ' + [['Bought', b], ['Sold', s], ['Net', n]].filter(x => x[1] === null).map(x => x[0]).join(' / ')
+      : !(b > 0) ? 'no purchase price'
+      : b > PAST_DEAL_CAP ? `bought over the $${(PAST_DEAL_CAP / 1e6).toFixed(1)}M cap`
+      : st && !/^sold$/i.test(st) ? `status "${st.slice(0, 30)}", not Sold`
+      : UNRESOLVED_DEAL.test(g('Notes')) ? 'status unresolved in the notes' : '';
+    if (why) { left.push({ addr: [a, c].filter(Boolean).join(', '), why }); return; }
+    deals.push({ addr: a.slice(0, 80), city: c.split(',')[0].trim().slice(0, 40), bought: b, sold: s, net: n,
+      boughtOn: dayKey(g('Bought On')) || '', soldOn: dayKey(g('Sold On')) || '' });
+  });
+  return { deals, left, error: '' };
+}
+
+const kMoney = n => { const a = Math.abs(n); return (a >= 1e6 ? '$' + (a / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M' : '$' + Math.round(a / 1e3) + 'k'); };
+
+/** Our deals in this listing's city bought within 40% of its price.
+ *  → null (nothing to compare), { keep: false, why } (one of them lost money),
+ *  or { keep: true, why, deals } (every one made money). */
+function secondLook(m, deals) {
+  const price = num(m && m.price), city = dealCity(m && m.city);
+  if (!(price > 0) || !city || !Array.isArray(deals) || !deals.length) return null;
+  const near = deals.filter(d => dealCity(d.city) === city && Math.abs(d.bought - price) <= PAST_DEAL_BAND * price)
+    .sort((x, y) => Math.abs(x.bought - price) - Math.abs(y.bought - price));
+  if (!near.length) return null;
+  const line = d => `${d.net < 0 ? 'lost' : 'made'} ${d.net < 0 ? '−' : '+'}${kMoney(d.net)} on ${d.addr}, ${d.city} (bought ${kMoney(d.bought)}, sold ${kMoney(d.sold)})`;
+  const lost = near.filter(d => !(d.net > 0));
+  if (lost.length) return { keep: false, deals: near, why: `we ${line(lost[0])} — a past loss near this price, so no second look` };
+  return { keep: true, deals: near,
+    why: `SECOND LOOK — we ${line(near[0])}${near.length > 1 ? ` and ${near.length - 1} more there at a similar price, all made money` : ''}` };
+}
+
+/** The gate's verdict after the second look: a soft C (a low score, never a
+ *  hard exclusion, never a confirmed or AI drop) becomes a B when secondLook()
+ *  says keep. Returns the look (or null) and changes `q` in place. */
+function applySecondLook(q, m, deals) {
+  if (!q || q.bucket !== 'C' || q.hard || /^AI/.test(String(q.why || ''))) return null;
+  const sl = secondLook(m, deals);
+  if (sl && sl.keep) {
+    Object.assign(q, { bucket: 'B', label: BUCKET_LABEL.B, decision: 'keep', secondLook: true,
+      why: `${sl.why} · the scan scored it ${q.score}: ${q.why}` });
+  }
+  return sl;
+}
+
 /**
  * Turn the vision model's JSON into a verdict.
  *
@@ -1801,5 +1895,6 @@ module.exports = {
   JS_SCRAPE_GRID, JS_GRID_DEBUG, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
   qualify, privateRemarks, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
+  PAST_DEALS_TAB, PAST_DEAL_HEADERS, PAST_DEAL_CAP, PAST_DEAL_BAND, money, pastDealsFromGrid, secondLook, applySecondLook,
   mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS, disclosuresLink,
 };

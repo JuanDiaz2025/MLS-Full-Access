@@ -16,6 +16,7 @@ const gsheets = require('./google-sheets');
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
 let aiFailStreak = 0;   // consecutive failed AI calls in this run
+let pastDeals = [];     // the sheet's "Past Deals" tab, read at the start of each MLS scan (second look)
 const cfg = {
   apiKey: '', model: 'claude-opus-5-5', useAI: false,   // AI vision (optional)
   readSeconds: 6,                                                      // dwell per listing
@@ -239,7 +240,7 @@ const KPI_FILE = () => path.join(app.getPath('userData'), 'kpi-history.json');
 const KPI_FIELDS = ['runs', 'scanned', 'candidates', 'skippedAlreadyChecked', 'reviewed', 'kept',
   'dropped', 'droppedRenovated', 'droppedMultiUnit', 'droppedFire',
   'droppedFewPhotos', 'droppedOther', 'leads', 'gateCleared', 'pushed', 'pushSkipped',
-  'bucketA', 'bucketB', 'bucketC', 'photoChecked',
+  'bucketA', 'bucketB', 'bucketC', 'photoChecked', 'secondLook',
   'compsValued', 'compsHigh', 'compsMedium', 'compsLow', 'compsNone'];
 const todayKey = () => {
   const d = new Date();
@@ -1096,6 +1097,8 @@ ipcMain.handle('start-scan', async (_e, opts) => {
     // Pull the reviewer's rejections down first, so anything she deleted is
     // treated as already-checked and never resurfaces.
     await syncRejectedIntoLedger();
+    // Our own past deals, for the second look at listings the gate would drop.
+    pastDeals = await loadPastDeals();
 
     // ONE CITY AT A TIME, START TO FINISH. San Francisco is first in
     // DEFAULT_BUYBOX and is finished completely — scanned, every candidate
@@ -1245,6 +1248,13 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         // photos". It stays as the text scored it, and says why.
         const csTooFew = c._comingSoon && n <= 4;   // none posted yet counts too
         if (csTooFew) q.why += ' + AI photo check waits for the photos to post';
+        // THE SECOND LOOK (v1.74, Seth 21 Oct). A low-score C is not thrown away
+        // when we made money on a house in the same city at a similar price: it
+        // goes to B for a person, and — being a B now — to the AI photo check
+        // below, which can still drop it. Hard exclusions are never touched.
+        const sl = core.applySecondLook(q, { city: cityOf(c), price: gal.listPrice || c._price }, pastDeals);
+        if (q.secondLook) log(`  ${sl.why} — held at B for a person instead of being dropped`, 'good');
+        else if (sl && !sl.keep) log(`  ${sl.why}`);
         let aiJudged = false;   // a photo verdict was reached (makes a Coming Soon verdict final)
         // Why the photos were not judged, said on the lead itself (v1.72.2):
         // a lead with no photo verdict used to look exactly like one the AI kept.
@@ -1283,6 +1293,10 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           offerDue: core.offerDue([gal.privateRemarks, gal.remarks].filter(Boolean).join(' \n ')) };
         if (c._gal.offerDue) log(`  offer due: ${c._gal.offerDue}`, 'good');
         const decision = q.decision;
+        if (q.secondLook) {
+          if (decision === 'keep') runKpi.secondLook++;
+          else log('  the photos dropped it anyway — no second look for a house the AI turned down', 'info');
+        }
         const dropReason = q.decision === 'drop' ? `Auto-pass (score ${q.score}): ${q.why}` : '';
         send('review', { ...base, verdict: decision, why: `${q.label} · score ${q.score} — ${q.why}` });
         log(`  ${q.label} · score ${q.score} — ${q.why}`, decision === 'keep' ? 'good' : 'info');
@@ -1466,6 +1480,10 @@ function finishRun(runKpi, day, started) {
         + (lastAiError ? `. Last AI error: ${String(lastAiError).slice(0, 160)}` : !aiReady() ? ' (AI photo check is off in section 2)' : '') : '') + '.';
     log(photoLine, runKpi.photoChecked < runKpi.kept && aiReady() ? 'error' : runKpi.photoChecked < runKpi.kept ? 'warn' : 'good');
   }
+  // The listings the gate would have dropped that went to a person (v1.74).
+  const slLine = runKpi.secondLook ? `Second look: ${runKpi.secondLook} listing(s) the scan would have dropped are on the sheet as B, `
+    + 'because we made money on a house in the same city at a similar price — their Why starts "SECOND LOOK".' : '';
+  if (slLine) log(slLine, 'good');
   // What the ARVs rest on, said once at the end (v1.73).
   const compsRun = runKpi.compsValued + runKpi.compsNone;
   const compsLine = compsRun ? `Comps: ${runKpi.compsValued} lead(s) valued (${runKpi.compsHigh} high · ${runKpi.compsMedium} medium · `
@@ -1483,7 +1501,7 @@ function finishRun(runKpi, day, started) {
   send('board', board);
   log('Nothing else is running. Start scan again whenever you want the next pass.', 'good');
   send('done', {
-    stopped: control.stopped, summary: line + (photoLine ? ' ' + photoLine : '') + (compsLine ? ' ' + compsLine : ''),
+    stopped: control.stopped, summary: line + (photoLine ? ' ' + photoLine : '') + (slLine ? ' ' + slLine : '') + (compsLine ? ' ' + compsLine : ''),
     scanned: runKpi.scanned, reviewed: runKpi.reviewed, kept: runKpi.kept,
     dropped: runKpi.dropped, pushed: runKpi.pushed,
     skipped: runKpi.skippedAlreadyChecked, day: day,
@@ -2604,6 +2622,36 @@ async function syncRejectedIntoLedger() {
   return { ok: false, unconfigured: true, error: 'connect your Google Sheet in section 8 first' };
 }
 
+
+// ---------- past deals: the second look (v1.74) ----------
+// The "Past Deals" tab on the sheet, kept by Cherry and Juan: one row per house
+// we bought and sold (Address · City · Bought · Sold · Net …). Read once at the
+// start of each MLS scan. No tab, no Google, or an unreadable tab = no second
+// look, said once in the log; it never stops a scan.
+async function loadPastDeals() {
+  const tab = core.PAST_DEALS_TAB;
+  if (!googleReady()) { log(`Second look is off — connect the Google Sheet (section 8) so the scan can read its "${tab}" tab.`, 'warn'); return []; }
+  try {
+    const g = googleCfg();
+    const token = await googleToken();
+    const info = await gsheets.listTabs(token, g.sheetId);
+    if (info.tabs.indexOf(tab) < 0) {
+      log(`Second look is off — the sheet has no "${tab}" tab. Add one with the columns ${core.PAST_DEAL_HEADERS.join(' · ')} `
+        + '(one row per house we bought and sold) and low-score listings near a past win go to B instead of being dropped.', 'warn');
+      return [];
+    }
+    const p = core.pastDealsFromGrid(await gsheets.readAll(token, g.sheetId, tab));
+    if (p.error) { log(`Second look is off — "${tab}": ${p.error}.`, 'warn'); return []; }
+    const won = p.deals.filter(d => d.net > 0).length;
+    log(`Second look: ${p.deals.length} past deal(s) from "${tab}" (${won} made money, ${p.deals.length - won} lost)`
+      + (p.left.length ? ` · ${p.left.length} left out (${p.left.slice(0, 3).map(x => x.addr + ': ' + x.why).join('; ')}${p.left.length > 3 ? '; …' : ''})` : ''),
+      p.deals.length ? 'good' : 'warn');
+    return p.deals;
+  } catch (e) {
+    log(`Second look is off — could not read "${tab}": ${e.message}`, 'warn');
+    return [];
+  }
+}
 
 // ---------- the Board tab ----------
 // One tab that says what to work on: today's funnel on top, then the live A /

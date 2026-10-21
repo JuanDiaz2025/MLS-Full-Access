@@ -74,6 +74,19 @@ install (creates a desktop shortcut) or run the portable exe directly.
    **Lead Board** does rehab, holding, selling costs and profit from its own
    Settings, so the app no longer filters leads on a profit gate. **Export** to
    CSV or JSON.
+4b. **Second look** (v1.74) — a listing the gate scores **C on a low score**
+   is not dropped when we bought a house in the **same city**, within **40%** of
+   its price, and **made money** on it: it goes to the sheet as **B**, its Why
+   starting `SECOND LOOK — we made +$127k on 1202 Via Lucas, San Lorenzo …`,
+   and gets the AI photo check like any other B (which can still drop it). A
+   loss among those deals means no second look. Hard exclusions — renovated,
+   fire, tenant, multi-unit, structural, too new, too few photos — and the buy
+   box are never overruled. The deals come from a **`Past Deals`** tab on your
+   sheet: `Address · City · Bought · Sold · Net` (+ optional `Bought On · Sold
+   On · Status · Notes`), one row per house we bought and sold. Only rows with
+   Bought, Sold and Net all filled in count, bought at $1.5M or less; a Status
+   other than Sold, or a note saying the status is unresolved, leaves a row
+   out. No tab = no second look, and the log says so at the start of the scan.
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,

@@ -1226,6 +1226,30 @@ never blanked by an empty read, capped at 1500 chars (`REMARKS_MAX`, the
 parsers' own limit); `core.boardLead` already carried it as `remarks`. §17 of
 `test-google-sheets.js` reads the header lists out of `main.js` itself.
 
+**v1.74.0 — the second look (Seth 21 Oct: "Any rejected listing in a city where
+we made money at a similar price gets flagged for a person instead of
+disappearing").** This is the "$180k gap": the scan threw a deal away and
+nothing compared it with houses we had bought. `core.applySecondLook(q, {city,
+price}, pastDeals)` runs right after `qualify()` in the MLS scan, BEFORE the AI
+step: a **soft C** (low score / "when unsure = drop" — never `q.hard`, never an
+`AI (vision)` drop, never confirmed) becomes **B** when `core.secondLook()`
+finds deals in the **same Postal City** bought within **±40%** of the list price
+and **every one made money**; a loss among them = no second look (logged). The
+Why starts `SECOND LOOK — we made +$Xk on <addr>, <city> (bought …, sold …) · the
+scan scored it N: …`; the score is left as it was. Being a B, it then gets the
+AI photo check, which can still drop it (renovated / dated-but-fine → C, stage
+Photo review), so Rule #0 holds. Hard exclusions and the buy box are never
+overruled. The deals come from a **`Past Deals` tab** on the connected sheet
+(`loadPastDeals()` in `main.js`, read once per MLS scan after the Rejected
+sync): `Address · City · Bought · Sold · Net` required, `Bought On · Sold On ·
+Status · Notes` optional; `core.pastDealsFromGrid` keeps only rows with Bought,
+Sold AND Net (formatted cells read by `core.money`), bought ≤ $1.5M
+(`PAST_DEAL_CAP`, Seth 21 Oct), Status blank or Sold, no unresolved note — the
+same picky rules as the board's `history.py`. No tab / no Google = off, said
+once at the start. KPI field `secondLook` (kept ones only); the end of a scan
+says `Second look: N listing(s) …`. Redfin scan and Refresh are unchanged.
+Tests: `node desktop-app/test-second-look.js` (in `npm test`).
+
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope
 `spreadsheets` only) and pastes the spreadsheet URL; as each city finishes, the

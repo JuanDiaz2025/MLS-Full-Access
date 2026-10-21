@@ -702,6 +702,7 @@
         + `<b>${t.bucketA||0} A — Work Now</b> · ${t.bucketB||0} B — AI Review · ${t.bucketC||0} C — Auto-Pass → ${t.pushed} new on the sheet.`
         + `<br><span class="pill">keep rate ${pct(t.kept,t.reviewed)}</span> `
         + `<span class="pill">gate rate ${pct(t.gateCleared,t.leads)}</span>`
+        + (t.secondLook ? ` <span class="pill" title="Listings the scan would have dropped, kept as B because we made money nearby at a similar price">second look ${t.secondLook}</span>` : '')
         + (t.dropped ? `<br>Dropped ${t.dropped}: `
             + `${t.droppedRenovated} renovated · ${t.droppedMultiUnit} multi-unit · `
             + `${t.droppedFire} fire · ${t.droppedFewPhotos} too few photos · ${t.droppedOther} other` : '')
