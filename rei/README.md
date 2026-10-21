@@ -184,3 +184,33 @@ Verified 21 Oct on a real round trip: sent 1:24 PM, outreach 1:45 PM, reply
 
 `sent.jsonl` is gitignored: it grows, it holds agents' phone numbers, and the
 container it lives in is reclaimed. Its durable home is the board's agent log.
+
+## replywatch.js — catching a reply without being asked
+
+```
+node rei/replywatch.js --state <file> [--line "Realtor"] [--days 14]
+```
+
+Prints `{newReplies, writes, alert, advanceTo}` and **writes nothing itself** —
+the board's database is reached with the Artifact tools, not from node, so this
+stays a pure read and is safe to run at any time.
+
+The caller does three things in order, and the order is the point:
+
+1. apply `writes` to `agents/<id>.log` — the reply lands on the agent card and
+   on the Email & SMS Log screen;
+2. send `alert` to a person;
+3. **only then** save `advanceTo` to the state file.
+
+Advancing the mark first would lose the reply if either step failed. A reply
+reported twice is a nuisance; a reply dropped is a lost deal.
+
+A reply from a number that matches no agent on the board is still written,
+keyed by phone. `agDoc` walks every id an agent has gone by, so the entry
+attaches itself the day that agent's listing reaches the board — inert rather
+than lost.
+
+**The limit worth stating out loud:** this runs only while a session with the
+REI login is alive. The signed-in browser profile lives in a container that is
+reclaimed, so there is no unattended alerting until that login lives somewhere
+that persists.
