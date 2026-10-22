@@ -250,12 +250,22 @@ it when the Master Property List changes, not on the daily refresh.
 
 ## Pull date and counts (Test board, 22 Oct)
 
-The board opens on **this month** (the 1st to the last day; a month with no
-pull yet falls back to the latest pull's month). "This month" is the first
-quick pick in the Pull date calendar. The top tiles, the Area menu and the
+The board opens on the **last 7 days** (Seth, 22 Oct; a week with no pull
+falls back to the latest pull date). The top tiles, the Area menu and the
 Market buttons all count the pull dates picked, so Total Properties matches
 the Show menu. Pressing a tile keeps the dates. The sidebar's Priority Leads
 badge still counts every pull date, because that item opens All pull dates.
+
+Brought over from the real board on 22 Oct:
+
+- **New in my areas**, and the 🔔 pop-up's Show me opening it.
+- **The Email & SMS Log's direction marks**: replies that REI's tools mark as
+  incoming. A call or text is tied to a listing only when the person logging
+  it said which one, or the agent has only one listing.
+
+The Test board's own log fixes stay as they were: replies from agents with no
+listing on the board, replies whose outgoing text wasn't logged, and plain
+dates read at noon so they don't show a day early.
 
 ## Buy Box Settings (Test board, 22 Oct)
 
