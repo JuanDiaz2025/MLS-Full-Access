@@ -88,3 +88,31 @@ its repo before promising otherwise.
   actually connected before promising a contact will be created.
 - Credentials in this repo: none, ever. `.env`, `data/`, session cookies and
   `.claude/settings.local.json` are gitignored.
+
+## Open houses → Bryan's calendar (Bryan, 22 Oct)
+
+**Never put a nice / already-renovated house on the calendar.** Only fixers.
+Check every photo first — the whole gallery, not the cover shot or the remarks
+("95% original" on 1321 Cabrillo turned out to be a 2000s granite kitchen).
+
+- **Where open houses come from:** the public MLSListings page,
+  `https://www.mlslistings.com/Property/<MLS #>` → "Upcoming Open Houses".
+  Redfin blocks automated lookups from here (CloudFront 403, even headless
+  Chromium); MLSListings carries the same schedule.
+- **Photos:** same page. MLSListings listings use
+  `media.mlslmedia.com/property/MLSL/<id>/<hash>/2/<n>`; SF listings use
+  `sfarmedia.rapmls.com/.../bigphoto/...jpg`; East Bay uses
+  `zimg.paragon.ice.com/...JPG`. Tile them into numbered contact sheets and
+  judge every one.
+- **Verdicts:** FIXER → add. RENOVATED (new kitchen/baths/floors, LVP + white
+  shaker, quartz, recessed lights, or a 1995–2015 granite/stainless refresh)
+  → never add; remove it if it is already there. DATED-BUT-GOOD (old but tidy,
+  nothing to fix) → Juan usually passes; add only as clearly marked
+  "DATED (optional)", never as a main stop.
+- **Calendar:** bryan@twinhomebuyer.com, not Juan's, until Bryan says
+  otherwise. Every title starts with "🏠 Open House". Arrange by location as a
+  timed driving route (one event per stop, "Sat 2/5" order, next stop + drive
+  time in the notes, an all-day route summary with a Google Maps link). Green
+  = fixer, yellow = optional. Each event carries a
+  `[twin-network-openhouse:<MLS>:<start>]` tag so nothing is added twice.
+- **Area:** SF and the Peninsula (San Mateo County), active leads on the board.
