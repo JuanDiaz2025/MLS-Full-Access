@@ -116,3 +116,25 @@ Check every photo first — the whole gallery, not the cover shot or the remarks
   time in the notes, an all-day route summary with a Google Maps link). Each event carries a
   `[twin-network-openhouse:<MLS>:<start>]` tag so nothing is added twice.
 - **Area:** SF and the Peninsula (San Mateo County), active leads on the board.
+
+### The hourly open-house routine (set up 22 Oct)
+
+A Routine fires every hour in a fresh session and does exactly this:
+
+1. Check out branch `claude/elegant-einstein-1i628r` of this repo (until it is
+   merged) and `git pull`.
+2. Read the board's `data.js` with the Artifact tool (`action: read`,
+   `paths: ["data.js"]`, url above). Run
+   `python3 -I scripts/openhouse/scan.py <data.js> scripts/openhouse/verdicts.json > cand.json`.
+3. For every candidate with an empty verdict (a house never judged before):
+   `python3 -I scripts/openhouse/sheets.py ph <MLS>…` and look at **every**
+   sheet. Record FIXER / RENOVATED / DATED in `verdicts.json` with the address
+   and date. Never re-judge a house already in `verdicts.json`.
+4. List the next 14 days of bryan@twinhomebuyer.com and read the
+   `[twin-network-openhouse:<MLS>:<start>]` tags. Add every FIXER slot that is
+   not there yet; rebuild that day's route (times by location, next stop and
+   drive time in each event, the "Open House on <day> · Route" summary) so
+   stops don't overlap. Delete any tagged event whose house is now RENOVATED,
+   DATED, sold, pending or no longer has that slot.
+5. Commit and push `verdicts.json` only if it changed. Touch nothing else on
+   the calendar. If nothing changed, stop quietly.
