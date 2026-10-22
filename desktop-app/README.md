@@ -87,6 +87,17 @@ install (creates a desktop shortcut) or run the portable exe directly.
    Bought, Sold and Net all filled in count, bought at $1.5M or less; a Status
    other than Sold, or a note saying the status is unresolved, leaves a row
    out. No tab = no second look, and the log says so at the start of the scan.
+4c. **Refresh re-checks passed leads and comps older ones** (v1.74.1) — **↻ Refresh
+   leads on the board** now also re-reads every lead **passed in Notes** that is
+   still on the market and was added in the last 120 days (price and status
+   only, right after the A leads). A price **10% or more under the sheet's
+   Purchase Price**, or a lead passed as sold / pending / off-market that the MLS
+   shows **Active** again, puts `PRICE CUT AFTER PASS — $1.40M → $1.00M (−29%),
+   now Pending: look again` (or `BACK ON THE MARKET AFTER PASS …`) in front of its
+   Why, and the end of the Refresh lists them. Notes are never touched. It also
+   **comps up to 25 live A/B leads that have no ARV yet**, A first (the same
+   comps as a scan, the same "Run comps" box); a lead that found no comps is
+   tried again after 14 days, and comps cut short by Stop are not saved.
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,

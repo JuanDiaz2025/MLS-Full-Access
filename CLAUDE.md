@@ -1248,6 +1248,27 @@ Sold AND Net (formatted cells read by `core.money`), bought ≤ $1.5M
 same picky rules as the board's `history.py`. No tab / no Google = off, said
 once at the start. KPI field `secondLook` (kept ones only); the end of a scan
 says `Second look: N listing(s) …`. Redfin scan and Refresh are unchanged.
+
+**v1.74.1 — Refresh re-checks passed leads and comps the older ones (Seth 21
+Oct).** 1534 Kooser Rd (ML82059011) was passed at $1,399,888 ("PASS-SOLD LAST
+AUG 17"), cut to $999,999 (65% of the San Jose median) and went Pending with
+someone else; the sheet still read $1.4M because Refresh skipped every row
+passed in Notes and a scan skips every row on the sheet. Refresh now re-reads
+passed rows that are not closed and were added in the last 120 days
+(`core.passRecheckDue`), ranked right after the A leads, price + status only. A
+list price ≥10% under the sheet's Purchase Price, or a pass about status (sold /
+pending / off-market) that is Active again, puts `PRICE CUT AFTER PASS — $1.40M →
+$1.00M (−29%), now Pending: look again` in front of the Why
+(`core.passRecheck` / `core.withPassFlag`: replaces an older flag, never
+stacks); Notes are never touched; the end of the Refresh lists them. Refresh
+also comps up to `REFRESH_COMPS_MAX` = 25 live A/B leads with no ARV
+(`core.refreshNeedsComps`: not pending/closed, no "Comps Run On" in 14 days),
+A first, with the scan's `compsFor()` and the same "Run comps" box — on 21 Oct
+only 15 of 1,064 live A/B leads had an ARV, so the board's Comps agent had
+nothing to read. A failed comps run is not stamped (retried next Refresh);
+comps cut short by Stop are not saved. Replay on the 21 Oct sheet: 133 of 153
+passed rows re-checked (Kooser among them), 679 A/B rows waiting for comps
+(157 A). Tests: `test-refresh-pass.js`. Not yet run against the live MLS.
 Tests: `node desktop-app/test-second-look.js` (in `npm test`).
 
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with

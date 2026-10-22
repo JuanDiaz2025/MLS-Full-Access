@@ -2687,7 +2687,7 @@ ipcMain.handle('refresh-board', async () => {
   if (control.running) return { ok: false, error: 'already running', message: 'Refresh NOT started — another run is still finishing. Wait for its "Finished" message, then try again.' };
   if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 8 first' };
   control.running = true; control.stopped = false; control.paused = false;
-  let done = 0, notFound = 0, scored = 0, flagged = 0, started = false;
+  let done = 0, notFound = 0, scored = 0, flagged = 0, started = false, reopenedN = 0;
   try {
     if (!mlsWin || mlsWin.isDestroyed()) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
     const title = await js(core.JS_TITLE).catch(() => '');
@@ -2713,22 +2713,40 @@ ipcMain.handle('refresh-board', async () => {
     // MLS # to look up — it would only ever come back "Not found".
     const isMlsId = m => /^[A-Z]{2,6}\d{5,}$/.test(String(m || '').trim().toUpperCase());
     const redfinOnly = all.filter(x => !isMlsId(val(x.r, 'MLS #'))).length;
+    // v1.74.1: passed leads still on the market come back for a price check,
+    // right after the A leads — a cut since the pass is as urgent as an A
+    // (1534 Kooser Rd went from $1.4M to $999,999 and nobody saw it).
+    const tday = todayKey();
+    const passRows = all.filter(x => isMlsId(val(x.r, 'MLS #')) && core.passRecheckDue(
+      { notes: val(x.r, 'Notes'), mlsStatus: val(x.r, 'MLS Status'), firstAdded: val(x.r, 'First Added') }, tday));
     const todo = all
       .filter(x => isMlsId(val(x.r, 'MLS #')) && !core.PASSED_NOTE.test(val(x.r, 'Notes')) && !core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))
         && !/^C/.test(val(x.r, 'Bucket')))
-      .sort((a, b) => rankOf(a.r) - rankOf(b.r) || b.i - a.i)
-      .map(x => x.r);
-    log(`Refreshing ${todo.length} lead(s), A first then B (reports only, no photos) — `
-      + `skipping ${closedN} closed, ${passedN} passed in Notes and ${redfinOnly} Redfin-only (no MLS # to look up)…`, 'good');
+      .map(x => ({ r: x.r, i: x.i, kind: 'lead', rank: rankOf(x.r) ? rankOf(x.r) + 1 : 0 }))   // A 0 · B 2 · unscored 3
+      .concat(passRows.map(x => ({ r: x.r, i: x.i, kind: 'passed', rank: 1 })))
+      .sort((a, b) => a.rank - b.rank || b.i - a.i);
+    // v1.74.1: comps for live A/B leads with no ARV, A first, a few per Refresh.
+    const comping = cfg.runComps !== false;
+    const compCache = comping ? loadCompCache() : null;
+    let compsRun = 0, compsValued = 0, passChecked = 0;
+    const reopened = [];
+    const compsWaiting = todo.filter(x => x.kind === 'lead' && core.refreshNeedsComps(
+      { bucket: val(x.r, 'Bucket'), arv: val(x.r, 'ARV'), compsAt: val(x.r, 'Comps Run On'), status: val(x.r, 'MLS Status') }, tday)).length;
+    log(`Refreshing ${todo.length - passRows.length} lead(s), A first then B (reports only, no photos), and re-checking `
+      + `${passRows.length} passed lead(s) still on the market for a price cut — `
+      + `skipping ${closedN} closed, ${passedN - passRows.length} other passed and ${redfinOnly} Redfin-only (no MLS # to look up)…`, 'good');
+    if (comping && compsWaiting) log(`  ${compsWaiting} A/B lead(s) have no ARV yet — up to ${core.REFRESH_COMPS_MAX} get comps this Refresh, A first`);
 
     let batch = [];
     // Old broken Portal.aspx links on the rows we are NOT re-reading (closed,
     // passed) are fixed in the same write — no MLS lookup needed for that.
-    const skipped = all.map(x => x.r).filter(r => todo.indexOf(r) < 0 && /Portal\.aspx/i.test(val(r, 'MLS Link')));
+    const reading = new Set(todo.map(x => x.r));
+    const skipped = all.map(x => x.r).filter(r => !reading.has(r) && /Portal\.aspx/i.test(val(r, 'MLS Link')));
     const flush = async () => {
       if (!batch.length) return;
       await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', batch,
-        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link'], patchOnly: true });
+        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link',
+          'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On'], patchOnly: true });
       batch = [];
     };
     if (skipped.length) {
@@ -2738,9 +2756,30 @@ ipcMain.handle('refresh-board', async () => {
     }
     for (let i = 0; i < todo.length; i++) {
       if (await stopRequested()) break;   // flush + Board rebuild below still run
-      const r = todo[i], mls = val(r, 'MLS #');
-      log(`  [${i + 1}/${todo.length}] ${val(r, 'Address') || mls}`);
+      const r = todo[i].r, mls = val(r, 'MLS #');
+      log(`  [${i + 1}/${todo.length}] ${val(r, 'Address') || mls}${todo[i].kind === 'passed' ? ' (passed — price check)' : ''}`);
       const gal = await showGallery(mls, { factsOnly: true }).catch(e => ({ failed: true, error: e.message }));
+      if (todo[i].kind === 'passed') {
+        // A passed lead: its price and status only. A lead we could not read
+        // is left alone — a pass says nothing needs doing to it.
+        if (gal.failed || gal.mismatch || gal.notFound) { log('    could not read its report — left as is', 'warn'); continue; }
+        const list = core.num(gal.listPrice), orig = core.num(gal.origPrice);
+        const rec = {
+          'MLS #': mls,
+          'Price Cut': orig > list && list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
+          'MLS Status': gal.status || '',
+        };
+        const chk = core.passRecheck({ note: val(r, 'Notes'), sheetPrice: val(r, 'Purchase Price'), listPrice: list, status: gal.status });
+        if (chk.flag) {
+          rec['Why'] = core.withPassFlag(val(r, 'Why'), chk.why);
+          reopened.push(`${val(r, 'Address') || mls} — ${chk.why}`);
+        }
+        batch.push(rec);
+        passChecked++;
+        log(`    ${gal.status || 'status ?'} · ${list ? '$' + list.toLocaleString('en-US') : 'price ?'}${chk.flag ? ' · ' + chk.why : ''}`, chk.flag ? 'good' : 'info');
+        if (batch.length >= 10) await flush();
+        continue;
+      }
       if (gal.failed) {
         // The page did not load — that says nothing about the listing. Leave the row as it is.
         log(`    could not read its report${gal.error ? ' (' + gal.error + ')' : ''} — row left as is`, 'warn');
@@ -2797,6 +2836,32 @@ ipcMain.handle('refresh-board', async () => {
             'Why': q.why + ' (scored on refresh — no $/sqft or photo check)' });
           scored++;
         }
+        // v1.74.1: comps for a live A/B lead with no ARV yet (never one just moved to C)
+        if (comping && compsRun < core.REFRESH_COMPS_MAX && !(hard && hard.decision === 'drop')
+            && core.refreshNeedsComps({ bucket: rec.Bucket || val(r, 'Bucket'), arv: val(r, 'ARV'),
+              compsAt: val(r, 'Comps Run On'), status: gal.status || val(r, 'MLS Status') }, tday)
+            && !(await stopRequested())) {
+          const addr = val(r, 'Address') || gal.address || '';
+          const sq = core.num(val(r, 'SqFt'));
+          let comp;
+          try {
+            comp = await compsFor({ mls, zip: (addr.match(/9[0-5]\d{3}(?=(?:-\d{4})?\D*$)/) || [''])[0], fullAddr: addr,
+              _sqft: sq >= 300 ? sq : 0 }, compCache);
+          } catch (e) { comp = { arv: 0, reason: 'comps failed: ' + e.message, list: [] }; }
+          if (control.stopped) {
+            // Stop mid-comps leaves a half-read set: save none of it, the next Refresh comps it whole.
+            log('    comps stopped part-way — not saved');
+          } else {
+            const f = compFields(comp);
+            // a failed run (page error) is not stamped, so the next Refresh tries again
+            const failed = /^comps failed/.test(String(comp.reason || ''));
+            Object.assign(rec, { 'ARV': f.arv, 'ARV $/SqFt': f.arvPpsf, 'Comp Confidence': f.compConf,
+              'Comps': f.comps, 'Comps Run On': failed ? '' : f.compsAt });
+            compsRun++;
+            if (comp.arv) compsValued++;
+            log(`    comps: ${core.compSummary(comp)}${comp.read ? ` · ${comp.read} sold report(s) read` : ''}`, comp.arv ? 'good' : 'warn');
+          }
+        }
         batch.push(rec);
         done++;
         log(`    ${gal.status || 'status ?'}${offer ? ' · offer due ' + offer : ''}${rec.Bucket ? ' · ' + rec.Bucket + ' ' + rec['Opportunity Score'] : ''}`
@@ -2806,11 +2871,20 @@ ipcMain.handle('refresh-board', async () => {
       if (batch.length >= 10) await flush();   // a Stop mid-way keeps what was read
     }
     await flush();
+    if (compCache) saveCompCache(compCache);
     await rebuildBoard();
     const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · `
-      + `${flagged} moved to C by a red flag · ${notFound} not found among Active or Coming Soon listings.`;
+      + `${flagged} moved to C by a red flag · ${notFound} not found among Active or Coming Soon listings · `
+      + `${compsRun} comped (${compsValued} with an ARV) · ${passChecked} passed lead(s) re-checked, `
+      + `${reopened.length} cut or back on the market since the pass.`;
     log(line, 'good');
-    return { ok: true, done, scored, notFound };
+    reopenedN = reopened.length;
+    if (reopened.length) {
+      log(`Look again — ${reopened.length} passed lead(s) changed since the pass (the Why on each now says so; Notes untouched):`, 'good');
+      reopened.forEach(x => log('  ' + x, 'good'));
+    }
+    if (comping && compsWaiting > compsRun) log(`  ${compsWaiting - compsRun} A/B lead(s) still have no ARV — the next Refresh comps more.`);
+    return { ok: true, done, scored, notFound, compsRun, compsValued, passChecked, reopened: reopened.length };
   } catch (e) {
     if (e.message === 'stopped') { log('Refresh stopped.', 'warn'); return { ok: false, stopped: true }; }
     log('Refresh error: ' + e.message, 'error');
@@ -2818,7 +2892,8 @@ ipcMain.handle('refresh-board', async () => {
   } finally {
     if (started) closeMlsWindow();
     send('done', started
-      ? { stopped: control.stopped, summary: `Refresh finished — ${done} updated, ${notFound} not found.` }
+      ? { stopped: control.stopped, summary: `Refresh finished — ${done} updated, ${notFound} not found`
+          + (reopenedN ? `, ${reopenedN} passed lead(s) cut or back on the market — look again (see the log).` : '.') }
       : { neverStarted: true, summary: 'Refresh NOT started — sign in to the MLS first (section 1), then press ↻ Refresh again.' });
     control.running = false;
   }

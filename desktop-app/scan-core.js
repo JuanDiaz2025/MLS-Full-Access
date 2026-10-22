@@ -1133,6 +1133,78 @@ const PENDING_STATUS = /\b(pending|contingent|under contract)\b/i;
 // not work, so the Board counts them and leaves them off.
 const PASSED_NOTE = /^\s*(?:pass\b|passing\b|passed\b|we'?re passing|rejected\b|not a (?:fit|deal))/i;
 
+// ---- v1.74.1: a passed lead is re-checked for a price cut (Seth, 21 Oct) ----
+// Refresh skipped every row passed in Notes and a scan skips every row already
+// on the sheet, so a cut after the pass was never seen. 1534 Kooser Rd
+// (ML82059011) was passed at $1,399,888 ("PASS-SOLD LAST AUG 17"), cut to
+// $999,999 — 65% of the San Jose median — and went Pending with someone else
+// while the sheet still read $1.4M. Refresh now re-reads passed leads still on
+// the market and says so on the Why; it never touches Notes.
+const PASS_RECHECK_DAYS = 120;   // passed leads added in the last ~4 months
+const PASS_CUT_PCT = 10;         // at least 10% under the price on the sheet
+// a pass about the listing's status, not the house — "SOLD", "off-market", "pending"
+const PASS_FOR_STATUS = /\b(?:sold|pending|contingent|off[- ]?market|withdrawn|under contract|in escrow)\b/i;
+const PASS_FLAG_RE = /^(?:PRICE CUT|BACK ON THE MARKET) AFTER PASS\b[^·]*(?:·\s*|$)/;
+
+/** A sheet date ("2026-08-26", "8/26/2026", a sheet day number) as YYYY-MM-DD, or "". */
+function dayKeyOf(v) {
+  const s = String(v == null ? '' : v).trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\b/.exec(s);
+  if (m) return m[3] + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+  if (/^\d{5}(?:\.\d+)?$/.test(s)) return new Date(Math.round((+s - 25569) * 864e5)).toISOString().slice(0, 10);
+  return '';
+}
+/** YYYY-MM-DD, `days` before `today` (YYYY-MM-DD). */
+function daysBefore(today, days) {
+  return new Date(new Date(today + 'T12:00:00Z').getTime() - days * 864e5).toISOString().slice(0, 10);
+}
+/** Is this passed row one a Refresh re-reads? Still on the market, added recently. */
+function passRecheckDue(row, today) {
+  if (!PASSED_NOTE.test(String(row.notes || ''))) return false;
+  if (CLOSED_STATUS.test(String(row.mlsStatus || ''))) return false;
+  const d = dayKeyOf(row.firstAdded);
+  return !d || d >= daysBefore(today, PASS_RECHECK_DAYS);   // no date: check rather than skip
+}
+const shortPrice = n => (n >= 995000 ? '$' + (n / 1e6).toFixed(2) + 'M' : '$' + Math.round(n / 1000) + 'k');
+/**
+ * A passed lead, read again: did its price fall far enough to look again, or
+ * did a lead passed as sold / pending come back on the market?
+ * {note, sheetPrice, listPrice, status} -> {flag, why}
+ */
+function passRecheck(o) {
+  const was = num(o.sheetPrice), now = num(o.listPrice), st = String(o.status || '').trim();
+  if (was > 0 && now > 0 && now <= was * (1 - PASS_CUT_PCT / 100)) {
+    return { flag: true, why: 'PRICE CUT AFTER PASS — ' + shortPrice(was) + ' → ' + shortPrice(now)
+      + ' (−' + Math.round(100 * (was - now) / was) + '%)' + (st ? ', now ' + st : '') + ': look again' };
+  }
+  if (PASS_FOR_STATUS.test(String(o.note || '')) && /^\s*(?:active|coming soon)\b/i.test(st)) {
+    return { flag: true, why: 'BACK ON THE MARKET AFTER PASS — passed as off the market, the MLS now says ' + st + ': look again' };
+  }
+  return { flag: false, why: '' };
+}
+/** The Why with the after-pass flag in front — replacing an older flag, never stacking. */
+function withPassFlag(why, flag) {
+  const rest = String(why || '').replace(PASS_FLAG_RE, '').trim();
+  return flag + (rest ? ' · ' + rest : '');
+}
+
+// ---- v1.74.1: Refresh comps the live A/B leads that have no ARV yet ----
+// v1.73 comps every NEW A/B lead; the ~1,050 added before it had none (15 of
+// 1,064 live A/B leads carried an ARV on 21 Oct), so the board's Comps agent
+// had nothing to show. Each Refresh comps a few, A first.
+const REFRESH_COMPS_MAX = 25;          // per Refresh: a new zip reads up to COMP_READ sold reports
+const REFRESH_COMPS_RETRY_DAYS = 14;   // a lead that found no comps is tried again after two weeks
+/** Should a Refresh comp this row? {bucket, arv, compsAt, status} */
+function refreshNeedsComps(row, today) {
+  if (!/^[AB]/.test(String(row.bucket || ''))) return false;
+  if (num(row.arv) > 0) return false;
+  if (CLOSED_STATUS.test(String(row.status || '')) || PENDING_STATUS.test(String(row.status || ''))) return false;
+  const d = dayKeyOf(row.compsAt);
+  return !d || d < daysBefore(today, REFRESH_COMPS_RETRY_DAYS);
+}
+
 /** "2026-09-30 (Wed) 12:00 PM" -> Date, or null for TBD / blank. */
 function offerDueToDate(v) {
   const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:\s*\(\w+\))?(?:\s+(\d{1,2}):(\d{2})\s*([AP])M)?/i);
@@ -1897,4 +1969,6 @@ module.exports = {
   qualify, privateRemarks, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
   PAST_DEALS_TAB, PAST_DEAL_HEADERS, PAST_DEAL_CAP, PAST_DEAL_BAND, money, pastDealsFromGrid, secondLook, applySecondLook,
   mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS, disclosuresLink,
+  PASS_RECHECK_DAYS, PASS_CUT_PCT, dayKeyOf, passRecheckDue, passRecheck, withPassFlag,
+  REFRESH_COMPS_MAX, REFRESH_COMPS_RETRY_DAYS, refreshNeedsComps,
 };
