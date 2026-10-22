@@ -743,39 +743,23 @@ async function showGallery(mls, opts) {
 // about 50 live leads have none there — the page sends you to the site's home
 // page (the seller kept the listing off the public site, or it was pulled).
 // The MLS itself always has the photos, so for exactly those leads the cover
-// photo goes into the sheet's "Photo" column: its address when it opens without
-// the MLS sign-in, else a small copy of the photo itself (a data: URL kept
-// under a cell's 50,000 characters). thumbs.py uses it when the page has none.
+// photo goes into the sheet's "Photo" column as a small copy of the photo
+// itself (a data: URL kept under a cell's 50,000 characters). thumbs.py uses
+// it when the page has none. v1.74.3 saved the photo's address instead when
+// it opened without the sign-in — but it opens only from this computer; from
+// the cloud, where the boards are built, the MLS answers with nothing.
 const COVER_MAX_CHARS = 45000;
-let coverPublic = null;   // does the MLS media server answer without the sign-in? learned once per app run
 async function publicPagePhoto(mls) {
   try {
     return await timeLimit((async () => {
       const r = await net.fetch('https://www.mlslistings.com/Property/' + encodeURIComponent(mls), { headers: { 'Accept': 'text/html' } });
-      if (!r.ok || !new RegExp('/property/' + mls + '\\b', 'i').test(r.url || '')) return false;
-      const m = (await r.text()).match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
-      return !!(m && !core.PUBLIC_NO_PHOTO.test(m[1]));
+      return r.ok && core.publicPageHasPhoto(await r.text(), mls);
     })(), 20000, 'public page');
   } catch (_) { return false; }
 }
 async function coverPhoto(url) {
-  if (!/^https:\/\/search\.mlslistings\.com\/MediaServer\//i.test(String(url || ''))) return '';
-  // 1. Without the sign-in: an address the board's daily refresh can open itself.
-  const pub = session.fromPartition('flipscout-public');   // in memory — no MLS cookies
-  if (coverPublic !== false && pub.fetch) {
-    const ok = await timeLimit((async () => {
-      const r = await pub.fetch(url);
-      if (!r.ok || !/^image\//i.test(r.headers.get('content-type') || '')) return false;
-      const buf = Buffer.from(await r.arrayBuffer());
-      return buf.length > 2000 && !nativeImage.createFromBuffer(buf).isEmpty();
-    })(), 20000, 'cover photo').catch(() => false);
-    if (ok) { coverPublic = true; return url; }
-    if (coverPublic === null) {
-      coverPublic = false;
-      log('  (MLS photos need the sign-in — the boards get a small copy of each cover photo instead)');
-    }
-  }
-  // 2. A small copy, read inside the signed-in MLS window like the AI's photos.
+  if (!core.MLS_MEDIA_LINK.test(String(url || ''))) return '';
+  // Read inside the signed-in MLS window, like the AI's photos.
   const d = await js(`(async () => { try {
       const r = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
       if (!r.ok) return '';
@@ -2799,12 +2783,15 @@ ipcMain.handle('refresh-board', async () => {
     // v1.74.1: comps for live A/B leads with no ARV, A first, a few per Refresh.
     const comping = cfg.runComps !== false;
     const compCache = comping ? loadCompCache() : null;
-    let compsRun = 0, compsValued = 0, passChecked = 0, photosSaved = 0;
-    const needPhoto = async (r, mls, gal) => {
-      if (val(r, 'Photo') || !gal.cover || control.stopped) return '';
-      const ph = await photoForBoards(mls, gal.cover).catch(() => '');
-      if (ph) photosSaved++;
-      return ph;
+    let compsRun = 0, compsValued = 0, passChecked = 0, photosSaved = 0, linksCleared = 0;
+    // v1.74.4: an MLS media address v1.74.3 saved counts as no photo — it is
+    // replaced by a copy, or emptied when the public page has a photo after all.
+    const needPhoto = async (r, mls, gal, rec) => {
+      const had = val(r, 'Photo'), dead = core.MLS_MEDIA_LINK.test(had);
+      if ((had && !dead) || control.stopped) return;
+      const ph = gal.cover ? await photoForBoards(mls, gal.cover).catch(() => '') : '';
+      if (ph) { rec['Photo'] = ph; photosSaved++; }
+      else if (dead) { rec.__clear = (rec.__clear || []).concat('Photo'); linksCleared++; }
     };
     const reopened = [];
     const compsWaiting = todo.filter(x => x.kind === 'lead' && core.refreshNeedsComps(
@@ -2859,8 +2846,7 @@ ipcMain.handle('refresh-board', async () => {
           'Price Cut': orig > list && list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
           'MLS Status': gal.status || '',
         };
-        const php = await needPhoto(r, mls, gal);
-        if (php) rec['Photo'] = php;
+        await needPhoto(r, mls, gal, rec);
         const chk = core.passRecheck({ note: val(r, 'Notes'), sheetPrice: val(r, 'Purchase Price'), listPrice: list, status: gal.status });
         if (chk.flag) {
           rec['Why'] = core.withPassFlag(val(r, 'Why'), chk.why);
@@ -2901,8 +2887,7 @@ ipcMain.handle('refresh-board', async () => {
         // v1.74.2: the field is still empty, but the sheet holds the old reader's
         // "Showing & Location" — empty the cell (a blank alone never wipes one).
         if (!rec['Private Remarks'] && core.isJunkPrivate(val(r, 'Private Remarks'))) { rec.__clear = ['Private Remarks']; junkCleared++; }
-        const phl = await needPhoto(r, mls, gal);
-        if (phl) rec['Photo'] = phl;
+        await needPhoto(r, mls, gal, rec);
         // Red flags in the remarks move a lead that was already scored to
         // C — a private remark like "this is not a cosmetic remodel" or
         // "plans approved by the City" is exactly what the quick-flip rule
@@ -2975,7 +2960,8 @@ ipcMain.handle('refresh-board', async () => {
       + `${compsRun} comped (${compsValued} with an ARV) · ${passChecked} passed lead(s) re-checked, `
       + `${reopened.length} cut or back on the market since the pass`
       + (junkCleared ? ` · ${junkCleared} "Showing & Location" private remark(s) cleared` : '')
-      + (photosSaved ? ` · ${photosSaved} cover photo(s) saved for leads the public site has no photo of.` : '.');
+      + (photosSaved ? ` · ${photosSaved} cover photo(s) saved for leads the public site has no photo of` : '')
+      + (linksCleared ? ` · ${linksCleared} old photo link(s) cleared` : '') + '.';
     log(line, 'good');
     reopenedN = reopened.length;
     if (reopened.length) {

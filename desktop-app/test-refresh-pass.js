@@ -88,5 +88,28 @@ eq(cover('<p>no photos</p>'), '', 'a report with no MLS photos gives no cover');
 eq(core.PUBLIC_NO_PHOTO.test('https://www.mlslistings.com/images/nophoto.png'), true, "the public site's no-photo image is not a photo");
 eq(core.PUBLIC_NO_PHOTO.test('https://media.mlslmedia.com/property/MLSL/82065149/0e20df80/2/1'), false, 'a real MLS photo is one');
 
+// --- v1.74.4: Seth's first run (22 Oct) saved a Photo for 5 North Bay leads; 4 had a public photo ---
+const T2 = '<img src="https://search.mlslistings.com/MediaServer/GetMedia.ashx?Key=3046380142&amp;TableID=9&amp;Type=2&amp;Number=0&amp;Size=5">';
+eq(cover(T2 + G(0, 2)), 'https://search.mlslistings.com/MediaServer/GetMedia.ashx?Key=77&TableID=9&Type=1&Number=0&Size=2',
+  'a Type=2 image is never the cover, even at a bigger size');
+eq(cover(T2), '', '2613 Sage St: only a Type=2 image (no photos posted yet) → no cover');
+const page = (url, img) => `<link rel="canonical" href="${url}">\n<meta property="og:url" content="${url}">\n`
+  + '<meta property="og:image:width" content="600"/>\n' + (img ? `<meta property="og:image" content="${img}">` : '');
+const VAC = 'https://www.mlslistings.com/property/ba326088771/690-camellia-way-vacaville-ca-95688';
+const BARI = 'https://barimedia.rapmls.com/norcalmls/listingpics/bigphoto/2026/10/21/7233452c-aab3-40a2-adb8-6cba69ff557d.jpg';
+eq(core.publicPageHasPhoto(page(VAC, BARI), 'BA326088771'), true, '690 Camellia Way: its own page (lower-case id in og:url) with a photo');
+eq(core.publicPageHasPhoto(page('https://www.mlslistings.com/property/ba326086547/2613-sage-st-santa-rosa-ca-95405',
+  'https://www.mlslistings.com/images/photos_coming_soon.png'), 'BA326086547'), false, '2613 Sage St: "photos coming soon" is not a photo');
+eq(core.publicPageHasPhoto('<meta property="og:url" content="https://www.mlslistings.com" />\n<title>MLSListings</title>', 'ML82065149'), false,
+  'a hidden listing lands on the home page: no photo');
+eq(core.publicPageHasPhoto(page(VAC, BARI), 'BA326088825'), false, "another listing's page is not this one's");
+eq(core.publicPageHasPhoto(page(VAC, BARI), 'BA32608877'), false, 'an MLS # that is only the start of the page\'s is not it');
+eq(core.publicPageHasPhoto(`<meta property="og:image" content="${BARI}">`, 'BA326088771'), false, 'a page that does not say which listing it is: no');
+eq(core.publicPageHasPhoto(page(VAC, BARI), ''), false, 'no MLS #: no');
+eq(core.MLS_MEDIA_LINK.test('https://search.mlslistings.com/MediaServer/GetMedia.ashx?Key=3048371939&TableID=9&Type=1&Number=0&Size=2&exk=f8023655b1f7d4476cd321e8efb3da01'), true,
+  "v1.74.3's saved address is recognised (a Refresh replaces it)");
+eq(['data:image/jpeg;base64,/9j/4AAQ', 'https://media.mlslmedia.com/property/MLSL/82065149/0e20df80/2/1', ''].map(v => core.MLS_MEDIA_LINK.test(v)),
+  [false, false, false], 'a copy, a public photo or a blank is not');
+
 console.log(fails ? fails + ' FAILED' : 'ALL PASS');
 process.exit(fails ? 1 : 0);

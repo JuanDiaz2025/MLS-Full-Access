@@ -144,6 +144,9 @@ def finish(lead, pid, url, raw, im):
 
 
 SHEET_DATA = re.compile(r'^data:image/(?:jpeg|png);base64,([A-Za-z0-9+/=\s]+)$')
+# An MLS media address (app v1.74.3) opens only from the computer that saved it;
+# from here the MLS answers with nothing. v1.74.4 saves a copy instead.
+MLS_MEDIA = re.compile(r'^https://search\.mlslistings\.com/MediaServer/', re.I)
 
 
 def from_sheet(lead, why):
@@ -220,7 +223,7 @@ def sheet_photos(xlsx):
         if r is None or len(r) <= max(im, ip):
             continue
         m, v = str(r[im] or '').strip().upper(), str(r[ip] or '').strip()
-        if m and (v.startswith('https://') or v.startswith('data:image/')):
+        if m and (v.startswith('data:image/') or (v.startswith('https://') and not MLS_MEDIA.match(v))):
             out[m] = v
     return out
 

@@ -156,9 +156,12 @@ const JS_PHOTOS = `(() => {
 
 // v1.74.3: the listing's cover photo (Number=0) at the largest size the report
 // offers — for the boards, when the public mlslistings.com page has no photo.
+// v1.74.4: listing photos only (Type=1). A Coming Soon listing with no photos
+// posted (2613 Sage St, 22 Oct) gave a Type=2 image as its "cover".
 const JS_COVER = `(() => {
   const html = document.body.innerHTML.replace(/&amp;/g,'&');
-  const all = [...html.matchAll(/https:\\/\\/search\\.mlslistings\\.com\\/MediaServer\\/GetMedia\\.ashx\\?[^'"\\s<>]+/g)].map(m=>m[0]);
+  const all = [...html.matchAll(/https:\\/\\/search\\.mlslistings\\.com\\/MediaServer\\/GetMedia\\.ashx\\?[^'"\\s<>]+/g)].map(m=>m[0])
+    .filter(u => !/[?&]Type=/i.test(u) || /[?&]Type=1(?!\\d)/i.test(u));
   let best = '', bn = Infinity, bs = -1;
   for (const u of all) {
     const n = +((u.match(/Number=(\\d+)/)||[])[1] || 0), s = +((u.match(/Size=(\\d+)/)||[])[1] || 0);
@@ -168,6 +171,27 @@ const JS_COVER = `(() => {
 })()`;
 // What the boards treat as "no real photo" on the public page (thumbs.py's BAD_IMG).
 const PUBLIC_NO_PHOTO = /nophoto|no-photo|no_photo|placeholder|coming[_-]?soon|mlslpub-cdn|mlslistings\.com\/images\//i;
+// v1.74.4: is this public page the listing itself, with a real photo? Decided
+// from the page's own og:url / canonical tag. v1.74.3 tested the response URL,
+// which Electron's net.fetch leaves blank, so every page "failed" and leads
+// whose page has a photo got one saved anyway (4 of 5 on Seth's first run).
+// The site's home page, where a hidden listing redirects, says
+// og:url = https://www.mlslistings.com.
+function publicPageHasPhoto(html, mls) {
+  const s = String(html || ''), id = String(mls || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!id) return false;
+  const own = new RegExp('/property/' + id + '(?![A-Za-z0-9])', 'i');
+  const self = [(s.match(/<meta\s+property="og:url"\s+content="([^"]*)"/i) || [])[1],
+    (s.match(/<link\s+rel="canonical"\s+href="([^"]*)"/i) || [])[1]];
+  if (!self.some(u => own.test(u || ''))) return false;
+  const m = s.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+  return !!(m && !PUBLIC_NO_PHOTO.test(m[1]));
+}
+// A Photo cell holding an MLS media address (what v1.74.3 saved when it opened
+// without the sign-in). It opens only from the computer that saved it — from
+// the cloud, where the boards are built, the MLS answers with nothing — so a
+// Refresh replaces it with a copy, and thumbs.py ignores it.
+const MLS_MEDIA_LINK = /^https:\/\/search\.mlslistings\.com\/MediaServer\//i;
 
 const JS_MATCH_COUNT = `(() => { const m=document.body.innerText.match(/([\\d,]+\\+?)\\s*match/i); return m?m[1]:'?'; })()`;
 const JS_TITLE = `document.title`;
@@ -2001,7 +2025,7 @@ module.exports = {
   redfinUrlFrom,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
-  JS_SCRAPE_GRID, JS_GRID_DEBUG, JS_PHOTOS, JS_COVER, PUBLIC_NO_PHOTO, JS_MATCH_COUNT, JS_TITLE,
+  JS_SCRAPE_GRID, JS_GRID_DEBUG, JS_PHOTOS, JS_COVER, PUBLIC_NO_PHOTO, publicPageHasPhoto, MLS_MEDIA_LINK, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
   qualify, privateRemarks, isJunkPrivate, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
   PAST_DEALS_TAB, PAST_DEAL_HEADERS, PAST_DEAL_CAP, PAST_DEAL_BAND, money, pastDealsFromGrid, secondLook, applySecondLook,

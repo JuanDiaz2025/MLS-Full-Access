@@ -123,9 +123,13 @@ last name, or the same phone). The photo is cut to a 96x96 tile; tiles go into
 `thumbs.py` takes each lead's cover photo from its public mlslistings.com page.
 A listing kept off the public site, or pulled, has no page. With
 `--sheet <prod sheet .xlsx>` it then uses the Leads tab's **Photo** column,
-which the FlipScout app (v1.74.3+) fills for exactly those leads: an image
-address, or a small copy as a data: URL. A lead given up on after its tries is
-tried again once a Photo appears.
+which the FlipScout app (v1.74.3+) fills for exactly those leads with a small
+copy as a data: URL. An MLS media address (`search.mlslistings.com/MediaServer`,
+saved by v1.74.3) is ignored: it opens only on the computer that saved it. A
+lead given up on after its tries is tried again once a Photo appears.
+
+The **All photos** gallery (`listing.py`, the `cs` sheets) still comes only
+from the public page, so those leads get a cover photo but no gallery.
 
 ## Comps
 

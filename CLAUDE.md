@@ -1301,9 +1301,25 @@ from a cookie-less session (`persist`-less partition `flipscout-public`), else a
 leads) and Refresh (live and passed rows without a Photo) both fill it.
 `thumbs.py --sheet <xlsx>` uses the Photo when the page gives none or a
 placeholder, and retries a lead it had given up on once a Photo appears.
-Not yet run against the live MLS: the first Refresh's log says whether MLS
-photos open without the sign-in.
 Tests: `node desktop-app/test-second-look.js` (in `npm test`).
+
+**v1.74.4 — what v1.74.3's first live run showed (Seth's North Bay scan, 22
+Oct, 5 leads, all 5 got a Photo).** (1) **Links are useless to the boards:**
+the GetMedia address (`…&exk=…`) opened without cookies on Seth's PC, but from
+the cloud, where the boards are built, every one answers 200 with **0 bytes**
+(with or without `exk`, any UA). It is bound to the PC or expires. The app now
+ALWAYS saves the ≤45,000-char copy (`coverPhoto`; the `flipscout-public` link
+path is gone); a busy 1024×768 test photo comes to ~35k chars in Chromium.
+`thumbs.py` ignores MLS media links (`MLS_MEDIA`). (2) **4 of the 5 had a
+public photo** (barimedia.rapmls.com): Electron's `net.fetch` leaves
+`response.url` blank, so v1.74.3's "landed on /Property/<MLS #>" test always
+failed. `core.publicPageHasPhoto(html, mls)` now reads the page's own
+`og:url` / canonical (the home page says `https://www.mlslistings.com`).
+(3) `JS_COVER` takes **Type=1** photos only — 2613 Sage St (Coming Soon,
+"photos coming soon" publicly) gave a Type=2 image. Refresh replaces a saved
+MLS link with a copy, or empties it (`__clear`) when the page has the photo.
+**The "All photos" gallery** (listing.py's 12-photo sheet, `cs`) still comes
+only from the public page — leads without one have a cover but no gallery.
 
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope

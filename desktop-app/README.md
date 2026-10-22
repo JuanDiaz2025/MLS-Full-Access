@@ -110,9 +110,12 @@ install (creates a desktop shortcut) or run the portable exe directly.
    50 live leads have none there (the seller kept the listing off the public
    site, or it was pulled). For exactly those, the scan and **↻ Refresh** save
    the listing's cover photo from the MLS in a new **Photo** column at the end
-   of the Leads tab: the photo's address when it opens without the MLS sign-in,
-   else a small copy (about 480 px, under a cell's 50,000 characters). Leads
-   whose public page has a photo get nothing in that column.
+   of the Leads tab: a small copy (about 480 px, under a cell's 50,000
+   characters). Leads whose public page has a photo get nothing in that column.
+   (v1.74.4: v1.74.3 saved the photo's address when it opened without the MLS
+   sign-in, but it opens only on the computer that saved it — the boards could
+   not use it. A Refresh swaps those for a copy, or empties them when the public
+   page has the photo.)
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,
