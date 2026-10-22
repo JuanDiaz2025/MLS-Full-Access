@@ -1331,6 +1331,23 @@ MLS link with a copy, or empties it (`__clear`) when the page has the photo.
 **The "All photos" gallery** (listing.py's 12-photo sheet, `cs`) still comes
 only from the public page — leads without one have a cover but no gallery.
 
+**v1.74.5 — a dropped connection no longer ends a Refresh (Seth, 22 Oct).**
+Seth's Refresh died at lead 632 of 1,176 on `Refresh error: fetch failed`: one
+save to the sheet got no answer, `api()` only retried quota refusals, and the
+whole run ended (the last ~10 leads unsaved, the Board tab not rebuilt). Now:
+(1) `gsheets.api()` waits 5 / 15 / 30 s and resends on a dropped connection, an
+answer cut off half-way, or a 5xx; `:append` and the spreadsheet's own
+`:batchUpdate` are resent only when the request never left (ENOTFOUND,
+ECONNREFUSED… — `NEVER_SENT`), so rows are never added twice. The Google
+sign-in renewal retries too. (2) A save that still fails keeps its leads for
+the next save; three failed saves in a row stop the Refresh cleanly. (3) The
+MLS #s each Refresh saves go to `refresh-progress.json` (userData); pressing
+Refresh again **the same day** skips them (`core.refreshResume`), and the
+counter carries on from where it stopped. A finished Refresh or a new day
+starts over. (4) Errors name the cause (`gsheets.netReason`: "the connection
+was cut (ECONNRESET)") instead of "fetch failed". Tests in
+`test-google-sheets.js` and `test-refresh-pass.js`.
+
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with
 his own Google account inside the app (OAuth loopback + PKCE, scope
 `spreadsheets` only) and pastes the spreadsheet URL; as each city finishes, the

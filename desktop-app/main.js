@@ -918,6 +918,12 @@ function loadCompCache() {
 }
 function saveCompCache(c) { try { fs.writeFileSync(COMP_CACHE_FILE(), JSON.stringify(c)); } catch (_) {} }
 
+// v1.74.5: what an unfinished Refresh already saved today (core.refreshResume)
+const REFRESH_PROGRESS_FILE = () => path.join(app.getPath('userData'), 'refresh-progress.json');
+function loadRefreshProgress() { try { return JSON.parse(fs.readFileSync(REFRESH_PROGRESS_FILE(), 'utf8')); } catch (_) { return null; } }
+function saveRefreshProgress(p) { try { fs.writeFileSync(REFRESH_PROGRESS_FILE(), JSON.stringify(p)); } catch (_) {} }
+function clearRefreshProgress() { try { fs.unlinkSync(REFRESH_PROGRESS_FILE()); } catch (_) {} }
+
 /** The comps and ARV for one kept lead. */
 async function compsFor(c, cache) {
   // the report's zip, else the one ending the full address ("…, CA 94112")
@@ -2742,7 +2748,7 @@ ipcMain.handle('refresh-board', async () => {
   if (control.running) return { ok: false, error: 'already running', message: 'Refresh NOT started — another run is still finishing. Wait for its "Finished" message, then try again.' };
   if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 8 first' };
   control.running = true; control.stopped = false; control.paused = false;
-  let done = 0, notFound = 0, scored = 0, flagged = 0, started = false, reopenedN = 0;
+  let done = 0, notFound = 0, scored = 0, flagged = 0, started = false, reopenedN = 0, endSummary = '';
   try {
     if (!mlsWin || mlsWin.isDestroyed()) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
     const title = await js(core.JS_TITLE).catch(() => '');
@@ -2774,12 +2780,23 @@ ipcMain.handle('refresh-board', async () => {
     const tday = todayKey();
     const passRows = all.filter(x => isMlsId(val(x.r, 'MLS #')) && core.passRecheckDue(
       { notes: val(x.r, 'Notes'), mlsStatus: val(x.r, 'MLS Status'), firstAdded: val(x.r, 'First Added') }, tday));
-    const todo = all
+    let todo = all
       .filter(x => isMlsId(val(x.r, 'MLS #')) && !core.PASSED_NOTE.test(val(x.r, 'Notes')) && !core.CLOSED_STATUS.test(val(x.r, 'MLS Status'))
         && !/^C/.test(val(x.r, 'Bucket')))
       .map(x => ({ r: x.r, i: x.i, kind: 'lead', rank: rankOf(x.r) ? rankOf(x.r) + 1 : 0 }))   // A 0 · B 2 · unscored 3
       .concat(passRows.map(x => ({ r: x.r, i: x.i, kind: 'passed', rank: 1 })))
       .sort((a, b) => a.rank - b.rank || b.i - a.i);
+    // v1.74.5: an unfinished Refresh earlier today picks up where it stopped
+    const keyOf = r => val(r, 'MLS #').toUpperCase();
+    let progress = loadRefreshProgress();
+    const savedToday = core.refreshResume(progress, tday);
+    const resumed = todo.filter(x => savedToday.has(keyOf(x.r))).length;
+    if (resumed) {
+      todo = todo.filter(x => !savedToday.has(keyOf(x.r)));
+      log(`Picking up where today's unfinished Refresh stopped — skipping the ${resumed} lead(s) it already saved `
+        + `(a Refresh that finishes, or a new day, starts the list over).`, 'good');
+    }
+    const todoKeys = new Set(todo.map(x => keyOf(x.r)));
     // v1.74.1: comps for live A/B leads with no ARV, A first, a few per Refresh.
     const comping = cfg.runComps !== false;
     const compCache = comping ? loadCompCache() : null;
@@ -2796,8 +2813,9 @@ ipcMain.handle('refresh-board', async () => {
     const reopened = [];
     const compsWaiting = todo.filter(x => x.kind === 'lead' && core.refreshNeedsComps(
       { bucket: val(x.r, 'Bucket'), arv: val(x.r, 'ARV'), compsAt: val(x.r, 'Comps Run On'), status: val(x.r, 'MLS Status') }, tday)).length;
-    log(`Refreshing ${todo.length - passRows.length} lead(s), A first then B (reports only, no photos), and re-checking `
-      + `${passRows.length} passed lead(s) still on the market for a price cut — `
+    const passTodo = todo.filter(x => x.kind === 'passed').length;
+    log(`Refreshing ${todo.length - passTodo} lead(s), A first then B (reports only, no photos), and re-checking `
+      + `${passTodo} passed lead(s) still on the market for a price cut — `
       + `skipping ${closedN} closed, ${passedN - passRows.length} other passed and ${redfinOnly} Redfin-only (no MLS # to look up)…`, 'good');
     if (comping && compsWaiting) log(`  ${compsWaiting} A/B lead(s) have no ARV yet — up to ${core.REFRESH_COMPS_MAX} get comps this Refresh, A first`);
 
@@ -2806,17 +2824,31 @@ ipcMain.handle('refresh-board', async () => {
     // passed) are fixed in the same write — no MLS lookup needed for that.
     const reading = new Set(todo.map(x => x.r));
     const skipped = all.map(x => x.r).filter(r => !reading.has(r) && /Portal\.aspx/i.test(val(r, 'MLS Link')));
+    // v1.74.5: a save that fails no longer ends the Refresh. The leads stay in
+    // the batch and go with the next save; three failed saves in a row (each
+    // already retried for ~50 s inside gsheets) stop it, ready to pick up later.
+    let saveFails = 0, sheetDown = '';
     const flush = async () => {
-      if (!batch.length) return;
-      await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', batch,
-        { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link',
-          'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On'], patchOnly: true });
+      if (!batch.length) return true;
+      try {
+        await gsheets.syncRows(await googleToken(), g.sheetId, g.leadTab, LEAD_HEADERS, 'MLS #', batch,
+          { overwrite: [...FACT_HEADERS, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link',
+            'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On'], patchOnly: true });
+      } catch (e) {
+        saveFails++;
+        log(`  couldn't save to the Google Sheet — ${e.message}. Keeping the ${batch.length} unsaved lead(s) for the next save.`, 'warn');
+        if (saveFails >= 3) sheetDown = e.message;
+        return false;
+      }
+      saveFails = 0;
+      const saved = batch.map(b => String(b['MLS #'] || '').toUpperCase()).filter(k => todoKeys.has(k));
+      if (saved.length) { progress = core.refreshProgressAdd(progress, tday, saved); saveRefreshProgress(progress); }
       batch = [];
+      return true;
     };
     if (skipped.length) {
       for (const r of skipped) batch.push({ 'MLS #': val(r, 'MLS #'), 'MLS Link': core.mlsUrl(val(r, 'MLS #')) });
-      await flush();
-      log(`  fixed ${skipped.length} old MLS link(s) on closed / passed rows`);
+      if (await flush()) log(`  fixed ${skipped.length} old MLS link(s) on closed / passed rows`);
     }
     // v1.74.2: "Showing & Location" in Private Remarks is a section heading the
     // old reader saved when the field was empty — never a remark. The rows this
@@ -2827,14 +2859,14 @@ ipcMain.handle('refresh-board', async () => {
     let junkCleared = 0;
     if (junkNow.length) {
       for (const r of junkNow) batch.push({ 'MLS #': val(r, 'MLS #'), __clear: ['Private Remarks'] });
-      await flush();
       junkCleared += junkNow.length;
-      log(`  cleared "Showing & Location" (a heading, not a remark) from the Private Remarks of ${junkNow.length} row(s) not re-read today`);
+      if (await flush()) log(`  cleared "Showing & Location" (a heading, not a remark) from the Private Remarks of ${junkNow.length} row(s) not re-read today`);
     }
     for (let i = 0; i < todo.length; i++) {
+      if (sheetDown) break;               // the sheet can't be reached: stop, ready to pick up later
       if (await stopRequested()) break;   // flush + Board rebuild below still run
       const r = todo[i].r, mls = val(r, 'MLS #');
-      log(`  [${i + 1}/${todo.length}] ${val(r, 'Address') || mls}${todo[i].kind === 'passed' ? ' (passed — price check)' : ''}`);
+      log(`  [${resumed + i + 1}/${resumed + todo.length}] ${val(r, 'Address') || mls}${todo[i].kind === 'passed' ? ' (passed — price check)' : ''}`);
       const gal = await showGallery(mls, { factsOnly: true }).catch(e => ({ failed: true, error: e.message }));
       if (todo[i].kind === 'passed') {
         // A passed lead: its price and status only. A lead we could not read
@@ -2952,16 +2984,27 @@ ipcMain.handle('refresh-board', async () => {
       }
       if (batch.length >= 10) await flush();   // a Stop mid-way keeps what was read
     }
-    await flush();
+    const allSaved = sheetDown ? false : await flush();
     if (compCache) saveCompCache(compCache);
+    if (!allSaved) {
+      // The progress file keeps every lead that WAS saved, so the next press goes on from here.
+      log(`Refresh STOPPED — the Google Sheet could not be reached (${sheetDown || 'the last save failed'}). `
+        + `${batch.length} lead(s) read just now could not be saved; everything before them is on the sheet. `
+        + `Press ↻ Refresh again when the internet is back — it picks up where it stopped.`, 'error');
+      endSummary = 'Refresh stopped — the Google Sheet could not be reached. Press ↻ Refresh again; it picks up where it stopped.';
+      return { ok: false, stopped: true, sheetDown: true, error: 'the Google Sheet could not be reached' };
+    }
+    if (!control.stopped) clearRefreshProgress();   // finished: the next Refresh reads every lead again
     await rebuildBoard();
-    const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · `
+    const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'}`
+      + `${resumed ? ` (picked up after ${resumed} lead(s) saved earlier today)` : ''} — ${done} updated · ${scored} scored for the first time · `
       + `${flagged} moved to C by a red flag · ${notFound} not found among Active or Coming Soon listings · `
       + `${compsRun} comped (${compsValued} with an ARV) · ${passChecked} passed lead(s) re-checked, `
       + `${reopened.length} cut or back on the market since the pass`
       + (junkCleared ? ` · ${junkCleared} "Showing & Location" private remark(s) cleared` : '')
       + (photosSaved ? ` · ${photosSaved} cover photo(s) saved for leads the public site has no photo of` : '')
-      + (linksCleared ? ` · ${linksCleared} old photo link(s) cleared` : '') + '.';
+      + (linksCleared ? ` · ${linksCleared} old photo link(s) cleared` : '') + '.'
+      + (control.stopped ? ' Press ↻ Refresh again today to pick up where it stopped.' : '');
     log(line, 'good');
     reopenedN = reopened.length;
     if (reopened.length) {
@@ -2972,13 +3015,17 @@ ipcMain.handle('refresh-board', async () => {
     return { ok: true, done, scored, notFound, compsRun, compsValued, passChecked, reopened: reopened.length };
   } catch (e) {
     if (e.message === 'stopped') { log('Refresh stopped.', 'warn'); return { ok: false, stopped: true }; }
-    log('Refresh error: ' + e.message, 'error');
-    return { ok: false, error: e.message };
+    // "fetch failed" on its own says nothing: name the real cause
+    const why = /^fetch failed$/i.test(e.message) ? 'no answer over the internet — ' + gsheets.netReason(e) : e.message;
+    log('Refresh error: ' + why + (started ? ' — press ↻ Refresh again; it picks up where it stopped.' : ''), 'error');
+    if (started) endSummary = 'Refresh stopped by an error — press ↻ Refresh again; it picks up where it stopped.';
+    return { ok: false, stopped: started, error: why };
   } finally {
     if (started) closeMlsWindow();
     send('done', started
-      ? { stopped: control.stopped, summary: `Refresh finished — ${done} updated, ${notFound} not found`
-          + (reopenedN ? `, ${reopenedN} passed lead(s) cut or back on the market — look again (see the log).` : '.') }
+      ? { stopped: control.stopped || !!endSummary, failed: !!endSummary, summary: endSummary || (`Refresh finished — ${done} updated, ${notFound} not found`
+          + (reopenedN ? `, ${reopenedN} passed lead(s) cut or back on the market — look again (see the log).` : '.')
+          + (control.stopped ? ' Press ↻ Refresh again today to pick up where it stopped.' : '')) }
       : { neverStarted: true, summary: 'Refresh NOT started — sign in to the MLS first (section 1), then press ↻ Refresh again.' });
     control.running = false;
   }

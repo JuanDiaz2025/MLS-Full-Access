@@ -156,6 +156,13 @@ it once today's leads are done. Sold / withdrawn listings come off the Board;
 pending ones stay at the bottom. Listing links open the public MLSListings page. **▦ Update Board tab**
 rebuilds the Board without touching MLS.
 
+**If the internet drops** (v1.74.5): the app waits and tries again (5 s, 15 s,
+30 s) before giving up on a save, and a save that still fails no longer ends the
+Refresh — the leads go with the next save. Only three failed saves in a row stop
+it. **Pressing ↻ Refresh again the same day picks up where it stopped**: the
+leads it already saved are skipped (kept in `refresh-progress.json` in the app's
+data folder). A Refresh that finishes, or a new day, starts the list over.
+
 ## One-time Google setup
 
 Google won't let any app touch your spreadsheets unless it's registered to a

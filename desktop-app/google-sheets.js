@@ -132,13 +132,45 @@ function emailFromIdToken(jwt) {
   } catch (_) { return ''; }
 }
 
-async function postForm(url, body) {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(body).toString(),
-  });
-  return r.json();
+// v1.74.5 (Seth, 22 Oct): a Refresh died at lead 632 of 1,176 on "fetch
+// failed" — one dropped connection to Google ended the whole run. A request
+// that gets no answer is now waited out and sent again, like a quota refusal.
+const NET_WAITS = [5000, 15000, 30000];
+// The request never left this computer, so sending it again cannot repeat it.
+const NEVER_SENT = /^(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|UND_ERR_CONNECT_TIMEOUT)$/;
+const NET_WORDS = {
+  ECONNRESET: 'the connection was cut', UND_ERR_SOCKET: 'the connection was cut', EPIPE: 'the connection was cut',
+  ECONNABORTED: 'the connection was cut', ETIMEDOUT: 'no answer in time', UND_ERR_CONNECT_TIMEOUT: 'no answer in time',
+  UND_ERR_HEADERS_TIMEOUT: 'no answer in time', UND_ERR_BODY_TIMEOUT: 'no answer in time',
+  ENOTFOUND: 'no internet (the address lookup failed)', EAI_AGAIN: 'no internet (the address lookup failed)',
+  ECONNREFUSED: 'the connection was refused', ENETUNREACH: 'no internet connection', EHOSTUNREACH: 'no internet connection',
+  ENETDOWN: 'no internet connection',
+};
+const netCode = e => String((e && e.cause && e.cause.code) || (e && e.code) || '');
+/** Why a request got no answer, in plain words — "fetch failed" says nothing. */
+function netReason(e) {
+  const code = netCode(e), said = String((e && e.cause && e.cause.message) || (e && e.message) || 'no answer');
+  if (NET_WORDS[code]) return `${NET_WORDS[code]} (${code})`;
+  if (/CERT|SSL|TLS/i.test(code + ' ' + said)) return 'a security certificate problem' + (code ? ` (${code})` : '');
+  return code && said.indexOf(code) < 0 ? `${said} (${code})` : said;
+}
+
+async function postForm(url, body, retry) {
+  for (let net = 0; ; net++) {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(body).toString(),
+      });
+      return await r.json();
+    } catch (e) {
+      // Renewing a sign-in can be sent twice; a sign-in code can only be
+      // used once, so that one is retried only when it never left.
+      if (net < NET_WAITS.length && (retry || NEVER_SENT.test(netCode(e)))) { await quotaSleep(NET_WAITS[net]); continue; }
+      throw new Error(`couldn't reach Google — ${netReason(e)}` + (net ? ` (tried ${net + 1} times)` : ''));
+    }
+  }
 }
 
 /** Access tokens last an hour; swap the refresh token for a fresh one. */
@@ -146,7 +178,7 @@ async function refresh({ clientId, clientSecret, refreshToken }) {
   const tok = await postForm(TOKEN_URL, {
     client_id: clientId, client_secret: clientSecret || '',
     refresh_token: refreshToken, grant_type: 'refresh_token',
-  });
+  }, true);
   if (!tok.access_token) throw new Error(tok.error_description || 'could not refresh the Google session — sign in again');
   return { accessToken: tok.access_token, expiresAt: Date.now() + (tok.expires_in || 3600) * 1000 };
 }
@@ -156,16 +188,33 @@ async function refresh({ clientId, clientSecret, refreshToken }) {
 // out the minute and try again instead of failing the whole refresh.
 const QUOTA_WAITS = [20000, 40000, 65000];
 let quotaSleep = ms => new Promise(r => setTimeout(r, ms));
+// A connection that drops, an answer cut off half-way, or a Google server
+// error (5xx) is waited out and tried again. Adding rows (:append) and adding
+// tabs (the spreadsheet's own :batchUpdate) are the exception: if the
+// connection broke after Google had done it, doing it again would add the
+// rows twice — so those are retried only when the request never left.
 async function api(token, path, opts) {
-  for (let attempt = 0; ; attempt++) {
-    const r = await fetch(SHEETS + path, Object.assign({
-      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-    }, opts || {}));
-    const j = await r.json().catch(() => ({}));
+  const once = /:append\b|^\/[^/]+:batchUpdate\b/.test(path);
+  for (let quota = 0, net = 0; ;) {
+    let r = null, j;
+    try {
+      r = await fetch(SHEETS + path, Object.assign({
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      }, opts || {}));
+      j = await r.json();
+    } catch (e) {
+      if (r && (!r.ok || once)) j = {};   // judged by its status below (an :append that answered OK was done)
+      else {
+        const neverSent = !r && NEVER_SENT.test(netCode(e));
+        if (net < NET_WAITS.length && (!once || neverSent)) { await quotaSleep(NET_WAITS[net++]); continue; }
+        throw new Error(`couldn't reach Google Sheets — ${netReason(e)}` + (net ? ` (tried ${net + 1} times)` : ''));
+      }
+    }
     if (r.ok) return j;
     const msg = (j.error && j.error.message) || `Sheets API ${r.status}`;
-    const quota = r.status === 429 || /quota exceeded|rate limit/i.test(msg);
-    if (quota && attempt < QUOTA_WAITS.length) { await quotaSleep(QUOTA_WAITS[attempt]); continue; }
+    const isQuota = r.status === 429 || /quota exceeded|rate limit/i.test(msg);
+    if (isQuota && quota < QUOTA_WAITS.length) { await quotaSleep(QUOTA_WAITS[quota++]); continue; }
+    if (r.status >= 500 && !once && net < NET_WAITS.length) { await quotaSleep(NET_WAITS[net++]); continue; }
     throw new Error(msg);
   }
 }
@@ -338,4 +387,4 @@ async function replaceTab(token, id, tab, rows) {
 }
 
 module.exports = { _setQuotaSleep: f => { quotaSleep = f; }, parseSheetId, signIn, refresh, listTabs, readCol, readRow, readAll, replaceTab,
-  ensureTab, syncRows, colName, SCOPE };
+  ensureTab, syncRows, colName, netReason, SCOPE };

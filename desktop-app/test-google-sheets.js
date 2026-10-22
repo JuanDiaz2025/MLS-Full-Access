@@ -483,6 +483,65 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     const info = await gs.listTabs('tok', 'ID');
     eq(info.tabs, ['Leads'], 'two "quota exceeded" answers in a row are retried, then it works');
   }
+  // v1.74.5 (Seth, 22 Oct): a Refresh died at lead 632 of 1,176 on "fetch failed".
+  {
+    const netErr = code => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('read ' + code), { code }) });
+    const waits = []; gs._setQuotaSleep(ms => { waits.push(ms); return Promise.resolve(); });
+    // a read: two dropped connections, then it works
+    tabs = fakeSheets({ Leads: [['MLS #'], ['ML1']] });
+    let n = 0, real = global.fetch;
+    global.fetch = (u, o) => (n++ < 2 ? Promise.reject(netErr('ECONNRESET')) : real(u, o));
+    eq(await gs.readAll('tok', 'ID', 'Leads'), [['MLS #'], ['ML1']], 'a read survives two dropped connections (ECONNRESET)');
+    eq(waits, [5000, 15000], 'it waits 5 s, then 15 s, before trying again');
+    // a write of many rows, same thing — the Refresh's save
+    tabs = fakeSheets({ Leads: [['MLS #', 'MLS Status'], ['ML1', 'Active']] });
+    n = 0; real = global.fetch;
+    global.fetch = (u, o) => (/values:batchUpdate/.test(u) && n++ < 1 ? Promise.reject(netErr('UND_ERR_SOCKET')) : real(u, o));
+    await gs.syncRows('tok', 'ID', 'Leads', ['MLS #', 'MLS Status'], 'MLS #', [{ 'MLS #': 'ML1', 'MLS Status': 'Pending' }],
+      { overwrite: ['MLS Status'], patchOnly: true });
+    eq(tabs.Leads[1][1], 'Pending', 'the save that dropped once is sent again and lands');
+    // a Google server error (503) is retried; a plain refusal (400) is not
+    tabs = fakeSheets({ Leads: [['MLS #']] });
+    n = 0; real = global.fetch;
+    global.fetch = (u, o) => (n++ < 1 ? Promise.resolve({ ok: false, status: 503, json: async () => ({ error: { message: 'The service is currently unavailable.' } }) }) : real(u, o));
+    eq((await gs.listTabs('tok', 'ID')).tabs, ['Leads'], 'a 503 from Google is waited out and retried');
+    n = 0;
+    global.fetch = () => { n++; return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: { message: 'Unable to parse range' } }) }); };
+    let msg = ''; try { await gs.listTabs('tok', 'ID'); } catch (e) { msg = e.message; }
+    eq([msg, n], ['Unable to parse range', 1], 'a 400 is a real refusal: thrown at once, not retried');
+    // an answer cut off half-way through a read is retried, not read as an empty sheet
+    tabs = fakeSheets({ Leads: [['MLS #'], ['ML1']] });
+    n = 0; real = global.fetch;
+    global.fetch = (u, o) => (n++ < 1 ? Promise.resolve({ ok: true, status: 200, json: async () => { throw netErr('ECONNRESET'); } }) : real(u, o));
+    eq(await gs.readAll('tok', 'ID', 'Leads'), [['MLS #'], ['ML1']], 'a read whose answer broke off is read again, never taken as empty');
+    // gives up after four tries, and says why in plain words
+    n = 0; global.fetch = () => { n++; return Promise.reject(netErr('ECONNRESET')); };
+    msg = ''; try { await gs.readAll('tok', 'ID', 'Leads'); } catch (e) { msg = e.message; }
+    eq([msg, n], ["couldn't reach Google Sheets — the connection was cut (ECONNRESET) (tried 4 times)", 4],
+      'after four tries the error names the cause instead of "fetch failed"');
+    // adding rows: never sent twice when Google may already have them
+    tabs = fakeSheets({ Leads: [['MLS #']] });
+    n = 0; global.fetch = () => { n++; return Promise.reject(netErr('ECONNRESET')); };
+    msg = ''; try { await gs.syncRows('tok', 'ID', 'Leads', ['MLS #'], 'MLS #', [{ 'MLS #': 'ML9' }], {}); } catch (e) { msg = e.message; }
+    eq(/connection was cut/.test(msg), true, '(setup) a cut connection on the first call fails the push');
+    tabs = fakeSheets({ Leads: [['MLS #']] });
+    let appends = 0; real = global.fetch;
+    global.fetch = (u, o) => (/:append/.test(u) ? (appends++, Promise.reject(netErr('ECONNRESET'))) : real(u, o));
+    msg = ''; try { await gs.syncRows('tok', 'ID', 'Leads', ['MLS #'], 'MLS #', [{ 'MLS #': 'ML9' }], {}); } catch (e) { msg = e.message; }
+    eq([appends, /ECONNRESET/.test(msg)], [1, true], 'an :append cut off mid-way is NOT sent again (it may already be on the sheet)');
+    tabs = fakeSheets({ Leads: [['MLS #']] });
+    appends = 0; real = global.fetch;
+    global.fetch = (u, o) => (/:append/.test(u) && appends++ < 1 ? Promise.reject(netErr('ENOTFOUND')) : real(u, o));
+    await gs.syncRows('tok', 'ID', 'Leads', ['MLS #'], 'MLS #', [{ 'MLS #': 'ML9' }], {});
+    eq(tabs.Leads.map(r => r[0]), ['MLS #', 'ML9'], 'an :append that never left (no internet) is sent again, once');
+    // renewing the Google sign-in survives a dropped connection too
+    n = 0; global.fetch = () => (n++ < 1 ? Promise.reject(netErr('ETIMEDOUT'))
+      : Promise.resolve({ ok: true, json: async () => ({ access_token: 'new', expires_in: 3600 }) }));
+    eq((await gs.refresh({ clientId: 'c', refreshToken: 'r' })).accessToken, 'new', 'the sign-in renewal is retried after a timeout');
+    eq([gs.netReason(netErr('ENOTFOUND')), gs.netReason(new TypeError('fetch failed'))],
+      ['no internet (the address lookup failed) (ENOTFOUND)', 'fetch failed'], 'netReason: plain words for a known cause');
+    gs._setQuotaSleep(() => Promise.resolve());
+  }
 
   // 17. Seth's manual check, 28 Sep (Alameda, 36 leads): A needs needs-work wording,
   //     and the AI's KEEP needs wear it actually saw.

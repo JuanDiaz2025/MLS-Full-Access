@@ -1244,6 +1244,26 @@ function refreshNeedsComps(row, today) {
   return !d || d < daysBefore(today, REFRESH_COMPS_RETRY_DAYS);
 }
 
+// v1.74.5 (Seth, 22 Oct): a Refresh that stopped at 632 of 1,176 started over
+// at lead 1 when it was run again — two hours redoing leads it had just saved.
+// The MLS #s each Refresh SAVES to the sheet are kept for the day; run again
+// the same day, it skips them and picks up where it stopped. A new day starts
+// the list over (statuses move), and a Refresh that finishes clears the list.
+/** The MLS #s an unfinished Refresh already saved today. {day, done: [...]} */
+function refreshResume(progress, today) {
+  if (!progress || progress.day !== today || !Array.isArray(progress.done)) return new Set();
+  return new Set(progress.done.map(m => String(m || '').trim().toUpperCase()).filter(Boolean));
+}
+/** Add the MLS #s just saved; a list from another day is started over. */
+function refreshProgressAdd(progress, today, mlsList) {
+  const done = [...refreshResume(progress, today)], seen = new Set(done);
+  for (const m of mlsList || []) {
+    const k = String(m || '').trim().toUpperCase();
+    if (k && !seen.has(k)) { seen.add(k); done.push(k); }
+  }
+  return { day: today, done };
+}
+
 /** "2026-09-30 (Wed) 12:00 PM" -> Date, or null for TBD / blank. */
 function offerDueToDate(v) {
   const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:\s*\(\w+\))?(?:\s+(\d{1,2}):(\d{2})\s*([AP])M)?/i);
@@ -2031,5 +2051,5 @@ module.exports = {
   PAST_DEALS_TAB, PAST_DEAL_HEADERS, PAST_DEAL_CAP, PAST_DEAL_BAND, money, pastDealsFromGrid, secondLook, applySecondLook,
   mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS, disclosuresLink,
   PASS_RECHECK_DAYS, PASS_CUT_PCT, dayKeyOf, passRecheckDue, passRecheck, withPassFlag,
-  REFRESH_COMPS_MAX, REFRESH_COMPS_RETRY_DAYS, refreshNeedsComps,
+  REFRESH_COMPS_MAX, REFRESH_COMPS_RETRY_DAYS, refreshNeedsComps, refreshResume, refreshProgressAdd,
 };

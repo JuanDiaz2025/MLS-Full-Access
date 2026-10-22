@@ -111,5 +111,19 @@ eq(core.MLS_MEDIA_LINK.test('https://search.mlslistings.com/MediaServer/GetMedia
 eq(['data:image/jpeg;base64,/9j/4AAQ', 'https://media.mlslmedia.com/property/MLSL/82065149/0e20df80/2/1', ''].map(v => core.MLS_MEDIA_LINK.test(v)),
   [false, false, false], 'a copy, a public photo or a blank is not');
 
+// --- v1.74.5: a Refresh run again the same day picks up where it stopped ---
+{
+  const day = '2026-10-22';
+  let p = core.refreshProgressAdd(null, day, ['ml1', 'ML2', '']);
+  eq(p, { day, done: ['ML1', 'ML2'] }, 'the saved MLS #s are kept for the day, upper-cased, blanks dropped');
+  p = core.refreshProgressAdd(p, day, ['ML2', 'ML3']);
+  eq(p.done, ['ML1', 'ML2', 'ML3'], 'a second save adds only the new ones');
+  eq([...core.refreshResume(p, day)], ['ML1', 'ML2', 'ML3'], 'the same day: those are skipped');
+  eq(core.refreshResume(p, '2026-10-23').size, 0, 'the next day: nothing is skipped — statuses move');
+  eq(core.refreshProgressAdd(p, '2026-10-23', ['ML9']), { day: '2026-10-23', done: ['ML9'] }, "yesterday's list is started over");
+  eq([core.refreshResume(null, day).size, core.refreshResume({ day }, day).size, core.refreshResume('junk', day).size], [0, 0, 0],
+    'no file, or a broken one, skips nothing');
+}
+
 console.log(fails ? fails + ' FAILED' : 'ALL PASS');
 process.exit(fails ? 1 : 0);
