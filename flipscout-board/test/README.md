@@ -321,6 +321,32 @@ down a bucket (34 to C). The area levels did almost all of it: with area
 points at zero, 143 stay in Work now. The settings screen previews the effect
 of every change before Save.
 
+## On the real board (22 Oct, version 125)
+
+Seth asked for the Test board's changes on the real board, with nothing of
+the real board's taken away. Version 125 was built on the real board's newest
+version (another session's, published the same day) and adds:
+
+- Buy Box Settings, with the points and reasons above.
+- The pull date: opens on the last 7 days, and the tiles, Area menu and
+  Market buttons count the dates picked.
+- The Test board's three message-log fixes (replies from agents with no
+  listing on the board, replies whose outgoing text wasn't logged, plain
+  dates read at noon).
+
+The real board's own newer work stayed: New in my areas showing exactly the
+leads the 🔔 pop-up named, and Visits leaving out what the team passed or
+removed. The only code taken out is the old Buy Box agent check
+(`buyBoxFails`), which Buy Box Settings replaces.
+
+What differs from the Test board:
+
+- The real board has its own `buybox/team`, so it starts at the Field Guide
+  defaults. A Test board save is not copied over.
+- No comps there, so no max offer and no "over the max offer" rule; the
+  Price and Deal math tabs say so. Comps and the Historical agent stay on the
+  Test board.
+
 ## Daily refresh
 
 Steps 1–3 run once per board, each in its own out dir and its own upload

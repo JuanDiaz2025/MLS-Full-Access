@@ -1057,7 +1057,9 @@ All of this lives on the Board's branch, not this one — `flipscout-board/`:
   button (viewer's Google Drive connector). Adds agent phone/email, MLS link,
   offer time, MLS status, remarks panel, bucket/score (A first), Show views,
   Area filter, Pass with a reason, confirmed saves.
-  **Buy Box Settings** (Test board only, Seth 22 Oct): one team buy box in
+  **Buy Box Settings** (Seth 22 Oct; Test board first, real board since its
+  v125 the same day, which keeps its own `buybox/team` and has no max offer
+  because it has no comps): one team buy box in
   `buybox/team` that defaults to the Field Guide's area tiers (Focus 0, Target
   −5, Selective −10, Only if it's really a deal −20, Outside −40), caps (San
   Mateo $2.5M, else $1.5M, never over $3M) and SOP math. Each rule takes its
