@@ -26,6 +26,7 @@ const FILE = arg("--file", ""), ID = arg("--id", ""), BY = arg("--by", "");
 const DRY = process.argv.includes("--dry");
 const LINE = arg("--line", "Realtor");
 const TEXT = arg("--text", "1");
+const TPLFILE = arg("--template", "");
 
 const die = (err, extra) => { console.log(JSON.stringify({ ok: false, err, ...(extra || {}) })); process.exit(0); };
 if (!FILE || !ID) die("need --file <queue json> and --id <contactId>");
@@ -67,7 +68,11 @@ const bom = /back on market/i.test(notes);
 // 90-day-old listing when they are reviewing offers — is the mistake an agent
 // actually notices. The fallback is recorded in `ageSource` and reported, so
 // it is a stated assumption rather than a quiet one.
+// --template is the board's live wording, written out by whoever read it from
+// the Text Templates screen. When one is given it replaces the built-in texts
+// entirely, so the team edits what we say on the board rather than in here.
 const args = [__dirname + "/outreach.js", ID, LINE, sender, "--text", TEXT];
+if (TPLFILE) args.push("--tplfile", TPLFILE);
 let ageSource;
 if (cut || bom) { args.push(cut ? "--cut" : "--bom"); ageSource = cut ? "price cut in the notes" : "back on market in the notes"; }
 else if (dom !== undefined) { args.push("--dom", dom); ageSource = dom + " DOM from the notes"; }
@@ -98,11 +103,15 @@ const boardLog = res.ok && !res.dryRun ? {
   data: { name: [q.first, q.last].filter(Boolean).join(" ") || undefined,
           log: { ["text-" + at.replace(/[^0-9]/g, "").slice(0, 14)]: {
             k: "text", t: String(res.message || "").slice(0, 300), by: "Claude (auto, pushed by " + sender + ")",
-            at, dir: "out", mls: q.mls || undefined } } }
+            // `tpl` is what the board's Text Templates screen counts to work
+            // out each template's reply rate. Without it a send is invisible
+            // to the comparison, so the wording can never be judged.
+            at, dir: "out", mls: q.mls || undefined, tpl: res.templateId || undefined } } }
 } : null;
 
 console.log(JSON.stringify({
   ok: !!res.ok, dryRun: !!res.dryRun, mls: q.mls || "", contactId: ID, sentBy: sender,
+  wording: res.text, templateId: res.templateId || "",
   ageSource, question: res.question, capturedName: res.capturedName,
   capturedAddress: res.capturedAddress, addressUsed: res.addressUsed,
   message: res.message || res.ifOlderListing, chars: res.chars,

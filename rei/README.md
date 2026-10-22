@@ -319,3 +319,30 @@ and deliver nothing.
 On a real send the result carries `boardLog`, the document to write into the
 board's `agents` collection so the text shows up in the Email & SMS Log with
 the right listing in the Property column.
+
+### Where the wording lives now
+
+The board owns it. **Text Templates** in the left menu (board v126) keeps each
+template in the artifact's `templates` collection, with `templates/_active`
+naming the live one. The team edits what we say there; nothing in this repo
+has to change to change a sentence.
+
+To send with it, write the live template to a file and pass it:
+
+    node pushtext.js --file q-<MLS>.json --id <contactId> --template tpl.json
+
+`tpl.json` is `{"id": "...", "name": "...", "body": "..."}` exactly as the
+board stores it. Its wording replaces the four built-in texts entirely, and
+the same four blanks get filled — `[Agent Name]`, `[Name]`,
+`[Property Address]` and `[Question]` — from the values read off the REI
+contact, so changing the wording can never quietly change what is captured.
+A template with no `[Question]` asks nothing, and the result says so.
+
+Every send stamps the template id onto the board's agent-log entry as `tpl`.
+That stamp is the whole basis of the Sent / Replied / Reply rate on each
+template card: an unstamped send is invisible to the comparison, so the
+wording can never be judged. Replied counts AGENTS, not messages — one agent
+answering three times is one reply — and only counts a message that arrived
+after we wrote.
+
+With no `--template`, the built-in texts still work exactly as before.

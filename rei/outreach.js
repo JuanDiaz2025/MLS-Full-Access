@@ -41,6 +41,26 @@ const EXTRA = {
   "4": { add: " We're comfortable with homes that need work.", needs: "real condition evidence on this listing — never send it blind on a renovated house" }
 };
 const TEXT = String(arg("--text", "1"));
+// --tplfile points at a template saved on the board (Text Templates in the
+// left menu). Its wording wins over --text entirely: the board is where the
+// team edits what we say, so a template that exists is the one that goes out.
+// The placeholders are filled from the SAME captured values as the built-in
+// texts, so switching wording cannot quietly change what gets captured.
+const TPLFILE = arg("--tplfile", ""), TPLID = arg("--tplid", "");
+let TPL = null;
+if (TPLFILE) {
+  try {
+    const t = JSON.parse(fs.readFileSync(TPLFILE, "utf8"));
+    if (typeof t.body === "string" && t.body.trim()) TPL = { id: t.id || TPLID, name: t.name || "", body: t.body };
+  } catch (e) {
+    console.log(JSON.stringify({ ok: false, err: "could not read the template at " + TPLFILE + ": " + String(e.message || e).slice(0, 120) }));
+    process.exit(0);
+  }
+  if (!TPL) {
+    console.log(JSON.stringify({ ok: false, err: "the template at " + TPLFILE + " has no wording in its `body`" }));
+    process.exit(0);
+  }
+}
 // The question turns on the listing's age. A house that went up this week is
 // obviously still available, so asking shows we did not look; after a week, a
 // price cut or a fall-through, it is a real question answered in one word.
@@ -102,16 +122,34 @@ const until = async (fn, ms, step) => {
   const shortAddr = parts.slice(0, 2).join(", ");
   out.addressUsed = shortAddr;
 
-  if (!EXTRA[TEXT]) {
+  // --text only picks between the four built-in texts, so it is only worth
+  // checking when no board template is standing in for all of them.
+  if (!TPL && !EXTRA[TEXT]) {
     console.log(JSON.stringify({ ok: false, err: "--text must be 1, 2, 3 or 4", ...out }));
     await ctx.close(); return;
   }
-  const build = (f) =>
+  // A board template fills the same four blanks; the built-in texts hard-code
+  // everything but the question. Either way the name and address come from
+  // what was just read off the contact, never from an argument.
+  const fillTpl = (f) => String(TPL.body)
+    .replace(/\[Agent Name\]/g, first)
+    .replace(/\[Name\]/g, SENDER)
+    .replace(/\[Property Address\]/g, shortAddr)
+    .replace(/\[Question\]/g, QUESTION(f));
+  const build = (f) => TPL ? fillTpl(f) :
     `Hi ${first}, ${SENDER} with Twin Home Buyer. We're interested in ${shortAddr}. ` +
     `${QUESTION(f)}${EXTRA[TEXT].add} We're also looking to build long-term relationships ` +
     `with local agents. Can I ask you a couple quick questions about the property?`;
-  out.text = "Text " + TEXT;
-  if (EXTRA[TEXT].needs) out.beforeSending = "Text " + TEXT + " needs " + EXTRA[TEXT].needs;
+  if (TPL) {
+    out.text = "Board template" + (TPL.name ? ' "' + TPL.name + '"' : "");
+    out.templateId = TPL.id || "";
+    // Worth saying out loud: a template with no [Question] never asks one, and
+    // the listing-age rule then has nothing to switch.
+    if (!/\[Question\]/.test(TPL.body)) out.beforeSending = "this template has no [Question] placeholder, so it asks nothing about the listing";
+  } else {
+    out.text = "Text " + TEXT;
+    if (EXTRA[TEXT].needs) out.beforeSending = "Text " + TEXT + " needs " + EXTRA[TEXT].needs;
+  }
   out.daysOnMarket = DOM === "" ? (STALE ? "(flagged older)" : "(not given)") : Number(DOM);
   out.question = FRESH === null ? "(unknown)" : QUESTION(FRESH);
 
@@ -218,7 +256,7 @@ const until = async (fn, ms, step) => {
     at: new Date().toISOString(), kind: "text", dir: "out",
     contactId: ID, name: fullName, phone: toPhone, line: out.fromPicked || FROM,
     address: shortAddr, by: SENDER, body: MSG,
-    text: out.text, daysOnMarket: out.daysOnMarket, question: out.question
+    text: out.text, tpl: out.templateId || "", daysOnMarket: out.daysOnMarket, question: out.question
   };
   try { fs.appendFileSync(SENTLOG, JSON.stringify(sent) + "\n"); out.loggedTo = SENTLOG; }
   catch (e) { out.logErr = String(e.message || e).slice(0, 120); }
