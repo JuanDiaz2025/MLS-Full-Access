@@ -596,6 +596,18 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
       { overwrite: [...FACT, 'Bucket', 'Opportunity Score', 'Why', 'MLS Link'], patchOnly: true });
     eq(tabs.Leads[1][at('Public Remarks')], 'Price reduced! ' + pub, 'a refresh replaces edited public remarks');
     eq(tabs.Leads[1][at('Notes')], 'called the agent', 'a refresh never touches Notes');
+    // v1.74.2: __clear empties one named cell — the one exception to "a blank never wipes"
+    const RF = { overwrite: [...FACT], patchOnly: true };
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [{ 'MLS #': 'ML1', 'Private Remarks': 'Showing & Location' }], RF);
+    eq(tabs.Leads[1][at('Private Remarks')], 'Showing & Location', "(setup) the old reader's section heading sits in Private Remarks");
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [{ 'MLS #': 'ML1', 'Private Remarks': '' }], RF);
+    eq(tabs.Leads[1][at('Private Remarks')], 'Showing & Location', 'a blank alone still never wipes a cell');
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [{ 'MLS #': 'ML1', __clear: ['Private Remarks'] }], RF);
+    eq([tabs.Leads[1][at('Private Remarks')], tabs.Leads[1][at('Public Remarks')], tabs.Leads[1][at('Notes')]], ['', 'Price reduced! ' + pub, 'called the agent'],
+      '__clear empties Private Remarks only — Public Remarks and Notes are kept');
+    eq(tabs.Leads[0].includes('__clear'), false, '__clear is never a column');
+    await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [{ 'MLS #': 'ML404', __clear: ['Private Remarks'] }], RF);
+    eq(tabs.Leads.length, 2, 'a __clear for a row that is not on the sheet adds nothing (patchOnly)');
     // a sheet already wide enough is left alone
     const lim2 = { cols: { Leads: 40 } };
     fakeSheets({ Leads: [H27.slice()] }, lim2);

@@ -2754,6 +2754,19 @@ ipcMain.handle('refresh-board', async () => {
       await flush();
       log(`  fixed ${skipped.length} old MLS link(s) on closed / passed rows`);
     }
+    // v1.74.2: "Showing & Location" in Private Remarks is a section heading the
+    // old reader saved when the field was empty — never a remark. The rows this
+    // Refresh does not re-read for remarks are cleared now (no MLS lookup
+    // needed); the ones it re-reads get their real remark, or an empty cell, below.
+    const rereadRemarks = new Set(todo.filter(x => x.kind === 'lead').map(x => x.r));
+    const junkNow = all.map(x => x.r).filter(r => core.isJunkPrivate(val(r, 'Private Remarks')) && !rereadRemarks.has(r));
+    let junkCleared = 0;
+    if (junkNow.length) {
+      for (const r of junkNow) batch.push({ 'MLS #': val(r, 'MLS #'), __clear: ['Private Remarks'] });
+      await flush();
+      junkCleared += junkNow.length;
+      log(`  cleared "Showing & Location" (a heading, not a remark) from the Private Remarks of ${junkNow.length} row(s) not re-read today`);
+    }
     for (let i = 0; i < todo.length; i++) {
       if (await stopRequested()) break;   // flush + Board rebuild below still run
       const r = todo[i].r, mls = val(r, 'MLS #');
@@ -2806,6 +2819,9 @@ ipcMain.handle('refresh-board', async () => {
           'Agent Phone': gal.agentPhone || '', 'Agent Email': gal.agentEmail || '',
           'Showing': gal.showing || '', 'Disclosures': gal.disclosures || '',
         };
+        // v1.74.2: the field is still empty, but the sheet holds the old reader's
+        // "Showing & Location" — empty the cell (a blank alone never wipes one).
+        if (!rec['Private Remarks'] && core.isJunkPrivate(val(r, 'Private Remarks'))) { rec.__clear = ['Private Remarks']; junkCleared++; }
         // Red flags in the remarks move a lead that was already scored to
         // C — a private remark like "this is not a cosmetic remodel" or
         // "plans approved by the City" is exactly what the quick-flip rule
@@ -2876,7 +2892,8 @@ ipcMain.handle('refresh-board', async () => {
     const line = `Refresh ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} updated · ${scored} scored for the first time · `
       + `${flagged} moved to C by a red flag · ${notFound} not found among Active or Coming Soon listings · `
       + `${compsRun} comped (${compsValued} with an ARV) · ${passChecked} passed lead(s) re-checked, `
-      + `${reopened.length} cut or back on the market since the pass.`;
+      + `${reopened.length} cut or back on the market since the pass`
+      + (junkCleared ? ` · ${junkCleared} "Showing & Location" private remark(s) cleared.` : '.');
     log(line, 'good');
     reopenedN = reopened.length;
     if (reopened.length) {

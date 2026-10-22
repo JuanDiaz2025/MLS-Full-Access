@@ -98,6 +98,13 @@ install (creates a desktop shortcut) or run the portable exe directly.
    **comps up to 25 live A/B leads that have no ARV yet**, A first (the same
    comps as a scan, the same "Run comps" box); a lead that found no comps is
    tried again after 14 days, and comps cut short by Stop are not saved.
+4d. **Empty private remarks stay empty** (v1.74.2) — when the Agent Full report's
+   **Private:** field was empty, the old reader took the next line, the section
+   heading **"Showing & Location"**, and saved it as the remark (51 rows by 21
+   Oct). It now reads the remark from the label's own line, and an empty field
+   stays empty. **↻ Refresh** clears that heading from the rows: the ones it
+   re-reads get their real remark (and any offer date in it), the rest are
+   emptied without an MLS lookup.
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,

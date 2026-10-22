@@ -278,7 +278,10 @@ async function syncRows(token, id, tab, headers, keyHeader, records, opts) {
   for (const rec of records) {
     const key = String(rec[keyHeader] || '').trim().toUpperCase();
     const row = headers.map(h => (rec[h] == null ? '' : rec[h]));
-    if (key && rowOf[key]) toPatch.push({ row: rowOf[key], values: row });
+    // rec.__clear: columns this record empties on purpose — the one exception
+    // to "a blank never wipes" (v1.74.2: a section heading the old reader saved
+    // as a private remark). Never a column of its own.
+    if (key && rowOf[key]) toPatch.push({ row: rowOf[key], values: row, clear: new Set(rec.__clear || []) });
     // patchOnly: update rows that are there, never re-add one — a row the
     // reviewer deleted or rejected mid-refresh must not come back as a skeleton.
     else if (!(opts && opts.patchOnly)) toAppend.push(row);
@@ -290,6 +293,7 @@ async function syncRows(token, id, tab, headers, keyHeader, records, opts) {
     const cur = grid[p.row - 1] || [];
     const merged = p.values.map((v, i) => {
       const had = cur[i];
+      if (p.clear.has(headers[i])) return '';
       const mine = over.has(headers[i]);
       if (!mine && had !== undefined && String(had).trim() !== '') return had;  // keep what's there
       if (mine && (v === '' || v == null)) return had === undefined ? '' : had; // don't blank on a gap

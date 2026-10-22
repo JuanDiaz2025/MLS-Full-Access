@@ -1269,6 +1269,21 @@ nothing to read. A failed comps run is not stamped (retried next Refresh);
 comps cut short by Stop are not saved. Replay on the 21 Oct sheet: 133 of 153
 passed rows re-checked (Kooser among them), 679 A/B rows waiting for comps
 (157 A). Tests: `test-refresh-pass.js`. Not yet run against the live MLS.
+
+**v1.74.2 — an empty Private field stays empty (Seth 22 Oct, 136 Rae Ave
+SF426167828).** `privateRemarks()` used `:\s*`, so when the Agent Full
+**Private:** field was empty it crossed the line break and saved the next
+section's heading, **"Showing & Location"**, as the remark — 51 rows by 21 Oct
+(13 live A/B). 136 Rae's agent later wrote "Offer date to be 10/28/2026 by
+2:00pm" there; the board showed "Showing & Location" and no offer date. Now the
+remark is read from the label's own line; an empty line means an empty field,
+unless the next line is plainly a remark (never a heading, never a
+`Label:` field line); `core.isJunkPrivate` rejects the headings. **Refresh**
+clears the heading: re-read rows get their real remark or an emptied cell
+(`rec.__clear`), the other junk rows are emptied up front without a lookup.
+`syncRows` honours `rec.__clear: [header]` — the one way a cell is emptied,
+since a blank never wipes. Tests in `test-refresh-pass.js` and §15 of
+`test-google-sheets.js`.
 Tests: `node desktop-app/test-second-look.js` (in `npm test`).
 
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with

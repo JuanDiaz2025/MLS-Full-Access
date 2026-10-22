@@ -1335,9 +1335,31 @@ function buildBoard(leadRows, today, now) {
  * Verified on a live Agent Full page (23 Sep): the label is "Private:".
  */
 function privateRemarks(text) {
-  const m = String(text || '').match(/(?:^|\n)\s*(?:Private(?:\s*Remarks?)?|(?:Agent|Realtor|Broker|Confidential)\s*(?:Only\s*)?Remarks?)\s*:\s*([\s\S]{0,1500}?)(?=\n\s*\n|\nShowing|\nVirtual Open|\nFeatures|$)/i);
-  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+  // The remark starts on the label's own line ("Private:<tab>supra now is on
+  // the property…"). An EMPTY field is empty: the old `:\s*` crossed the line
+  // break and saved the next section's heading, "Showing & Location", as the
+  // remark — 51 rows on the sheet, 136 Rae Ave (SF426167828) among them, whose
+  // agent later added "Offer date to be 10/28/2026 by 2:00pm" (Seth, 22 Oct).
+  // If a report ever puts the remark on the line BELOW the label, that line is
+  // taken only when it is plainly a remark — never a section heading or another
+  // field's "Label:" line.
+  const t = String(text || '');
+  const m = /(?:^|\n)[ \t]*(?:Private(?:[ \t]*Remarks?)?|(?:Agent|Realtor|Broker|Confidential)[ \t]*(?:Only[ \t]*)?Remarks?)[ \t]*:[ \t]*/i.exec(t);
+  if (!m) return '';
+  let rest = t.slice(m.index + m[0].length);
+  if (rest === '' || rest.charAt(0) === '\n') {               // nothing on the label's own line
+    const next = rest.replace(/^\n[ \t]*/, '');
+    const line = next.split('\n')[0].trim();
+    if (!line || isJunkPrivate(line) || /^[A-Za-z][\w .&/#()'-]{0,40}:/.test(line)) return '';
+    rest = next;
+  }
+  const end = rest.search(/\n[ \t]*\n|\n[ \t]*Showing|\nVirtual Open|\nFeatures/i);
+  const v = (end < 0 ? rest : rest.slice(0, end)).slice(0, 1500).replace(/\s+/g, ' ').trim();
+  return isJunkPrivate(v) ? '' : v;
 }
+/** A section heading saved as a private remark by the old reader — never a real remark. */
+const JUNK_PRIVATE = /^\s*(?:Showing\s*(?:&|and)\s*Location|Showing\s+Information|Virtual\s+Open\s+House|Features)\s*$/i;
+function isJunkPrivate(v) { return JUNK_PRIVATE.test(String(v == null ? '' : v)); }
 
 /**
  * The exact Redfin page for an address, out of Redfin's location-autocomplete
@@ -1966,7 +1988,7 @@ module.exports = {
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
   JS_SCRAPE_GRID, JS_GRID_DEBUG, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
-  qualify, privateRemarks, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
+  qualify, privateRemarks, isJunkPrivate, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
   PAST_DEALS_TAB, PAST_DEAL_HEADERS, PAST_DEAL_CAP, PAST_DEAL_BAND, money, pastDealsFromGrid, secondLook, applySecondLook,
   mlsUrl, fixLink, CLOSED_STATUS, PENDING_STATUS, disclosuresLink,
   PASS_RECHECK_DAYS, PASS_CUT_PCT, dayKeyOf, passRecheckDue, passRecheck, withPassFlag,

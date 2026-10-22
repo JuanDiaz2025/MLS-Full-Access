@@ -62,5 +62,22 @@ eq(core.refreshNeedsComps({ bucket: 'A — Work Now', arv: '', compsAt: '2026-10
 eq(core.refreshNeedsComps({ bucket: 'A — Work Now', arv: '', compsAt: '2026-10-01', status: 'Active' }, today), true, 'found no comps 20 days ago: try again');
 eq(core.REFRESH_COMPS_MAX, 25, 'at most 25 comp runs per Refresh');
 
+// --- v1.74.2: the private remarks reader (136 Rae Ave, SF426167828) ---
+const PR = core.privateRemarks;
+eq(PR('Public:\tNice house.\nPrivate:\tsupra now is on the property. Offer date to be 10/28/2026 by 2:00pm.\nShowing & Location\nShowing Information\nOccupied By:\tVacant'),
+  'supra now is on the property. Offer date to be 10/28/2026 by 2:00pm.', '136 Rae: the remark on the label\'s own line is read, up to the next section');
+eq(core.offerDue(PR('Private:\tsupra now is on the property. Offer date to be 10/28/2026 by 2:00pm.\nShowing & Location')), '2026-10-28 (Wed) 2:00 PM',
+  '…and its offer date reads Wed 10/28 2:00 PM');
+eq(PR('Public:\tNice.\nPrivate:\t\nShowing & Location\nShowing Information\nOccupied By:\tVacant'), '', 'an empty field (tab, then a new line) is empty — not "Showing & Location"');
+eq(PR('Public:\tNice.\nPrivate:\nShowing & Location\nOccupied By:\tVacant'), '', 'an empty field with no tab is empty');
+eq(PR('Private:\t\nOccupied By:\tVacant\tOwner:'), '', "an empty field never reads the next field's label");
+eq(PR('Private:\t\n\nShowing & Location'), '', 'an empty field before a blank line is empty');
+eq(PR('Public:\tNice.\nPrivate:'), '', 'an empty field at the very end is empty');
+eq(PR('Private:\nSupra on property. Offers due Friday 10/30 by 5pm.\nShowing & Location'), 'Supra on property. Offers due Friday 10/30 by 5pm.',
+  'a remark on the line below the label is still read when it is plainly a remark');
+eq(PR('Public:\tNice.\nPrivate:\tTenant pays $2,400. Cash only.\n\nFeatures'), 'Tenant pays $2,400. Cash only.', 'the old case still reads the same');
+eq(['Showing & Location', ' showing and location ', 'Showing Information'].map(core.isJunkPrivate), [true, true, true], 'the section headings are junk');
+eq(['Showings by appointment only.', 'Offer date 10/28', ''].map(core.isJunkPrivate), [false, false, false], 'a real remark (or an empty one) is not');
+
 console.log(fails ? fails + ' FAILED' : 'ALL PASS');
 process.exit(fails ? 1 : 0);
