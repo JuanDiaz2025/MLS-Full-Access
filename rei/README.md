@@ -346,3 +346,19 @@ answering three times is one reply — and only counts a message that arrived
 after we wrote.
 
 With no `--template`, the built-in texts still work exactly as before.
+
+### Rotation
+
+With more than one template saved and none pinned, a push picks one **at
+random**:
+
+    node pushtext.js --file q-<MLS>.json --id <contactId> --templates all.json
+
+`all.json` is a JSON array of the board's templates. The result says which was
+drawn (`pickedAtRandom`, `templateId`), and the agent-log entry carries the
+id, so the Text Templates screen can count it.
+
+Random is the point, not a convenience. If a person chose the wording each
+time, they would hand the better leads to the sentence they like, and the
+winner would be the chooser rather than the sentence. `--template` still pins
+one when the testing is over.

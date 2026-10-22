@@ -27,6 +27,12 @@ const DRY = process.argv.includes("--dry");
 const LINE = arg("--line", "Realtor");
 const TEXT = arg("--text", "1");
 const TPLFILE = arg("--template", "");
+// --templates is the whole set from the board, and one is picked at RANDOM
+// per lead. That is what makes the reply rates on the Text Templates screen
+// mean anything: if a person chose the wording each time they would hand the
+// better leads to their favourite, and the winner would be the chooser, not
+// the sentence. Random assignment is the only way the comparison is fair.
+const TPLSET = arg("--templates", "");
 
 const die = (err, extra) => { console.log(JSON.stringify({ ok: false, err, ...(extra || {}) })); process.exit(0); };
 if (!FILE || !ID) die("need --file <queue json> and --id <contactId>");
@@ -72,7 +78,25 @@ const bom = /back on market/i.test(notes);
 // the Text Templates screen. When one is given it replaces the built-in texts
 // entirely, so the team edits what we say on the board rather than in here.
 const args = [__dirname + "/outreach.js", ID, LINE, sender, "--text", TEXT];
-if (TPLFILE) args.push("--tplfile", TPLFILE);
+
+// Which wording this lead gets. A pinned template (--template) always wins;
+// otherwise one of the set is drawn at random and written to a file of its
+// own, so the result says exactly what was sent and nothing is reconstructed
+// afterwards from a guess.
+let picked = "", pickedFrom = 0, tplArg = TPLFILE;
+if (!tplArg && TPLSET) {
+  let set;
+  try { set = JSON.parse(fs.readFileSync(TPLSET, "utf8")); }
+  catch (e) { die("could not read the template set at " + TPLSET + ": " + String(e.message || e).slice(0, 120)); }
+  if (!Array.isArray(set)) die("--templates must be a JSON array of templates");
+  set = set.filter((t) => t && typeof t.body === "string" && t.body.trim());
+  if (!set.length) die("no usable templates in " + TPLSET + " — every one needs a `body`");
+  const one = set[Math.floor(Math.random() * set.length)];
+  pickedFrom = set.length; picked = one.id || "";
+  tplArg = require("path").join(require("os").tmpdir(), "pushtext-" + process.pid + ".json");
+  fs.writeFileSync(tplArg, JSON.stringify(one));
+}
+if (tplArg) args.push("--tplfile", tplArg);
 let ageSource;
 if (cut || bom) { args.push(cut ? "--cut" : "--bom"); ageSource = cut ? "price cut in the notes" : "back on market in the notes"; }
 else if (dom !== undefined) { args.push("--dom", dom); ageSource = dom + " DOM from the notes"; }
@@ -112,6 +136,7 @@ const boardLog = res.ok && !res.dryRun ? {
 console.log(JSON.stringify({
   ok: !!res.ok, dryRun: !!res.dryRun, mls: q.mls || "", contactId: ID, sentBy: sender,
   wording: res.text, templateId: res.templateId || "",
+  pickedAtRandom: pickedFrom ? "1 of " + pickedFrom + " in rotation" : (TPLFILE ? "pinned" : ""),
   ageSource, question: res.question, capturedName: res.capturedName,
   capturedAddress: res.capturedAddress, addressUsed: res.addressUsed,
   message: res.message || res.ifOlderListing, chars: res.chars,
