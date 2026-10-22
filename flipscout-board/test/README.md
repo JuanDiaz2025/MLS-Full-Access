@@ -248,6 +248,60 @@ cap, green when they all made money, grey when there is nothing to compare.
 `history.js` holds company deal figures — publish it, never commit it. Rerun
 it when the Master Property List changes, not on the daily refresh.
 
+## Buy Box Settings (Test board, 22 Oct)
+
+The left menu's **Buy Box Settings** is one buy box for the whole team, saved
+in the board's shared data at `buybox/team` (written only by the page's Save,
+never by the daily refresh). Until someone saves, it is the Twin Network Field
+Guide's (artifact `PNrnY9e7aYostCoAiHdnid`):
+
+- **Area levels**: Focus 0 · Target −5 · Selective −10 · Only if it's really a
+  deal −20 · Outside our search −40 points. The most specific setting wins:
+  a San Francisco zip, then a city, then the county.
+  - Focus: SF's primary zips (Richmond, Sunset, Parkside, West Portal, Glen
+    Park, Noe, Bernal…), San Mateo City and San Carlos.
+  - Target: Redwood City, Palo Alto, and SF's premium and block-specific zips
+    (94112, 94134, 94124, 94107, 94117, 94115, 94123, 94109).
+  - Selective: South San Francisco, East Palo Alto and Oakland.
+  - Outside our search: 94102 (Tenderloin / Civic Center).
+  - Only if it's really a deal: SF's condo-district zips, and every other city
+    in the nine counties.
+- **Price**: San Mateo $2.5M, every other area $1.5M, never over $3M (Seth, 22
+  Oct: keep 2.5 for San Mateo). Over its area's cap −20; over the never-over
+  price is an Auto-pass. These re-score the board; they don't change what the
+  app's scan pulls.
+- **Property & risk**: under 25 years old Auto-pass · over 45 DOM −10 · a
+  unit number Auto-pass · tenant-occupied Auto-pass (delivered vacant at close
+  is only noted) · owner-occupied / unknown occupancy no effect · loss profile
+  (over $1.5M in Redwood City, Menlo Park, Foster City, San Carlos, Walnut
+  Creek) −10.
+- **Max offer**: the lowest of the area cap, 70% of the ARV minus a light
+  rehab, the price that still leaves the profit gate, and an optional cash +
+  lender limit. Only leads with comps get one. An asking price over it is −10.
+- **Deal math**: light $70 / heavy $145 per sqft, 3 months held, 10%/yr
+  financing, 1.25%/yr tax, $2,000 insurance per $1M, $400 utilities; profit
+  gate $100k / $70k / $50k. The Comps agent uses these too.
+
+The board shows the scan's score plus the points. The scan's own score and
+bucket are kept on each lead (`score0` / `bucket0`), and the reasons show in
+four places: the score ring, the line under the agent icons, the Buy Box
+agent and the Opportunity agent. Claude's "Argue the other side" prompt gets
+the reasons as well.
+
+Two limits on what the points can do:
+
+- A lead never moves **up** a bucket: the scan's A needs needs-work wording.
+- Points alone never move a kept lead to **C**: it is held at 35, and only an
+  Auto-pass rule or Outside our search can do that. This follows the Field
+  Guide's rule that an area's rank sets the review order and never rejects a
+  lead.
+
+A confirmed deal (21 College Terrace) is never auto-passed. Effect of the
+defaults on 22 Oct: Work now went from 150 leads to 26, and 466 leads moved
+down a bucket (34 to C). The area levels did almost all of it: with area
+points at zero, 143 stay in Work now. The settings screen previews the effect
+of every change before Save.
+
 ## Daily refresh
 
 Steps 1–3 run once per board, each in its own out dir and its own upload

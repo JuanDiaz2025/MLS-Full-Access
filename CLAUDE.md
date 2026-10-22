@@ -1057,6 +1057,14 @@ All of this lives on the Board's branch, not this one — `flipscout-board/`:
   button (viewer's Google Drive connector). Adds agent phone/email, MLS link,
   offer time, MLS status, remarks panel, bucket/score (A first), Show views,
   Area filter, Pass with a reason, confirmed saves.
+  **Buy Box Settings** (Test board only, Seth 22 Oct): one team buy box in
+  `buybox/team` that defaults to the Field Guide's area tiers (Focus 0, Target
+  −5, Selective −10, Only if it's really a deal −20, Outside −40), caps (San
+  Mateo $2.5M, else $1.5M, never over $3M) and SOP math. Each rule takes its
+  points off the AI score, with the reason in the ring, the row, and the Buy
+  Box and Opportunity agents. A lead never moves up a bucket, and points alone
+  never push a kept lead to C (held at 35). Details:
+  `flipscout-board/test/README.md`.
 - **Chat alerts** — `flipscout-board/apps-script/flipscout-alerts.gs`, pasted
   into the prod sheet next to `flip-scout-reject.gs`: 8:00 "Offers due in 3
   days" summary + 🚨 NEEDS JUAN (under 24h) / 🔴 final call (under 5h) at 8:00,
