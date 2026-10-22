@@ -1,19 +1,93 @@
 {
- "ML82064806": {"v": "FIXER", "addr": "221 N Delaware St, San Mateo", "at": "2026-10-22"},
- "SF426167828": {"v": "FIXER", "addr": "136 Rae Ave, SF", "at": "2026-10-22"},
- "SF426170788": {"v": "FIXER", "addr": "228 Minerva St, SF", "at": "2026-10-22"},
- "ML82064030": {"v": "FIXER", "addr": "425 Kehoe Ave, Half Moon Bay", "at": "2026-10-22"},
- "ML82063550": {"v": "FIXER", "addr": "910 Golden Gate Ave, Half Moon Bay", "at": "2026-10-22"},
- "SF426169434": {"v": "FIXER", "addr": "146 Lenox Way, SF", "at": "2026-10-22"},
- "EB41151371": {"v": "RENOVATED", "addr": "750 Joost Ave, SF", "at": "2026-10-22"},
- "SF426170171": {"v": "RENOVATED", "addr": "57 Vista Verde Ct, SF", "at": "2026-10-22"},
- "SF426169997": {"v": "RENOVATED", "addr": "6 Lindsay Cir, SF", "at": "2026-10-22"},
- "SF426163796": {"v": "RENOVATED", "addr": "965 Brussels St, SF", "at": "2026-10-22"},
- "ML82064718": {"v": "RENOVATED", "addr": "1321 Cabrillo Ave, Burlingame", "at": "2026-10-22"},
- "ML82062722": {"v": "RENOVATED", "addr": "3419 La Selva St, San Mateo", "at": "2026-10-22"},
- "ML82064672": {"v": "DATED", "addr": "999 Lurline Dr, Foster City", "at": "2026-10-22"},
- "EB41151461": {"v": "DATED", "addr": "383 Joost Ave, SF", "at": "2026-10-22"},
- "ML82064772": {"v": "DATED", "addr": "539 Silver Ave, Half Moon Bay", "at": "2026-10-22"},
- "ML82064746": {"v": "DATED", "addr": "3815 Vineyard Dr, Redwood City", "at": "2026-10-22"},
- "ML82065002": {"v": "DATED", "addr": "2015 Ticonderoga Dr, San Mateo", "at": "2026-10-22"}
+ "ML82064806": {
+  "v": "FIXER",
+  "addr": "221 N Delaware St, San Mateo",
+  "at": "2026-10-22"
+ },
+ "SF426167828": {
+  "v": "FIXER",
+  "addr": "136 Rae Ave, SF",
+  "at": "2026-10-22"
+ },
+ "SF426170788": {
+  "v": "FIXER",
+  "addr": "228 Minerva St, SF",
+  "at": "2026-10-22"
+ },
+ "ML82064030": {
+  "v": "FIXER",
+  "addr": "425 Kehoe Ave, Half Moon Bay",
+  "at": "2026-10-22"
+ },
+ "ML82063550": {
+  "v": "FIXER",
+  "addr": "910 Golden Gate Ave, Half Moon Bay",
+  "at": "2026-10-22"
+ },
+ "SF426169434": {
+  "v": "FIXER",
+  "addr": "146 Lenox Way, SF",
+  "at": "2026-10-22"
+ },
+ "EB41151371": {
+  "v": "RENOVATED",
+  "addr": "750 Joost Ave, SF",
+  "at": "2026-10-22"
+ },
+ "SF426170171": {
+  "v": "RENOVATED",
+  "addr": "57 Vista Verde Ct, SF",
+  "at": "2026-10-22"
+ },
+ "SF426169997": {
+  "v": "RENOVATED",
+  "addr": "6 Lindsay Cir, SF",
+  "at": "2026-10-22"
+ },
+ "SF426163796": {
+  "v": "RENOVATED",
+  "addr": "965 Brussels St, SF",
+  "at": "2026-10-22"
+ },
+ "ML82064718": {
+  "v": "RENOVATED",
+  "addr": "1321 Cabrillo Ave, Burlingame",
+  "at": "2026-10-22"
+ },
+ "ML82062722": {
+  "v": "RENOVATED",
+  "addr": "3419 La Selva St, San Mateo",
+  "at": "2026-10-22"
+ },
+ "ML82064672": {
+  "v": "DATED",
+  "addr": "999 Lurline Dr, Foster City",
+  "at": "2026-10-22"
+ },
+ "EB41151461": {
+  "v": "DATED",
+  "addr": "383 Joost Ave, SF",
+  "at": "2026-10-22"
+ },
+ "ML82064772": {
+  "v": "DATED",
+  "addr": "539 Silver Ave, Half Moon Bay",
+  "at": "2026-10-22"
+ },
+ "ML82064746": {
+  "v": "DATED",
+  "addr": "3815 Vineyard Dr, Redwood City",
+  "at": "2026-10-22"
+ },
+ "ML82065002": {
+  "v": "DATED",
+  "addr": "2015 Ticonderoga Dr, San Mateo",
+  "at": "2026-10-22"
+ },
+ "SF426153945": {
+  "v": "RENOVATED",
+  "addr": "3106 Marburger Ave, Belmont",
+  "at": "2026-10-22",
+  "why": "new LVP floors, recessed lights, fresh paint, both baths redone (#33-35, #47-48), new decks/turf/garage door; only the 70s oak kitchen is original"
+ }
 }

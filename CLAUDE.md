@@ -91,7 +91,9 @@ its repo before promising otherwise.
 
 ## Open houses → Bryan's calendar (Bryan, 22 Oct)
 
-**Only fixers go on the calendar.** Never a nice / already-renovated house,
+**Only fixers go on the calendar.** Bryan, 22 Oct: always double-check the
+pulled data and look at the images yourself before anything is added to
+Juan's calendar — no house goes on it without its photos checked. Never a nice / already-renovated house,
 and never a dated-but-good one either (Bryan, 22 Oct: "only fixer will show").
 Check every photo first — the whole gallery, not the cover shot or the remarks
 ("95% original" on 1321 Cabrillo turned out to be a 2000s granite kitchen).
