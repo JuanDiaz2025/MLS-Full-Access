@@ -110,8 +110,9 @@ Check every photo first — the whole gallery, not the cover shot or the remarks
   nothing to fix) → Juan usually passes; add only as clearly marked
   "DATED (optional)", never as a main stop.
 - **Calendar:** bryan@twinhomebuyer.com, not Juan's, until Bryan says
-  otherwise. Every title starts with "🏠 Open House". Arrange by location as a
-  timed driving route (one event per stop, "Sat 2/5" order, next stop + drive
+  otherwise. Title format: **"Open House on Sat 10/24 · 136 Rae Ave, SF · FIXER"**
+  (day + date first, then address, then the verdict). Arrange by location as a
+  timed driving route (one event per stop in time order, next stop + drive
   time in the notes, an all-day route summary with a Google Maps link). Green
   = fixer, yellow = optional. Each event carries a
   `[twin-network-openhouse:<MLS>:<start>]` tag so nothing is added twice.
