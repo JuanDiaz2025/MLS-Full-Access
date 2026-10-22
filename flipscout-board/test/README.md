@@ -123,7 +123,8 @@ last name, or the same phone). The photo is cut to a 96x96 tile; tiles go into
 The FlipScout app (v1.73+) values every A/B lead from sold homes on the MLS
 and writes five columns at the end of the sheet's Leads tab: **ARV · ARV
 $/SqFt · Comp Confidence · Comps · Comps Run On**. `comps.py` turns them into
-`comps.js` for the board's comps table:
+`comps.js` for the **Test board's Comps agent** (since 22 Oct; Seth: Test board
+only — never publish it to the real board):
 
     python3 -I comps.py <prod sheet .xlsx> <out>/comps.js
 
@@ -142,10 +143,17 @@ yr, use, why}`, and `use: 1` marks the ones the ARV was taken from.
   hand).
 - Leads without an ARV are left out of the file; the sheet's Comp Confidence
   says why ("None — no sold home within 60% of its size").
-- Rehab, holding, selling costs and profit are **not** in this file. The board
-  works them out from its own Settings (rehab $/sqft per county, light 70 /
-  heavy 145 by default; selling costs blank until set, so profit reads
-  "before selling costs").
+- Rehab, holding and profit are **not** in this file. The Test board works
+  them out with the SOP numbers (CLAUDE.md §5): rehab light $70 / heavy
+  $145 a sqft; 3 months of holding = 10%/yr financing + insurance $2,000 per
+  $1M + 1.25%/yr tax + $400; gate $100k (ARV ≥ $1M) / $70k / $50k. Selling
+  costs and closing are not in it, so the panel says equity is not profit.
+- On the Test board: the Comps icon is green **Strong Deal** (clears the gate
+  even with a heavy rehab), yellow **Marginal** (light rehab only — or any
+  Low-confidence ARV), orange under the gate, red no profit, grey no comps;
+  **Est. Equity** (ARV − price) fills in; the lead's panel lists every sold
+  home, counted ones first, each linked to its mlslistings.com page. A price
+  under $50,000 on the sheet (an auction's $1) gets no math.
 - Every field is checked again here, as the app does: a hand-typed or
   cut-short Comps cell only ever reaches the page as numbers, dates and plain
   text.
@@ -256,9 +264,9 @@ Contrarian too).
    store, 25 a call, and record them with `zoom_ids.py … --key cs --delete`
    (above). At about 15 new October-style sheets a day on top of the zoomed
    photos, watch the 5,000-file limit.
-8. Publish each board's live page with `data.js`, `agents.js`, `comps.js`,
+8. Publish each board's live page with `data.js`, `agents.js`,
    `remarks.js`, `permits.js`, its own `thumbs/index.js` and new sheets, and
-   the agentphotos NEW FILES. Files left out of a publish are kept, so earlier
+   the agentphotos NEW FILES — plus `comps.js`, on the **Test board only**. Files left out of a publish are kept, so earlier
    sheets stay.
 
 The photos are listing photos. Keep them on the private board only: never in
