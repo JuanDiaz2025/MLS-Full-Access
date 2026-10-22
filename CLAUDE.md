@@ -91,7 +91,8 @@ its repo before promising otherwise.
 
 ## Open houses → Bryan's calendar (Bryan, 22 Oct)
 
-**Never put a nice / already-renovated house on the calendar.** Only fixers.
+**Only fixers go on the calendar.** Never a nice / already-renovated house,
+and never a dated-but-good one either (Bryan, 22 Oct: "only fixer will show").
 Check every photo first — the whole gallery, not the cover shot or the remarks
 ("95% original" on 1321 Cabrillo turned out to be a 2000s granite kitchen).
 
@@ -107,13 +108,11 @@ Check every photo first — the whole gallery, not the cover shot or the remarks
 - **Verdicts:** FIXER → add. RENOVATED (new kitchen/baths/floors, LVP + white
   shaker, quartz, recessed lights, or a 1995–2015 granite/stainless refresh)
   → never add; remove it if it is already there. DATED-BUT-GOOD (old but tidy,
-  nothing to fix) → Juan usually passes; add only as clearly marked
-  "DATED (optional)", never as a main stop.
+  nothing to fix) → never add either; remove it if it is already there.
 - **Calendar:** bryan@twinhomebuyer.com, not Juan's, until Bryan says
   otherwise. Title format: **"Open House on Sat 10/24 · 136 Rae Ave, SF · FIXER"**
   (day + date first, then address, then the verdict). Arrange by location as a
   timed driving route (one event per stop in time order, next stop + drive
-  time in the notes, an all-day route summary with a Google Maps link). Green
-  = fixer, yellow = optional. Each event carries a
+  time in the notes, an all-day route summary with a Google Maps link). Each event carries a
   `[twin-network-openhouse:<MLS>:<start>]` tag so nothing is added twice.
 - **Area:** SF and the Peninsula (San Mateo County), active leads on the board.
