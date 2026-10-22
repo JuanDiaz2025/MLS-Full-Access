@@ -14,7 +14,7 @@ having signed us out. Check which it is before reporting a sign-out.
 | | |
 |---|---|
 | `push-quick.js <lead.json>` | Creates the listing agent as a contact, in three stages. |
-| `outreach.js <contactId> "<From label>" "<sender>"` | Sends the agent-outreach text, filling the blanks from the contact's own record. `--dry` captures and prints without sending. |
+| `outreach.js <contactId> "<From label>" "<sender>" --dom <days>` | Sends the agent-outreach text, filling the blanks from the contact's own record. `--dry` captures and prints without sending. |
 | `sendtext.js <contactId> "<From label>" "<message>"` | Texts a contact through a named ProfitDial number. |
 | `alive.js <contactId>` | Read-only: are we still signed in, and does that contact still exist? |
 | `findby.js <term>` | Read-only: search contacts. |
@@ -89,6 +89,26 @@ segments.
 Run `--dry` first on anything that matters: it prints what it captured and the
 exact message without sending, which turns a bad capture into a line of output
 rather than a text to a real agent.
+
+### The opening question depends on the listing's age
+
+From the Realtor Outreach Guide, and the reason `--dom` is **required**:
+
+| Listing | Question |
+|---|---|
+| 0-7 days | *When are you reviewing offers?* |
+| 8+ days, price cut, or back on market | *Is it still available?* |
+
+Asking "is it still available?" about a house that went up on Tuesday tells the
+agent we did not look. So the script will not guess: with no `--dom` (or
+`--cut` / `--bom`) it refuses to send and prints both versions instead.
+
+`--text 1|2|3|4` picks one of the guide's four texts. **Text 3 is the control**;
+1, 2 and 4 each add exactly one sentence to it, so a test can tell which
+sentence moved the number. Each carries a precondition the script cannot check
+and therefore prints: Text 1 needs the review count re-confirmed, Text 2 needs
+a proof-of-funds letter ready today, Text 4 needs real condition evidence.
+The default is Text 1, which is what has been going out.
 
 Capturing from the About panel has its own trap: walking up from the
 `Contacts (N)` heading only reaches the caption/value list once that panel has

@@ -6,7 +6,13 @@
 //                         noise in an SMS)
 //   [Name]             <- us, passed in as the sender
 //
-//   node outreach.js <contactId> "<From label>" "<sender>"
+//   node outreach.js <contactId> "<From label>" "<sender>" --dom <days> [--text 1|2|3|4]
+//
+// --dom is the listing's days on market and is REQUIRED, because the guide
+// picks the opening question from it. --cut or --bom stand in for a price cut
+// or a back-on-market listing. --text picks one of the guide's four texts
+// (default 1, the control plus the review count). --dry prints and sends
+// nothing.
 //
 // Prints the captured fields and the exact message before sending, so a bad
 // capture is visible rather than silently texted to a real agent.
@@ -17,9 +23,32 @@ const ID = process.argv[2];
 const FROM = process.argv[3] || "Realtor";
 const SENDER = process.argv[4] || "Bryan";
 const DRY = process.argv.includes("--dry");
+const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : d; };
 // Every send is appended here as one JSON object per line. Nothing else
 // records a Chat-tab send, so this file is the sent side of the KPI.
 const SENTLOG = arg("--log", __dirname + "/sent.jsonl");
+
+// Which text, and which opening question. Both come from the Realtor Outreach
+// Guide; this script only picks between them, it does not invent wording.
+//
+// Text 3 is the control. Texts 1, 2 and 4 each add exactly ONE sentence to it,
+// so a test can tell which sentence moved the number. Each carries a condition
+// the guide sets, which this script cannot check for you — it prints it.
+const EXTRA = {
+  "1": { add: " We have 120 Google reviews.", needs: "the review count re-confirmed by Bryan before this round" },
+  "2": { add: " We can send proof of funds.", needs: "a current proof-of-funds letter ready to send today" },
+  "3": { add: "", needs: "" },
+  "4": { add: " We're comfortable with homes that need work.", needs: "real condition evidence on this listing — never send it blind on a renovated house" }
+};
+const TEXT = String(arg("--text", "1"));
+// The question turns on the listing's age. A house that went up this week is
+// obviously still available, so asking shows we did not look; after a week, a
+// price cut or a fall-through, it is a real question answered in one word.
+const DOM = arg("--dom", "");
+const STALE = process.argv.includes("--cut") || process.argv.includes("--bom");
+// null means nobody said how old the listing is, and this script will not guess.
+const FRESH = STALE ? false : (DOM === "" ? null : Number(DOM) <= 7);
+const QUESTION = (f) => (f ? "When are you reviewing offers?" : "Is it still available?");
 
 const until = async (fn, ms, step) => {
   const end = Date.now() + ms;
@@ -73,9 +102,31 @@ const until = async (fn, ms, step) => {
   const shortAddr = parts.slice(0, 2).join(", ");
   out.addressUsed = shortAddr;
 
-  const MSG = `Hi ${first}, ${SENDER} with Twin Home Buyer. We're interested in ${shortAddr}. ` +
-    `When are you reviewing offers? We have 120 Google reviews. We're also looking to build ` +
-    `long-term relationships with local agents. Can I ask you a couple quick questions about the property?`;
+  if (!EXTRA[TEXT]) {
+    console.log(JSON.stringify({ ok: false, err: "--text must be 1, 2, 3 or 4", ...out }));
+    await ctx.close(); return;
+  }
+  const build = (f) =>
+    `Hi ${first}, ${SENDER} with Twin Home Buyer. We're interested in ${shortAddr}. ` +
+    `${QUESTION(f)}${EXTRA[TEXT].add} We're also looking to build long-term relationships ` +
+    `with local agents. Can I ask you a couple quick questions about the property?`;
+  out.text = "Text " + TEXT;
+  if (EXTRA[TEXT].needs) out.beforeSending = "Text " + TEXT + " needs " + EXTRA[TEXT].needs;
+  out.daysOnMarket = DOM === "" ? (STALE ? "(flagged older)" : "(not given)") : Number(DOM);
+  out.question = FRESH === null ? "(unknown)" : QUESTION(FRESH);
+
+  // Refuse rather than guess: the guide says check the days on market BEFORE
+  // texting, and the wrong question is the one mistake an agent notices.
+  if (FRESH === null) {
+    out.ifNewListing = build(true);
+    out.ifOlderListing = build(false);
+    const err = "days on market not given, so the opening question is unknown — pass --dom <n>, or --cut / --bom for a price cut or back on market";
+    console.log(JSON.stringify(DRY ? { ok: true, dryRun: true, wouldNotSend: err, ...out }
+                                   : { ok: false, err, ...out }));
+    await ctx.close(); return;
+  }
+
+  const MSG = build(FRESH);
   out.message = MSG;
   out.chars = MSG.length;
   if (DRY) { console.log(JSON.stringify({ ok: true, dryRun: true, ...out })); await ctx.close(); return; }
@@ -166,7 +217,8 @@ const until = async (fn, ms, step) => {
   const sent = {
     at: new Date().toISOString(), kind: "text", dir: "out",
     contactId: ID, name: fullName, phone: toPhone, line: out.fromPicked || FROM,
-    address: shortAddr, by: SENDER, body: MSG
+    address: shortAddr, by: SENDER, body: MSG,
+    text: out.text, daysOnMarket: out.daysOnMarket, question: out.question
   };
   try { fs.appendFileSync(SENTLOG, JSON.stringify(sent) + "\n"); out.loggedTo = SENTLOG; }
   catch (e) { out.logErr = String(e.message || e).slice(0, 120); }
