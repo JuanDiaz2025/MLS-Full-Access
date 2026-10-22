@@ -27,15 +27,23 @@ const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").re
 const phone = arg("--phone", ""), email = arg("--email", ""), name = arg("--name", "");
 const kind = arg("--kind", "text"), text = arg("--text", ""), by = arg("--by", "Twin Network");
 const at = arg("--at", new Date().toISOString());
+// Two fields the agent card ignores and the Email & SMS Log needs. Without
+// --mls that screen cannot say which listing a text was about: it will leave
+// the Property column empty rather than guess, which is the whole point.
+const dir = arg("--dir", "out"), mls = arg("--mls", "");
 
 if (!["call", "text", "email", "met", "other"].includes(kind)) {
   console.error("--kind must be call|text|email|met|other (the board ignores anything else)"); process.exit(1);
 }
+if (!["in", "out"].includes(dir)) { console.error("--dir must be in|out"); process.exit(1); }
 const id = email ? "e-" + slug(email) : phone ? "p-" + digits(phone) : name ? "n-" + slug(name) : "";
 if (!id) { console.error("need --phone, --email or --name"); process.exit(1); }
 
 // one entry id per event, so re-running the same event cannot double-log it
 const entry = kind + "-" + at.replace(/[^0-9]/g, "").slice(0, 14);
-const doc = { name: name || undefined, log: { [entry]: { k: kind, t: text.slice(0, 300), by, at } } };
+const doc = { name: name || undefined, log: { [entry]: {
+  k: kind, t: text.slice(0, 300), by, at,
+  dir: dir === "in" ? "in" : undefined, mls: mls || undefined
+} } };
 console.log(JSON.stringify({ collection: "agents", doc_id: id, entry, data: doc }, null, 2));
 if (!process.argv.includes("--write")) { console.log("\n(dry run — pass --write to send it)"); }

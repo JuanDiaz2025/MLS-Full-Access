@@ -85,9 +85,12 @@ const writes = fresh.map(r => ({
     name: human(r.name) || undefined,
     log: { ["text-in-" + r.at.replace(/[^0-9]/g, "").slice(0, 14)]: {
       k: "text",
-      // The board shows this line as-is on the agent card, so mark the
-      // direction in the text: its log has no inbound/outbound field.
+      // The agent card shows this line as-is and has no inbound/outbound
+      // field, so the direction stays in the text for the card's benefit —
+      // and is also set properly below, which is what the Email & SMS Log
+      // reads to put the message on the In side rather than the Out side.
       t: "Reply on " + r.line + ": " + String(r.body || "").slice(0, 240),
+      dir: "in",
       by: "REI inbox",
       at: r.at
     } }
