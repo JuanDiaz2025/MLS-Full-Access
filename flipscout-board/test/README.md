@@ -248,6 +248,15 @@ cap, green when they all made money, grey when there is nothing to compare.
 `history.js` holds company deal figures — publish it, never commit it. Rerun
 it when the Master Property List changes, not on the daily refresh.
 
+## Pull date and counts (Test board, 22 Oct)
+
+The board opens on **this month** (the 1st to the last day; a month with no
+pull yet falls back to the latest pull's month). "This month" is the first
+quick pick in the Pull date calendar. The top tiles, the Area menu and the
+Market buttons all count the pull dates picked, so Total Properties matches
+the Show menu. Pressing a tile keeps the dates. The sidebar's Priority Leads
+badge still counts every pull date, because that item opens All pull dates.
+
 ## Buy Box Settings (Test board, 22 Oct)
 
 The left menu's **Buy Box Settings** is one buy box for the whole team, saved
