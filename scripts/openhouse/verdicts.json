@@ -119,5 +119,15 @@
   "v": "FIXER",
   "addr": "2 Juri St, SF",
   "at": "2026-10-22"
+ },
+ "ML82063858": {
+  "v": "FIXER",
+  "addr": "1712 Anamor St, Redwood City",
+  "at": "2026-10-22"
+ },
+ "ML82064675": {
+  "v": "RENOVATED",
+  "addr": "1597 29th Ave, SF",
+  "at": "2026-10-22"
  }
 }
