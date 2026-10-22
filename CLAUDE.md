@@ -109,8 +109,9 @@ Check every photo first — the whole gallery, not the cover shot or the remarks
   shaker, quartz, recessed lights, or a 1995–2015 granite/stainless refresh)
   → never add; remove it if it is already there. DATED-BUT-GOOD (old but tidy,
   nothing to fix) → never add either; remove it if it is already there.
-- **Calendar:** bryan@twinhomebuyer.com, not Juan's, until Bryan says
-  otherwise. Title format: **"Open House on Sat 10/24 · 136 Rae Ave, SF · FIXER"**
+- **Calendars:** both **bryan@twinhomebuyer.com** and Juan's
+  **pecuniary2@gmail.com** ("Juan's Official Calendar" — Bryan added it 22 Oct).
+  Same events on both. Title format: **"Open House on Sat 10/24 · 136 Rae Ave, SF · FIXER"**
   (day + date first, then address, then the verdict). Arrange by location as a
   timed driving route (one event per stop in time order, next stop + drive
   time in the notes, an all-day route summary with a Google Maps link). Each event carries a
@@ -130,7 +131,8 @@ A Routine fires every hour in a fresh session and does exactly this:
    `python3 -I scripts/openhouse/sheets.py ph <MLS>…` and look at **every**
    sheet. Record FIXER / RENOVATED / DATED in `verdicts.json` with the address
    and date. Never re-judge a house already in `verdicts.json`.
-4. List the next 14 days of bryan@twinhomebuyer.com and read the
+4. On **each** calendar (bryan@twinhomebuyer.com and pecuniary2@gmail.com),
+   list the next 14 days and read the
    `[twin-network-openhouse:<MLS>:<start>]` tags. Add every FIXER slot that is
    not there yet; rebuild that day's route (times by location, next stop and
    drive time in each event, the "Open House on <day> · Route" summary) so
