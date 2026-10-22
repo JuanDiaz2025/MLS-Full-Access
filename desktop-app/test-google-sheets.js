@@ -566,8 +566,9 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     const H27 = ['Status', 'MLS #', 'Address', 'Beds', 'Baths', 'SqFt', 'Lot SqFt', 'Year Built', 'DOM',
       'Purchase Price', '$/SqFt', 'Notes', 'MLS Link', 'First Added', 'Bucket', 'Opportunity Score', 'Why', 'Price Cut',
       'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status', 'Agent Phone', 'Agent Email', 'Showing', 'Disclosures'];
-    const NEW_H = ['ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On', 'Public Remarks'];
-    eq(LEAD, H27.concat(NEW_H), "main.js: the live 27 columns unchanged, then the comps, then Public Remarks, at the END");
+    const NEW_H = ['ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On', 'Public Remarks', 'Photo'];
+    eq(LEAD, H27.concat(NEW_H), "main.js: the live 27 columns unchanged, then the comps, Public Remarks and Photo, at the END");
+    eq(FACT.includes('Photo'), true, 'main.js: a refresh fills the Photo column (v1.74.3)');
     eq(NEW_H.every(h => GATE.includes(h)), true, 'main.js: the new columns are app-owned (replaced on a re-review)');
     eq(FACT.includes('Public Remarks') && FACT.includes('Private Remarks'), true, 'main.js: a refresh re-reads Public Remarks, like Private Remarks');
     eq(/'Public Remarks': String\(r\.remarks \|\| ''\)\.slice\(0, REMARKS_MAX\)/.test(src) && /const REMARKS_MAX = 1500;/.test(src), true,
@@ -586,7 +587,7 @@ const HEADERS = ['Status', 'MLS #', 'Address', 'City', 'Zip', 'SqFt', 'Notes'];
     eq(lim.cols.Leads, n, 'the grid was widened to ' + n + ' columns first');
     eq(tabs.Leads[0], H, 'the header row gains the new columns at the end');
     eq(tabs.Leads[1].slice(0, 27), old, 'every existing cell of the row is kept (Notes too)');
-    eq(tabs.Leads[1].slice(27), [900000, 600, 'High', comps, '2026-10-20', pub], 'the comps and the public remarks land in their own columns');
+    eq(tabs.Leads[1].slice(27), [900000, 600, 'High', comps, '2026-10-20', pub, ''], 'the comps and the public remarks land in their own columns');
     await gs.syncRows('tok', 'ID', 'Leads', H, 'MLS #', [{ 'MLS #': 'ML1', 'ARV': '', 'Comps': '', 'Comp Confidence': '', 'Public Remarks': '' }], { overwrite: GATE });
     eq([tabs.Leads[1][at('ARV')], tabs.Leads[1][at('Public Remarks')]], [900000, pub],
       'a push without comps or remarks (comps off, a Stop, a report not read) never blanks them');

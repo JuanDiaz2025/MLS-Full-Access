@@ -154,6 +154,21 @@ const JS_PHOTOS = `(() => {
   return Object.keys(pick).map(Number).sort((a,b)=>a-b).map(n=>pick[n]);
 })()`;
 
+// v1.74.3: the listing's cover photo (Number=0) at the largest size the report
+// offers — for the boards, when the public mlslistings.com page has no photo.
+const JS_COVER = `(() => {
+  const html = document.body.innerHTML.replace(/&amp;/g,'&');
+  const all = [...html.matchAll(/https:\\/\\/search\\.mlslistings\\.com\\/MediaServer\\/GetMedia\\.ashx\\?[^'"\\s<>]+/g)].map(m=>m[0]);
+  let best = '', bn = Infinity, bs = -1;
+  for (const u of all) {
+    const n = +((u.match(/Number=(\\d+)/)||[])[1] || 0), s = +((u.match(/Size=(\\d+)/)||[])[1] || 0);
+    if (n < bn || (n === bn && s > bs)) { best = u; bn = n; bs = s; }
+  }
+  return best;
+})()`;
+// What the boards treat as "no real photo" on the public page (thumbs.py's BAD_IMG).
+const PUBLIC_NO_PHOTO = /nophoto|no-photo|no_photo|placeholder|coming[_-]?soon|mlslpub-cdn|mlslistings\.com\/images\//i;
+
 const JS_MATCH_COUNT = `(() => { const m=document.body.innerText.match(/([\\d,]+\\+?)\\s*match/i); return m?m[1]:'?'; })()`;
 const JS_TITLE = `document.title`;
 
@@ -1986,7 +2001,7 @@ module.exports = {
   redfinUrlFrom,
   fullAddress, parseDetail, isConfirmed, MAX_DOM_DAYS, LIST_WINDOW_DAYS,
   FIELDS, SEARCH_URL, DEFAULT_BUYBOX,
-  JS_SCRAPE_GRID, JS_GRID_DEBUG, JS_PHOTOS, JS_MATCH_COUNT, JS_TITLE,
+  JS_SCRAPE_GRID, JS_GRID_DEBUG, JS_PHOTOS, JS_COVER, PUBLIC_NO_PHOTO, JS_MATCH_COUNT, JS_TITLE,
   num, median, filterCandidates, scoreDeal, arvFromComps, holding, gate, rulesDecide,
   qualify, privateRemarks, isJunkPrivate, offerDue, offerDueToDate, buildBoard, PASSED_NOTE, BUCKET_LABEL,
   PAST_DEALS_TAB, PAST_DEAL_HEADERS, PAST_DEAL_CAP, PAST_DEAL_BAND, money, pastDealsFromGrid, secondLook, applySecondLook,

@@ -643,6 +643,9 @@ async function showGallery(mls, opts) {
       reportRead = !!String(raw || '').trim() && !meta.mismatch;
     }
   } catch (_) {}
+  // v1.74.3: the cover photo's address, for the boards — read now, before the
+  // Agent Full report replaces the carousel.
+  const cover = reportRead ? await js(core.JS_COVER).catch(() => '') : '';
 
   // EVERY photo, not the handful the carousel happens to have preloaded.
   //
@@ -732,7 +735,68 @@ async function showGallery(mls, opts) {
     status: meta.status || '',
     agentPhone: meta.agentPhone || '', agentEmail: meta.agentEmail || '', showing: meta.showing || '',
     disclosures: core.disclosuresLink(meta.disclosuresField, [meta.privateRemarks, meta.remarks].filter(Boolean).join(' \n ')),
-    mismatch: !!meta.mismatch, showing: meta.showing || '' };
+    mismatch: !!meta.mismatch, showing: meta.showing || '', cover: cover || '' };
+}
+
+// ---------- the cover photo for the boards (v1.74.3, Seth 22 Oct) ----------
+// The boards take each house photo from the public mlslistings.com page, and
+// about 50 live leads have none there — the page sends you to the site's home
+// page (the seller kept the listing off the public site, or it was pulled).
+// The MLS itself always has the photos, so for exactly those leads the cover
+// photo goes into the sheet's "Photo" column: its address when it opens without
+// the MLS sign-in, else a small copy of the photo itself (a data: URL kept
+// under a cell's 50,000 characters). thumbs.py uses it when the page has none.
+const COVER_MAX_CHARS = 45000;
+let coverPublic = null;   // does the MLS media server answer without the sign-in? learned once per app run
+async function publicPagePhoto(mls) {
+  try {
+    return await timeLimit((async () => {
+      const r = await net.fetch('https://www.mlslistings.com/Property/' + encodeURIComponent(mls), { headers: { 'Accept': 'text/html' } });
+      if (!r.ok || !new RegExp('/property/' + mls + '\\b', 'i').test(r.url || '')) return false;
+      const m = (await r.text()).match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+      return !!(m && !core.PUBLIC_NO_PHOTO.test(m[1]));
+    })(), 20000, 'public page');
+  } catch (_) { return false; }
+}
+async function coverPhoto(url) {
+  if (!/^https:\/\/search\.mlslistings\.com\/MediaServer\//i.test(String(url || ''))) return '';
+  // 1. Without the sign-in: an address the board's daily refresh can open itself.
+  const pub = session.fromPartition('flipscout-public');   // in memory — no MLS cookies
+  if (coverPublic !== false && pub.fetch) {
+    const ok = await timeLimit((async () => {
+      const r = await pub.fetch(url);
+      if (!r.ok || !/^image\//i.test(r.headers.get('content-type') || '')) return false;
+      const buf = Buffer.from(await r.arrayBuffer());
+      return buf.length > 2000 && !nativeImage.createFromBuffer(buf).isEmpty();
+    })(), 20000, 'cover photo').catch(() => false);
+    if (ok) { coverPublic = true; return url; }
+    if (coverPublic === null) {
+      coverPublic = false;
+      log('  (MLS photos need the sign-in — the boards get a small copy of each cover photo instead)');
+    }
+  }
+  // 2. A small copy, read inside the signed-in MLS window like the AI's photos.
+  const d = await js(`(async () => { try {
+      const r = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
+      if (!r.ok) return '';
+      const bmp = await createImageBitmap(await r.blob());
+      for (const [w, q] of [[480, 0.7], [400, 0.62], [320, 0.55]]) {
+        const k = Math.min(1, w / Math.max(bmp.width, bmp.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(bmp.width * k)); cv.height = Math.max(1, Math.round(bmp.height * k));
+        cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+        const d = cv.toDataURL('image/jpeg', q);
+        if (d.length <= ${COVER_MAX_CHARS}) return d;
+      }
+      return '';
+    } catch (e) { return ''; } })()`).catch(() => '');
+  return /^data:image\/jpeg;base64,/.test(d) && d.length > 2000 ? d : '';
+}
+/** The "Photo" cell for one lead: blank when its public page already has a photo. */
+async function photoForBoards(mls, coverUrl) {
+  if (!coverUrl) return '';
+  if (await publicPagePhoto(mls)) return '';
+  return coverPhoto(coverUrl);
 }
 
 // Scroll the report top to bottom, a screen at a time, before reading it.
@@ -1288,7 +1352,7 @@ ipcMain.handle('start-scan', async (_e, opts) => {
         c._gal = { origPrice: gal.origPrice, listPrice: gal.listPrice, listedBy: gal.listedBy,
           occupiedBy: gal.occupiedBy || '', privateRemarks: gal.privateRemarks || '', status: gal.status || '',
           agentPhone: gal.agentPhone || '', agentEmail: gal.agentEmail || '', showing: gal.showing || '',
-          disclosures: gal.disclosures || '',
+          disclosures: gal.disclosures || '', cover: gal.cover || '',
           // No MLS field holds it — agents write it into the remarks.
           offerDue: core.offerDue([gal.privateRemarks, gal.remarks].filter(Boolean).join(' \n ')) };
         if (c._gal.offerDue) log(`  offer due: ${c._gal.offerDue}`, 'good');
@@ -1356,8 +1420,11 @@ ipcMain.handle('start-scan', async (_e, opts) => {
           if (comp.arv) runKpi.compsValued++;
           log(`  ${core.compSummary(comp)}${comp.read ? ` · ${comp.read} sold report(s) read` : ''}`, comp.arv ? 'good' : 'warn');
         }
+        // v1.74.3: the cover photo, only where the public page has none
+        const photo = (c._gal && c._gal.cover && !(await stopRequested())) ? await photoForBoards(c.mls, c._gal.cover).catch(() => '') : '';
+        if (photo) { runKpi.photoSaved = (runKpi.photoSaved || 0) + 1; log(`  cover photo saved for the boards — the public MLS page has none`); }
         cityLeads.push({
-          mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '',
+          mls: c.mls, address: c.fullAddr || c.addr, city: cityOf(c), zip: c.zip || '', photo,
           beds: c.bds, baths: c.baths || '', sqft: c._sqft,
           lotSqft: core.num(c.lotSqft || 0) || '',
           // The report's own year beats 2026 - Age, which reads "2026" when
@@ -2294,6 +2361,9 @@ const LEAD_HEADERS = [
   // The listing's public remarks ("Public:" on Client Full) — read on every
   // review but never written until v1.73, so the boards saw none.
   'Public Remarks',
+  // The cover photo (v1.74.3), only for leads whose public mlslistings.com page
+  // has none: an image address, or a small copy as a data: URL. thumbs.py reads it.
+  'Photo',
 ];
 // Remarks are capped like the parsers cap them (privateRemarks, parseDetail).
 const REMARKS_MAX = 1500;
@@ -2302,11 +2372,11 @@ const REMARKS_MAX = 1500;
 // too: a re-review's comps replace the old ones (a blank never wipes them).
 const GATE_HEADERS = ['Bucket', 'Opportunity Score', 'Why', 'Price Cut', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
   'Agent Phone', 'Agent Email', 'Showing', 'Disclosures',
-  'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On', 'Public Remarks'];
+  'ARV', 'ARV $/SqFt', 'Comp Confidence', 'Comps', 'Comps Run On', 'Public Remarks', 'Photo'];
 // Facts re-read by "Refresh leads on the board" — the listing's own data, never
 // the reviewer's columns. Bucket / score are only filled where still blank.
 const FACT_HEADERS = ['Price Cut', 'Listing Agent', 'Offer Due', 'Private Remarks', 'Occupied By', 'MLS Status',
-  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures', 'Public Remarks'];
+  'Agent Phone', 'Agent Email', 'Showing', 'Disclosures', 'Public Remarks', 'Photo'];
 const REJECT_HEADERS = [
   'Rejected On', 'MLS #', 'Address',
   'Price', '$/SqFt', 'SqFt', 'DOM', 'Reason', 'Stage', 'By', 'MLS Link',
@@ -2339,6 +2409,7 @@ const leadRecord = r => ({
   'ARV': r.arv || '', 'ARV $/SqFt': r.arvPpsf || '', 'Comp Confidence': r.compConf || '',
   'Comps': r.comps || '', 'Comps Run On': r.compsAt || '',
   'Public Remarks': String(r.remarks || '').slice(0, REMARKS_MAX),
+  'Photo': r.photo || '',
 });
 
 const rejectRecord = r => ({
@@ -2557,7 +2628,7 @@ function toSheetRow(l) {
     remarks: l.remarks || '',
     mlsStatus: l.mlsStatus || '',
     agentPhone: l.agentPhone || '', agentEmail: l.agentEmail || '', showing: l.showing || '',
-    disclosures: l.disclosures || '',
+    disclosures: l.disclosures || '', photo: l.photo || '',
   };
 }
 
@@ -2728,7 +2799,13 @@ ipcMain.handle('refresh-board', async () => {
     // v1.74.1: comps for live A/B leads with no ARV, A first, a few per Refresh.
     const comping = cfg.runComps !== false;
     const compCache = comping ? loadCompCache() : null;
-    let compsRun = 0, compsValued = 0, passChecked = 0;
+    let compsRun = 0, compsValued = 0, passChecked = 0, photosSaved = 0;
+    const needPhoto = async (r, mls, gal) => {
+      if (val(r, 'Photo') || !gal.cover || control.stopped) return '';
+      const ph = await photoForBoards(mls, gal.cover).catch(() => '');
+      if (ph) photosSaved++;
+      return ph;
+    };
     const reopened = [];
     const compsWaiting = todo.filter(x => x.kind === 'lead' && core.refreshNeedsComps(
       { bucket: val(x.r, 'Bucket'), arv: val(x.r, 'ARV'), compsAt: val(x.r, 'Comps Run On'), status: val(x.r, 'MLS Status') }, tday)).length;
@@ -2782,6 +2859,8 @@ ipcMain.handle('refresh-board', async () => {
           'Price Cut': orig > list && list ? `-$${Math.round((orig - list) / 1000)}k (${Math.round(100 * (orig - list) / orig)}%)` : '',
           'MLS Status': gal.status || '',
         };
+        const php = await needPhoto(r, mls, gal);
+        if (php) rec['Photo'] = php;
         const chk = core.passRecheck({ note: val(r, 'Notes'), sheetPrice: val(r, 'Purchase Price'), listPrice: list, status: gal.status });
         if (chk.flag) {
           rec['Why'] = core.withPassFlag(val(r, 'Why'), chk.why);
@@ -2822,6 +2901,8 @@ ipcMain.handle('refresh-board', async () => {
         // v1.74.2: the field is still empty, but the sheet holds the old reader's
         // "Showing & Location" — empty the cell (a blank alone never wipes one).
         if (!rec['Private Remarks'] && core.isJunkPrivate(val(r, 'Private Remarks'))) { rec.__clear = ['Private Remarks']; junkCleared++; }
+        const phl = await needPhoto(r, mls, gal);
+        if (phl) rec['Photo'] = phl;
         // Red flags in the remarks move a lead that was already scored to
         // C — a private remark like "this is not a cosmetic remodel" or
         // "plans approved by the City" is exactly what the quick-flip rule
@@ -2893,7 +2974,8 @@ ipcMain.handle('refresh-board', async () => {
       + `${flagged} moved to C by a red flag · ${notFound} not found among Active or Coming Soon listings · `
       + `${compsRun} comped (${compsValued} with an ARV) · ${passChecked} passed lead(s) re-checked, `
       + `${reopened.length} cut or back on the market since the pass`
-      + (junkCleared ? ` · ${junkCleared} "Showing & Location" private remark(s) cleared.` : '.');
+      + (junkCleared ? ` · ${junkCleared} "Showing & Location" private remark(s) cleared` : '')
+      + (photosSaved ? ` · ${photosSaved} cover photo(s) saved for leads the public site has no photo of.` : '.');
     log(line, 'good');
     reopenedN = reopened.length;
     if (reopened.length) {

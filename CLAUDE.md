@@ -1284,6 +1284,25 @@ clears the heading: re-read rows get their real remark or an emptied cell
 `syncRows` honours `rec.__clear: [header]` — the one way a cell is emptied,
 since a blank never wipes. Tests in `test-refresh-pass.js` and §15 of
 `test-google-sheets.js`.
+
+**v1.74.3 — cover photos for leads the public site does not show (Seth 22
+Oct).** 207 of 1,842 board leads had no house photo: `thumbs.py` takes it from
+the public mlslistings.com page, which redirects to the site's home page for
+canceled/expired/withdrawn listings (~150 — nothing to fix), un-prefixed
+bridgeMLS numbers and RF ids (59), and ~49 leads still Active on the sheet
+(the seller kept them off the public site, or the sheet's status is stale).
+The app now reads the cover photo's address while the Client Full report is on
+screen (`core.JS_COVER`: Number=0, the largest Size), checks the public page
+(`publicPagePhoto`: final URL is /Property/<MLS #> and its og:image is not a
+`PUBLIC_NO_PHOTO`), and only when it has none fills the new last Leads column
+**Photo** (`photoForBoards` → `coverPhoto`): the GetMedia address if it opens
+from a cookie-less session (`persist`-less partition `flipscout-public`), else a
+≤45,000-char JPEG data: URL read inside the signed-in MLS window. Scan (kept
+leads) and Refresh (live and passed rows without a Photo) both fill it.
+`thumbs.py --sheet <xlsx>` uses the Photo when the page gives none or a
+placeholder, and retries a lead it had given up on once a Photo appears.
+Not yet run against the live MLS: the first Refresh's log says whether MLS
+photos open without the sign-in.
 Tests: `node desktop-app/test-second-look.js` (in `npm test`).
 
 **Sheet writing is direct (`desktop-app/google-sheets.js`).** Bryan signs in with

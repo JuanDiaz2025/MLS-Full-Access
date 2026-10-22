@@ -79,5 +79,14 @@ eq(PR('Public:\tNice.\nPrivate:\tTenant pays $2,400. Cash only.\n\nFeatures'), '
 eq(['Showing & Location', ' showing and location ', 'Showing Information'].map(core.isJunkPrivate), [true, true, true], 'the section headings are junk');
 eq(['Showings by appointment only.', 'Offer date 10/28', ''].map(core.isJunkPrivate), [false, false, false], 'a real remark (or an empty one) is not');
 
+// --- v1.74.3: the cover photo for the boards ---
+const cover = html => { global.document = { body: { innerHTML: html } }; try { return eval(core.JS_COVER); } finally { delete global.document; } };
+const G = (n, sz) => `<img src="https://search.mlslistings.com/MediaServer/GetMedia.ashx?Key=77&amp;TableID=9&amp;Type=1&amp;Number=${n}&amp;Size=${sz}">`;
+eq(cover(G(2, 2) + G(0, 2) + G(0, 5) + G(1, 5)), 'https://search.mlslistings.com/MediaServer/GetMedia.ashx?Key=77&TableID=9&Type=1&Number=0&Size=5',
+  'the cover is photo 0, at the largest size the report has');
+eq(cover('<p>no photos</p>'), '', 'a report with no MLS photos gives no cover');
+eq(core.PUBLIC_NO_PHOTO.test('https://www.mlslistings.com/images/nophoto.png'), true, "the public site's no-photo image is not a photo");
+eq(core.PUBLIC_NO_PHOTO.test('https://media.mlslmedia.com/property/MLSL/82065149/0e20df80/2/1'), false, 'a real MLS photo is one');
+
 console.log(fails ? fails + ' FAILED' : 'ALL PASS');
 process.exit(fails ? 1 : 0);

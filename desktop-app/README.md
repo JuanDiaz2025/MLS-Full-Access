@@ -105,6 +105,14 @@ install (creates a desktop shortcut) or run the portable exe directly.
    stays empty. **↻ Refresh** clears that heading from the rows: the ones it
    re-reads get their real remark (and any offer date in it), the rest are
    emptied without an MLS lookup.
+4e. **Cover photos for leads the public site does not show** (v1.74.3) — the
+   boards take each house photo from the public mlslistings.com page, and about
+   50 live leads have none there (the seller kept the listing off the public
+   site, or it was pulled). For exactly those, the scan and **↻ Refresh** save
+   the listing's cover photo from the MLS in a new **Photo** column at the end
+   of the Leads tab: the photo's address when it opens without the MLS sign-in,
+   else a small copy (about 480 px, under a cell's 50,000 characters). Leads
+   whose public page has a photo get nothing in that column.
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,

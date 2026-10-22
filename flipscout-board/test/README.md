@@ -118,6 +118,15 @@ last name, or the same phone). The photo is cut to a 96x96 tile; tiles go into
   pet, a flower or a logo.
 - They are the agents' public MLS photos: private board only, never in git.
 
+## Photos the public site does not show
+
+`thumbs.py` takes each lead's cover photo from its public mlslistings.com page.
+A listing kept off the public site, or pulled, has no page. With
+`--sheet <prod sheet .xlsx>` it then uses the Leads tab's **Photo** column,
+which the FlipScout app (v1.74.3+) fills for exactly those leads: an image
+address, or a small copy as a data: URL. A lead given up on after its tries is
+tried again once a Photo appears.
+
 ## Comps
 
 The FlipScout app (v1.73+) values every A/B lead from sold homes on the MLS

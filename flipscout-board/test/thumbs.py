@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """House photos for the FlipScout Test board.
 
-    python3 -I thumbs.py <data.js> <out dir> [--zoom DIR] [--only N] [--workers 4]
+    python3 -I thumbs.py <data.js> <out dir> [--zoom DIR] [--sheet <prod sheet .xlsx>] [--only N] [--workers 4]
 
 <out dir>/thumbs/index.js is the live Test board's copy when there is one
 (Artifact read, path "thumbs/index.js"): leads already in it are not fetched
@@ -18,12 +18,17 @@ every lead with a tile but no zoomed photo yet. Those are uploaded to the
 board's asset store (Artifact publish, asset: true, 25 a call, from inside
 the working directory) and their ids recorded with zoom_ids.py.
 
+With --sheet, a lead the public page gives no photo (no page — the seller kept
+it off the public site, or it was pulled — or a placeholder) takes the cover
+photo the FlipScout app (v1.74.3+) saved in the Leads tab's "Photo" column:
+an image address, or a small copy as a data: URL.
+
 Redfin-only leads (RF..., Redfin's own listing ids) have no MLS page and keep
-the house icon. The page is anchored to the MLS # asked for: a redirect to
+the house icon unless the sheet has a Photo for them. The page is anchored to the MLS # asked for: a redirect to
 the home page means there is no listing, and a page whose street number is
 not the lead's is not used.
 """
-import hashlib, html, io, json, math, os, re, sys, time, urllib.request
+import base64, hashlib, html, io, json, math, os, re, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageOps
 
@@ -124,6 +129,43 @@ def fetch_img(url):
     return b, im
 
 
+def finish(lead, pid, url, raw, im):
+    """The tile and the zoomed photo for one lead, from one downloaded photo."""
+    mls = lead['mls']
+    out = {'mls': mls, 'pid': pid, 'url': url, 'md5': hashlib.md5(raw).hexdigest()}
+    rgb = im.convert('RGB')
+    if lead['tile']:
+        out['tile'] = ImageOps.fit(rgb, (TW, TH), Image.LANCZOS)
+    if lead['zoom']:
+        rgb.thumbnail((ZW, ZH), Image.LANCZOS)
+        out['zoom'] = os.path.join(ZOOM_DIR, mls + '.jpg')
+        rgb.save(out['zoom'], 'JPEG', quality=72, optimize=True, progressive=True)
+    return out
+
+
+SHEET_DATA = re.compile(r'^data:image/(?:jpeg|png);base64,([A-Za-z0-9+/=\s]+)$')
+
+
+def from_sheet(lead, why):
+    """The app's cover photo from the sheet's Photo column, when the page gave none."""
+    v = (lead.get('sheet') or '').strip()
+    if not v:
+        return None
+    try:
+        m = SHEET_DATA.match(v)
+        if m:
+            raw = base64.b64decode(m.group(1))
+            im = Image.open(io.BytesIO(raw))
+            im.load()
+        elif re.match(r'^https://', v):
+            raw, im = fetch_img(v)
+        else:
+            raise IOError('not a photo')
+    except Exception as e:
+        return {'mls': lead['mls'], 'why': 'sheet photo would not load: %s' % str(e)[:60]}
+    return finish(lead, lead['mls'], 'sheet', raw, im)
+
+
 def one(lead):
     mls, addr = lead['mls'], lead['addr']
     why = 'no MLS page'
@@ -137,7 +179,7 @@ def one(lead):
             why = title
             continue
         if BAD_IMG.search(url):
-            return {'mls': mls, 'why': 'placeholder photo'}
+            return from_sheet(lead, 'placeholder photo') or {'mls': mls, 'why': 'placeholder photo'}
         a, b = street_no(addr), street_no(title)
         if a and b and a != b:
             # the page is another house: an MLS # typed wrong on the sheet, or
@@ -152,21 +194,35 @@ def one(lead):
             except Exception as e:
                 last = e
         if raw is None:
-            return {'mls': mls, 'why': 'photo would not download: %s' % str(last)[:80], 'err': True}
-        out = {'mls': mls, 'pid': pid, 'url': url, 'md5': hashlib.md5(raw).hexdigest()}
-        rgb = im.convert('RGB')
-        if lead['tile']:
-            out['tile'] = ImageOps.fit(rgb, (TW, TH), Image.LANCZOS)
-        if lead['zoom']:
-            rgb.thumbnail((ZW, ZH), Image.LANCZOS)
-            out['zoom'] = os.path.join(ZOOM_DIR, mls + '.jpg')
-            rgb.save(out['zoom'], 'JPEG', quality=72, optimize=True, progressive=True)
-        return out
-    return {'mls': mls, 'why': why, 'err': why.startswith('page error')}
+            return from_sheet(lead, 'download') or {'mls': mls, 'why': 'photo would not download: %s' % str(last)[:80], 'err': True}
+        return finish(lead, pid, url, raw, im)
+    return from_sheet(lead, why) or {'mls': mls, 'why': why, 'err': why.startswith('page error')}
 
 
-def blocked(ms, today):
+def blocked(ms, today, sheet=False):
+    # a lead given up on is tried again once the app has saved a Photo for it
+    if sheet and ms and not ms[2].startswith('sheet photo'):
+        return ms[1] == today
     return ms and (ms[0] >= (TRIES_SOON if 'placeholder' in ms[2] else TRIES) or ms[1] == today)
+
+
+def sheet_photos(xlsx):
+    """MLS # -> the Leads tab's "Photo" cell, for the rows that have one."""
+    import openpyxl
+    wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
+    rows = wb['Leads'].iter_rows(values_only=True)
+    head = [str(h or '').strip() for h in next(rows)]
+    if 'Photo' not in head or 'MLS #' not in head:
+        return {}
+    im, ip = head.index('MLS #'), head.index('Photo')
+    out = {}
+    for r in rows:
+        if r is None or len(r) <= max(im, ip):
+            continue
+        m, v = str(r[im] or '').strip().upper(), str(r[ip] or '').strip()
+        if m and (v.startswith('https://') or v.startswith('data:image/')):
+            out[m] = v
+    return out
 
 
 def main():
@@ -175,6 +231,7 @@ def main():
     only = int(args[args.index('--only') + 1]) if '--only' in args else 0
     workers = int(args[args.index('--workers') + 1]) if '--workers' in args else 4
     ZOOM_DIR = args[args.index('--zoom') + 1] if '--zoom' in args else None
+    SHEET = sheet_photos(args[args.index('--sheet') + 1]) if '--sheet' in args else {}
     if ZOOM_DIR:
         os.makedirs(ZOOM_DIR, exist_ok=True)
     data_js, out = args[0], args[1]
@@ -188,18 +245,19 @@ def main():
     leads, seen = [], set()
     for r in D['rows']:
         mls = str(r[ci['mls']] or '').strip().upper()
-        if not mls or mls in seen or not candidates(mls):
+        if not mls or mls in seen or not (candidates(mls) or mls in SHEET):
             continue
         seen.add(mls)
-        tile = mls not in ix['at'] and not blocked(ix['miss'].get(mls), today)
-        zoom = bool(ZOOM_DIR) and mls not in ix['z'] and (tile or mls in ix['at']) and not blocked(ix['zmiss'].get(mls), today)
+        sh = mls in SHEET
+        tile = mls not in ix['at'] and not blocked(ix['miss'].get(mls), today, sh)
+        zoom = bool(ZOOM_DIR) and mls not in ix['z'] and (tile or mls in ix['at']) and not blocked(ix['zmiss'].get(mls), today, sh)
         if tile or zoom:
             leads.append({'mls': mls, 'addr': str(r[ci['addr']] or ''), 'date': str(r[ci['date']] or today)[:10],
-                          'tile': tile, 'zoom': zoom})
+                          'tile': tile, 'zoom': zoom, 'sheet': SHEET.get(mls, '')})
     if only:
         leads = leads[:only]
-    print('leads to fetch: %d new, %d for the zoomed photo only (already have %d photos, %d zoomed)' % (
-        sum(1 for l in leads if l['tile']), sum(1 for l in leads if not l['tile']), len(ix['at']), len(ix['z'])), flush=True)
+    print('leads to fetch: %d new, %d for the zoomed photo only (already have %d photos, %d zoomed) · sheet photos: %d' % (
+        sum(1 for l in leads if l['tile']), sum(1 for l in leads if not l['tile']), len(ix['at']), len(ix['z']), len(SHEET)), flush=True)
 
     res, t0 = [], time.time()
     with ThreadPoolExecutor(workers) as ex:
