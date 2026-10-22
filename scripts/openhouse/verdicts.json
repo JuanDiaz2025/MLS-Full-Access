@@ -89,5 +89,25 @@
   "addr": "3106 Marburger Ave, Belmont",
   "at": "2026-10-22",
   "why": "new LVP floors, recessed lights, fresh paint, both baths redone (#33-35, #47-48), new decks/turf/garage door; only the 70s oak kitchen is original"
+ },
+ "SF426165636": {
+  "v": "FIXER",
+  "addr": "179 Santa Maria Ave, Pacifica",
+  "at": "2026-10-22"
+ },
+ "ML82062925": {
+  "v": "RENOVATED",
+  "addr": "237 Winding Way, San Carlos",
+  "at": "2026-10-22"
+ },
+ "SF426170649": {
+  "v": "FIXER",
+  "addr": "364 Madison St, SF",
+  "at": "2026-10-22"
+ },
+ "CC41151887": {
+  "v": "FIXER",
+  "addr": "898 Lomita Ave, Millbrae",
+  "at": "2026-10-22"
  }
 }
