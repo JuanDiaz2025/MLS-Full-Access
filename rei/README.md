@@ -279,3 +279,43 @@ Before any auto-reply goes out:
 Adding a real agent to `allow` is a decision about letting software speak for
 the business, one contact at a time. There is no wildcard, and there should
 not be one.
+
+## The text that fires on Push to REI
+
+`pushtext.js` is the join between a push and the first text. It takes the
+queue file push-quick.js just used plus the contact id it produced, and hands
+`outreach.js` everything it needs:
+
+    node pushtext.js --file q-<MLS>.json --id <contactId> [--by "<pusher>"] [--dry]
+
+The agent's name and the property address are read back OUT of the REI contact
+by `outreach.js`, not passed in — a contact created wrong then says so instead
+of being quietly papered over. `--by` defaults to the "Pushed by <name>" line
+in the queue notes, and only the first name reaches the text.
+
+The opening question follows the guide's listing-age rule, taken from the
+queue notes in this order:
+
+| what the notes say | question |
+|---|---|
+| `price cut` or `back on market` | Is it still available? |
+| `N DOM`, N ≤ 7 | When are you reviewing offers? |
+| `N DOM`, N ≥ 8 | Is it still available? |
+| no DOM at all | Is it still available? — see below |
+
+**The no-DOM case.** About a third of leads reach the queue with no days on
+market in the notes. `outreach.js` refuses to guess, which is right for a
+person at a keyboard and wrong for an automatic send — refusing means that
+lead silently never gets texted. So `pushtext.js` falls back to "Is it still
+available?", the question that cannot embarrass us: on a listing a week old it
+is exactly right, on a brand-new one it is merely redundant. The reverse
+mistake — asking a three-month-old listing when they are reviewing offers — is
+the one an agent notices. The fallback is always reported in `ageSource`.
+
+A lead with an email but no phone is skipped, not sent: there is nothing to
+text, and a Chat tab driven at a contact with no number would look like a send
+and deliver nothing.
+
+On a real send the result carries `boardLog`, the document to write into the
+board's `agents` collection so the text shows up in the Email & SMS Log with
+the right listing in the Property column.
