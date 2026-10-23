@@ -330,23 +330,39 @@ const at = () => Math.round((Date.now() - t0) / 100) / 10;
               // abbreviation has to be spelled out before it will filter.
               const FULL = { CA: "California", NV: "Nevada", AZ: "Arizona", OR: "Oregon", WA: "Washington", TX: "Texas", FL: "Florida" };
               const term = FULL[String(c.state).toUpperCase()] || String(c.state);
-              await pg.mouse.click(at3.state.x, at3.state.y);
-              await pg.keyboard.type(term, { delay: 40 });
-              // Wait for the option ITSELF, not merely for something id'd
-              // "option" to exist — reading the list too early was why the
-              // state silently stayed unset while street, city and zip saved.
-              const listed = await until(async () => pg.evaluate((t) =>
-                Array.from(document.querySelectorAll('[id^="react-select"][id*="option"]'))
-                  .filter((e) => e.offsetParent !== null)
-                  .some((e) => (e.textContent || "").trim().toLowerCase() === t.toLowerCase()), term), 9000, 250);
-              if (listed) {
-                // Typing the full name leaves exactly one match, and
-                // react-select highlights it, so Enter takes it.
-                await pg.keyboard.press("Enter");
-                await pg.waitForTimeout(500);
-              } else {
+              // The first attempt often loses the keystrokes: the dialog has
+              // only just opened and the react-select has not taken focus, so
+              // the list never filters and the state silently stays unset
+              // while street, city and zip save. That is why every push used
+              // to need a SECOND whole run. Try again in place instead — a
+              // retry costs a few seconds, a second run costs a minute.
+              let listed = false;
+              for (let attempt = 1; attempt <= 3 && !listed; attempt++) {
+                await pg.mouse.click(at3.state.x, at3.state.y);
+                await pg.waitForTimeout(attempt === 1 ? 150 : 600);
+                await pg.keyboard.type(term, { delay: 40 });
+                // Wait for the option ITSELF, not merely for something id'd
+                // "option" to exist — reading the list too early was the
+                // original bug here.
+                listed = await until(async () => pg.evaluate((t) =>
+                  Array.from(document.querySelectorAll('[id^="react-select"][id*="option"]'))
+                    .filter((e) => e.offsetParent !== null)
+                    .some((e) => (e.textContent || "").trim().toLowerCase() === t.toLowerCase()), term),
+                  attempt === 1 ? 4000 : 9000, 250);
+                if (listed) {
+                  // Typing the full name leaves exactly one match, and
+                  // react-select highlights it, so Enter takes it.
+                  await pg.keyboard.press("Enter");
+                  await pg.waitForTimeout(500);
+                  step.stateTries = attempt;
+                } else {
+                  // Clear what was typed before trying again, or the next
+                  // attempt filters on "CaliforniaCalifornia" and finds nothing.
+                  for (let k = 0; k < term.length + 2; k++) await pg.keyboard.press("Backspace");
+                }
+              }
+              if (!listed) {
                 step.stateMissed = term;
-                for (let k = 0; k < term.length + 2; k++) await pg.keyboard.press("Backspace");
                 await pg.keyboard.press("Escape").catch(() => {});
               }
             }
