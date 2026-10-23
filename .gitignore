@@ -257,3 +257,7 @@ rei/gv-ready*.json
 # The Voice queue folder: prepared batches, i.e. agents names, numbers and
 # the finished texts. Same reason as rei/q-*.json.
 rei/queue/
+
+# Debug screenshots taken while checking what a page shows. Same reason as
+# rei/*.png: evidence for a conversation, not source.
+voice-check*.png
