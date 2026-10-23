@@ -253,3 +253,7 @@ rei/*.jsonl
 # Same reason as rei/q-*.json and the send logs — operational data, not source.
 gv-ready*.json
 rei/gv-ready*.json
+
+# The Voice queue folder: prepared batches, i.e. agents names, numbers and
+# the finished texts. Same reason as rei/q-*.json.
+rei/queue/
