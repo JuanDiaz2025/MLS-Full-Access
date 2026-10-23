@@ -75,9 +75,26 @@ const until = async (fn, ms, step) => {
     }
     out.landedOn = pg.url();
 
-    const box = pg.locator('textarea[aria-label*="message" i], div[contenteditable="true"][aria-label*="message" i]').first();
+    const box = pg.locator('textarea[placeholder*="message" i], textarea[aria-label*="message" i], div[contenteditable="true"][aria-label*="message" i]').first();
     if (!await until(async () => await box.isVisible(), 20000, 500)) {
-      throw new Error("No message box on the page. Either the thread did not open, or Voice has changed its markup.");
+      // The deep link only opens a thread that already exists. For a number
+      // never texted it leaves a blank pane (seen 23 Oct), so start one the
+      // way a person does: + Send new message, type the number, pick the
+      // "Send to (xxx) xxx-xxxx" suggestion.
+      const pretty = "(" + to.slice(0, 3) + ") " + to.slice(3, 6) + "-" + to.slice(6);
+      await pg.getByText("Send new message", { exact: true }).first().click();
+      const rcpt = pg.locator('input[placeholder*="name or phone" i], input[aria-label*="recipient" i], gv-recipient-picker input').first();
+      if (!await until(async () => await rcpt.isVisible(), 15000, 400)) {
+        throw new Error("No message box, and + Send new message did not open a recipient box. Voice may have changed its markup.");
+      }
+      await rcpt.fill(to);
+      const opt = pg.getByText(pretty, { exact: false }).first();
+      if (!await until(async () => await opt.isVisible(), 10000, 400)) throw new Error("Voice did not offer " + pretty + " as a recipient.");
+      await opt.click();
+      if (!await until(async () => await box.isVisible(), 15000, 500)) {
+        throw new Error("Picked " + pretty + " but no message box appeared.");
+      }
+      out.opened = "new message";
     }
     out.messageBox = "found";
 
