@@ -271,14 +271,34 @@ const until = async (fn, ms, step) => {
   });
   if (!send) { console.log(JSON.stringify({ ok: false, err: "no Send Text button", ...out })); await ctx.close(); return; }
   await pg.mouse.click(send.x, send.y);
-  await pg.waitForTimeout(12000);
-  await pg.evaluate(() => { document.querySelectorAll("*").forEach(e => { if (e.scrollHeight > e.clientHeight + 50) e.scrollTop = e.scrollHeight; }); });
-  await pg.waitForTimeout(2000);
-  out.threadTail = await pg.evaluate((m) => {
+
+  // REI shows "Processing…" on the bubble until the text actually goes, then
+  // replaces it with "PD #: … · Sent to: … · <time>". Clicking Send is NOT
+  // proof; waiting a fixed 12 seconds and reporting ok:true was how a failed
+  // send got written to the log as a success and the batch carried on.
+  const tailOf = async () => pg.evaluate((m) => {
     const t = (document.body.innerText || "").replace(/\n{2,}/g, "\n");
-    const i = t.indexOf(m.slice(0, 40));
-    return i < 0 ? "(not found in thread)" : t.slice(i, i + 220).trim();
+    const i = t.lastIndexOf(m.slice(0, 40));
+    return i < 0 ? "" : t.slice(i, i + 260).trim();
   }, MSG);
+
+  let tail = "";
+  for (let waited = 0; waited < 45000; waited += 2500) {
+    await pg.waitForTimeout(2500);
+    await pg.evaluate(() => { document.querySelectorAll("*").forEach(e => { if (e.scrollHeight > e.clientHeight + 50) e.scrollTop = e.scrollHeight; }); });
+    tail = await tailOf();
+    if (tail && /PD\s*#|Sent to:/i.test(tail) && !/Processing/i.test(tail)) break;
+  }
+  out.threadTail = tail || "(not found in thread)";
+  out.confirmed = !!(tail && /PD\s*#|Sent to:/i.test(tail) && !/Processing/i.test(tail));
+
+  if (!tail) {
+    // The message never reached the thread at all, so nothing was sent and
+    // nothing goes in the log — logging it would silence a retry later.
+    await pg.screenshot({ path: __dirname + "/outreach-proof.png" });
+    console.log(JSON.stringify({ ok: false, err: "the message never appeared in the thread — treating it as NOT sent", ...out }));
+    await ctx.close(); return;
+  }
 
   // The send is the only record of itself: REI's Outbox holds scheduled and
   // broadcast texts only, so a Chat-tab send appears nowhere we can query
@@ -289,9 +309,19 @@ const until = async (fn, ms, step) => {
     address: shortAddr, by: SENDER, body: MSG,
     text: out.text, tpl: out.templateId || "", daysOnMarket: out.daysOnMarket, question: out.question
   };
-  try { fs.appendFileSync(SENTLOG, JSON.stringify(sent) + "\n"); out.loggedTo = SENTLOG; }
+  // It IS logged even when delivery is unconfirmed: the bubble is in the
+  // thread, so it may well have gone, and texting someone twice is worse
+  // than one unflagged send. The run still reports a failure so the batch
+  // stops and a person looks.
+  try { fs.appendFileSync(SENTLOG, JSON.stringify({ ...sent, confirmed: out.confirmed }) + "\n"); out.loggedTo = SENTLOG; }
   catch (e) { out.logErr = String(e.message || e).slice(0, 120); }
   await pg.screenshot({ path: __dirname + "/outreach-proof.png" });
+  if (!out.confirmed) {
+    console.log(JSON.stringify({ ok: false,
+      err: "the bubble never showed 'Sent to:' — it is in the thread and IS logged, so nobody gets texted twice, but treat delivery as unproven",
+      ...out }));
+    await ctx.close(); return;
+  }
   console.log(JSON.stringify({ ok: true, ...out }));
   await ctx.close();
 })();
