@@ -157,7 +157,7 @@ const until = async (fn, ms, step) => {
     .replace(/\[Property Address\]/g, shortAddr)
     .replace(/\[Question\]/g, QUESTION(f));
   const build = (f) => TPL ? fillTpl(f) :
-    `Hi ${first}, ${SENDER} with Twin Home Buyer. We're interested in ${shortAddr}. ` +
+    `Hi ${first}, ${SENDER} here, a local cash buyer. We're interested in ${shortAddr}. ` +
     `${QUESTION(f)}${EXTRA[TEXT].add} We're also looking to build long-term relationships ` +
     `with local agents. Can I ask you a couple quick questions about the property?`;
   if (TPL) {

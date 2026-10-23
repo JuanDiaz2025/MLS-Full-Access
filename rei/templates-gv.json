@@ -2,21 +2,21 @@
   {
     "id": "gvrev1",
     "name": "GV 1 — 120 Google reviews",
-    "body": "Hi [Agent Name], [Name] with Twin Home Buyer, a local cash buyer. We're interested in [Property Address]. [Question] We have 120 Google reviews. Can I ask a couple quick questions about the property?"
+    "body": "Hi [Agent Name], [Name] here, a local cash buyer. We're interested in [Property Address]. [Question] We have 120 Google reviews. Can I ask a couple quick questions about the property?"
   },
   {
     "id": "gvpof2",
     "name": "GV 2 — Proof of funds",
-    "body": "Hi [Agent Name], [Name] with Twin Home Buyer, a local cash buyer. We're interested in [Property Address]. [Question] Happy to send proof of funds. Can I ask a couple quick questions about the property?"
+    "body": "Hi [Agent Name], [Name] here, a local cash buyer. We're interested in [Property Address]. [Question] Happy to send proof of funds. Can I ask a couple quick questions about the property?"
   },
   {
     "id": "gvctrl3",
     "name": "GV 3 — Control, no extra line",
-    "body": "Hi [Agent Name], [Name] with Twin Home Buyer, a local cash buyer. We're interested in [Property Address]. [Question] Can I ask a couple quick questions about the property?"
+    "body": "Hi [Agent Name], [Name] here, a local cash buyer. We're interested in [Property Address]. [Question] Can I ask a couple quick questions about the property?"
   },
   {
     "id": "gvwork4",
     "name": "GV 4 — Comfortable with work needed",
-    "body": "Hi [Agent Name], [Name] with Twin Home Buyer, a local cash buyer. We're interested in [Property Address]. [Question] We're comfortable with homes that need work. Can I ask a couple quick questions about the property?"
+    "body": "Hi [Agent Name], [Name] here, a local cash buyer. We're interested in [Property Address]. [Question] We're comfortable with homes that need work. Can I ask a couple quick questions about the property?"
   }
 ]
