@@ -47,10 +47,25 @@ const TEXT = String(arg("--text", "1"));
 // The placeholders are filled from the SAME captured values as the built-in
 // texts, so switching wording cannot quietly change what gets captured.
 const TPLFILE = arg("--tplfile", ""), TPLID = arg("--tplid", "");
+// --tplpick is the rotation. The file may hold ONE template or a SET of them
+// (a bare array, or {templates:[...]}). With a set, --tplpick <n> names which
+// one — blast.js deals them out so a batch spreads evenly — and without it
+// one is drawn at random, so a single hand-run still varies.
+const TPLPICK = arg("--tplpick", "");
 let TPL = null;
 if (TPLFILE) {
   try {
-    const t = JSON.parse(fs.readFileSync(TPLFILE, "utf8"));
+    const raw = JSON.parse(fs.readFileSync(TPLFILE, "utf8"));
+    const set = Array.isArray(raw) ? raw : Array.isArray(raw.templates) ? raw.templates : null;
+    let t = raw;
+    if (set) {
+      const usable = set.filter(function (x) { return x && typeof x.body === "string" && x.body.trim(); });
+      if (usable.length) {
+        const n = TPLPICK === "" ? Math.floor(Math.random() * usable.length)
+                                 : Math.abs(parseInt(TPLPICK, 10) || 0) % usable.length;
+        t = usable[n];
+      } else { t = {}; }
+    }
     if (typeof t.body === "string" && t.body.trim()) TPL = { id: t.id || TPLID, name: t.name || "", body: t.body };
   } catch (e) {
     console.log(JSON.stringify({ ok: false, err: "could not read the template at " + TPLFILE + ": " + String(e.message || e).slice(0, 120) }));

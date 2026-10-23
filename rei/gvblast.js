@@ -87,6 +87,35 @@ const queue = agents
 const noPhone = queue.filter((a) => tenDigit(a.phone).length !== 10)
   .map((a) => ({ contactId: a.contactId, name: a.name || "", phone: a.phone || "(none)" }));
 
+// Templates are DEALT, not drawn: a shuffled order handed out one each and
+// reshuffled when the deck runs out, so no wording gets twice another's volume
+// by chance. Same rotation blast.js uses — one pipe must not skew the numbers
+// the other is measured by.
+function tplCount(file) {
+  if (!file) return 0;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const set = Array.isArray(raw) ? raw : Array.isArray(raw.templates) ? raw.templates : null;
+    if (!set) return 0;
+    return set.filter(function (x) { return x && typeof x.body === "string" && x.body.trim(); }).length;
+  } catch (e) { return 0; }
+}
+function tplDeal(n, total) {
+  const order = [];
+  for (let i = 0; i < total; i += n || 1) {
+    const deck = [];
+    for (let j = 0; j < n; j++) deck.push(j);
+    for (let j = deck.length - 1; j > 0; j--) {
+      const k = Math.floor(Math.random() * (j + 1));
+      const t = deck[j]; deck[j] = deck[k]; deck[k] = t;
+    }
+    deck.forEach(function (d) { order.push(d); });
+  }
+  return order;
+}
+const TPLN = tplCount(TPLSET);
+const TPLORDER = TPLN > 1 ? tplDeal(TPLN, queue.length) : [];
+
 const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 
 (async () => {
@@ -95,6 +124,7 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
     from: "Google Voice, via Chrome on this machine (port " + PORT + ")",
     inList: agents.length, alreadyTexted: already.size, willSend: queue.length - noPhone.length,
     cap: MAX, secondsBetween: DELAY,
+    templates: TPLN > 1 ? TPLN + " in rotation, dealt evenly" : TPLN === 1 ? "1 (no rotation — only one in the set)" : "none (built-in wording)",
     stopFile: STOP + "  (create it to stop after the current message)"
   };
   if (noPhone.length) head.skippedNoPhone = noPhone;
@@ -115,7 +145,10 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
     // 1. The words. outreach.js composes them and sends nothing: --dry.
     const oArgs = [path.join(__dirname, "outreach.js"), String(a.contactId),
                    "Google Voice", String(a.by || "Bryan"), "--dry"];
-    if (TPLSET) oArgs.push("--tplfile", TPLSET);
+    if (TPLSET) {
+      oArgs.push("--tplfile", TPLSET);
+      if (TPLN > 1) oArgs.push("--tplpick", String(TPLORDER[i]));
+    }
     if (a.dom !== undefined && a.dom !== null && a.dom !== "") oArgs.push("--dom", String(a.dom));
     else oArgs.push("--bom");            // unknown age asks the safe question
 
@@ -157,7 +190,8 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
     const row = {
       n: i + 1, of: queue.length, contactId: a.contactId, phone,
       name: msg.capturedName, address: msg.addressUsed, question: msg.question,
-      chars: msg.chars, message: msg.message, ok: !!res.ok, err: res.err
+      chars: msg.chars, message: msg.message, template: msg.templateId || "",
+      ok: !!res.ok, err: res.err
     };
     results.push(row);
     console.log(JSON.stringify(row, null, 2));

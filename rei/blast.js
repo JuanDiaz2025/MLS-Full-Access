@@ -72,11 +72,43 @@ const queue = agents
 
 const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 
+// Template rotation. Random per message would, by chance, leave one wording
+// with twice the volume of another over a batch — the same reason the lines
+// round-robin rather than draw. So the templates are DEALT: a shuffled order,
+// handed out one each, reshuffled when the deck runs out. Random in order,
+// even in volume, which is what makes the reply rates on the board comparable.
+function tplCount(file) {
+  if (!file) return 0;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const set = Array.isArray(raw) ? raw : Array.isArray(raw.templates) ? raw.templates : null;
+    if (!set) return 0;
+    return set.filter(function (x) { return x && typeof x.body === "string" && x.body.trim(); }).length;
+  } catch (e) { return 0; }
+}
+function tplDeal(n, total) {
+  const order = [];
+  for (let i = 0; i < total; i += n || 1) {
+    const deck = [];
+    for (let j = 0; j < n; j++) deck.push(j);
+    for (let j = deck.length - 1; j > 0; j--) {
+      const k = Math.floor(Math.random() * (j + 1));
+      const t = deck[j]; deck[j] = deck[k]; deck[k] = t;
+    }
+    deck.forEach(function (d) { order.push(d); });
+  }
+  return order;
+}
+
+const TPLN = tplCount(TPLSET);
+const TPLORDER = TPLN > 1 ? tplDeal(TPLN, queue.length) : [];
+
 (async () => {
   const head = {
     mode: GO ? "SENDING FOR REAL" : "dry run — nothing will be sent",
     inList: agents.length, alreadyTexted: already.size, willSend: queue.length,
     cap: MAX, secondsBetween: DELAY, lines: LINES,
+    templates: TPLN > 1 ? TPLN + " in rotation, dealt evenly" : TPLN === 1 ? "1 (no rotation — only one in the set)" : "none (built-in wording)",
     stopFile: STOP + "  (create it to stop after the current message)"
   };
   if (GO) {
@@ -97,7 +129,10 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
     // would leave one line with twice the volume by chance.
     const line = LINES[i % LINES.length];
     const args = [path.join(__dirname, "outreach.js"), String(a.contactId), line, String(a.by || "Bryan")];
-    if (TPLSET) args.push("--tplfile", TPLSET);
+    if (TPLSET) {
+      args.push("--tplfile", TPLSET);
+      if (TPLN > 1) args.push("--tplpick", String(TPLORDER[i]));
+    }
     if (a.dom !== undefined && a.dom !== null && a.dom !== "") args.push("--dom", String(a.dom));
     else args.push("--bom");            // unknown age asks the safe question
     if (!GO) args.push("--dry");
@@ -118,7 +153,7 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
       n: i + 1, of: queue.length, contactId: a.contactId, line,
       name: res.capturedName, address: res.addressUsed,
       question: res.question, chars: res.chars, message: res.message,
-      ok: !!res.ok, err: res.err
+      template: res.templateId || "", ok: !!res.ok, err: res.err
     };
     results.push(row);
     console.log(JSON.stringify(row, null, 2));
