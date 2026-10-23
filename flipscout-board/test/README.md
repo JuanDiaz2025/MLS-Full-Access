@@ -136,10 +136,11 @@ from the public page, so those leads get a cover photo but no gallery.
 The FlipScout app (v1.73+) values every A/B lead from sold homes on the MLS
 and writes five columns at the end of the sheet's Leads tab: **ARV · ARV
 $/SqFt · Comp Confidence · Comps · Comps Run On**. `comps.py` turns them into
-`comps.js` for the **Test board's Comps agent** (since 22 Oct; Seth: Test board
-only — never publish it to the real board):
+`comps.js` for the **Comps agent** on both boards (Test board since 22 Oct;
+the real board since its version 131 the same night, labelled testing). One
+file, the same on both:
 
-    python3 -I comps.py <prod sheet .xlsx> <out>/comps.js
+    python3 -I comps.py <prod sheet .xlsx> <out>/shared/comps.js
 
 `window.__COMPS__ = {v, built, by: {MLS: {arv, ppsf, conf, at, list}}}`, where
 `list` holds up to 16 sold homes `{mls, addr, price, sqft, ppsf, sold, bd, ba,
@@ -226,7 +227,7 @@ a captcha page) it stops and saves, and the next run carries on. 20 Oct: 761
 of 790 checked in 51 minutes, 501 with permits, 260 with none, Redfin never
 refused.
 
-## Historical agent (Test board)
+## Historical agent (Test board; real board since version 131, labelled testing)
 
 `history.py` takes the deals we can trust from the Master Property List
 (Cherry's artifact, saved as a page) and writes `history.js`:
@@ -345,7 +346,35 @@ What differs from the Test board:
   defaults. A Test board save is not copied over.
 - No comps there, so no max offer and no "over the max offer" rule; the
   Price and Deal math tabs say so. Comps and the Historical agent stay on the
-  Test board.
+  Test board. (Changed in version 131, below.)
+
+## Comps and Historical on the real board (22 Oct, version 131)
+
+Seth asked for the rest of the Test board on the real board — "make sure it's
+noted for testing", nothing of the real board removed. Version 131 was built
+on the real board's newest version (another session's, with its new Text
+Blast on the Agents screen) and adds, each marked with a dashed **TESTING**
+tag:
+
+- the Comps agent (its row in a lead's panel, its icon and tooltip, and the
+  AI agents window), from `comps.js`;
+- **Est. Equity** in the table (ARV − asking price; the header carries the
+  tag, each cell's tooltip starts "Testing —");
+- the max offer, in the Comps and Buy Box agents and in Buy Box Settings →
+  Price & max offer;
+- the Historical agent, from `history.js` (copied from the Test board).
+
+The real board's rule **"Asking price over our max offer" defaults to No
+effect** (the Test board's is −10): the max offer shows on every lead with
+comps but takes no points off, so every lead's score and bucket are what they
+were before — checked on all 1,860 leads. Setting it to a number in Buy Box
+Settings and saving turns it on for the team; at −10 it would move 15 scores
+and 1 bucket today.
+
+The real board's own work stayed: Text Blast, Text templates, New in my areas
+pinned to the 🔔 list, Visits without passed or removed leads, and the
+`bbxHasComps` guard (if `comps.js` fails to load the board says it has no
+comps instead of breaking). No function was taken out.
 
 ## Daily refresh
 
@@ -363,7 +392,7 @@ Contrarian too).
 3. Upload the zoomed photos to THAT board's asset store and record their ids
    (above).
 4. Run `python3 -I agents.py <prod sheet .xlsx> <out>/agents.js` and
-   `python3 -I comps.py <prod sheet .xlsx> <out>/comps.js`.
+   `python3 -I comps.py <prod sheet .xlsx> <out>/shared/comps.js`.
 5. Read the Test board's `agphotos/index.js` into `<out>/agphotos/index.js`,
    then run `python3 -I agentphotos.py <new data.js> <out>`. It looks up only
    agents it has not settled yet, and prints NEW FILES.
@@ -378,8 +407,10 @@ Contrarian too).
    photos, watch the 5,000-file limit.
 8. Publish each board's live page with `data.js`, `agents.js`,
    `remarks.js`, `permits.js`, its own `thumbs/index.js` and new sheets, and
-   the agentphotos NEW FILES — plus `comps.js`, on the **Test board only**. Files left out of a publish are kept, so earlier
-   sheets stay.
+   the agentphotos NEW FILES, and `comps.js` (both boards since version 131
+   of the real board). `history.js` is not rebuilt daily, so it is left out
+   and each board keeps its copy. Files left out of a publish are kept, so
+   earlier sheets stay.
 
 The photos are listing photos. Keep them on the private board only: never in
 git, and never on a shared page.
