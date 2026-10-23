@@ -51,16 +51,40 @@ const RUNLOG = arg("--log", path.join(__dirname, "gv-blast-sent.jsonl"));
 const REILOG = arg("--reilog", path.join(__dirname, "blast-sent.jsonl"));
 const STOP = path.join(path.dirname(RUNLOG), "STOP");
 
+// --prepared takes a file of messages that are ALREADY WRITTEN:
+// [{phone, text, name?, contactId?, mls?, template?}]. The words then come
+// from the file instead of being composed, so the machine running this needs
+// only Chrome and Voice — no REI login, because nothing has to be read off a
+// contact. That is the whole point: composing needs REI, sending does not.
+const PREPARED = arg("--prepared", "");
+
 const die = (err, extra) => { console.log(JSON.stringify({ ok: false, err, ...(extra || {}) }, null, 2)); process.exit(1); };
 
-if (!LIST) die("--list is required: a JSON array of {contactId, phone, …}");
+if (!LIST && !PREPARED) die("--list is required: a JSON array of {contactId, phone, …}  (or --prepared with the messages already written)");
+if (LIST && PREPARED) die("pass --list or --prepared, not both: one composes the words from REI, the other takes them as given");
 if (!Number.isFinite(MAX) || MAX < 1) die("--max must be a positive number");
 if (!Number.isFinite(DELAY) || DELAY < 0) die("--delay must be a number of seconds");
+if (!Number.isFinite(MAXCHARS) || MAXCHARS < 1) die("--maxchars must be a positive number");
 
+const SRC = PREPARED || LIST;
 let agents;
-try { agents = JSON.parse(fs.readFileSync(LIST, "utf8")); }
-catch (e) { die("could not read " + LIST + ": " + String(e.message || e).slice(0, 160)); }
-if (!Array.isArray(agents) || !agents.length) die("--list must be a non-empty JSON array of {contactId, phone, …}");
+try { agents = JSON.parse(fs.readFileSync(SRC, "utf8")); }
+catch (e) { die("could not read " + SRC + ": " + String(e.message || e).slice(0, 160)); }
+if (!Array.isArray(agents) || !agents.length) die(SRC + " must be a non-empty JSON array");
+
+if (PREPARED) {
+  // A prepared file is checked ALL AT ONCE, before anything is sent: a bad
+  // row halfway down a batch is found while it can still be fixed for free.
+  const bad = [];
+  agents.forEach((a, k) => {
+    const t = a && typeof a.text === "string" ? a.text.trim() : "";
+    if (!t) bad.push({ row: k + 1, why: "no text" });
+    else if (t.length > MAXCHARS) bad.push({ row: k + 1, why: t.length + " characters, over the " + MAXCHARS + " limit" });
+    if (!a || String(a.phone == null ? a.to : a.phone || "").replace(/\D/g, "").length < 10) bad.push({ row: k + 1, why: "no usable phone number" });
+  });
+  if (bad.length) die("the prepared file has rows that cannot be sent — nothing was sent", { bad });
+  agents = agents.map((a) => ({ ...a, phone: a.phone == null ? a.to : a.phone, contactId: a.contactId || ("p-" + String(a.phone == null ? a.to : a.phone).replace(/\D/g, "")) }));
+}
 
 const tenDigit = (v) => String(v == null ? "" : v).replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
 
@@ -129,7 +153,8 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
     from: "Google Voice, via Chrome on this machine (port " + PORT + ")",
     inList: agents.length, alreadyTexted: already.size, willSend: queue.length - noPhone.length,
     cap: MAX, secondsBetween: DELAY,
-    templates: TPLN > 1 ? TPLN + " in rotation, dealt evenly" : TPLN === 1 ? "1 (no rotation — only one in the set)" : "none (built-in wording)",
+    templates: PREPARED ? "not used — the words come from " + path.basename(PREPARED) : TPLN > 1 ? TPLN + " in rotation, dealt evenly" : TPLN === 1 ? "1 (no rotation — only one in the set)" : "none (built-in wording)",
+    needsREI: PREPARED ? "no — the messages are already written" : "yes, to read each contact and compose",
     stopFile: STOP + "  (create it to stop after the current message)"
   };
   if (noPhone.length) head.skippedNoPhone = noPhone;
@@ -176,6 +201,13 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
     const dealt = TPLN > 1 ? TPLORDER[i] : 0;
     const picks = TPLN > 1 ? Array.from({ length: TPLN }, (_, k) => (dealt + k) % TPLN) : [0];
     let msg = null, tried = [];
+    if (PREPARED) {
+      // Already written, already length-checked at startup. Nothing to compose.
+      msg = { ok: true, message: String(a.text).trim(), capturedName: a.name || "",
+              addressUsed: a.address || "", question: "", chars: String(a.text).trim().length,
+              templateId: a.template || "(prepared)" };
+      picks.length = 0;
+    }
     for (const p of picks) {
       const m = compose(p);
       if (m.ok && m.message && !m.tooLong) { msg = m; break; }
