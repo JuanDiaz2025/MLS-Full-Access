@@ -41,7 +41,12 @@ const GO = process.argv.includes("--go");
 const MAX = Number(arg("--max", "25"));
 const DELAY = Number(arg("--delay", "45"));
 const PORT = arg("--port", "9222");
-const TPLSET = arg("--templates", "");
+// Google Voice gets its OWN wording (rei/templates-gv.json): shorter than the
+// board's four, because the Voice composer refuses anything over 300 and the
+// address is pasted into the middle of it. Pass --templates to override.
+const GVDEFAULT = path.join(__dirname, "templates-gv.json");
+const TPLSET = arg("--templates", fs.existsSync(GVDEFAULT) ? GVDEFAULT : "");
+const MAXCHARS = Number(arg("--maxchars", "300"));   // the Voice composer refuses longer
 const RUNLOG = arg("--log", path.join(__dirname, "gv-blast-sent.jsonl"));
 const REILOG = arg("--reilog", path.join(__dirname, "blast-sent.jsonl"));
 const STOP = path.join(path.dirname(RUNLOG), "STOP");
@@ -143,25 +148,50 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
     if (phone.length !== 10) continue;   // already reported in skippedNoPhone
 
     // 1. The words. outreach.js composes them and sends nothing: --dry.
-    const oArgs = [path.join(__dirname, "outreach.js"), String(a.contactId),
-                   "Google Voice", String(a.by || "Bryan"), "--dry"];
-    if (TPLSET) {
-      oArgs.push("--tplfile", TPLSET);
-      if (TPLN > 1) oArgs.push("--tplpick", String(TPLORDER[i]));
-    }
-    if (a.dom !== undefined && a.dom !== null && a.dom !== "") oArgs.push("--dom", String(a.dom));
-    else oArgs.push("--bom");            // unknown age asks the safe question
+    //    A wording that fits one agent can be too long for the next, because
+    //    the address goes inside it. So try the dealt template first and fall
+    //    through the rest of the rotation rather than losing the agent — and
+    //    never trim Bryan's words to make them fit.
+    const compose = (pick) => {
+      const oArgs = [path.join(__dirname, "outreach.js"), String(a.contactId),
+                     "Google Voice", String(a.by || "Bryan"), "--dry", "--max", String(MAXCHARS)];
+      if (TPLSET) {
+        oArgs.push("--tplfile", TPLSET);
+        if (TPLN > 1) oArgs.push("--tplpick", String(pick));
+      }
+      if (a.dom !== undefined && a.dom !== null && a.dom !== "") oArgs.push("--dom", String(a.dom));
+      else oArgs.push("--bom");          // unknown age asks the safe question
+      try {
+        const raw = execFileSync("node", oArgs, {
+          cwd: __dirname, encoding: "utf8", timeout: 240000,
+          env: { ...process.env, REI_PROFILE: process.env.REI_PROFILE || path.join(__dirname, "profile") }
+        });
+        const j = raw.indexOf("{");
+        return JSON.parse(j < 0 ? raw : raw.slice(j));
+      } catch (e) {
+        return { ok: false, err: String(e.message || e).slice(0, 200) };
+      }
+    };
 
-    let msg;
-    try {
-      const raw = execFileSync("node", oArgs, {
-        cwd: __dirname, encoding: "utf8", timeout: 240000,
-        env: { ...process.env, REI_PROFILE: process.env.REI_PROFILE || path.join(__dirname, "profile") }
-      });
-      const j = raw.indexOf("{");
-      msg = JSON.parse(j < 0 ? raw : raw.slice(j));
-    } catch (e) {
-      msg = { ok: false, err: String(e.message || e).slice(0, 200) };
+    const dealt = TPLN > 1 ? TPLORDER[i] : 0;
+    const picks = TPLN > 1 ? Array.from({ length: TPLN }, (_, k) => (dealt + k) % TPLN) : [0];
+    let msg = null, tried = [];
+    for (const p of picks) {
+      const m = compose(p);
+      if (m.ok && m.message && !m.tooLong) { msg = m; break; }
+      if (m.ok && m.tooLong) { tried.push((m.templateId || "#" + p) + " " + m.chars + " chars"); continue; }
+      msg = m; break;                     // a real compose failure, not a length one
+    }
+
+    if (msg && msg.ok && msg.tooLong) msg = null;   // every template was too long
+
+    if (!msg) {
+      // Too long is this agent's problem, not the batch's: skip and carry on.
+      const row = { n: i + 1, of: queue.length, contactId: a.contactId, phone, ok: false, skipped: true,
+                    err: "every template is over " + MAXCHARS + " characters for this address (" + tried.join(", ") + ") — not sent" };
+      results.push(row);
+      console.log(JSON.stringify(row, null, 2));
+      continue;
     }
     if (!msg.ok || !msg.message) {
       const row = { n: i + 1, of: queue.length, contactId: a.contactId, phone, ok: false,
@@ -171,6 +201,7 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
       console.log(JSON.stringify({ stopped: "could not compose — stopping rather than carrying on blind", after: i + 1, remaining: queue.length - i - 1 }));
       break;
     }
+    if (tried.length) msg.switchedTemplate = "the dealt template was too long (" + tried.join(", ") + ")";
 
     // 2. The pipe. gvsend.js is the proven one: it attaches, opens the
     //    thread by deep link, types, and confirms the words landed.
@@ -193,9 +224,17 @@ const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
       chars: msg.chars, message: msg.message, template: msg.templateId || "",
       ok: !!res.ok, err: res.err
     };
+    if (msg.switchedTemplate) row.switchedTemplate = msg.switchedTemplate;
     results.push(row);
     console.log(JSON.stringify(row, null, 2));
 
+    if (!res.ok && !GO) {
+      // A dry run exists to prove the WORDS. On a machine with no Chrome the
+      // pipe always refuses, and stopping there would hide every message after
+      // the first — exactly what you ran the dry run to see.
+      row.dryNote = "no send was attempted; Chrome is only needed for the real run";
+      continue;
+    }
     if (!res.ok) {
       // One failure usually means Chrome died or Voice signed out, and every
       // send after it would be a silent no-op recorded as a success.

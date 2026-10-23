@@ -52,6 +52,11 @@ const TPLFILE = arg("--tplfile", ""), TPLID = arg("--tplid", "");
 // one — blast.js deals them out so a batch spreads evenly — and without it
 // one is drawn at random, so a single hand-run still varies.
 const TPLPICK = arg("--tplpick", "");
+// The Voice composer refuses anything over 300 characters, and a longer text
+// is a three-segment SMS on any line, so the cap applies to both pipes. It is
+// checked HERE, where the words are made, rather than at the sender: by the
+// time gvsend sees it the batch has already opened a browser.
+const MAX = Number(arg("--max", "300"));
 let TPL = null;
 if (TPLFILE) {
   try {
@@ -182,6 +187,17 @@ const until = async (fn, ms, step) => {
   const MSG = build(FRESH);
   out.message = MSG;
   out.chars = MSG.length;
+  // A long address can push a wording that normally fits over the edge, so the
+  // same template is fine for one agent and too long for the next. Say so
+  // plainly and never trim Bryan's words to make them fit.
+  if (Number.isFinite(MAX) && MAX > 0 && MSG.length > MAX) {
+    out.tooLong = true;
+    out.max = MAX;
+    const err = "message is " + MSG.length + " characters, over the " + MAX +
+                "-character limit — use a shorter template for this one";
+    if (!DRY) { console.log(JSON.stringify({ ok: false, err, ...out })); await ctx.close(); return; }
+    out.wouldNotSend = err;
+  }
   if (DRY) { console.log(JSON.stringify({ ok: true, dryRun: true, ...out })); await ctx.close(); return; }
 
   // --- Chat tab ---

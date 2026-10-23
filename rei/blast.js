@@ -43,6 +43,7 @@ const MAX = Number(arg("--max", "25"));
 const DELAY = Number(arg("--delay", "45"));
 const LINES = String(arg("--lines", "Realtor")).split(",").map((s) => s.trim()).filter(Boolean);
 const TPLSET = arg("--templates", "");
+const MAXCHARS = Number(arg("--maxchars", "300"));   // longer than this is a 3-segment SMS, and Voice refuses it
 const RUNLOG = arg("--log", path.join(__dirname, "blast-sent.jsonl"));
 const STOP = path.join(path.dirname(RUNLOG), "STOP");
 
@@ -128,26 +129,51 @@ const TPLORDER = TPLN > 1 ? tplDeal(TPLN, queue.length) : [];
     // Round-robin, not random: over a batch this spreads evenly, where random
     // would leave one line with twice the volume by chance.
     const line = LINES[i % LINES.length];
-    const args = [path.join(__dirname, "outreach.js"), String(a.contactId), line, String(a.by || "Bryan")];
-    if (TPLSET) {
-      args.push("--tplfile", TPLSET);
-      if (TPLN > 1) args.push("--tplpick", String(TPLORDER[i]));
-    }
-    if (a.dom !== undefined && a.dom !== null && a.dom !== "") args.push("--dom", String(a.dom));
-    else args.push("--bom");            // unknown age asks the safe question
-    if (!GO) args.push("--dry");
+    // The address goes inside the wording, so a template that fits one agent
+    // can be over the limit for the next. outreach.js refuses an over-long one
+    // BEFORE it sends anything, so falling through to the next template in the
+    // rotation costs a read and loses nobody. Bryan's words are never trimmed.
+    const attempt = (pick) => {
+      const args = [path.join(__dirname, "outreach.js"), String(a.contactId), line, String(a.by || "Bryan"),
+                    "--max", String(MAXCHARS)];
+      if (TPLSET) {
+        args.push("--tplfile", TPLSET);
+        if (TPLN > 1) args.push("--tplpick", String(pick));
+      }
+      if (a.dom !== undefined && a.dom !== null && a.dom !== "") args.push("--dom", String(a.dom));
+      else args.push("--bom");          // unknown age asks the safe question
+      if (!GO) args.push("--dry");
+      try {
+        const raw = execFileSync("node", args, {
+          cwd: __dirname, encoding: "utf8", timeout: 240000,
+          env: { ...process.env, REI_PROFILE: process.env.REI_PROFILE || path.join(__dirname, "profile") }
+        });
+        const j = raw.indexOf("{");
+        return JSON.parse(j < 0 ? raw : raw.slice(j));
+      } catch (e) {
+        return { ok: false, err: String(e.message || e).slice(0, 200) };
+      }
+    };
 
-    let res;
-    try {
-      const raw = execFileSync("node", args, {
-        cwd: __dirname, encoding: "utf8", timeout: 240000,
-        env: { ...process.env, REI_PROFILE: process.env.REI_PROFILE || path.join(__dirname, "profile") }
-      });
-      const j = raw.indexOf("{");
-      res = JSON.parse(j < 0 ? raw : raw.slice(j));
-    } catch (e) {
-      res = { ok: false, err: String(e.message || e).slice(0, 200) };
+    const dealt = TPLN > 1 ? TPLORDER[i] : 0;
+    const picks = TPLN > 1 ? Array.from({ length: TPLN }, (_, k) => (dealt + k) % TPLN) : [0];
+    let res = { ok: false, err: "nothing attempted" }, tried = [];
+    for (const p of picks) {
+      res = attempt(p);
+      if (res.ok && !res.tooLong) break;
+      if (res.tooLong) { tried.push((res.templateId || "#" + p) + " " + res.chars + " chars"); continue; }
+      break;                              // a real failure, not a length one
     }
+
+    if (res.tooLong) {
+      // Too long is this agent's problem, not the batch's: skip and carry on.
+      const row = { n: i + 1, of: queue.length, contactId: a.contactId, line, ok: false, skipped: true,
+                    err: "every template is over " + MAXCHARS + " characters for this address (" + tried.join(", ") + ") — not sent" };
+      results.push(row);
+      console.log(JSON.stringify(row, null, 2));
+      continue;
+    }
+    if (tried.length) res.switchedTemplate = "the dealt template was too long (" + tried.join(", ") + ")";
 
     const row = {
       n: i + 1, of: queue.length, contactId: a.contactId, line,
