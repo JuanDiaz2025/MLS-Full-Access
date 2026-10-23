@@ -139,5 +139,35 @@
   "v": "RENOVATED",
   "addr": "4024 Bayview Ave, San Mateo",
   "at": "2026-10-23"
+ },
+ "SF426170507": {
+  "v": "FIXER",
+  "addr": "815 Avalon Ave, SF",
+  "at": "2026-10-23"
+ },
+ "ML82065517": {
+  "v": "DATED",
+  "addr": "1408 Royal Ave, San Mateo",
+  "at": "2026-10-23"
+ },
+ "SF426171804": {
+  "v": "FIXER",
+  "addr": "116 Judson Ave, SF",
+  "at": "2026-10-23"
+ },
+ "CC41151947": {
+  "v": "DATED",
+  "addr": "2351 Valleywood Dr, San Bruno",
+  "at": "2026-10-23"
+ },
+ "ML82065522": {
+  "v": "FIXER",
+  "addr": "1645 Virginia Ave, Redwood City",
+  "at": "2026-10-23"
+ },
+ "ML82065426": {
+  "v": "FIXER",
+  "addr": "1550 Gover Ln, San Carlos",
+  "at": "2026-10-23"
  }
 }
