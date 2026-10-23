@@ -247,3 +247,9 @@ rei/q-*.json
 # agents' phone numbers. Its durable home is the board's agent log.
 rei/sent.jsonl
 rei/*.jsonl
+
+# Prepared Google Voice batches: the finished texts plus the agents' names and
+# phone numbers, written per batch and handed straight to whoever sends them.
+# Same reason as rei/q-*.json and the send logs — operational data, not source.
+gv-ready*.json
+rei/gv-ready*.json
