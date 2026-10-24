@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -34,7 +35,9 @@ type Reader struct {
 }
 
 func init() {
-	store.SetOSInfo("WhatsApp Reader", [3]uint32{1, 0, 0})
+	store.SetOSInfo("WhatsApp Reader", [3]uint32{1, 0, 1})
+	// Present as a desktop browser, the most common kind of linked device.
+	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_CHROME.Enum()
 }
 
 func OpenReader(dir string, log waLog.Logger) (*Reader, error) {

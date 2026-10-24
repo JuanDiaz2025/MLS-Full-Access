@@ -108,3 +108,15 @@ func TestSaveAndRead(t *testing.T) {
 		t.Errorf("paging wrong: %+v more=%v", page, more)
 	}
 }
+
+func TestWithSecret(t *testing.T) {
+	code := "https://wa.me/settings/linked_devices#2@abc==,NOISE==,IDENT==,OLDSECRET==,1"
+	got := withSecret(code, []byte{1, 2, 3})
+	want := "https://wa.me/settings/linked_devices#2@abc==,NOISE==,IDENT==,AQID,1"
+	if got != want {
+		t.Fatalf("got %s", got)
+	}
+	if withSecret("no-hash", []byte{1}) != "" || withSecret("x#a,b", []byte{1}) != "" {
+		t.Fatal("malformed codes should give an empty result")
+	}
+}

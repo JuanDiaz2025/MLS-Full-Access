@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,10 +20,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
-const version = "1.0.0"
+const version = "1.0.1"
 
 func main() {
 	setupConsole()
@@ -43,8 +45,12 @@ func main() {
 
 	err := interactive(dir, cmd, args)
 	if err != nil {
+		fmt.Print("\033[H\033[2J") // clear any QR code so an expired one can't be scanned
+		fmt.Println("WhatsApp Reader", version)
 		fmt.Println()
 		fmt.Println("Problem:", err)
+		fmt.Println()
+		fmt.Println("Details are in reader.log in this folder.")
 	}
 	pause()
 	if err != nil {
@@ -99,7 +105,11 @@ func interactive(dir, cmd string, args []string) error {
 			fmt.Printf("Already linked to +%s. To link a different phone, run: whatsapp-reader.exe unlink\n", dev.ID.User)
 			return nil
 		}
-		return link(r, strings.TrimLeft(strings.ReplaceAll(*phone, " ", ""), "+"))
+		number := digitsOnly(*phone)
+		if cmd == "" && number == "" {
+			number = askHowToLink()
+		}
+		return link(r, number)
 	case "status":
 		return printStatus(r)
 	case "unlink":
@@ -151,6 +161,51 @@ func printStatus(r *Reader) error {
 
 // ---- linking ----
 
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
+// askHowToLink lets someone who double-clicked choose a QR code or a code
+// typed into the phone, without opening a terminal.
+func askHowToLink() string {
+	fmt.Println("WhatsApp Reader", version, "- link to your phone")
+	fmt.Println()
+	fmt.Println("Press Enter to show a QR code to scan.")
+	fmt.Println("Or type your phone number with country code (for example 15551234567) and press")
+	fmt.Println("Enter to get an 8-character code to type into WhatsApp instead.")
+	fmt.Println()
+	fmt.Print("> ")
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	n := digitsOnly(line)
+	if len(n) < 8 {
+		return ""
+	}
+	return n
+}
+
+// useCurrentVersion asks web.whatsapp.com which version it runs today, so
+// WhatsApp doesn't turn the link down as coming from an old client.
+func useCurrentVersion(log waLog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	latest, err := whatsmeow.GetLatestVersion(ctx, nil)
+	if err != nil || latest == nil {
+		log.Warnf("Couldn't check the current WhatsApp Web version, using the built-in one: %v", err)
+		return
+	}
+	current := store.GetWAVersion()
+	if latest[2] > current[2] {
+		store.SetWAVersion(*latest)
+		log.Infof("Using WhatsApp Web version %s", latest.String())
+	}
+}
+
 func lockPath(dir string) string { return filepath.Join(dir, "link.lock") }
 
 func link(r *Reader, phone string) error {
@@ -163,6 +218,7 @@ func link(r *Reader, phone string) error {
 	if err != nil {
 		return err
 	}
+	useCurrentVersion(r.log)
 	cli := r.NewClient(dev)
 	qrChan, err := cli.GetQRChannel(ctx)
 	if err != nil {
@@ -176,11 +232,41 @@ func link(r *Reader, phone string) error {
 	fmt.Println("WhatsApp Reader", version, "- link to your phone")
 	fmt.Println()
 	codeShown := false
-	pngPath := filepath.Join(r.dir, "link-qr.png")
-	defer os.Remove(pngPath)
+	passkeyAsked := false
+	lastCode := ""
+	showQR := func(code string) {
+		fmt.Print("\033[H\033[2J")
+		fmt.Println("On your phone: WhatsApp > Settings > Linked devices > Link a device, then scan this.")
+		fmt.Println("The code changes every few seconds; just keep the camera on it.")
+		fmt.Println()
+		printQR(code)
+		fmt.Println("If your phone says \"Couldn't link device\", close this window, double-click")
+		fmt.Println("whatsapp-reader.exe again and type your phone number to link with a code instead.")
+		if passkeyAsked {
+			fmt.Println()
+			fmt.Println("WhatsApp asked for a passkey, which WhatsApp Reader can't use. If your phone asks")
+			fmt.Println("for a passkey or still won't link, see \"Couldn't link device\" in README.txt.")
+		}
+	}
 
 	for item := range qrChan {
+		r.log.Infof("Link step: %s", item.Event)
 		switch item.Event {
+		case whatsmeow.QRChannelEventPasskeyRequest:
+			// WhatsApp offers to confirm the link with a passkey, which this
+			// program can't use, and in doing so replaces the secret inside the
+			// QR code. Redraw the code with the new secret straight away, since
+			// the one on screen would now fail with "Couldn't link device".
+			passkeyAsked = true
+			if phone == "" && lastCode != "" {
+				if fresh := withSecret(lastCode, cli.Store.AdvSecretKey); fresh != "" {
+					lastCode = fresh
+					showQR(fresh)
+				}
+			}
+			continue
+		case whatsmeow.QRChannelEventPasskeyResponse:
+			continue // only follows a passkey answer, which this program never sends
 		case "code":
 			if phone != "" {
 				if codeShown {
@@ -199,14 +285,14 @@ func link(r *Reader, phone string) error {
 				fmt.Println("Waiting for you to enter it...")
 				continue
 			}
-			fmt.Print("\033[H\033[2J")
-			fmt.Println("On your phone: WhatsApp > Settings > Linked devices > Link a device, then scan this.")
-			fmt.Println("The code changes every few seconds; just keep the camera on it.")
-			fmt.Println()
-			printQR(item.Code)
-			_ = qrcode.WriteFile(item.Code, qrcode.Low, 420, pngPath)
-			fmt.Println("If it won't scan, open link-qr.png in this folder, or close this window and run:")
-			fmt.Println("  whatsapp-reader.exe link --phone <your number with country code>")
+			// The library prepares its codes ahead of time; after a passkey
+			// offer they still hold the old secret, so always use the current one.
+			code := item.Code
+			if fresh := withSecret(code, cli.Store.AdvSecretKey); fresh != "" {
+				code = fresh
+			}
+			lastCode = code
+			showQR(code)
 		case "success":
 			fmt.Print("\033[H\033[2J")
 			fmt.Println("Linked. Saving recent group messages from your phone. This can take a minute...")
@@ -218,12 +304,15 @@ func link(r *Reader, phone string) error {
 			fmt.Println("Next: add WhatsApp Reader to the Claude desktop app (see the README).")
 			return nil
 		case "timeout":
-			return errors.New("the code expired before it was scanned. Run whatsapp-reader.exe again")
+			return errors.New("the code expired before it was used, or WhatsApp closed the connection.\nDouble-click whatsapp-reader.exe to try again")
+		case "err-scanned-without-multidevice":
+			return errors.New("your phone's WhatsApp can't link devices yet. Update WhatsApp on the phone and try again")
+		case "err-client-outdated":
+			return errors.New("WhatsApp says this version of WhatsApp Reader is too old. Ask for an updated copy")
+		case "error":
+			return fmt.Errorf("WhatsApp didn't accept the link (%v).\nTry again, and if it keeps failing, double-click whatsapp-reader.exe and type\nyour phone number to link with an 8-character code instead", item.Error)
 		default:
-			if item.Error != nil {
-				return fmt.Errorf("linking failed: %w", item.Error)
-			}
-			return fmt.Errorf("linking stopped (%s). Run whatsapp-reader.exe again", item.Event)
+			return fmt.Errorf("linking stopped (%s). Double-click whatsapp-reader.exe to try again", item.Event)
 		}
 	}
 	return errors.New("linking stopped. Run whatsapp-reader.exe again")
@@ -246,6 +335,21 @@ func waitForHistory(r *Reader) {
 		}
 	}
 	fmt.Println()
+}
+
+// withSecret rebuilds a QR code's text with a new link secret. The text is
+// https://wa.me/settings/linked_devices#ref,noise key,identity key,secret,client type
+func withSecret(code string, secret []byte) string {
+	i := strings.Index(code, "#")
+	if i < 0 || len(secret) == 0 {
+		return ""
+	}
+	parts := strings.Split(code[i+1:], ",")
+	if len(parts) != 5 {
+		return ""
+	}
+	parts[3] = base64.StdEncoding.EncodeToString(secret)
+	return code[:i+1] + strings.Join(parts, ",")
 }
 
 // printQR draws the code with half-height blocks so it fits the window.
@@ -350,6 +454,7 @@ func keepConnected(ctx context.Context, r *Reader) {
 			sleep(ctx, 10*time.Second)
 			continue
 		}
+		useCurrentVersion(r.log)
 		cli := r.NewClient(dev)
 		if err := cli.Connect(); err != nil {
 			r.log.Warnf("Connecting failed, retrying: %v", err)

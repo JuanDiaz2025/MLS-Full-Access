@@ -1,4 +1,4 @@
-WhatsApp Reader 1.0.0
+WhatsApp Reader 1.0.1
 =====================
 
 WhatsApp Reader links to your phone the same way WhatsApp Web does and saves
@@ -19,15 +19,14 @@ SETUP (one time, about 15 minutes)
 2. Double-click whatsapp-reader.exe.
    - If Windows says "Windows protected your PC", click "More info", then
      "Run anyway". It shows this because the program isn't signed.
-   - A QR code appears. On your phone: WhatsApp > Settings > Linked devices
-     > Link a device, and point the camera at it.
+   - It asks how to link:
+       * Press Enter for a QR code. On your phone: WhatsApp > Settings >
+         Linked devices > Link a device, and point the camera at it.
+       * Or type your phone number with country code (digits only, for
+         example 15551234567) and press Enter. On your phone: WhatsApp >
+         Settings > Linked devices > Link a device > Link with phone number
+         instead, and type the 8-character code it shows.
    - Wait until it says "Done", then press Enter to close the window.
-
-   If the QR code won't scan, close the window, open Command Prompt in this
-   folder and run (your number with country code, digits only):
-       whatsapp-reader.exe link --phone 15551234567
-   Then on your phone choose "Link with phone number instead" and type the
-   8-character code it shows.
 
 3. Add it to the Claude desktop app:
    - Open the Claude desktop app > Settings > Developer > Edit Config.
@@ -65,6 +64,20 @@ Then check the dashboard shows the first three as replied (with their
 response times) and your friend as not responding to the fourth.
 Also try one instruction that names your friend with a deadline
 ("Mike, send photos of the site by 5pm") and have them send a photo back.
+
+
+IF YOUR PHONE SAYS "COULDN'T LINK DEVICE"
+-----------------------------------------
+1. Check the top of the window says WhatsApp Reader 1.0.1 or later.
+   Version 1.0.0 stopped linking when WhatsApp offered its passkey step.
+2. Try again, scanning the newest code on screen.
+3. Try the 8-character code instead: double-click whatsapp-reader.exe,
+   type your phone number and press Enter.
+4. If your WhatsApp account has a passkey (WhatsApp > Settings > Account >
+   Passkeys), WhatsApp may ask for it when linking, and WhatsApp Reader
+   can't use passkeys. Removing the passkey there, linking, and adding it
+   back afterwards gets around this.
+5. Still stuck? Send reader.log from this folder. It lists each linking step.
 
 
 GOOD TO KNOW
