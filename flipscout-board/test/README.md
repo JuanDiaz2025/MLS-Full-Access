@@ -387,8 +387,9 @@ the board refuses to queue it for anyone else.
 Those replies are real texts, sent by `testsend.js` on Seth's computer: a copy
 of `rei/gvsend.js` (branch `claude/laughing-lamport-cmllyv`) that texts
 5103945339 and nobody else. Setup is at the top of the file: Chrome started
-with `--remote-debugging-port=9222`, signed in to Seth's Voice by hand, and
-`npm i playwright`.
+with `--remote-debugging-port=9222` on a profile folder of its own
+(`--user-data-dir`, since Chrome 136 ignores the port on the everyday
+profile), signed in to Seth's Voice by hand, and `npm i playwright`.
 
 The loop Claude runs on Seth's computer, one text at a time:
 

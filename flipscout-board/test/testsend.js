@@ -12,12 +12,13 @@
 // Seth has already started and signed in to voice.google.com himself.
 //
 // ONE-TIME SETUP, on Seth's machine:
-//   1. Quit Chrome completely.
-//   2. Start it with the debugging port open:
-//        macOS   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222
-//        Windows "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
-//   3. Sign in to voice.google.com in that window, by hand, as (510) 214-3561.
-//   4. npm i playwright   (once, in this folder)
+//   1. Start Chrome with the debugging port open, on a profile folder of its
+//      own (Chrome 136 and later ignore the port on the everyday profile):
+//        macOS   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="$HOME/chrome-voice"
+//        Windows "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\chrome-voice"
+//   2. Sign in to voice.google.com in that window, by hand, as (510) 214-3561.
+//      The folder keeps the sign-in, so this is once.
+//   3. npm i playwright   (once, in this folder)
 //
 // THEN:
 //   node testsend.js --text "..."          # shows what it would do
@@ -54,7 +55,7 @@ const until = async (fn, ms, step) => {
     browser = await chromium.connectOverCDP("http://localhost:" + PORT);
   } catch (e) {
     console.error("Could not reach Chrome on port " + PORT + ".\n" +
-      "Chrome has to be started with --remote-debugging-port=" + PORT + " and signed in to voice.google.com.\n" +
+      "Chrome has to be started with --remote-debugging-port=" + PORT + " and its own --user-data-dir folder, and signed in to voice.google.com.\n" +
       "See the setup notes at the top of this file.\n" + String(e.message || e).slice(0, 200));
     process.exit(1);
   }
