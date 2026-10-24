@@ -1,0 +1,10 @@
+# Created when the reader runs. session.db holds the WhatsApp link keys and
+# messages.db holds group messages: never commit either.
+*.db
+*.db-wal
+*.db-shm
+reader.log
+link-qr.png
+link.lock
+*.exe
+dist/

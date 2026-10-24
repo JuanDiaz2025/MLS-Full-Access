@@ -1,0 +1,1529 @@
+<title>WhatsApp AI Accountability</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a dark sidebar of four views beside a pale work surface; every view puts its summary first and the detail below. */
+:root {
+  --bg: #eef2f0; --surface: #ffffff; --surface-2: #f4f7f5; --line: #dde5e1; --line-2: #c6d2cd;
+  --ink: #10221f; --ink-2: #3f5651; --ink-3: #5a6f6a;
+  --side: #0e2321; --side-2: #18352f; --side-ink: #e4efeb; --side-ink-2: #9fbab3; --side-line: #22403b;
+  --accent: #118a4c; --accent-hover: #0c7440; --accent-ink: #ffffff; --accent-soft: #dff2e6;
+  --good: #17944a; --good-soft: #e1f3e7; --good-ink: #0c6631;
+  --warn: #d99a06; --warn-soft: #fbefd1; --warn-ink: #7f5400;
+  --serious: #e2733f; --serious-soft: #fce4d8; --serious-ink: #9c4119;
+  --crit: #d03b3b; --crit-soft: #fae0e0; --crit-ink: #a12424;
+  --info: #2f6fdc; --info-soft: #e1eafb; --info-ink: #1b4fa8;
+  --muted-soft: #e9efec; --muted-ink: #4a5f5a;
+  --bubble: #d7f1de; --brand: #1fa85c; --on-brand: #ffffff;
+  --shadow: 0 1px 2px rgba(16, 34, 31, .06);
+  --f-ui: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --f-display: "Archivo", "Figtree", ui-sans-serif, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b1514; --surface: #121f1d; --surface-2: #172724; --line: #233532; --line-2: #334a46;
+  --ink: #e5efec; --ink-2: #b0c3be; --ink-3: #8fa49f;
+  --side: #071110; --side-2: #132722; --side-ink: #e4efeb; --side-ink-2: #92aea7; --side-line: #1b302c;
+  --accent: #2db673; --accent-hover: #3ccb84; --accent-ink: #04150c; --accent-soft: #13321f;
+  --good: #2db35b; --good-soft: #122e1d; --good-ink: #86dea3;
+  --warn: #f0b429; --warn-soft: #31270e; --warn-ink: #f3cb6c;
+  --serious: #f08a5d; --serious-soft: #382015; --serious-ink: #f5ac8b;
+  --crit: #e35a5a; --crit-soft: #381818; --crit-ink: #f39d9d;
+  --info: #5f95f0; --info-soft: #162949; --info-ink: #a0bff6;
+  --muted-soft: #1c2c29; --muted-ink: #aabdb8;
+  --bubble: #1b3a29;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0b1514; --surface: #121f1d; --surface-2: #172724; --line: #233532; --line-2: #334a46;
+  --ink: #e5efec; --ink-2: #b0c3be; --ink-3: #8fa49f;
+  --side: #071110; --side-2: #132722; --side-ink: #e4efeb; --side-ink-2: #92aea7; --side-line: #1b302c;
+  --accent: #2db673; --accent-hover: #3ccb84; --accent-ink: #04150c; --accent-soft: #13321f;
+  --good: #2db35b; --good-soft: #122e1d; --good-ink: #86dea3;
+  --warn: #f0b429; --warn-soft: #31270e; --warn-ink: #f3cb6c;
+  --serious: #f08a5d; --serious-soft: #382015; --serious-ink: #f5ac8b;
+  --crit: #e35a5a; --crit-soft: #381818; --crit-ink: #f39d9d;
+  --info: #5f95f0; --info-soft: #162949; --info-ink: #a0bff6;
+  --muted-soft: #1c2c29; --muted-ink: #aabdb8;
+  --bubble: #1b3a29;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); font-size: 14px; line-height: 1.45; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ic { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- frame ---------- */
+.app { display: grid; grid-template-columns: 236px minmax(0, 1fr); }
+.side { position: sticky; top: 0; height: 100vh; align-self: start; background: var(--side); color: var(--side-ink);
+  display: flex; flex-direction: column; gap: 22px; padding-block: 22px 18px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; padding-inline: 6px; }
+.brand-mark { width: 38px; height: 38px; border-radius: 11px; background: var(--brand); color: var(--on-brand); display: grid; place-items: center; flex: none; }
+.brand-mark .ic { width: 22px; height: 22px; stroke-width: 2; }
+.brand-name { font-family: var(--f-display); font-weight: 700; font-size: 15px; line-height: 1.15; letter-spacing: .005em; }
+.brand-name small { display: block; font-family: var(--f-ui); font-weight: 500; font-size: 12px; color: var(--side-ink-2); letter-spacing: 0; margin-top: 2px; }
+.nav { display: flex; flex-direction: column; gap: 4px; }
+.nav a { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 9px; color: var(--side-ink-2); text-decoration: none; font-weight: 600; }
+.nav a:hover { background: var(--side-2); color: var(--side-ink); }
+.nav a[aria-current="page"] { background: var(--brand); color: var(--on-brand); }
+.nav .count { margin-left: auto; font-size: 12px; font-weight: 700; min-width: 22px; padding: 1px 7px; border-radius: 99px; background: rgba(255, 255, 255, .14); text-align: center; font-variant-numeric: tabular-nums; }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; }
+.timing-btn { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 11px 12px; border-radius: 10px;
+  background: var(--side-2); border: 1px solid var(--side-line); color: var(--side-ink); }
+.timing-btn:hover { border-color: #3c6b62; }
+.timing-btn b { display: block; font-weight: 600; }
+.timing-btn span { display: block; font-size: 12px; color: var(--side-ink-2); margin-top: 1px; }
+.side-note { font-size: 12px; color: var(--side-ink-2); padding-inline: 4px; }
+
+.main { min-width: 0; padding-block: 26px 40px; padding-left: 30px; padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.main-inner { max-width: 1180px; display: flex; flex-direction: column; gap: 20px; }
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; }
+.top h1 { margin: 0; font-family: var(--f-display); font-weight: 800; font-size: 28px; letter-spacing: -.01em; line-height: 1.1; text-wrap: balance; }
+.top p { margin: 4px 0 0; color: var(--ink-2); max-width: 62ch; }
+.top-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.pill .ic { width: 16px; height: 16px; color: var(--ink-3); }
+.pill.sample { background: var(--warn-soft); border-color: transparent; color: var(--warn-ink); font-weight: 600; }
+.pill.sample .ic { color: var(--warn-ink); }
+
+/* ---------- shared pieces ---------- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; align-items: center; box-shadow: var(--shadow); }
+.tile .t-ic { grid-row: span 2; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; }
+.tile .t-ic .ic { width: 21px; height: 21px; }
+.tile .t-num { font-size: 30px; font-weight: 700; line-height: 1.05; letter-spacing: -.01em; }
+.tile .t-num small { font-size: 16px; font-weight: 600; margin-left: 2px; }
+.tile .t-lab { font-weight: 600; }
+.tile .t-sub { grid-column: 2; font-size: 12.5px; color: var(--ink-3); }
+.tone-crit .t-ic { background: var(--crit-soft); color: var(--crit-ink); }
+.tone-warn .t-ic { background: var(--warn-soft); color: var(--warn-ink); }
+.tone-info .t-ic { background: var(--info-soft); color: var(--info-ink); }
+.tone-good .t-ic { background: var(--good-soft); color: var(--good-ink); }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); min-width: 0; display: flex; flex-direction: column; }
+.card-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.card-h h2 { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 16px; letter-spacing: 0; }
+.card-h .hint { color: var(--ink-3); font-size: 12.5px; }
+.card-b { padding: 16px 18px; }
+.link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 600; text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); gap: 20px; align-items: start; }
+
+.tw { overflow-x: auto; }
+.tw > table.t { min-width: 620px; }
+.stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.t td.from { max-width: 300px; }
+.t td.from .rowlink { font-weight: 500; }
+table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.t th { text-align: left; font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.t td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.t tr:last-child td { border-bottom: 0; }
+.t .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.t .sub { display: block; font-size: 12px; color: var(--ink-3); }
+.t .nowrap { white-space: nowrap; }
+.who { display: flex; align-items: center; gap: 10px; white-space: nowrap; font-weight: 600; }
+.av { width: 28px; height: 28px; border-radius: 50%; background: var(--muted-soft); color: var(--muted-ink); display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+.rowlink { background: none; border: 0; padding: 0; text-align: left; font-weight: 600; color: var(--ink); }
+.rowlink:hover { color: var(--accent); text-decoration: underline; }
+.more { font-size: 12px; color: var(--ink-3); font-weight: 500; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: 99px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.chip .ic { width: 14px; height: 14px; stroke-width: 2.2; }
+.chip.dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.c-good { background: var(--good-soft); color: var(--good-ink); }
+.c-warn { background: var(--warn-soft); color: var(--warn-ink); }
+.c-serious { background: var(--serious-soft); color: var(--serious-ink); }
+.c-crit { background: var(--crit-soft); color: var(--crit-ink); }
+.c-info { background: var(--info-soft); color: var(--info-ink); }
+.c-muted { background: var(--muted-soft); color: var(--muted-ink); }
+.plain { color: var(--ink-3); }
+
+.meter { display: flex; align-items: center; gap: 10px; min-width: 150px; }
+.meter-track { flex: 1; height: 8px; border-radius: 99px; background: var(--muted-soft); overflow: hidden; }
+.meter-fill { height: 100%; background: var(--good); border-radius: 99px; }
+.meter b { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; }
+
+.empty { padding: 26px 18px; color: var(--ink-3); text-align: center; }
+
+/* ---------- messages ---------- */
+.msgs { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.mlist { max-height: 760px; overflow-y: auto; }
+.mday { position: sticky; top: 0; z-index: 1; padding: 8px 16px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.mitem { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 3px 12px; align-items: center; padding: 12px 16px; background: none; border: 0; border-bottom: 1px solid var(--line); text-align: left; }
+.mitem:hover { background: var(--surface-2); }
+.mitem[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.mitem .m-ic { grid-row: span 2; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--good-soft); color: var(--good-ink); }
+.mitem.open .m-ic { background: var(--warn-soft); color: var(--warn-ink); }
+.mitem .m-ic .ic { width: 17px; height: 17px; }
+.mitem .m-t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mitem .m-s { font-size: 12.5px; color: var(--ink-3); grid-column: 2; }
+.mitem .chip { grid-row: span 2; }
+
+.mhead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.mhead h2 { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 20px; text-wrap: balance; }
+.mhead p { margin: 3px 0 0; color: var(--ink-3); font-size: 13px; }
+.bubble { margin-top: 16px; background: var(--bubble); border-radius: 4px 14px 14px 14px; padding: 14px 16px 10px; max-width: 560px; white-space: pre-wrap; font-size: 14.5px; }
+.bubble .b-time { display: block; text-align: right; font-size: 11.5px; color: var(--ink-3); margin-top: 6px; white-space: normal; }
+.read { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+.read-grid { margin: 10px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.read dt { font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.read dd { margin: 3px 0 0; font-weight: 600; }
+.read dd span { display: block; font-weight: 400; font-size: 12.5px; color: var(--ink-3); }
+.read-cap { font-size: 12.5px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.read-cap .ic { width: 15px; height: 15px; color: var(--accent); }
+.subh { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin: 22px 0 10px; }
+.subh h3 { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 15px; }
+.subh .tally { font-size: 13px; font-weight: 600; display: flex; gap: 14px; }
+.tally .ok { color: var(--good-ink); }
+.tally .no { color: var(--crit-ink); }
+.inset { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+
+/* ---------- tasks ---------- */
+.sel { padding: 7px 30px 7px 11px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface); }
+.ev { display: flex; align-items: center; gap: 5px; }
+.ev .ph { width: 30px; height: 30px; border-radius: 6px; background: var(--info-soft); color: var(--info-ink); display: grid; place-items: center; }
+.ev .ph .ic { width: 16px; height: 16px; }
+.ev .ph.more-ph { font-size: 12px; font-weight: 700; }
+.ev-doc { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
+.ev-doc .ic { color: var(--info-ink); }
+.ev-reply { font-size: 13px; color: var(--ink-2); font-style: italic; }
+
+/* ---------- reports ---------- */
+.bars { display: flex; flex-direction: column; gap: 4px; }
+.bar-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) 92px; align-items: center; gap: 12px; padding: 5px 6px; border-radius: 8px; }
+.bar-row:hover, .bar-row:focus-visible { background: var(--surface-2); }
+.bar-row .who { font-size: 13.5px; }
+.bar-row .av { width: 24px; height: 24px; font-size: 11px; }
+.bar-track { position: relative; height: 14px; }
+.bar { position: absolute; left: 0; top: 0; height: 14px; border-radius: 0 4px 4px 0; }
+.bar-val { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar-val span { display: block; font-weight: 400; font-size: 11.5px; color: var(--ink-3); }
+.mark { position: absolute; top: -4px; bottom: -4px; width: 1px; background: var(--line-2); }
+.scale-head { display: grid; grid-template-columns: 112px minmax(0, 1fr) 92px; gap: 12px; padding: 0 6px 6px; font-size: 11.5px; color: var(--ink-3); }
+.scale-head .marks { position: relative; height: 16px; }
+.scale-head .marks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); margin-top: 12px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 168px; border-bottom: 1px solid var(--line-2); border-radius: 6px 6px 0 0; }
+.col:hover, .col:focus-visible { background: var(--surface-2); }
+.col .cv { font-size: 13px; font-weight: 600; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.col .cbar { width: min(44px, 70%); background: var(--accent); border-radius: 4px 4px 0 0; }
+.col-x { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 8px; font-size: 12px; color: var(--ink-3); text-align: center; }
+.tip { position: fixed; z-index: 30; max-width: 260px; padding: 9px 11px; border-radius: 9px; background: var(--ink); color: var(--surface); font-size: 12.5px; line-height: 1.4; pointer-events: none; box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
+.tip b { display: block; font-size: 13px; }
+
+.pill.live { background: var(--good-soft); border-color: transparent; color: var(--good-ink); font-weight: 600; }
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); display: inline-block; }
+.live-error { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--crit-soft); color: var(--crit-ink); font-weight: 500; }
+.setup .card-b { padding: 22px 24px; }
+.setup h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; font-family: var(--f-display); font-weight: 700; font-size: 20px; text-wrap: balance; }
+.setup h2 .ic { color: var(--accent); width: 22px; height: 22px; }
+.setup h3 { margin: 22px 0 8px; font-family: var(--f-display); font-weight: 700; font-size: 15px; }
+.setup p { margin: 4px 0; color: var(--ink-2); max-width: 70ch; }
+.setup .dlg-f { margin-top: 18px; }
+.steps { margin: 12px 0 18px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; max-width: 70ch; }
+.choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 10px; }
+.choice { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 12px; cursor: pointer; background: var(--surface); min-width: 0; }
+.choice:hover { border-color: var(--accent); }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.choice input { margin-top: 3px; accent-color: var(--accent); flex: none; }
+.choice b { overflow-wrap: anywhere; }
+.choice .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
+.empty b { color: var(--ink); }
+.foot { font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 14px; max-width: 80ch; }
+
+/* ---------- timing dialog ---------- */
+.scrim { position: fixed; inset: 0; z-index: 40; background: rgba(5, 15, 13, .5); display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.dlg { width: min(460px, 100%); background: var(--surface); border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 20px 50px rgba(0, 0, 0, .25); }
+.dlg-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 6px; }
+.dlg-h h2 { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 18px; }
+.dlg-h p { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; }
+.x { background: none; border: 0; padding: 4px; border-radius: 8px; color: var(--ink-3); }
+.x:hover { background: var(--surface-2); color: var(--ink); }
+.fields { padding: 10px 20px 4px; display: flex; flex-direction: column; gap: 12px; }
+.field { display: grid; grid-template-columns: minmax(0, 1fr) 118px; gap: 4px 14px; align-items: center; }
+.field label { font-weight: 600; }
+.field .help { grid-column: 1; font-size: 12.5px; color: var(--ink-3); }
+.field .inp { grid-row: 1 / span 2; grid-column: 2; display: flex; align-items: center; gap: 6px; }
+.field input { width: 72px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface); font-variant-numeric: tabular-nums; text-align: right; }
+.field input:disabled { background: var(--surface-2); color: var(--ink-3); }
+.dlg-msg { margin: 6px 20px 0; font-size: 13px; min-height: 18px; }
+.dlg-msg.err { color: var(--crit-ink); }
+.dlg-msg.ok { color: var(--good-ink); }
+.dlg-f { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px 18px; }
+.btn { padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); font-weight: 600; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn:disabled { opacity: .55; cursor: default; }
+
+/* ---------- narrow screens ---------- */
+@media (max-width: 1040px) { .msgs { grid-template-columns: minmax(0, 1fr); } .mlist { max-height: 340px; } }
+@media (max-width: 860px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; padding-block: 12px;
+    padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .nav { order: 3; flex-direction: row; width: 100%; overflow-x: auto; gap: 4px; }
+  .nav a { padding: 8px 11px; white-space: nowrap; }
+  .nav .count { display: none; }
+  .side-foot { margin: 0 0 0 auto; }
+  .timing-btn { padding: 8px 10px; }
+  .timing-btn .t-txt, .side-note { display: none; }
+  .main { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-top: 20px; }
+  .top h1 { font-size: 24px; }
+}
+@media (max-width: 520px) {
+  .bar-row, .scale-head { grid-template-columns: 84px minmax(0, 1fr) 70px; gap: 8px; }
+  .bar-row .av { display: none; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .tile { grid-template-columns: 1fr; padding: 14px; }
+  .tile .t-ic { grid-row: auto; width: 34px; height: 34px; margin-bottom: 6px; }
+  .tile .t-sub { grid-column: 1; }
+  .tile .t-num { font-size: 26px; }
+  .nav a .ic { display: none; }
+  .field { grid-template-columns: minmax(0, 1fr) 100px; }
+}
+@media (prefers-reduced-motion: no-preference) { .nav a, .mitem, .btn, .bar-row { transition: background-color .12s ease, color .12s ease; } }
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark"><svg class="ic" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8.5 10.5l2.3 2.3 4.7-4.7"/></svg></div>
+      <div class="brand-name">WhatsApp AI Accountability<small id="brand-sub">THB Construction Team</small></div>
+    </div>
+    <nav class="nav" id="nav" aria-label="Views"></nav>
+    <div class="side-foot">
+      <button class="timing-btn" id="change-group" type="button" data-action="change-group" hidden>
+        <svg class="ic" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
+        <span class="t-txt"><b>Change group</b><span>Pick the group or whose messages count</span></span>
+      </button>
+      <button class="timing-btn" id="open-timing" type="button" aria-haspopup="dialog">
+        <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 1.5M9.5 3h5"/></svg>
+        <span class="t-txt"><b>Follow-up timing</b><span id="timing-sum"></span></span>
+      </button>
+      <div class="side-note" id="side-note">Sample data. Not connected to WhatsApp yet.</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="main-inner">
+      <header class="top">
+        <div><h1 id="v-title"></h1><p id="v-sub"></p></div>
+        <div class="top-meta">
+          <span class="pill" id="group-pill"></span>
+          <span class="pill sample" id="snap"></span>
+        </div>
+      </header>
+      <p class="live-error" id="live-error" role="status" hidden></p>
+      <section class="view" id="v-setup" hidden></section>
+      <section class="view" id="v-dashboard"></section>
+      <section class="view" id="v-messages" hidden></section>
+      <section class="view" id="v-tasks" hidden></section>
+      <section class="view" id="v-reports" hidden></section>
+      <p class="foot" id="foot"></p>
+    </div>
+  </main>
+</div>
+
+<div class="scrim" id="timing" hidden>
+  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="timing-h">
+    <div class="dlg-h">
+      <div><h2 id="timing-h">Follow-up timing</h2><p>When the dashboard flags people who haven't replied. Nothing is sent to WhatsApp.</p></div>
+      <button class="x" type="button" id="close-timing" aria-label="Close"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <form id="timing-form" novalidate>
+      <div class="fields">
+        <div class="field"><label for="t-first">Flag for a 1st reminder</label><span class="help">After this many minutes without a reply.</span>
+          <span class="inp"><input id="t-first" type="number" min="1" max="1440" step="1" inputmode="numeric"> min</span></div>
+        <div class="field"><label for="t-second">Flag for a 2nd reminder</label><span class="help">If there's still no reply.</span>
+          <span class="inp"><input id="t-second" type="number" min="1" max="1440" step="1" inputmode="numeric"> min</span></div>
+        <div class="field"><label for="t-esc">Flag to escalate</label><span class="help">Marked as not responding. Reports count this as a missed reply.</span>
+          <span class="inp"><input id="t-esc" type="number" min="1" max="1440" step="1" inputmode="numeric"> min</span></div>
+      </div>
+      <p class="dlg-msg" id="timing-msg" role="status"></p>
+      <div class="dlg-f">
+        <button class="btn" type="button" id="cancel-timing">Cancel</button>
+        <button class="btn primary" type="submit" id="save-timing">Save timing</button>
+      </div>
+    </form>
+  </div>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+// ---- sample data + derivation (shared by the page and the node check) ----
+const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Sample snapshot: today at 10:15 AM in the viewer's time zone.
+function sampleNow() { const d = new Date(); d.setHours(10, 15, 0, 0); return d.getTime(); }
+
+function buildSample(now) {
+  const rnd = mulberry32(20261024);
+  const at = (daysAgo, h, m) => { const d = new Date(now); d.setDate(d.getDate() - daysAgo); d.setHours(h, m, 0, 0); return d.getTime(); };
+
+  // id, name, typical minutes to reply, chance of replying only after escalation
+  const roster = [
+    ['john', 'John', 3, 0], ['maria', 'Maria', 5, 0], ['carlos', 'Carlos', 14, .04], ['bryan', 'Bryan', 11, 0],
+    ['david', 'David', 38, .10], ['james', 'James', 24, .07], ['robert', 'Robert', 30, .08], ['jose', 'Jose', 16, .03],
+    ['luis', 'Luis', 9, 0], ['ana', 'Ana', 6, 0], ['miguel', 'Miguel', 8, 0], ['sofia', 'Sofia', 4, 0],
+    ['kevin', 'Kevin', 13, .02], ['daniel', 'Daniel', 10, 0], ['elena', 'Elena', 7, 0], ['marcus', 'Marcus', 19, .03],
+    ['tony', 'Tony', 21, .04], ['rosa', 'Rosa', 12, .02],
+  ];
+  const people = roster.map(([id, name]) => ({ id, name }));
+  const prof = Object.fromEntries(roster.map(([id, , med, late]) => [id, { med, late }]));
+  const ALL = people.map(p => p.id);
+  const ACKS = ['👍', 'OK', 'Got it', 'Confirmed', 'Seen, thanks', 'Will do', 'Copy that', 'Yes', 'OK, reviewed.', 'All good.'];
+  const ack = () => ACKS[Math.floor(rnd() * ACKS.length)];
+  const delayFor = id => {
+    const p = prof[id];
+    if (rnd() < p.late) return Math.round(65 + rnd() * 170) * MIN;
+    return Math.max(1, Math.round(p.med * (0.45 + rnd() * 1.3))) * MIN;
+  };
+
+  const messages = [], tasks = [];
+  const msg = (o) => { messages.push({ replies: {}, priority: 'Normal', ...o }); return messages[messages.length - 1]; };
+  const autoReplies = (m, except = []) => {
+    const req = m.required === 'all' ? ALL : m.required;
+    req.forEach(id => { if (!except.includes(id) && !m.replies[id]) m.replies[id] = { at: m.at + delayFor(id), text: ack() }; });
+  };
+
+  // History: one all-hands message most working days, days 2 to 29.
+  const GROUP = [
+    ['Read the updated site schedule', 'Everyone, read the updated site schedule for this week and reply to confirm.', 'Instruction'],
+    ['PPE for the inspection', 'City inspection tomorrow at Site A. Confirm you have your hard hat, vest and boots.', 'Instruction'],
+    ['Confirm timesheet hours', 'Confirm your hours for this week’s timesheet by end of day.', 'Instruction'],
+    ['New gate code at Site B', 'The gate code at Site B changed. It’s posted in the office. Reply once you have it.', 'Instruction'],
+    ['Harness rule on the roof', 'Reminder: nobody goes on the roof without a harness. Reply to confirm.', 'Instruction'],
+    ['Staying late Thursday?', 'Who can stay late Thursday for the drywall delivery? Everyone reply yes or no.', 'Question'],
+    ['Site C closed Monday', 'Site C is closed Monday morning for the electrical inspection. Reply so I know you saw this.', 'Instruction'],
+    ['Parking at Site A', 'Don’t park on the street at Site A anymore, the neighbours complained. Use the lot. Confirm.', 'Instruction'],
+  ];
+  let g = 0;
+  for (let d = 29; d >= 2; d--) {
+    const day = new Date(at(d, 12, 0));
+    if (day.getDay() === 0) continue;
+    const [title, text, kind] = GROUP[g++ % GROUP.length];
+    const m = msg({ id: 'g' + d, at: at(d, 7 + Math.floor(rnd() * 3), Math.floor(rnd() * 4) * 15), title, text, kind, required: 'all' });
+    autoReplies(m);
+  }
+
+  // History: tasks given to one person. outcome: ontime | late | overdue
+  const TASKS = [
+    [29, 8, 10, 'kevin', 'Order replacement saw blades', 'Kevin, order the replacement saw blades today and tell me when they’re ordered.', [0, 17], 'ontime', { reply: 'Ordered, arriving Wed' }],
+    [27, 7, 40, 'bryan', 'Framing photos, Site A', 'Bryan, send me photos of the framing at Site A by 3 PM.', [0, 15], 'ontime', { photos: 4 }],
+    [25, 9, 15, 'david', 'Clean dumpster area, Site B', 'David, clean out the dumpster area at Site B before Friday.', [3, 17], 'late', { photos: 2 }],
+    [23, 13, 5, 'maria', 'Safety checklist, Site B', 'Maria, upload the safety checklist for Site B by 5 PM.', [0, 17], 'ontime', { doc: 'Site B safety checklist.pdf' }],
+    [21, 8, 30, 'robert', 'Submit fuel receipts', 'Robert, submit last week’s fuel receipts by Thursday.', [2, 17], 'overdue', null],
+    [20, 10, 0, 'luis', 'Book the plumber for Monday', 'Luis, confirm the plumber is booked for Monday.', [0, 16], 'ontime', { reply: 'Booked for 8 AM' }],
+    [18, 7, 50, 'james', 'Check generator, Site C', 'James, check the generator at Site C and tell me if it needs service.', [0, 12], 'late', { reply: 'Needs an oil change' }],
+    [16, 9, 40, 'ana', 'Send material list to supplier', 'Ana, send the updated material list to the supplier today.', [0, 17], 'ontime', { doc: 'Material list rev 3.xlsx' }],
+    [14, 8, 20, 'carlos', 'Window install photos, Site A', 'Carlos, get me photos of the window install at Site A by noon.', [0, 12], 'ontime', { photos: 5 }],
+    [11, 14, 0, 'david', 'Return the rented compactor', 'David, return the rented compactor by Wednesday noon.', [2, 12], 'late', { reply: 'Dropped it off' }],
+    [9, 7, 30, 'miguel', 'Schedule porta-potty pickup', 'Miguel, schedule the porta-potty pickup at Site C.', [0, 15], 'ontime', { reply: 'Pickup Friday AM' }],
+    [7, 9, 0, 'james', 'Daily log, Site B', 'James, send me the daily log for Site B by 5 PM.', [0, 17], 'overdue', null],
+    [5, 8, 45, 'elena', 'Permit card photo, Site C', 'Elena, send a photo of the permit card at Site C.', [0, 12], 'ontime', { photos: 1 }],
+    [4, 10, 20, 'tony', 'Drywall delivery count', 'Tony, confirm the drywall count when the delivery lands.', [0, 16], 'late', { reply: '112 sheets, 4 damaged' }],
+    [3, 8, 0, 'bryan', 'Punch list, Site A', 'Bryan, upload the punch list for Site A by tomorrow noon.', [1, 12], 'ontime', { doc: 'Site A punch list.pdf' }],
+    [2, 9, 30, 'sofia', 'Bathroom tile photos, Site C', 'Sofia, send photos of the finished bathroom tile at Site C.', [0, 17], 'ontime', { photos: 3 }],
+  ];
+  TASKS.forEach(([d, h, mi, owner, title, text, [dd, dh], outcome, ev], i) => {
+    const m = msg({ id: 't' + i, at: at(d, h, mi), title, text, kind: 'Instruction', required: [owner], task: 'k' + i });
+    autoReplies(m);
+    const due = at(d - dd, dh, 0);
+    const t = { id: 'k' + i, title, msg: m.id, owner, due, ackAt: m.replies[owner].at };
+    if (outcome === 'ontime') t.doneAt = due - Math.round((1 + rnd() * 4) * HOUR);
+    if (outcome === 'late') t.doneAt = due + Math.round((3 + rnd() * 20) * HOUR);
+    if (t.doneAt && t.doneAt < t.ackAt) t.doneAt = t.ackAt + 40 * MIN;
+    if (ev) t.evidence = ev;
+    tasks.push(t);
+  });
+
+  // Yesterday
+  const y1 = msg({ id: 'y1', at: at(1, 11, 30), title: 'Inspect the concrete pour', kind: 'Instruction', required: ['carlos'], task: 'ky1',
+    text: 'Carlos, inspect the concrete pour at Site B tomorrow and send me photos by 3 PM.' });
+  y1.replies.carlos = { at: at(1, 11, 52), text: 'OK' };
+  tasks.push({ id: 'ky1', title: 'Inspect concrete pour, Site B', msg: 'y1', owner: 'carlos', due: at(0, 15, 0), ackAt: at(1, 11, 52) });
+
+  const y2 = msg({ id: 'y2', at: at(1, 14, 10), title: 'Safety checklist, Site A', kind: 'Instruction', required: ['maria'], task: 'ky2',
+    text: 'Maria, send me the completed safety checklist for Site A by 5 PM.' });
+  y2.replies.maria = { at: at(1, 14, 13), text: 'Will do' };
+  tasks.push({ id: 'ky2', title: 'Safety checklist, Site A', msg: 'y2', owner: 'maria', due: at(1, 17, 0), ackAt: at(1, 14, 13), doneAt: at(1, 16, 40), evidence: { doc: 'Site A safety checklist.pdf' } });
+
+  const y3 = msg({ id: 'y3', at: at(1, 15, 20), title: 'Confirm timesheet hours', kind: 'Instruction', required: 'all', priority: 'High',
+    text: 'Everyone, confirm your hours for this week’s timesheet by end of day. Payroll goes in tomorrow.' });
+  autoReplies(y3, ['david', 'robert']);
+
+  // Today
+  const m1 = msg({ id: 'm1', at: at(0, 9, 0), title: 'Confirm today’s site priorities', kind: 'Instruction', required: 'all', priority: 'High', task: 'kt1',
+    text: 'Everyone, please confirm you have reviewed today’s site priorities. Bryan, submit site photos by 4 PM.\n\nThanks!' });
+  [['john', 2, '👍'], ['sofia', 4, 'Seen'], ['maria', 5, 'OK, reviewed.'], ['ana', 6, 'Got it'], ['carlos', 8, 'All good.'], ['elena', 9, 'Confirmed'],
+   ['miguel', 10, '👍'], ['luis', 11, 'Reviewed'], ['bryan', 12, 'Done. Photos coming this afternoon'], ['daniel', 14, 'OK'],
+   ['kevin', 26, 'Sorry, was driving. Confirmed'], ['marcus', 33, 'Got it']]
+    .forEach(([id, mins, text]) => { m1.replies[id] = { at: m1.at + mins * MIN, text }; });
+  tasks.push({ id: 'kt1', title: 'Submit site photos', msg: 'm1', owner: 'bryan', due: at(0, 16, 0), ackAt: at(0, 9, 12), progressAt: at(0, 10, 5), evidence: { photos: 2 } });
+
+  const m2 = msg({ id: 'm2', at: at(0, 9, 40), title: 'Check equipment at Site A', kind: 'Instruction', required: ['carlos', 'miguel'], priority: 'High', task: 'kt2',
+    text: 'Carlos and Miguel, check the equipment at Site A before the concrete crew gets there at 10. Carlos, confirm when it’s done.' });
+  m2.replies.miguel = { at: at(0, 9, 46), text: 'Heading there now' };
+  tasks.push({ id: 'kt2', title: 'Check equipment at Site A', msg: 'm2', owner: 'carlos', due: at(0, 10, 0) });
+
+  const m3 = msg({ id: 'm3', at: at(0, 9, 55), title: 'Lumber delivery time?', kind: 'Question', required: ['luis', 'ana', 'tony', 'marcus'],
+    text: 'Site B crew: what time is the lumber delivery now? The yard said it might slip.' });
+  m3.replies.ana = { at: at(0, 10, 2), text: 'Truck is about 30 min out' };
+  m3.replies.luis = { at: at(0, 10, 12), text: 'Yard confirmed 10:45' };
+  m3.replies.marcus = { at: at(0, 10, 14), text: 'Same, 10:45' };
+
+  const m4 = msg({ id: 'm4', at: at(0, 10, 5), title: 'Extra ladder to Site C', kind: 'Question', required: ['jose'],
+    text: 'Jose, can you bring the extra ladder to Site C before lunch?' });
+
+  // Nothing in the sample can be later than the snapshot.
+  messages.forEach(m => Object.keys(m.replies).forEach(id => { if (m.replies[id].at > now) delete m.replies[id]; }));
+  messages.sort((a, b) => b.at - a.at);
+  return { people, messages, tasks };
+}
+
+function derive(S, cfg, now) {
+  const esc = cfg.escalate * MIN, marks = [cfg.first, cfg.second, cfg.escalate].map(x => x * MIN);
+  const people = {};
+  S.people.forEach(p => { people[p.id] = { ...p, required: 0, replied: 0, delays: [], missed: 0, lastMissed: null, pending: [] }; });
+
+  const messages = S.messages.map(m => {
+    const req = m.required === 'all' ? S.people.map(p => p.id) : m.required;
+    const elapsed = now - m.at;
+    const rows = req.map(pid => {
+      const r = m.replies[pid];
+      const window = r ? r.at - m.at : elapsed;
+      const stage = marks.filter(t => window >= t).length; // 0 waiting, 1, 2 reminders, 3 escalated
+      const missed = window >= esc;
+      const P = people[pid];
+      P.required++;
+      if (r) { P.replied++; P.delays.push(r.at - m.at); }
+      if (missed) { P.missed++; P.lastMissed = Math.max(P.lastMissed || 0, m.at + esc); }
+      const row = { pid, name: P.name, replied: !!r, at: r ? r.at : null, delay: r ? r.at - m.at : null, text: r ? r.text : '', stage, missed, waiting: r ? null : elapsed };
+      if (!r) P.pending.push({ msg: m, waiting: elapsed, stage });
+      return row;
+    });
+    const pending = rows.filter(r => !r.replied);
+    return { ...m, req, rows, pending, responded: rows.length - pending.length, resolved: pending.length === 0 };
+  });
+
+  const tasks = S.tasks.map(t => {
+    let status;
+    if (t.doneAt && t.doneAt <= now) status = t.due != null && t.doneAt > t.due ? 'Completed late' : 'Completed';
+    else if (t.due != null && t.due < now) status = 'Overdue';
+    else if (t.progressAt) status = 'In progress';
+    else if (t.ackAt) status = 'Acknowledged';
+    else status = 'Not acknowledged';
+    return { ...t, status, ownerName: people[t.owner].name, from: S.messages.find(m => m.id === t.msg) };
+  });
+
+  const list = Object.values(people).map(p => ({ ...p, avg: p.delays.length ? p.delays.reduce((a, b) => a + b, 0) / p.delays.length : null }));
+  const allDelays = list.flatMap(p => p.delays);
+  const due = tasks.filter(t => (t.due != null && t.due <= now) || t.status.startsWith('Completed'));
+  const done = due.filter(t => t.status.startsWith('Completed'));
+
+  const weeks = [3, 2, 1, 0].map(i => {
+    const end = now - i * 7 * DAY, start = end - 7 * DAY;
+    let ok = 0, n = 0;
+    messages.filter(m => m.at >= start && m.at < end).forEach(m => m.rows.forEach(r => {
+      if (r.replied || r.missed) { n++; if (!r.missed) ok++; }
+    }));
+    return { start, end, ok, n, rate: n ? ok / n : null };
+  });
+
+  const owners = {};
+  tasks.forEach(t => {
+    const o = owners[t.owner] ||= { id: t.owner, name: t.ownerName, total: 0, ontime: 0, late: 0, overdue: 0, open: 0 };
+    o.total++;
+    if (t.status === 'Completed') o.ontime++; else if (t.status === 'Completed late') o.late++; else if (t.status === 'Overdue') o.overdue++; else o.open++;
+  });
+
+  return {
+    messages, tasks, people: list,
+    pendingPeople: list.filter(p => p.pending.length).map(p => ({ ...p, pending: p.pending.sort((a, b) => b.waiting - a.waiting) })).sort((a, b) => b.pending[0].waiting - a.pending[0].waiting),
+    unresolved: messages.filter(m => !m.resolved),
+    overdue: tasks.filter(t => t.status === 'Overdue'),
+    // nothing is sent anywhere: these count people the dashboard flags right now
+    followUp: list.filter(p => p.pending.some(x => x.stage >= 1)).length,
+    toEscalate: list.filter(p => p.pending.some(x => x.stage >= 3)).length,
+    avgAck: allDelays.length ? allDelays.reduce((a, b) => a + b, 0) / allDelays.length : null,
+    repeat: list.filter(p => p.missed >= 2).sort((a, b) => b.missed - a.missed || b.lastMissed - a.lastMissed),
+    completion: { done: done.length, due: due.length, late: done.filter(t => t.status === 'Completed late').length },
+    weeks, owners: Object.values(owners),
+  };
+}
+
+if (typeof module !== 'undefined') module.exports = { buildSample, derive, sampleNow, MIN };
+
+// ---- turning the real group's messages into what the dashboard shows ----
+const WINDOW_DAYS = 30;
+const DONE_RE = /\b(done|finished|complete|completed|sent|uploaded|submitted|fixed|listo|terminado|hecho)\b|✅|✔/i;
+const KIND_LABEL = { image: 'Photo', video: 'Video', document: 'Document', audio: 'Voice note', sticker: 'Sticker', location: 'Location', contact: 'Contact', poll: 'Poll' };
+
+// A reader message in the short form saved to the page's storage.
+function compactMessage(m) {
+  const c = { i: m.id, t: m.at, s: m.sender_id };
+  if (m.kind && m.kind !== 'text') c.k = m.kind;
+  if (m.text) c.x = m.text.length > 1000 ? m.text.slice(0, 1000) : m.text;
+  if (m.quoted_id) c.q = m.quoted_id;
+  if (m.reaction_to) c.r = m.reaction_to;
+  if (m.mentions && m.mentions.length) c.m = m.mentions;
+  if (m.deleted) c.d = 1;
+  return c;
+}
+
+function dayKey(t) {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function parseLocal(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(s || '');
+  if (!m) return null;
+  const t = new Date(+m[1], +m[2] - 1, +m[3], m[4] != null ? +m[4] : 23, m[5] != null ? +m[5] : 59).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+function localStamp(t) {
+  const d = new Date(t);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())} (${d.toLocaleDateString('en-US', { weekday: 'long' })})`;
+}
+
+function nameIndex(raw) {
+  const names = { ...(raw.names || {}) };
+  (raw.participants || []).forEach(p => { if (p.name) names[p.id] = p.name; });
+  return id => names[id] || (String(id).endsWith('@lid') ? 'Unknown member' : '+' + id);
+}
+
+// "@15551234567" in WhatsApp text becomes "@Name" when we know who it is.
+function readableText(m, nameOf) {
+  let x = m.x || '';
+  (m.m || []).forEach(id => {
+    const digits = String(id).replace('@lid', '');
+    x = x.split('@' + digits).join('@' + nameOf(id));
+  });
+  return x;
+}
+
+function replyText(m, nameOf) {
+  if (m.k === 'reaction') return m.x || '';
+  const label = KIND_LABEL[m.k];
+  const text = readableText(m, nameOf);
+  if (label) return text ? `${label}: ${text}` : label;
+  return text;
+}
+
+// Used when Claude isn't available to read a message.
+function fallbackAnalysis(m, people) {
+  const text = (m.x || '').trim();
+  const ids = new Set(people.map(p => p.id));
+  const named = (m.m || []).filter(id => ids.has(id));
+  const chatter = /^(thanks|thank you|thx|ok|okay|good morning|good night|gracias|buenos dias)\b[\s!.]*$/i.test(text) || /^\p{Extended_Pictographic}+$/u.test(text);
+  return {
+    title: text.split('\n')[0].slice(0, 48) || 'Message',
+    type: text.includes('?') ? 'Question' : 'Instruction',
+    needs_reply: !chatter && text.length > 0,
+    required: named.length ? named : 'all',
+    priority: /\b(urgent|asap|important|now|today)\b/i.test(text) ? 'High' : 'Normal',
+    task: null,
+    by: 'rules',
+  };
+}
+
+function analysisPrompt(batch, people, bossNames, nameOf) {
+  const members = people.map(p => `${p.id}: ${p.name}`).join('\n');
+  const msgs = batch.map(m => ({ id: m.i, sent: localStamp(m.t), text: readableText(m, nameOf) }));
+  return `You read messages a manager posted in a WhatsApp work group, so a dashboard can track who has to reply.
+
+Manager: ${bossNames.join(', ')}
+Group members who may need to reply (id: name):
+${members}
+
+For each message return JSON in exactly this shape:
+{"results":[{"id":"<message id>","title":"<3 to 6 word summary>","type":"Instruction" or "Question" or "Info","needs_reply":true or false,"required":"all" or ["<member id>"],"priority":"High" or "Normal","task":null or {"title":"<short task name>","owner_id":"<member id>","due":"YYYY-MM-DDTHH:MM" or null}}]}
+
+Rules:
+- needs_reply is true when the message asks people to do, confirm or answer something. Greetings, thanks and plain announcements are "Info" with needs_reply false.
+- required is "all" when the message is meant for the whole group. Otherwise list the ids of the people it addresses by name or @mention. Use only ids from the member list.
+- task is set only when a specific member is asked to complete a piece of work. owner_id is that member. due is the deadline written in the same local time as "sent", or null when no deadline is given.
+- priority is "High" only when the message says it is urgent or important, or the work is due the same day.
+
+Messages:
+${JSON.stringify(msgs)}`;
+}
+
+function cleanAnalysis(a, people) {
+  const ids = new Set(people.map(p => p.id));
+  if (!a || typeof a !== 'object') return null;
+  const out = {
+    title: String(a.title || '').slice(0, 60),
+    type: ['Instruction', 'Question', 'Info'].includes(a.type) ? a.type : 'Instruction',
+    needs_reply: a.needs_reply !== false,
+    required: Array.isArray(a.required) ? a.required.map(String).filter(id => ids.has(id)) : 'all',
+    priority: a.priority === 'High' ? 'High' : 'Normal',
+    task: null,
+    by: 'claude',
+  };
+  if (Array.isArray(out.required) && !out.required.length) out.required = 'all';
+  if (a.task && ids.has(String(a.task.owner_id))) {
+    out.task = { title: String(a.task.title || out.title).slice(0, 60), owner_id: String(a.task.owner_id), due: typeof a.task.due === 'string' ? a.task.due : null };
+  }
+  return out;
+}
+
+// raw: { participants, names, bossIds, messages (compact), analysis, group }
+function buildFromRaw(raw, now) {
+  const nameOf = nameIndex(raw);
+  const boss = new Set(raw.bossIds || []);
+  const people = (raw.participants || []).filter(p => !boss.has(p.id)).map(p => ({ id: p.id, name: nameOf(p.id) }));
+  const pset = new Set(people.map(p => p.id));
+  const since = now - WINDOW_DAYS * 24 * 60 * 60000;
+  const msgs = (raw.messages || []).filter(m => m.t <= now).sort((a, b) => a.t - b.t);
+  const byId = new Map(msgs.map(m => [m.i, m]));
+
+  const tracked = [];
+  msgs.forEach(m => {
+    if (!boss.has(m.s) || m.k === 'reaction' || m.d || m.t < since) return;
+    const a = (raw.analysis || {})[m.i] || fallbackAnalysis(m, people);
+    if (!a.needs_reply) return;
+    let req = a.required === 'all' ? [...pset] : a.required.filter(id => pset.has(id));
+    if (a.task && pset.has(a.task.owner_id) && !req.includes(a.task.owner_id)) req = req.concat(a.task.owner_id);
+    if (req.length) tracked.push({ m, a, req: new Set(req) });
+  });
+  const trackedById = new Map(tracked.map(x => [x.m.i, x]));
+  const replies = new Map(tracked.map(x => [x.m.i, {}]));
+  const setReply = (id, pid, at, text) => { const r = replies.get(id); if (!r[pid]) r[pid] = { at, text }; };
+
+  // Who acknowledged what: a quoted reply or a reaction answers that one
+  // message; any other message answers everything still open before it.
+  msgs.forEach(msg => {
+    const pid = msg.s;
+    if (!pset.has(pid)) return;
+    if (msg.k === 'reaction') {
+      const x = trackedById.get(msg.r);
+      if (x && x.req.has(pid) && msg.t >= x.m.t) setReply(x.m.i, pid, msg.t, msg.x || '');
+      return;
+    }
+    const text = replyText(msg, nameOf);
+    const quoted = msg.q && trackedById.get(msg.q);
+    if (quoted) { if (quoted.req.has(pid)) setReply(quoted.m.i, pid, msg.t, text); return; }
+    tracked.forEach(x => { if (x.m.t < msg.t && x.req.has(pid)) setReply(x.m.i, pid, msg.t, text); });
+  });
+
+  const tasks = [];
+  const messages = tracked.map(x => {
+    const { m, a } = x;
+    let taskId = null;
+    if (a.task && pset.has(a.task.owner_id)) {
+      const owner = a.task.owner_id;
+      let doneAt = null, photos = 0, doc = null, doneText = '';
+      for (const msg of msgs) {
+        if (msg.s !== owner || msg.t <= m.t || msg.k === 'reaction') continue;
+        if (msg.q && msg.q !== m.i && trackedById.has(msg.q)) continue; // about a different instruction
+        if (msg.k === 'image' || msg.k === 'video') photos++;
+        if (msg.k === 'document' && !doc) doc = (msg.x || 'Document').split('\n')[0];
+        if (msg.k === 'image' || msg.k === 'video' || msg.k === 'document' || DONE_RE.test(msg.x || '')) { doneAt = msg.t; doneText = msg.x || ''; break; }
+      }
+      taskId = 'k' + m.i;
+      tasks.push({
+        id: taskId, title: a.task.title || a.title, msg: m.i, owner,
+        due: parseLocal(a.task.due), ackAt: (replies.get(m.i)[owner] || {}).at || null, doneAt,
+        evidence: photos ? { photos } : doc ? { doc } : doneAt ? { reply: doneText } : null,
+      });
+    }
+    return {
+      id: m.i, at: m.t, title: a.title || (m.x || '').split('\n')[0].slice(0, 48) || 'Message',
+      text: readableText(m, nameOf), kind: a.type === 'Question' ? 'Question' : 'Instruction',
+      required: a.required === 'all' ? 'all' : [...x.req], priority: a.priority || 'Normal',
+      task: taskId, replies: replies.get(m.i), senderName: nameOf(m.s), by: a.by || 'claude',
+    };
+  }).sort((a, b) => b.at - a.at);
+
+  // 'all' must mean the people in the group now
+  messages.forEach(m => { if (m.required === 'all') m.required = 'all'; });
+  return { people, messages, tasks, bossMessages: msgs.filter(m => boss.has(m.s) && m.k !== 'reaction' && !m.d && m.t >= since) };
+}
+
+if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromRaw, fallbackAnalysis, cleanAnalysis, analysisPrompt, parseLocal, dayKey, nameIndex };
+
+</script>
+<script>
+(function () {
+  const DEFAULTS = { first: 15, second: 30, escalate: 60 };
+  const READER = 'host:whatsapp-reader';
+  const DAY_MS = 24 * 60 * MIN;
+  const SAMPLE_NOW = sampleNow();
+  const SAMPLE = buildSample(SAMPLE_NOW);
+
+  let cfg = { ...DEFAULTS };
+  let D = null, S = SAMPLE, NOW = SAMPLE_NOW, N = SAMPLE.people.length;
+  const state = { view: 'dashboard', sel: null, taskFilter: 'open', setup: false, setupGroup: null, setupBoss: null };
+  // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
+  const src = { mode: 'sample', raw: null, S: SAMPLE, now: SAMPLE_NOW, group: { name: 'THB Construction Team' }, updatedAt: null };
+  const cap = { db: null, mcp: null, sample: null, canEdit: null };
+  const saved = { source: null, meta: null, analysis: {}, days: {}, loaded: { source: false, analysis: false, meta: false } };
+  const live = { on: false, status: null, groups: null, groupInfo: null, busy: false, again: false, lastSig: '', lastSync: 0,
+    written: {}, writtenAnalysis: null, writtenMeta: null, lastMetaWrite: 0, sampleDenied: false, analyzing: 0, error: null, offCode: null };
+
+  const VIEWS = {
+    dashboard: { label: 'Dashboard', icon: 'grid', title: 'Dashboard', sub: 'Who hasn’t replied, what’s still open, and who needs a follow-up.' },
+    messages: { label: 'Messages', icon: 'chat', title: 'Messages', sub: 'Every instruction and question sent to the group, with who replied and how fast.' },
+    tasks: { label: 'Tasks', icon: 'tasks', title: 'Tasks', sub: 'Work the AI found in messages: who owns it, when it’s due, and whether it got done.' },
+    reports: { label: 'Reports', icon: 'chart', title: 'Reports', sub: 'Patterns over the last 30 days, so accountability decisions rest on the record.' },
+  };
+
+  const ICON = {
+    grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    tasks: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5L7.5 11M3.5 18l1.5 1.5L7.5 17"/>',
+    chart: '<path d="M5 20V11M11 20V5M17 20v-7M3 20h18"/>',
+    users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.8-3.2 3.2-5 6-5s5.2 1.8 6 5"/><path d="M16 5.2a3 3 0 0 1 0 5.6M18 14c1.6.6 2.7 2.4 3 5"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.2v.1"/>',
+    flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/>',
+    doc: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M9.5 12h6M9.5 15.5h6"/>',
+    spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/>',
+    repeat: '<path d="M4 10a8 8 0 0 1 14-4l2 2M20 14a8 8 0 0 1-14 4l-2-2"/><path d="M20 4v4h-4M4 20v-4h4"/>',
+    gauge: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  };
+  const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
+  const initial = name => esc(String(name || '?').replace(/^\+/, '').slice(0, 1).toUpperCase());
+  const who = name => `<span class="who"><span class="av" aria-hidden="true">${initial(name)}</span>${esc(name)}</span>`;
+
+  const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const fmtClock = t => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const fmtDate = t => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const dayLabel = t => {
+    const diff = Math.round((startOfDay(NOW) - startOfDay(t)) / DAY_MS);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    if (diff === -1) return 'Tomorrow';
+    return new Date(t).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  const fmtWhen = t => `${dayLabel(t)}, ${fmtClock(t)}`;
+  const fmtDur = ms => {
+    const m = Math.max(0, Math.round(ms / MIN));
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60), r = m % 60;
+    if (h < 24) return r ? `${h}h ${r}m` : `${h}h`;
+    return plural(Math.floor(h / 24), 'day');
+  };
+  const fmtAgo = t => {
+    const diff = Math.round((startOfDay(NOW) - startOfDay(t)) / DAY_MS);
+    return diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : `${diff} days ago`;
+  };
+
+  const chip = (cls, label, icon) => `<span class="chip ${icon ? '' : 'dot '}${cls}">${icon ? ic(icon) : ''}${esc(label)}</span>`;
+  // Nothing is ever sent. These only say what the person is due for.
+  const stageChip = (s, m) => {
+    if (s === 0) return chip('c-muted', `Waiting until ${fmtClock(m.at + cfg.first * MIN)}`);
+    return [null, chip('c-warn', 'Needs 1st reminder'), chip('c-serious', 'Needs 2nd reminder'), chip('c-crit', 'Escalate to manager')][s];
+  };
+  const replyNote = s => [`Within ${cfg.first} min`, `After ${cfg.first} min`, `After ${cfg.second} min`, `After ${cfg.escalate} min (missed)`][s];
+  const TASK_TONE = { 'Completed': 'c-good', 'Completed late': 'c-warn', 'Overdue': 'c-crit', 'In progress': 'c-info', 'Acknowledged': 'c-muted', 'Not acknowledged': 'c-serious' };
+
+  const tiles = list => `<div class="tiles">${list.map(t => `
+    <div class="tile tone-${t.tone}"><div class="t-ic">${ic(t.icon)}</div>
+      <div><div class="t-num">${t.value}</div><div class="t-lab">${esc(t.label)}</div></div>
+      <div class="t-sub">${esc(t.sub)}</div></div>`).join('')}</div>`;
+
+  const meter = (a, b) => `<span class="meter"><span class="meter-track"><span class="meter-fill" style="display:block;width:${b ? (a / b * 100).toFixed(1) : 0}%"></span></span><b>${a}/${b}</b></span>`;
+
+  const evidence = t => {
+    const e = t.evidence;
+    if (!e) return '<span class="plain">None yet</span>';
+    if (e.photos) {
+      const shown = Math.min(e.photos, 3);
+      return `<span class="ev" aria-label="${plural(e.photos, 'photo')}">${Array.from({ length: shown }, () => `<span class="ph">${ic('image')}</span>`).join('')}${e.photos > shown ? `<span class="ph more-ph">+${e.photos - shown}</span>` : ''}</span>`;
+    }
+    if (e.doc) return `<span class="ev-doc">${ic('doc')}${esc(e.doc)}</span>`;
+    return `<span class="ev-reply">“${esc(e.reply)}”</span>`;
+  };
+
+  const snippet = text => { const line = String(text || '').split('\n')[0]; return line.length > 72 ? line.slice(0, 70).trimEnd() + '…' : line; };
+  const msgLink = (m, label) => `<button class="rowlink" type="button" data-open-msg="${esc(m.id)}">${esc(label || m.title)}</button>`;
+  const emptyCard = (title, body) => `<div class="card"><div class="empty"><b>${esc(title)}</b><br>${esc(body)}</div></div>`;
+
+  // ---------------- Dashboard ----------------
+  function viewDashboard() {
+    const pp = D.pendingPeople;
+    const peopleRows = pp.map(p => {
+      const top = p.pending[0];
+      const extra = p.pending.length - 1;
+      return `<tr><td>${who(p.name)}</td>
+        <td>${msgLink(top.msg)}${extra ? ` <span class="more">+${extra} more</span>` : ''}<span class="sub">Sent ${esc(fmtWhen(top.msg.at))}</span></td>
+        <td class="num">${fmtDur(top.waiting)}</td>
+        <td>${stageChip(top.stage, top.msg)}</td></tr>`;
+    }).join('');
+    const unresolvedRows = D.unresolved.map(m => `<tr>
+        <td>${msgLink(m)}<span class="sub">${esc(m.kind)}${m.priority === 'High' ? ' · High priority' : ''}</span></td>
+        <td class="nowrap">${esc(fmtWhen(m.at))}</td>
+        <td>${meter(m.responded, m.req.length)}</td>
+        <td>${chip('c-warn', `${m.pending.length} pending`)}</td></tr>`).join('');
+    const overdueRows = D.overdue.sort((a, b) => a.due - b.due).map(t => `<tr>
+        <td>${msgLink(t.from, t.title)}<span class="sub">Asked ${esc(fmtWhen(t.from.at))}</span></td>
+        <td>${who(t.ownerName)}</td>
+        <td class="nowrap">${esc(fmtWhen(t.due))}<span class="sub">${fmtDur(NOW - t.due)} late</span></td>
+        <td>${t.ackAt ? chip('c-muted', 'Acknowledged') : chip('c-serious', 'Never acknowledged')}</td></tr>`).join('');
+
+    return tiles([
+      { tone: 'crit', icon: 'users', value: pp.length, label: 'No response', sub: N ? `${Math.round(pp.length / N * 100)}% of ${plural(N, 'person', 'people')} owe a reply` : 'Nobody to track yet' },
+      { tone: 'warn', icon: 'clock', value: D.unresolved.length, label: 'Unresolved messages', sub: 'Still waiting on replies' },
+      { tone: 'crit', icon: 'alert', value: D.overdue.length, label: 'Overdue tasks', sub: 'Past their deadline' },
+      { tone: 'info', icon: 'flag', value: D.followUp, label: 'Need a follow-up', sub: `${plural(D.toEscalate, 'person', 'people')} to escalate to a manager` },
+    ]) + `
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>People who haven’t replied</h2><span class="hint">Longest wait first</span></div>
+      ${pp.length ? `<div class="tw"><table class="t"><thead><tr><th>Name</th><th>Waiting on</th><th>Waiting</th><th>Follow-up</th></tr></thead><tbody>${peopleRows}</tbody></table></div>`
+        : '<div class="empty">Everyone has replied to every message.</div>'}
+    </div>
+    <div class="card" style="margin-top:20px">
+        <div class="card-h"><h2>Unresolved messages</h2><a class="link" href="#messages">All messages</a></div>
+        ${D.unresolved.length ? `<div class="tw"><table class="t"><thead><tr><th>Message</th><th>Sent</th><th>Replies</th><th>Status</th></tr></thead><tbody>${unresolvedRows}</tbody></table></div>`
+          : '<div class="empty">No message is waiting on a reply.</div>'}
+    </div>
+    <div class="card" style="margin-top:20px">
+        <div class="card-h"><h2>Overdue tasks</h2><a class="link" href="#tasks">All tasks</a></div>
+        ${D.overdue.length ? `<div class="tw"><table class="t"><thead><tr><th>Task</th><th>Owner</th><th>Was due</th><th>Owner replied?</th></tr></thead><tbody>${overdueRows}</tbody></table></div>`
+          : '<div class="empty">No task is past its deadline.</div>'}
+    </div>`;
+  }
+
+  // ---------------- Messages ----------------
+  function viewMessages() {
+    if (!D.messages.length) {
+      return emptyCard('No instructions yet', src.mode === 'sample' ? 'Nothing to show.'
+        : `Messages from ${bossNames().join(' or ')} that ask people to do or answer something will show here.`);
+    }
+    if (!state.sel || !D.messages.find(m => m.id === state.sel)) {
+      state.sel = (D.unresolved.slice().sort((a, b) => b.pending.length - a.pending.length)[0] || D.messages[0]).id;
+    }
+    let lastDay = null;
+    const items = D.messages.map(m => {
+      const day = dayLabel(m.at);
+      const head = day !== lastDay ? `<div class="mday">${esc(day)}</div>` : '';
+      lastDay = day;
+      const open = m.pending.length > 0;
+      return head + `<button class="mitem${open ? ' open' : ''}" type="button" data-sel="${esc(m.id)}" aria-current="${m.id === state.sel}">
+        <span class="m-ic">${ic(open ? 'clock' : 'check')}</span>
+        <span class="m-t">${esc(m.title)}</span>
+        ${open ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied')}
+        <span class="m-s">${esc(fmtClock(m.at))} · ${m.responded}/${m.req.length} replied</span></button>`;
+    }).join('');
+
+    const m = D.messages.find(x => x.id === state.sel);
+    const task = m.task ? D.tasks.find(t => t.id === m.task) : null;
+    const nameById = id => (D.people.find(p => p.id === id) || {}).name || id;
+    const reqLabel = m.required === 'all' ? `Everyone (${N})` : m.req.map(nameById).join(', ');
+    const rows = m.rows.slice().sort((a, b) => (a.replied - b.replied) || (a.replied ? a.delay - b.delay : a.name.localeCompare(b.name))).map(r => `<tr>
+        <td>${who(r.name)}</td>
+        <td>${r.replied ? chip('c-good', 'Replied', 'check') : chip('c-crit', 'No response')}</td>
+        <td class="num">${r.replied ? fmtDur(r.delay) : `<span class="plain">${fmtDur(r.waiting)} so far</span>`}</td>
+        <td>${r.replied ? esc(r.text) : '<span class="plain">None</span>'}</td>
+        <td>${r.replied ? `<span class="plain">${replyNote(r.stage)}</span>` : stageChip(r.stage, m)}</td></tr>`).join('');
+
+    return `<div class="msgs">
+      <div class="card"><div class="card-h"><h2>Sent to the group</h2><span class="hint">${plural(D.messages.length, 'message')}, last 30 days</span></div>
+        <div class="mlist" id="mlist">${items}</div></div>
+      <div class="card"><div class="card-b">
+        <div class="mhead"><div><h2>${esc(m.title)}</h2><p>${esc(fmtWhen(m.at))} · Sent by ${esc(m.senderName || 'Juan')}</p></div>
+          ${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}</div>
+        <div class="bubble">${esc(m.text)}<span class="b-time">${esc(fmtClock(m.at))}</span></div>
+        <div class="read"><div class="read-cap">${ic('spark')}${m.by === 'rules' ? 'Read with simple rules, because Claude wasn’t available' : 'What the AI picked out of this message'}</div><dl class="read-grid">
+          <div><dt>Type</dt><dd>${esc(m.kind)}</dd></div>
+          <div><dt>Needs a reply from</dt><dd>${esc(reqLabel)}</dd></div>
+          <div><dt>Task</dt><dd>${task ? `${esc(task.title)}<span>Owner ${esc(task.ownerName)} · ${task.due != null ? 'due ' + esc(fmtWhen(task.due)) : 'no deadline given'}</span>` : 'None'}</dd></div>
+          <div><dt>Priority</dt><dd>${esc(m.priority)}</dd></div>
+        </dl></div>
+        <div class="subh"><h3>Replies (${m.req.length} required)</h3>
+          <span class="tally"><span class="ok">${m.responded} replied</span><span class="no">${m.pending.length} pending</span></span></div>
+        <div class="inset tw"><table class="t"><thead><tr><th>Name</th><th>Status</th><th>Response time</th><th>Reply</th><th>Follow-up</th></tr></thead><tbody>${rows}</tbody></table></div>
+      </div></div>
+    </div>`;
+  }
+
+  // ---------------- Tasks ----------------
+  function viewTasks() {
+    const order = { 'Overdue': 0, 'Not acknowledged': 1, 'Acknowledged': 2, 'In progress': 3, 'Completed late': 4, 'Completed': 5 };
+    const isOpen = t => !t.status.startsWith('Completed');
+    const dueKey = t => t.due == null ? Infinity : t.due;
+    const list = D.tasks.filter(t => state.taskFilter === 'all' ? true : state.taskFilter === 'open' ? isOpen(t) : !isOpen(t))
+      .sort((a, b) => isOpen(a) && isOpen(b) ? (order[a.status] - order[b.status]) || (dueKey(a) - dueKey(b)) : isOpen(a) !== isOpen(b) ? (isOpen(a) ? -1 : 1) : (b.doneAt || 0) - (a.doneAt || 0));
+    const counts = { open: D.tasks.filter(isOpen).length, done: D.tasks.filter(t => !isOpen(t)).length };
+    const rows = list.map(t => {
+      let when = '';
+      if (t.status === 'Overdue') when = `${fmtDur(NOW - t.due)} late`;
+      else if (isOpen(t)) when = t.due != null ? `in ${fmtDur(t.due - NOW)}` : '';
+      else when = t.status === 'Completed late' ? `done ${fmtDur(t.doneAt - t.due)} late` : `done ${esc(fmtWhen(t.doneAt))}`;
+      return `<tr>
+        <td><b>${esc(t.title)}</b></td>
+        <td class="from">${msgLink(t.from, '“' + snippet(t.from.text) + '”')}<span class="sub">${esc(fmtWhen(t.from.at))}</span></td>
+        <td>${who(t.ownerName)}</td>
+        <td class="nowrap">${t.due != null ? esc(fmtWhen(t.due)) : '<span class="plain">No deadline</span>'}<span class="sub">${when}</span></td>
+        <td>${chip(TASK_TONE[t.status], t.status)}</td>
+        <td>${evidence(t)}</td></tr>`;
+    }).join('');
+    return `<div class="card">
+      <div class="card-h"><h2>Tasks</h2>
+        <label class="hint" for="task-filter" style="display:flex;align-items:center;gap:8px">Show
+          <select class="sel" id="task-filter">
+            <option value="open"${state.taskFilter === 'open' ? ' selected' : ''}>Open (${counts.open})</option>
+            <option value="done"${state.taskFilter === 'done' ? ' selected' : ''}>Completed (${counts.done})</option>
+            <option value="all"${state.taskFilter === 'all' ? ' selected' : ''}>All (${D.tasks.length})</option>
+          </select></label></div>
+      ${list.length ? `<div class="tw"><table class="t"><thead><tr><th>Task</th><th>From message</th><th>Owner</th><th>Deadline</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : '<div class="empty">No tasks to show.</div>'}
+    </div>`;
+  }
+
+  // ---------------- Reports ----------------
+  function viewReports() {
+    const sent = D.messages.length;
+    const c = D.completion;
+    const rate = c.due ? Math.round(c.done / c.due * 100) : null;
+
+    const maxMiss = Math.max(1, ...D.repeat.map(p => p.missed));
+    const missBars = D.repeat.map(p => `
+      <div class="bar-row" tabindex="0" data-tip-t="${esc(p.name)}" data-tip="${esc(`${p.missed} of ${p.required} required replies came after escalation or not at all. Last missed: ${fmtAgo(p.lastMissed).toLowerCase()}.`)}">
+        ${who(p.name)}
+        <div class="bar-track"><div class="bar" style="width:${(p.missed / maxMiss * 100).toFixed(1)}%;background:var(--crit)"></div></div>
+        <div class="bar-val">${plural(p.missed, 'miss', 'misses')}<span>${esc(fmtAgo(p.lastMissed))}</span></div>
+      </div>`).join('');
+
+    const speed = D.people.filter(p => p.avg != null).sort((a, b) => b.avg - a.avg);
+    const top = Math.max(cfg.escalate, ...speed.map(p => p.avg / MIN)) * 1.06;
+    const tone = m => m < cfg.first ? 'var(--good)' : m < cfg.escalate ? 'var(--warn)' : 'var(--crit)';
+    const speedBars = speed.map(p => {
+      const m = p.avg / MIN;
+      return `<div class="bar-row" tabindex="0" data-tip-t="${esc(p.name)}" data-tip="${esc(`Average ${fmtDur(p.avg)} to reply across ${plural(p.delays.length, 'reply', 'replies')}. ${p.pending.length ? `Owes ${plural(p.pending.length, 'reply', 'replies')} right now.` : 'Nothing pending.'}`)}">
+        ${who(p.name)}
+        <div class="bar-track"><span class="mark" style="left:${(cfg.first / top * 100).toFixed(1)}%"></span><span class="mark" style="left:${(cfg.escalate / top * 100).toFixed(1)}%"></span>
+          <div class="bar" style="width:${(m / top * 100).toFixed(1)}%;background:${tone(m)}"></div></div>
+        <div class="bar-val">${fmtDur(p.avg)}</div></div>`;
+    }).join('');
+
+    const weekCols = D.weeks.map(w => {
+      const pct = w.rate == null ? 0 : Math.round(w.rate * 100);
+      const label = `${fmtDate(w.start)}–${fmtDate(w.end - DAY_MS)}`;
+      return { label, html: `<div class="col" tabindex="0" data-tip-t="${esc(label)}" data-tip="${w.n ? `${w.ok} of ${w.n} required replies came before escalation.` : 'No replies were due this week.'}"><span class="cv">${w.rate == null ? '–' : pct + '%'}</span><div class="cbar" style="height:${(pct / 100 * 130).toFixed(0)}px"></div></div>` };
+    });
+
+    const owners = D.owners.slice().sort((a, b) => b.overdue - a.overdue || b.late - a.late || a.name.localeCompare(b.name));
+    const ownerRows = owners.map(o => `<tr><td>${who(o.name)}</td><td class="num">${o.total}</td><td class="num">${o.ontime}</td>
+      <td class="num">${o.late ? chip('c-warn', o.late) : '0'}</td><td class="num">${o.overdue ? chip('c-crit', o.overdue) : '0'}</td><td class="num">${o.open}</td></tr>`).join('');
+
+    return tiles([
+      { tone: 'crit', icon: 'repeat', value: D.repeat.length, label: 'Repeat non-responders', sub: 'Missed 2 or more replies' },
+      { tone: 'info', icon: 'gauge', value: D.avgAck != null ? `${Math.round(D.avgAck / MIN)}<small>min</small>` : '–', label: 'Avg. time to acknowledge', sub: 'From message to first reply' },
+      { tone: 'good', icon: 'check', value: rate != null ? `${rate}<small>%</small>` : '–', label: 'Task completion rate', sub: c.due ? `${c.done} of ${c.due} due tasks done, ${c.late} late` : 'No tasks due yet' },
+      { tone: 'warn', icon: 'clock', value: D.unresolved.length, label: 'Unresolved messages', sub: `Out of ${sent} sent in 30 days` },
+    ]) + `
+    <div class="grid2" style="margin-top:20px">
+      <div class="stack"><div class="card"><div class="card-h"><h2>Repeat non-responders</h2><span class="hint">Last 30 days</span></div>
+        <div class="card-b">${missBars ? `<div class="bars">${missBars}</div>
+          <p class="legend">A miss is a reply that didn’t arrive before the ${cfg.escalate}-minute escalation point.</p>`
+          : '<div class="empty">Nobody missed more than one reply in the last 30 days.</div>'}</div></div>
+      <div class="card"><div class="card-h"><h2>Replies before escalation, by week</h2><span class="hint">Share of required replies</span></div>
+        <div class="card-b"><div class="cols">${weekCols.map(w => w.html).join('')}</div>
+          <div class="col-x">${weekCols.map(w => `<span>${esc(w.label)}</span>`).join('')}</div></div></div></div>
+      <div class="card"><div class="card-h"><h2>Response time by person</h2><span class="hint">Average, last 30 days</span></div>
+        <div class="card-b">${speedBars ? `
+          <div class="scale-head" aria-hidden="true"><span></span><span class="marks"><span style="left:${(cfg.first / top * 100).toFixed(1)}%">${cfg.first}m</span><span style="left:${(cfg.escalate / top * 100).toFixed(1)}%">${cfg.escalate}m escalation</span></span><span></span></div>
+          <div class="bars">${speedBars}</div>
+          <div class="legend"><span><i style="background:var(--good)"></i>Under ${cfg.first} min</span><span><i style="background:var(--warn)"></i>${cfg.first} to ${cfg.escalate} min</span><span><i style="background:var(--crit)"></i>${cfg.escalate} min or more</span></div>`
+          : '<div class="empty">No replies yet.</div>'}
+        </div></div>
+    </div>
+    <div class="card" style="margin-top:20px"><div class="card-h"><h2>Task follow-through</h2><span class="hint">By owner, last 30 days</span></div>
+        ${ownerRows ? `<div class="tw"><table class="t"><thead><tr><th>Owner</th><th>Tasks</th><th>On time</th><th>Late</th><th>Overdue</th><th>Open</th></tr></thead><tbody>${ownerRows}</tbody></table></div>`
+          : '<div class="empty">No tasks yet.</div>'}</div>`;
+  }
+
+  // ---------------- connecting a group (owner, on the computer running WhatsApp Reader) ----------------
+  const sourceKnown = () => !cap.db || saved.loaded.source;
+  const needsSetup = () => live.on && (!live.status || !live.status.linked || (!saved.source && sourceKnown()) || state.setup);
+
+  function viewSetup() {
+    const st = live.status;
+    if (!st || !st.linked) {
+      return `<div class="card setup"><div class="card-b">
+        <h2>${ic('link')}Link WhatsApp Reader to your phone</h2>
+        <p>WhatsApp Reader is running on this computer but isn’t linked to a phone yet.</p>
+        <ol class="steps">
+          <li>Close the Claude desktop app.</li>
+          <li>Double-click <b>whatsapp-reader.exe</b> in its folder.</li>
+          <li>On your phone: WhatsApp → Settings → Linked devices → Link a device, and scan the code.</li>
+          <li>Open the Claude desktop app and this page again.</li>
+        </ol>
+        <button class="btn" type="button" data-action="recheck">Check again</button>
+      </div></div>`;
+    }
+    const groups = (live.groups || []).slice().sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0));
+    const g = live.groupInfo;
+    const pickGroup = live.groups == null ? '<p class="plain">Loading your groups…</p>'
+      : !groups.length ? '<p class="plain">No groups found on the linked phone yet. Send a message in the group, then check again.</p>'
+      : `<div class="choices" role="radiogroup" aria-label="Group">${groups.map(x => `
+          <label class="choice"><input type="radio" name="setup-group" id="g-${esc(x.id)}" value="${esc(x.id)}"${state.setupGroup === x.id ? ' checked' : ''}>
+            <span><b>${esc(x.name || 'Unnamed group')}</b><span class="sub">${plural(x.members, 'member')} · ${plural(x.message_count, 'message')} saved${x.last_message_at ? ` · last ${esc(fmtWhen(x.last_message_at))}` : ''}</span></span></label>`).join('')}</div>`;
+    let pickBoss = '';
+    if (state.setupGroup) {
+      pickBoss = !g || g.id !== state.setupGroup ? '<p class="plain">Loading members…</p>'
+        : `<div class="choices">${g.participants.map(p => `
+            <label class="choice"><input type="checkbox" name="setup-boss" id="b-${esc(p.id)}" value="${esc(p.id)}"${state.setupBoss && state.setupBoss.has(p.id) ? ' checked' : ''}>
+              <span><b>${esc(p.name)}${p.id === g.me ? ' (this phone)' : ''}</b><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}</span></span></label>`).join('')}</div>`;
+    }
+    const ready = state.setupGroup && state.setupBoss && state.setupBoss.size && g && g.id === state.setupGroup;
+    return `<div class="card setup"><div class="card-b">
+      <h2>${ic('link')}Choose the group to track</h2>
+      <p>WhatsApp Reader is linked to +${esc(st.phone)}. It only reads; nothing is ever sent.</p>
+      <h3>1. Group</h3>${pickGroup}
+      ${state.setupGroup ? `<h3>2. Whose messages are the instructions?</h3><p class="plain">Everyone else in the group is tracked for replies.</p>${pickBoss}` : ''}
+      <p class="dlg-msg err" id="setup-msg" role="status">${esc(live.setupError || '')}</p>
+      <div class="dlg-f" style="padding:0">
+        ${saved.source ? '<button class="btn" type="button" data-action="cancel-setup">Cancel</button>' : ''}
+        <button class="btn primary" type="button" data-action="save-source"${ready ? '' : ' disabled'}>Start tracking</button>
+      </div>
+    </div></div>`;
+  }
+
+  // ---------------- frame ----------------
+  function bossNames() {
+    const raw = src.raw;
+    if (!raw) return ['Juan'];
+    const nameOf = nameIndex(raw);
+    return (raw.bossIds || []).map(nameOf);
+  }
+
+  function renderNav() {
+    const badge = { dashboard: D.pendingPeople.length, messages: D.unresolved.length, tasks: D.overdue.length, reports: null };
+    document.getElementById('nav').innerHTML = Object.entries(VIEWS).map(([k, v]) =>
+      `<a href="#${k}"${state.view === k ? ' aria-current="page"' : ''}>${ic(v.icon)}${v.label}${badge[k] ? `<span class="count" aria-label="${badge[k]} need attention">${badge[k]}</span>` : ''}</a>`).join('');
+    document.getElementById('timing-sum').textContent = `Flags at ${cfg.first} and ${cfg.second} min, escalate at ${cfg.escalate}`;
+  }
+
+  function renderFrame() {
+    const groupName = src.group && src.group.name ? src.group.name : 'WhatsApp group';
+    document.getElementById('brand-sub').textContent = groupName;
+    document.getElementById('group-pill').innerHTML = `${ic('users')}${esc(groupName)} · ${plural(N, 'person', 'people')}`;
+    const pill = document.getElementById('snap');
+    const note = document.getElementById('side-note');
+    const foot = document.getElementById('foot');
+    const change = document.getElementById('change-group');
+    change.hidden = !(live.on && live.status && live.status.linked && saved.source);
+    if (src.mode === 'live') {
+      pill.className = 'pill live';
+      pill.innerHTML = `<i class="dot"></i>Live · updated ${esc(fmtClock(src.updatedAt))}${live.analyzing ? ' · reading new messages…' : ''}`;
+      note.textContent = 'Reading the group on this computer. Nothing is sent to WhatsApp.';
+      foot.textContent = `Reading “${groupName}” through WhatsApp Reader on this computer. Nothing is ever sent to WhatsApp. Each update is saved into this page, so anyone with the link sees the same numbers on any device.`;
+    } else if (src.mode === 'saved') {
+      pill.className = 'pill';
+      pill.innerHTML = `${ic('clock')}Saved · as of ${esc(fmtDate(src.updatedAt))}, ${esc(fmtClock(src.updatedAt))}`;
+      note.textContent = 'Showing the last saved copy. Nothing is sent to WhatsApp.';
+      foot.textContent = `These numbers were saved at ${fmtClock(src.updatedAt)} on ${fmtDate(src.updatedAt)}, the last time this page was open in the Claude desktop app on the computer running WhatsApp Reader. Response times are counted up to that moment. Nothing is ever sent to WhatsApp.`;
+    } else {
+      pill.className = 'pill sample';
+      pill.innerHTML = `${ic('clock')}Sample data · as of ${esc(fmtClock(SAMPLE_NOW))} today`;
+      note.textContent = 'Sample data. Not connected to WhatsApp yet.';
+      foot.textContent = 'Everything on this page is sample data for 18 example team members. Real numbers appear once this page is opened in the Claude desktop app on the computer running WhatsApp Reader. Nothing is ever sent to WhatsApp.';
+    }
+    const err = document.getElementById('live-error');
+    const msg = live.error ? (live.error.message || String(live.error)) : '';
+    err.hidden = !(live.on && msg);
+    err.textContent = msg ? `WhatsApp Reader couldn’t read the group: ${msg}` : '';
+  }
+
+  function render() {
+    S = src.S;
+    NOW = src.mode === 'live' ? Date.now() : src.now;
+    N = S.people.length;
+    D = derive(S, cfg, NOW);
+    renderNav();
+    renderFrame();
+    const setup = needsSetup();
+    const v = VIEWS[state.view];
+    document.getElementById('v-title').textContent = setup ? 'Connect WhatsApp' : v.title;
+    document.getElementById('v-sub').textContent = setup ? 'One-time setup on this computer.' : v.sub;
+    const setupEl = document.getElementById('v-setup');
+    setupEl.hidden = !setup;
+    if (setup) setupEl.innerHTML = viewSetup();
+    const list = document.getElementById('mlist');
+    const keepScroll = list ? list.scrollTop : 0;
+    const builders = { dashboard: viewDashboard, messages: viewMessages, tasks: viewTasks, reports: viewReports };
+    for (const k of Object.keys(VIEWS)) {
+      const el = document.getElementById('v-' + k);
+      el.hidden = setup || k !== state.view;
+      if (!el.hidden) el.innerHTML = builders[k]();
+    }
+    const list2 = document.getElementById('mlist');
+    if (list2 && keepScroll) list2.scrollTop = keepScroll;
+  }
+
+  function go(view) {
+    if (!VIEWS[view]) view = 'dashboard';
+    if (state.view !== view) { state.view = view; render(); window.scrollTo(0, 0); }
+  }
+
+  window.addEventListener('hashchange', () => go(location.hash.slice(1)));
+  document.addEventListener('click', e => {
+    const open = e.target.closest('[data-open-msg]');
+    if (open) { state.sel = open.dataset.openMsg; if (state.view === 'messages') render(); else location.hash = 'messages'; return; }
+    const sel = e.target.closest('[data-sel]');
+    if (sel) { state.sel = sel.dataset.sel; render(); return; }
+    const act = e.target.closest('[data-action]');
+    if (act) onAction(act.dataset.action);
+  });
+  document.addEventListener('change', e => {
+    if (e.target.id === 'task-filter') { state.taskFilter = e.target.value; render(); }
+    if (e.target.name === 'setup-group') pickGroup(e.target.value);
+    if (e.target.name === 'setup-boss') {
+      state.setupBoss = new Set([...document.querySelectorAll('input[name="setup-boss"]:checked')].map(x => x.value));
+      render();
+    }
+  });
+
+  // tooltip for chart marks (plain text only)
+  const tip = document.getElementById('tip');
+  const placeTip = (x, y) => {
+    const r = tip.getBoundingClientRect();
+    tip.style.left = Math.max(8, Math.min(x + 14, innerWidth - r.width - 8)) + 'px';
+    tip.style.top = Math.max(8, Math.min(y + 14, innerHeight - r.height - 8)) + 'px';
+  };
+  const showTip = (el, x, y) => {
+    const b = document.createElement('b'); b.textContent = el.dataset.tipT || '';
+    tip.replaceChildren(b, document.createTextNode(el.dataset.tip)); tip.hidden = false; placeTip(x, y);
+  };
+  document.addEventListener('pointerover', e => { const el = e.target.closest('[data-tip]'); if (el) showTip(el, e.clientX, e.clientY); else tip.hidden = true; });
+  document.addEventListener('pointermove', e => { if (!tip.hidden) placeTip(e.clientX, e.clientY); });
+  document.addEventListener('focusin', e => { const el = e.target.closest('[data-tip]'); if (el) { const r = el.getBoundingClientRect(); showTip(el, r.left + r.width / 2, r.bottom); } else tip.hidden = true; });
+  document.addEventListener('focusout', () => { tip.hidden = true; });
+  window.addEventListener('scroll', () => { tip.hidden = true; }, { passive: true });
+
+  // ---------------- follow-up timing ----------------
+  const dlg = document.getElementById('timing');
+  const fFirst = document.getElementById('t-first'), fSecond = document.getElementById('t-second'), fEsc = document.getElementById('t-esc');
+  const tMsg = document.getElementById('timing-msg');
+  const saveBtn = document.getElementById('save-timing');
+  let lastFocus = null;
+  const say = (text, kind) => { tMsg.textContent = text; tMsg.className = 'dlg-msg' + (kind ? ' ' + kind : ''); };
+  const valid = v => [v.first, v.second, v.escalate].every(n => Number.isInteger(n) && n >= 1 && n <= 1440) && v.first < v.second && v.second < v.escalate;
+
+  function openTiming() {
+    lastFocus = document.activeElement;
+    fFirst.value = cfg.first; fSecond.value = cfg.second; fEsc.value = cfg.escalate;
+    const locked = cap.canEdit === false;
+    [fFirst, fSecond, fEsc].forEach(f => { f.disabled = locked; });
+    saveBtn.disabled = locked;
+    if (locked) say('Only editors of this page can change the timing.');
+    else if (!cap.db) say('This view can’t save settings, so a change applies only until you leave the page.');
+    else say('');
+    dlg.hidden = false;
+    (locked ? document.getElementById('close-timing') : fFirst).focus();
+  }
+  function closeTiming() { dlg.hidden = true; if (lastFocus) lastFocus.focus(); }
+  document.getElementById('open-timing').addEventListener('click', openTiming);
+  document.getElementById('close-timing').addEventListener('click', closeTiming);
+  document.getElementById('cancel-timing').addEventListener('click', closeTiming);
+  dlg.addEventListener('click', e => { if (e.target === dlg) closeTiming(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !dlg.hidden) closeTiming(); });
+
+  document.getElementById('timing-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const v = { first: Number(fFirst.value), second: Number(fSecond.value), escalate: Number(fEsc.value) };
+    if (![v.first, v.second, v.escalate].every(n => Number.isInteger(n) && n >= 1 && n <= 1440)) { say('Use whole minutes between 1 and 1440.', 'err'); return; }
+    if (!(v.first < v.second && v.second < v.escalate)) { say('Each step has to come after the one before it: first reminder, then second, then escalation.', 'err'); return; }
+    if (!cap.db) { cfg = v; render(); say('Applied to this view. It isn’t saved for anyone else.', 'ok'); return; }
+    saveBtn.disabled = true; say('Saving…');
+    try {
+      await cap.db.doc('settings/followup').set({ ...v, updatedAt: Date.now() });
+      cfg = v; render();
+      say('Saved. Everyone who opens this page now sees this timing.', 'ok');
+    } catch (err) {
+      if (err && err.code === 'invalid_argument') { cap.canEdit = false; say('Only editors of this page can change the timing.', 'err'); }
+      else if (err && (err.code === 'resource_exhausted' || err.code === 'unavailable')) say('Couldn’t save just now. Try again in a minute.', 'err');
+      else say('Couldn’t save the timing on this page.', 'err');
+    } finally { saveBtn.disabled = cap.canEdit === false; }
+  });
+
+  // ---------------- saved copy (any device) ----------------
+  function applyRaw(raw, mode) {
+    src.mode = mode; src.raw = raw;
+    src.group = raw.group || { name: 'WhatsApp group' };
+    src.updatedAt = raw.syncedAt || Date.now();
+    src.now = mode === 'live' ? Date.now() : src.updatedAt;
+    src.S = buildFromRaw(raw, src.now);
+    render();
+  }
+
+  function applySaved() {
+    if (src.mode === 'live' || !saved.meta || !saved.meta.group) { render(); return; }
+    const messages = Object.values(saved.days).flatMap(d => (d && d.messages) || []);
+    applyRaw({ ...saved.meta, analysis: saved.analysis || {}, messages }, 'saved');
+  }
+
+  function subscribeSaved(db) {
+    const fail = () => {};
+    db.doc('settings/followup').onSnapshot(snap => {
+      if (!snap.exists) return;
+      const d = snap.data();
+      const v = { first: d.first, second: d.second, escalate: d.escalate };
+      if (valid(v) && (v.first !== cfg.first || v.second !== cfg.second || v.escalate !== cfg.escalate)) { cfg = v; render(); }
+    }, fail);
+    db.doc('settings/source').onSnapshot(snap => {
+      saved.source = snap.exists ? snap.data() : null;
+      saved.loaded.source = true;
+      if (live.on && live.status && live.status.linked) { if (saved.source) syncNow(); else loadGroups(); }
+      render();
+    }, fail);
+    db.doc('sync/meta').onSnapshot(snap => { saved.meta = snap.exists ? snap.data() : null; saved.loaded.meta = true; applySaved(); }, fail);
+    db.doc('sync/analysis').onSnapshot(snap => {
+      saved.analysis = snap.exists ? (snap.data().byId || {}) : {};
+      saved.loaded.analysis = true;
+      applySaved();
+    }, fail);
+    db.collection('sync/meta/days').onSnapshot(q => {
+      const days = {};
+      q.docs.forEach(d => { days[d.id] = d.data(); });
+      saved.days = days;
+      applySaved();
+    }, fail);
+  }
+
+  // ---------------- live reading (Claude desktop app on the computer running WhatsApp Reader) ----------------
+  const callReader = async (tool, input) => (await cap.mcp.callTool(READER, tool, input || {}, { cache: false })).payload;
+
+  async function startLive() {
+    let st;
+    try { st = await callReader('status'); }
+    catch (e) { live.on = false; live.offCode = e && e.code; render(); return; }
+    live.on = true; live.status = st;
+    render();
+    cap.mcp.watchTool(READER, 'status', null, ev => {
+      if (ev.type === 'data') { onStatus(ev.result.payload); return; }
+      const code = ev.error && ev.error.code;
+      if (['server_not_connected', 'not_in_manifest', 'blocked_by_policy', 'approval_required', 'not_granted'].includes(code)) {
+        live.on = false; live.offCode = code;
+        if (src.mode === 'live') { src.mode = 'sample'; src.S = SAMPLE; src.now = SAMPLE_NOW; applySaved(); } else render();
+      }
+    }, { refetchInterval: 30000 });
+    onStatus(st);
+  }
+
+  function onStatus(st) {
+    if (!st) return;
+    const wasLinked = live.status && live.status.linked;
+    live.status = st;
+    if (!st.linked) { render(); return; }
+    if (!saved.source) {
+      if (sourceKnown() && (!live.groups || !wasLinked)) loadGroups(); // otherwise the saved choice is still loading
+      render(); return;
+    }
+    const sig = `${st.messages_stored}|${st.last_message_at}|${st.groups_known}`;
+    if (sig !== live.lastSig || Date.now() - live.lastSync > 10 * MIN) { live.lastSig = sig; syncNow(); }
+    else if (src.mode === 'live') { src.now = Date.now(); render(); }
+  }
+
+  async function loadGroups() {
+    try { live.groups = ((await callReader('list_groups')) || {}).groups || []; live.setupError = ''; }
+    catch (e) { live.groups = []; live.setupError = e.message || 'Couldn’t list the groups.'; }
+    if (!state.setupGroup && saved.source) state.setupGroup = saved.source.groupId;
+    if (state.setupGroup) pickGroup(state.setupGroup, true);
+    render();
+  }
+
+  async function pickGroup(id, keepBoss) {
+    state.setupGroup = id;
+    if (!keepBoss) state.setupBoss = null;
+    render();
+    try {
+      const g = await callReader('get_group', { group_id: id });
+      if (state.setupGroup !== id) return;
+      live.groupInfo = g;
+      if (!state.setupBoss) {
+        const prev = saved.source && saved.source.groupId === id ? saved.source.bossIds : null;
+        state.setupBoss = new Set(prev && prev.length ? prev : (g.me ? [g.me] : []));
+      }
+      live.setupError = '';
+    } catch (e) { live.setupError = e.message || 'Couldn’t read that group.'; }
+    render();
+  }
+
+  async function onAction(action) {
+    if (action === 'recheck') {
+      try { onStatus(await callReader('status')); } catch (e) { live.on = false; render(); }
+    } else if (action === 'change-group') {
+      state.setup = true; state.setupGroup = saved.source ? saved.source.groupId : null; state.setupBoss = null;
+      loadGroups();
+    } else if (action === 'cancel-setup') {
+      state.setup = false; render();
+    } else if (action === 'save-source') {
+      const g = live.groupInfo;
+      if (!g || !state.setupBoss || !state.setupBoss.size) return;
+      const source = { groupId: g.id, groupName: g.name, bossIds: [...state.setupBoss], me: g.me, savedAt: Date.now() };
+      saved.source = source; state.setup = false;
+      if (cap.db) { try { await cap.db.doc('settings/source').set(source); } catch (e) { live.setupError = 'Couldn’t save the choice on this page.'; } }
+      live.lastSig = ''; render(); syncNow();
+    }
+  }
+
+  const waitFor = (test, ms) => new Promise(resolve => {
+    const start = Date.now();
+    const tick = () => (test() || Date.now() - start > ms) ? resolve() : setTimeout(tick, 200);
+    tick();
+  });
+
+  async function syncNow() {
+    if (live.busy) { live.again = true; return; }
+    if (!live.on || !saved.source) return;
+    live.busy = true; live.again = false;
+    try {
+      if (cap.db) await waitFor(() => saved.loaded.analysis && saved.loaded.source && saved.loaded.meta, 6000);
+      const source = saved.source;
+      const g = await callReader('get_group', { group_id: source.groupId });
+      let since = Date.now() - (WINDOW_DAYS + 1) * DAY_MS;
+      const seen = new Map();
+      for (let i = 0; i < 25; i++) {
+        const page = await callReader('get_messages', { group_id: source.groupId, since, limit: 2000 });
+        const list = (page && page.messages) || [];
+        list.forEach(m => seen.set(m.id, m));
+        if (!page.more || !list.length || list[list.length - 1].at === since) break;
+        since = list[list.length - 1].at;
+      }
+      const all = [...seen.values()];
+      const participants = (g.participants || []).map(p => ({ id: p.id, name: p.name, phone: p.phone || '' }));
+      const ids = new Set(participants.map(p => p.id));
+      const names = {};
+      all.forEach(m => { if (m.sender_name && !ids.has(m.sender_id)) names[m.sender_id] = m.sender_name; });
+      const raw = {
+        group: { id: g.id, name: g.name || source.groupName }, participants, names, bossIds: source.bossIds, me: g.me,
+        messages: all.map(compactMessage).sort((a, b) => a.t - b.t),
+        analysis: { ...(saved.meta && saved.meta.group && saved.meta.group.id === g.id ? saved.analysis : {}) },
+        syncedAt: Date.now(),
+      };
+      await analyze(raw);
+      applyRaw(raw, 'live');
+      live.lastSync = Date.now(); live.error = null;
+      await persist(raw);
+    } catch (e) {
+      live.error = e; render();
+    } finally {
+      live.busy = false;
+      if (live.again) syncNow();
+    }
+  }
+
+  // Claude reads each new instruction once to see who must answer and whether
+  // it carries a task. Without Claude, simple rules are used instead.
+  async function analyze(raw) {
+    const S0 = buildFromRaw({ ...raw, analysis: {} }, Date.now());
+    const people = S0.people;
+    const nameOf = nameIndex(raw);
+    const canAsk = cap.sample && !live.sampleDenied;
+    const todo = S0.bossMessages.filter(m => { const a = raw.analysis[m.i]; return !a || (a.by === 'rules' && canAsk); });
+    if (!todo.length) return;
+    if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallbackAnalysis(m, people); }); return; }
+    live.analyzing = todo.length; renderFrame();
+    const bosses = (raw.bossIds || []).map(nameOf);
+    for (let i = 0; i < todo.length; i += 12) {
+      const batch = todo.slice(i, i + 12);
+      try {
+        const out = await cap.sample.json(analysisPrompt(batch, people, bosses, nameOf), { modelTier: 'default' });
+        const results = out && Array.isArray(out.results) ? out.results : [];
+        batch.forEach(m => {
+          const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people);
+          raw.analysis[m.i] = a || raw.analysis[m.i] || fallbackAnalysis(m, people);
+        });
+      } catch (e) {
+        if (e && e.code === 'not_granted') live.sampleDenied = true;
+        todo.slice(i).forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallbackAnalysis(m, people); });
+        break;
+      }
+    }
+    live.analyzing = 0;
+  }
+
+  // Save what was read into the page so the same numbers show on every device.
+  async function persist(raw) {
+    const db = cap.db;
+    if (!db || cap.canEdit === false) return;
+    const sameGroup = saved.meta && saved.meta.group && saved.meta.group.id === raw.group.id;
+    let changed = false;
+    try {
+      const byDay = {};
+      raw.messages.forEach(m => { (byDay[dayKey(m.t)] ||= []).push(m); });
+      for (const [day, list] of Object.entries(byDay)) {
+        let body = { day, messages: list };
+        let json = JSON.stringify(body);
+        if (json.length > 240000) { body = { day, trimmed: true, messages: list.map(m => m.x && m.x.length > 160 ? { ...m, x: m.x.slice(0, 160) } : m) }; json = JSON.stringify(body); }
+        const prev = live.written[day] ?? (sameGroup && saved.days[day] ? JSON.stringify(saved.days[day]) : null);
+        if (prev === json) continue;
+        await db.doc(`sync/meta/days/${day}`).set(body);
+        live.written[day] = json; changed = true;
+      }
+      for (const day of Object.keys(saved.days)) {
+        if (!byDay[day]) { await db.doc(`sync/meta/days/${day}`).delete(); delete live.written[day]; changed = true; }
+      }
+      const byId = {};
+      raw.messages.forEach(m => { if (raw.analysis[m.i]) byId[m.i] = raw.analysis[m.i]; });
+      const aJson = JSON.stringify(byId);
+      if (aJson !== (live.writtenAnalysis ?? JSON.stringify(sameGroup ? saved.analysis : null))) {
+        await db.doc('sync/analysis').set({ byId });
+        live.writtenAnalysis = aJson; changed = true;
+      }
+      const meta = { group: raw.group, participants: raw.participants, names: raw.names, bossIds: raw.bossIds, me: raw.me };
+      const mJson = JSON.stringify(meta);
+      if (changed || mJson !== live.writtenMeta || Date.now() - live.lastMetaWrite > 5 * MIN) {
+        await db.doc('sync/meta').set({ ...meta, syncedAt: raw.syncedAt, messageCount: raw.messages.length });
+        live.writtenMeta = mJson; live.lastMetaWrite = Date.now();
+      }
+    } catch (e) {
+      if (e && e.code === 'invalid_argument') cap.canEdit = false;
+      if (e && e.code === 'quota_exceeded') live.error = { message: 'this page’s storage is full, so updates aren’t being saved for other devices.' };
+      renderFrame();
+    }
+  }
+
+  // keep waiting times current while the page is open
+  setInterval(() => { if (src.mode === 'live' && !document.hidden && !live.busy) { src.now = Date.now(); render(); } }, 60000);
+
+  async function boot() {
+    const claude = window.claude;
+    if (!claude || typeof claude.use !== 'function') return;
+    const use = name => claude.use(name).catch(() => null);
+    const [db, mcp, sample, user] = await Promise.all([use('db'), use('mcp'), use('sample'), use('user')]);
+    cap.db = db; cap.mcp = mcp; cap.sample = sample;
+    if (user) { try { cap.canEdit = await user.canEdit(); } catch (_) { cap.canEdit = null; } }
+    if (db) subscribeSaved(db);
+    if (mcp) startLive();
+  }
+
+  state.view = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : 'dashboard';
+  render();
+  boot();
+})();
+
+</script>
