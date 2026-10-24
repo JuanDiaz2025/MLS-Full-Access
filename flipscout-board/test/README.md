@@ -376,6 +376,40 @@ pinned to the 🔔 list, Visits without passed or removed leads, and the
 `bbxHasComps` guard (if `comps.js` fails to load the board says it has no
 comps instead of breaking). No function was taken out.
 
+## Test lead texts (Test board only, 24 Oct, version 151)
+
+The Test board has a pretend lead, `TEST-LEAD`, that is in the page's own code
+and never on the sheet or the real board. Its agent is Bryan's Google Voice,
+(510) 394-5339. In the Email & SMS Log, a reply to it defaults to the line
+`Google Voice · Seth (510) 214-3561`; no other agent is offered that line, and
+the board refuses to queue it for anyone else.
+
+Those replies are real texts, sent by `testsend.js` on Seth's computer: a copy
+of `rei/gvsend.js` (branch `claude/laughing-lamport-cmllyv`) that texts
+5103945339 and nobody else. Setup is at the top of the file: Chrome started
+with `--remote-debugging-port=9222`, signed in to Seth's Voice by hand, and
+`npm i playwright`.
+
+The loop Claude runs on Seth's computer, one text at a time:
+
+1. Query the Test board's `replies` (https://claude.ai/artifact/76sa8TSBhyMMiECccwQax9)
+   for `st == "queued"`. Act only on `line == "Google Voice · Seth (510) 214-3561"`.
+   Never touch the real board.
+2. If `phone` is not `5103945339`, update the doc to `{st: "error", err: "Seth's line only texts the test agent"}`.
+3. Run `node testsend.js --text "<body>"` (dry), then `--go`. If it reports
+   `sent: true`, update the doc to `{st: "sent", sentAt}`. If it fails or cannot
+   confirm, update it to `{st: "error", err}`. Never send the same doc twice.
+
+What Bryan texts back lands in Seth's Voice. Put it on the board with the
+🧪 Add their text button in the test conversation.
+
+Bryan's Voice → Gmail → real board bridge (`rei/gvparse.js`) has no
+team-number filter. A text from Seth's 214-3561 arriving on Bryan's 394-5339
+would be logged on the real board as a new conversation. As of 24 Oct it had
+not written anything there. Before it is switched on, it should skip team
+numbers (`if (c.kind === "text" && TEAM.has(c.other)) return;` with
+`TEAM = new Set(["5102143561"])`).
+
 ## Daily refresh
 
 Steps 1–3 run once per board, each in its own out dir and its own upload
