@@ -1997,7 +1997,8 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   async function readGroup(t) {
     const gid = t.groupId;
     const g = await callReader('get_group', { group_id: gid });
-    let since = Date.now() - (WINDOW_DAYS + 1) * DAY_MS;
+    const windowStart = Date.now() - (WINDOW_DAYS + 1) * DAY_MS;
+    let since = windowStart;
     const seen = new Map();
     for (let i = 0; i < 25; i++) {
       const page = await callReader('get_messages', { group_id: gid, since, limit: 2000 });
@@ -2014,12 +2015,19 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const prev = savedGroupData(gid);
     const prevRaw = live.raws[gid];
     const now = Date.now();
+    // A newly linked reader (another computer, or after relinking) only gets
+    // part of the history from WhatsApp, so messages already saved in the page
+    // that it doesn't have are kept rather than dropped.
+    const fromReader = all.map(compactMessage);
+    const have = new Set(fromReader.map(m => m.i));
+    const kept = prev ? Object.values(prev.days || {}).flatMap(d => (d && d.messages) || [])
+      .filter(m => m && m.i && !have.has(m.i) && m.t >= windowStart) : [];
     const members = updateMembers(prevRaw ? prevRaw.members : prev ? prev.meta.members : null, participants,
       live.lastMembersRead[gid] || (prev ? prev.meta.syncedAt : 0), now);
     live.lastMembersRead[gid] = now;
     return {
       group: { id: g.id, name: g.name || t.groupName }, participants, members, names, bossIds: t.bossIds || [], me: g.me,
-      messages: all.map(compactMessage).sort((a, b) => a.t - b.t),
+      messages: fromReader.concat(kept).sort((a, b) => a.t - b.t),
       analysis: { ...(prevRaw ? prevRaw.analysis : prev ? prev.analysis : {}) },
       overrides: saved.names,
       syncedAt: now,
