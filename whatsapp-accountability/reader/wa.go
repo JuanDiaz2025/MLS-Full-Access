@@ -326,6 +326,9 @@ func (r *Reader) saveHistory(evt *events.HistorySync) {
 
 func (r *Reader) groupRecord(ctx context.Context, info *types.GroupInfo) GroupRecord {
 	g := GroupRecord{ID: info.JID.String(), Name: info.Name, UpdatedAt: nowMs(), Participants: []Participant{}}
+	if !info.GroupCreated.IsZero() {
+		g.CreatedAt = info.GroupCreated.UnixMilli()
+	}
 	for _, p := range info.Participants {
 		id := ""
 		if !p.PhoneNumber.IsEmpty() {

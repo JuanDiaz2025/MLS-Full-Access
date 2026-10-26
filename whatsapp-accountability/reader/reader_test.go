@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"context"
 	"testing"
 	"time"
@@ -118,5 +119,57 @@ func TestWithSecret(t *testing.T) {
 	}
 	if withSecret("no-hash", []byte{1}) != "" || withSecret("x#a,b", []byte{1}) != "" {
 		t.Fatal("malformed codes should give an empty result")
+	}
+}
+
+// A messages.db from 1.0.1 has no creation dates; 1.0.2 adds the column and
+// keeps a known date when a later read of the group doesn't carry one.
+func TestGroupCreatedDate(t *testing.T) {
+	dir := t.TempDir()
+	old, err := sql.Open("sqlite", sqlitePath(dir, "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`CREATE TABLE groups (id TEXT PRIMARY KEY, name TEXT, participants TEXT, updated INTEGER);
+		INSERT INTO groups VALUES ('g1@g.us', 'Old group', '[]', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	st, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal("opening a 1.0.1 database:", err)
+	}
+	created := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC).UnixMilli()
+	if err := st.SaveGroup(GroupRecord{ID: "g2@g.us", Name: "New deal", UpdatedAt: 2, CreatedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+	// a later read without the date, and a name from history sync, keep it
+	if err := st.SaveGroup(GroupRecord{ID: "g2@g.us", Name: "New deal", UpdatedAt: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveGroupName("g2@g.us", "New deal renamed"); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	st, err = OpenStore(dir) // the column already exists the second time
+	if err != nil {
+		t.Fatal("reopening:", err)
+	}
+	defer st.Close()
+	got := map[string]int64{}
+	sums, err := st.GroupSummaries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range sums {
+		got[g.ID] = g.CreatedAt
+	}
+	if got["g1@g.us"] != 0 || got["g2@g.us"] != created {
+		t.Fatalf("created dates = %v, want g1 0 and g2 %d", got, created)
+	}
+	if g, ok := st.Group("g2@g.us"); !ok || g.CreatedAt != created || g.Name != "New deal renamed" {
+		t.Fatalf("Group(g2) = %+v", g)
 	}
 }

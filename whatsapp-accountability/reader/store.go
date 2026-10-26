@@ -47,6 +47,7 @@ type GroupRecord struct {
 	Name         string        `json:"name"`
 	Participants []Participant `json:"participants"`
 	UpdatedAt    int64         `json:"updated_at"`
+	CreatedAt    int64         `json:"created_at"` // when the group was created on WhatsApp; 0 if unknown
 }
 
 func sqlitePath(dir, name string) string {
@@ -71,6 +72,13 @@ func OpenStore(dir string) (*Store, error) {
 		CREATE TABLE IF NOT EXISTS groups (
 			id TEXT PRIMARY KEY, name TEXT, participants TEXT, updated INTEGER);`)
 	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	// 1.0.2 keeps each group's creation date. Older files get the column
+	// added; it fills in on the next group list read.
+	if _, err := db.Exec(`ALTER TABLE groups ADD COLUMN created INTEGER NOT NULL DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
 		db.Close()
 		return nil, err
 	}
@@ -161,9 +169,10 @@ func (s *Store) SaveGroup(g GroupRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	parts, _ := json.Marshal(g.Participants)
-	_, err := s.db.Exec(`INSERT INTO groups (id, name, participants, updated) VALUES (?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET name = excluded.name, participants = excluded.participants, updated = excluded.updated`,
-		g.ID, g.Name, string(parts), g.UpdatedAt)
+	_, err := s.db.Exec(`INSERT INTO groups (id, name, participants, updated, created) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name = excluded.name, participants = excluded.participants, updated = excluded.updated,
+			created = CASE WHEN excluded.created > 0 THEN excluded.created ELSE groups.created END`,
+		g.ID, g.Name, string(parts), g.UpdatedAt, g.CreatedAt)
 	return err
 }
 
@@ -185,7 +194,7 @@ func (s *Store) Group(id string) (GroupRecord, bool) {
 	var g GroupRecord
 	var parts sql.NullString
 	var name sql.NullString
-	err := s.db.QueryRow(`SELECT id, name, participants, updated FROM groups WHERE id = ?`, id).Scan(&g.ID, &name, &parts, &g.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, name, participants, updated, created FROM groups WHERE id = ?`, id).Scan(&g.ID, &name, &parts, &g.UpdatedAt, &g.CreatedAt)
 	if err != nil {
 		return g, false
 	}
@@ -203,6 +212,7 @@ type GroupSummary struct {
 	Members       int    `json:"members"`
 	MessageCount  int    `json:"message_count"`
 	LastMessageAt int64  `json:"last_message_at"`
+	CreatedAt     int64  `json:"created_at"` // 0 if unknown
 }
 
 func (s *Store) GroupSummaries() ([]GroupSummary, error) {
@@ -211,7 +221,8 @@ func (s *Store) GroupSummaries() ([]GroupSummary, error) {
 	rows, err := s.db.Query(`
 		SELECT g.id, g.name, g.participants,
 		       (SELECT COUNT(*) FROM messages m WHERE m.chat = g.id AND m.kind <> 'reaction'),
-		       (SELECT COALESCE(MAX(ts), 0) FROM messages m WHERE m.chat = g.id)
+		       (SELECT COALESCE(MAX(ts), 0) FROM messages m WHERE m.chat = g.id),
+		       g.created
 		FROM groups g`)
 	if err != nil {
 		return nil, err
@@ -221,7 +232,7 @@ func (s *Store) GroupSummaries() ([]GroupSummary, error) {
 	for rows.Next() {
 		var g GroupSummary
 		var name, parts sql.NullString
-		if err := rows.Scan(&g.ID, &name, &parts, &g.MessageCount, &g.LastMessageAt); err != nil {
+		if err := rows.Scan(&g.ID, &name, &parts, &g.MessageCount, &g.LastMessageAt, &g.CreatedAt); err != nil {
 			return nil, err
 		}
 		g.Name = name.String

@@ -10,7 +10,9 @@
   const state = { view: 'dashboard', sel: null, taskFilter: 'open', groupFilter: 'all', senderFilter: 'all',
     setup: false, editGroup: null, setupBoss: null, setupNames: null, confirmRemove: null,
     // adding groups: the ones ticked, the search, then who gives instructions in each
-    pickGroups: new Set(), groupQuery: '', addStep: null, addActive: null, addBoss: {}, addTemplate: null, addNote: '' };
+    pickGroups: new Set(), groupQuery: '', groupSort: null, addStep: null, addActive: null, addBoss: {}, addTemplate: null, addNote: '' };
+  // how the group list is sorted is remembered on this computer
+  try { const v = localStorage.getItem('wa-group-sort'); if (['new', 'active', 'name'].includes(v)) state.groupSort = v; } catch (_) {}
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
   const src = { mode: 'sample', S: SAMPLE, now: SAMPLE_NOW, updatedAt: null, groups: [] };
   const cap = { db: null, mcp: null, sample: null, user: null, canEdit: null, isOwner: null, canWrite: null, me: null };
@@ -427,11 +429,17 @@
       : !others.length ? '<p class="plain">Every group on the linked phone is already tracked.</p>'
       : `<div class="pick-tools">
           <input class="name-in search-in" type="search" id="group-q" value="${esc(state.groupQuery)}" placeholder="Search groups" aria-label="Search groups" autocomplete="off">
+          <label class="sort-l" for="group-sort">Sort
+            <select class="sel" id="group-sort">
+              <option value="new"${groupSort() === 'new' ? ' selected' : ''}${haveCreated() ? '' : ' disabled'}>Newest groups${haveCreated() ? '' : ' (update WhatsApp Reader)'}</option>
+              <option value="active"${groupSort() === 'active' ? ' selected' : ''}>Recent activity</option>
+              <option value="name"${groupSort() === 'name' ? ' selected' : ''}>Name A\u2013Z</option>
+            </select></label>
           <span class="plain" id="group-q-count">${esc(groupCountText(shown, others.length))}</span>
         </div>
         <div class="choices" id="group-choices" aria-label="Groups">${others.map(x => `
           <label class="choice" data-gname="${esc((x.name || '').toLowerCase())}"${match(x) ? '' : ' hidden'}><input type="checkbox" name="pick-group" id="g-${esc(x.id)}" value="${esc(x.id)}"${state.pickGroups.has(x.id) ? ' checked' : ''}>
-            <span><b>${esc(x.name || 'Unnamed group')}</b><span class="sub">${plural(x.members, 'member')} · ${plural(x.message_count, 'message')} saved${x.last_message_at > 0 ? ` · last ${esc(fmtWhen(x.last_message_at))}` : ''}</span></span></label>`).join('')}</div>
+            <span><b>${esc(x.name || 'Unnamed group')}</b><span class="sub">${x.created_at > 0 ? `Created ${esc(createdDay(x.created_at))} \u00B7 ` : ''}${plural(x.members, 'member')} · ${plural(x.message_count, 'message')} saved${x.last_message_at > 0 ? ` · last ${esc(fmtWhen(x.last_message_at))}` : ''}</span></span></label>`).join('')}</div>
         <p class="plain" id="group-q-none"${shown ? ' hidden' : ''}>No group matches that search.</p>
         <div class="pick-bar" id="pick-bar">
           <span id="pick-count">${esc(pickCountText(n))}</span>
@@ -451,7 +459,16 @@
 
   // ---------------- adding several groups at once ----------------
   const trackedIds = () => new Set(trackedGroups().map(t => t.groupId));
-  const untrackedGroups = () => { const ids = trackedIds(); return (live.groups || []).filter(x => !ids.has(x.id)).sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0)); };
+  // Newest groups needs WhatsApp Reader 1.0.2 or later, which reports when each group was created.
+  const haveCreated = () => (live.groups || []).some(x => x.created_at > 0);
+  const groupSort = () => { const s = state.groupSort || 'new'; return s === 'new' && !haveCreated() ? 'active' : s; };
+  const SORTS = {
+    new: (a, b) => (b.created_at || 0) - (a.created_at || 0) || (b.last_message_at || 0) - (a.last_message_at || 0),
+    active: (a, b) => (b.last_message_at || 0) - (a.last_message_at || 0),
+    name: (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' }),
+  };
+  const createdDay = t => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(new Date(t).getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+  const untrackedGroups = () => { const ids = trackedIds(); return (live.groups || []).filter(x => !ids.has(x.id)).sort(SORTS[groupSort()]); };
   const groupCountText = (shown, all) => state.groupQuery.trim() ? `${shown} of ${plural(all, 'group')}` : plural(all, 'group');
   const pickCountText = n => n ? `${plural(n, 'group')} selected` : 'Tick the groups to track';
   // the ticked groups, in the order they appear in the list
@@ -667,6 +684,11 @@
     if (e.target.id === 'task-filter') { state.taskFilter = e.target.value; render(); }
     if (e.target.id === 'group-filter') { state.groupFilter = e.target.value; state.sel = null; render(); }
     if (e.target.id === 'sender-filter') { state.senderFilter = e.target.value; state.sel = null; render(); }
+    if (e.target.id === 'group-sort') {
+      state.groupSort = e.target.value;
+      try { localStorage.setItem('wa-group-sort', state.groupSort); } catch (_) {}
+      render();
+    }
     if (e.target.name === 'pick-group') {
       if (e.target.checked) state.pickGroups.add(e.target.value); else state.pickGroups.delete(e.target.value);
       const n = state.pickGroups.size;

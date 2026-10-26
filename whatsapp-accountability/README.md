@@ -20,7 +20,7 @@ WhatsApp group
 
 ## Rules the dashboard uses
 
-- Groups are added from "Groups and names": search the linked phone's groups, tick several, then pick each one on the left and tick who gives instructions there. "Use these instruction-givers in every selected group they're in" copies the ticks to the other groups.
+- Groups are added from "Groups and names": search the linked phone's groups (sorted by newest group, recent activity or name; newest needs WhatsApp Reader 1.0.2), tick several, then pick each one on the left and tick who gives instructions there. "Use these instruction-givers in every selected group they're in" copies the ticks to the other groups.
 - Each tracked group has its own instruction-givers, chosen at setup. Everyone else in that group is tracked. A message to everyone means the team, not the other givers, but when one giver asks another by name or @mention (Juan: "Cherry can you do this?") the one asked is tracked like anyone else. Groups can be added, edited or dropped later from "Groups and names" in the sidebar.
 - People are matched by phone number, so someone in two groups has one record. The top of the page switches between all groups and one, and a "From" filter shows only one instruction-giver's messages (for example only the CEO's, or only the COO's).
 - A quoted reply or a reaction answers that one message. Any other message answers everything still open for that person before it.
@@ -32,7 +32,7 @@ WhatsApp group
 
 ## Download
 
-`release/whatsapp-reader.exe` is WhatsApp Reader 1.0.1 for Windows, ready to use; setup steps are in `reader/README.txt`. Its SHA-256 is in `release/SHA256SUMS.txt`, and `reader/build.sh` rebuilds the same file byte for byte from `reader/`.
+`release/whatsapp-reader.exe` is WhatsApp Reader 1.0.2 for Windows, ready to use; setup steps are in `reader/README.txt`. Its SHA-256 is in `release/SHA256SUMS.txt`, and `reader/build.sh` rebuilds the same file byte for byte from `reader/`.
 
 ## Building
 
@@ -53,6 +53,7 @@ node dashboard/test/e2e-newpc.js  # a newly linked reader with less history keep
 node dashboard/test/e2e-clear.js  # Clear data wipes one group and counts only newer messages
 node dashboard/test/e2e-delete.js  # deleting one message, the deleted list, and Restore
 node dashboard/test/e2e-addmany.js  # searching, ticking several groups, and setting each one up side by side
+node dashboard/test/e2e-sort.js  # sorting the group list: newest groups, recent activity, name
 ```
 
 ## Status

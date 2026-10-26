@@ -43,6 +43,7 @@ type GroupOut struct {
 	Me           string        `json:"me"`
 	Participants []Participant `json:"participants"`
 	UpdatedAt    int64         `json:"updated_at"`
+	CreatedAt    int64         `json:"created_at"`
 	FromCache    bool          `json:"from_cache"`
 }
 
@@ -122,7 +123,7 @@ func addTools(s *mcp.Server, r *Reader) {
 					return nil, GroupOut{}, errors.New("this group isn't saved yet and WhatsApp Reader is offline")
 				}
 			}
-			return nil, GroupOut{ID: g.ID, Name: g.Name, Me: r.MyID(), Participants: g.Participants, UpdatedAt: g.UpdatedAt, FromCache: fromCache}, nil
+			return nil, GroupOut{ID: g.ID, Name: g.Name, Me: r.MyID(), Participants: g.Participants, UpdatedAt: g.UpdatedAt, CreatedAt: g.CreatedAt, FromCache: fromCache}, nil
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "get_messages", Annotations: readOnly(),
