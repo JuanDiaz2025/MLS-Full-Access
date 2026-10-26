@@ -411,6 +411,38 @@ not written anything there. Before it is switched on, it should skip team
 numbers (`if (c.kind === "text" && TEAM.has(c.other)) return;` with
 `TEAM = new Set(["5102143561"])`).
 
+## Team comp rules (Test board only, 26 Oct)
+
+Seth set the team's comp rules on 26 Oct from Gen's write-ups for 848
+Foerster, 1408 Royal and 549 6th Ave, and asked for them on the Test board
+only. `compcheck.py` applies them to the comps the FlipScout app saved
+(`comps.js`):
+
+    python3 -I compcheck.py <new data.js> <out>/shared/comps.js <out>/testonly
+
+- Each saved comp's public MLS page gives its location, sale date, sale
+  price, size, beds, baths, year and remarks; the lead's own page gives its
+  location and baths. Pages read are kept in `compfacts.js` (read the Test
+  board's copy into `<out>/testonly/` first), so a sale is read once.
+- The remarks decide the condition: the kitchen AND a bath remodeled (or a
+  whole-house remodel) counts, luxury included; a light update is a floor
+  marker only; as-is, new construction and rebuilds are out. "Updated" is a
+  light update until the photos say otherwise.
+- Then: within 1 mile, within 20% of the size, beds and baths within 1,
+  built within 20 years, sold in the last 3 months (6 when fewer than 3
+  pass), 3 needed. ARV = median $/sqft x our size, never above their top sale.
+- `teamcomps.js` holds the result per lead. The Test board's Comps agent
+  shows it as "Team rules" above the app's ARV, with each comp that counts
+  and why each other one doesn't.
+
+Not checked yet: the county square footage (drop a comp more than 10% off;
+only Matrix's Tax tab has it), the same side of the freeways, and sales
+outside the app's zip search (Gen's way is a 1-mile Matrix search). Those
+need the app, which feeds both boards, so they wait for Seth's OK.
+
+Never put `teamcomps.js` or the Team rules block on the real board until Seth
+says so.
+
 ## Daily refresh
 
 Steps 1–3 run once per board, each in its own out dir and its own upload
