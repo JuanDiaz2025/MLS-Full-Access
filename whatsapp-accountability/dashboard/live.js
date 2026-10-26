@@ -237,7 +237,7 @@ function buildFromRaw(raw, now) {
       id: m.i, at: m.t, title: a.title || (m.x || '').split('\n')[0].slice(0, 48) || 'Message',
       text: readableText(m, nameOf), kind: a.type === 'Question' ? 'Question' : 'Instruction',
       required: [...x.req], everyone: a.required === 'all', priority: a.priority || 'Normal',
-      task: taskId, replies: x.replies, senderName: nameOf(m.s), by: a.by || 'claude', chases: x.chases,
+      task: taskId, replies: x.replies, senderId: m.s, senderName: nameOf(m.s), by: a.by || 'claude', chases: x.chases,
     };
   }).sort((a, b) => b.at - a.at);
 
@@ -249,7 +249,7 @@ function buildFromRaw(raw, now) {
 // the previous read; someone missing is assumed to have left just after it.
 function updateMembers(prev, participants, lastRead, now) {
   const out = {};
-  const first = !prev;
+  const first = !prev || !Object.keys(prev).length;
   const seen = new Set(participants.map(p => p.id));
   Object.entries(prev || {}).forEach(([id, m]) => { out[id] = { ...m }; });
   participants.forEach(p => {

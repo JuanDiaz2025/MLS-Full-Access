@@ -1,6 +1,6 @@
 # WhatsApp AI Accountability
 
-Tracks who replies to instructions posted in a team WhatsApp group, how long they take, who owns which task, and who keeps not responding. It only reads. Nothing in it sends a message, a reaction, a read receipt or a reminder.
+Tracks who replies to instructions posted in one or more team WhatsApp groups, how long they take, who owns which task, and who keeps not responding. It only reads. Nothing in it sends a message, a reaction, a read receipt or a reminder.
 
 Dashboard: https://claude.ai/artifact/4NXd6hMvf29C9NHX6gv9ig
 
@@ -20,7 +20,8 @@ WhatsApp group
 
 ## Rules the dashboard uses
 
-- Instructions are messages from the people chosen at setup. Everyone else in the group is tracked.
+- Each tracked group has its own instruction-givers, chosen at setup. Everyone else in that group is tracked. Groups can be added, edited or dropped later from "Groups and names" in the sidebar.
+- People are matched by phone number, so someone in two groups has one record. The top of the page switches between all groups and one, and a "From" filter shows only one instruction-giver's messages (for example only the CEO's, or only the COO's).
 - A quoted reply or a reaction answers that one message. Any other message answers everything still open for that person before it.
 - A task counts as done when its owner sends a photo, video or document, or says done/finished/sent/etc.
 - Follow-up timing (default 15 / 30 / 60 minutes) only decides when someone is flagged "Needs 1st reminder", "Needs 2nd reminder" or "Escalate to manager". A reply after the escalation point counts as a miss; two or more misses in 30 days is a repeat non-responder.
@@ -34,12 +35,13 @@ reader/build.sh
 # dashboard: assembles whatsapp-accountability.html from page.src.html, model.js, live.js and app.js
 python3 dashboard/build.py
 
-# dashboard end-to-end check against a simulated reader, Claude and storage (needs Playwright)
-node dashboard/test/e2e.js
+# dashboard end-to-end checks against a simulated reader, Claude and storage (need Playwright)
+node dashboard/test/e2e.js        # one group, from setup to a second device
+node dashboard/test/e2e-multi.js  # two groups, filters, edits, and moving an older single-group copy
 ```
 
 ## Status
 
-Tested here: the reader reaches WhatsApp and produces a link code that scans; the Claude app sees exactly the four read-only tools; message saving is covered by `reader/reader_test.go`; the dashboard passes the simulated end-to-end run. Not yet tested: linking a real phone, a real group, and the Claude desktop app talking to the reader on Windows.
+Tested for real: a phone linked to the reader on Windows, a test group read live through the Claude desktop app, and the saved copy matching WhatsApp. Message saving is covered by `reader/reader_test.go`. Tracking several groups at once has only been tested against the simulated reader so far.
 
 WhatsApp's terms don't allow third-party linked devices, even read-only ones. The risk is low because nothing is sent, but it isn't zero.

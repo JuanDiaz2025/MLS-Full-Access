@@ -252,6 +252,17 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .name-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .name-row .sub { font-size: 12.5px; color: var(--ink-3); }
 .name-in { padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); width: 100%; }
+.top-meta .sel { max-width: 240px; font-weight: 600; }
+.tracked-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.tracked { border: 1px solid var(--line-2); border-radius: 12px; padding: 12px 14px; background: var(--surface); }
+.tracked.editing { border-color: var(--accent); }
+.tracked-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.tracked-h b { overflow-wrap: anywhere; }
+.tracked-h .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
+.tracked-a { display: flex; gap: 8px; }
+.btn.small { padding: 6px 12px; font-size: 13px; }
+.btn.danger { color: var(--crit-ink); }
+.btn.danger:hover { background: var(--crit-soft); }
 .foot { font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 14px; max-width: 80ch; }
 
 /* ---------- timing dialog ---------- */
@@ -320,7 +331,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
     <div class="side-foot">
       <button class="timing-btn" id="change-group" type="button" data-action="change-group" hidden>
         <svg class="ic" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
-        <span class="t-txt"><b>Change group or names</b><span>Pick the group, who gives instructions, and names</span></span>
+        <span class="t-txt"><b>Groups and names</b><span>Add or edit groups, who gives instructions, and names</span></span>
       </button>
       <button class="timing-btn" id="open-timing" type="button" aria-haspopup="dialog">
         <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 1.5M9.5 3h5"/></svg>
@@ -341,6 +352,8 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
       <header class="top">
         <div><h1 id="v-title"></h1><p id="v-sub"></p></div>
         <div class="top-meta">
+          <select class="sel" id="group-filter" aria-label="Group" hidden></select>
+          <select class="sel" id="sender-filter" aria-label="Instructions from" hidden></select>
           <span class="pill" id="group-pill"></span>
           <span class="pill sample" id="snap"></span>
         </div>
@@ -525,7 +538,7 @@ function buildSample(now) {
 function derive(S, cfg, now) {
   const esc = cfg.escalate * MIN, marks = [cfg.first, cfg.second, cfg.escalate].map(x => x * MIN);
   const people = {};
-  S.people.forEach(p => { people[p.id] = { ...p, required: 0, replied: 0, delays: [], missed: 0, lastMissed: null, pending: [] }; });
+  S.people.forEach(p => { people[p.id] = { ...p, required: 0, replied: 0, delays: [], missed: 0, lastMissed: null, pending: [], chased: 0 }; });
 
   const messages = S.messages.map(m => {
     const req = m.required === 'all' ? S.people.map(p => p.id) : m.required;
@@ -541,6 +554,8 @@ function derive(S, cfg, now) {
       if (missed) { P.missed++; P.lastMissed = Math.max(P.lastMissed || 0, m.at + esc); }
       const row = { pid, name: P.name, replied: !!r, at: r ? r.at : null, delay: r ? r.at - m.at : null, text: r ? r.text : '', stage, missed, waiting: r ? null : elapsed };
       if (!r) P.pending.push({ msg: m, waiting: elapsed, stage });
+      // each nudge counts against whoever still hadn't answered when it was sent
+      (m.chases || []).forEach(c => { if (!r || r.at > c.at) P.chased++; });
       return row;
     });
     const pending = rows.filter(r => !r.replied);
@@ -834,7 +849,7 @@ function buildFromRaw(raw, now) {
       id: m.i, at: m.t, title: a.title || (m.x || '').split('\n')[0].slice(0, 48) || 'Message',
       text: readableText(m, nameOf), kind: a.type === 'Question' ? 'Question' : 'Instruction',
       required: [...x.req], everyone: a.required === 'all', priority: a.priority || 'Normal',
-      task: taskId, replies: x.replies, senderName: nameOf(m.s), by: a.by || 'claude', chases: x.chases,
+      task: taskId, replies: x.replies, senderId: m.s, senderName: nameOf(m.s), by: a.by || 'claude', chases: x.chases,
     };
   }).sort((a, b) => b.at - a.at);
 
@@ -846,7 +861,7 @@ function buildFromRaw(raw, now) {
 // the previous read; someone missing is assumed to have left just after it.
 function updateMembers(prev, participants, lastRead, now) {
   const out = {};
-  const first = !prev;
+  const first = !prev || !Object.keys(prev).length;
   const seen = new Set(participants.map(p => p.id));
   Object.entries(prev || {}).forEach(([id, m]) => { out[id] = { ...m }; });
   participants.forEach(p => {
@@ -873,13 +888,18 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
 
   let cfg = { ...DEFAULTS };
   let D = null, S = SAMPLE, NOW = SAMPLE_NOW, N = SAMPLE.people.length;
-  const state = { view: 'dashboard', sel: null, taskFilter: 'open', setup: false, setupGroup: null, setupBoss: null };
+  const state = { view: 'dashboard', sel: null, taskFilter: 'open', groupFilter: 'all', senderFilter: 'all',
+    setup: false, editGroup: null, setupGroup: null, setupBoss: null, setupNames: null, confirmRemove: null };
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
-  const src = { mode: 'sample', raw: null, S: SAMPLE, now: SAMPLE_NOW, group: { name: 'THB Construction Team' }, updatedAt: null };
+  const src = { mode: 'sample', S: SAMPLE, now: SAMPLE_NOW, updatedAt: null, groups: [] };
   const cap = { db: null, mcp: null, sample: null, canEdit: null, isOwner: null };
-  const saved = { source: null, meta: null, analysis: {}, days: {}, names: {}, loaded: { source: false, analysis: false, meta: false } };
+  // tracking: the groups being tracked, each with whose messages are instructions
+  const saved = { tracking: null, legacySource: null, names: {}, groups: {}, legacy: { meta: null, analysis: {}, days: {} },
+    loaded: { tracking: false, source: false, legacyMeta: false, legacyAnalysis: false } };
+  const subs = {};
   const live = { on: false, status: null, groups: null, groupInfo: null, busy: false, again: false, lastSig: '', lastSync: 0,
-    unwatch: null, diag: null, written: {}, writtenAnalysis: null, writtenMeta: null, lastMetaWrite: 0, sampleDenied: false, analyzing: 0, error: null, offCode: null };
+    unwatch: null, diag: null, raws: {}, written: {}, writtenAnalysis: {}, writtenMeta: {}, lastMetaWrite: {}, lastMembersRead: {},
+    legacyCleared: false, sampleDenied: false, analyzing: 0, error: null, offCode: null };
 
   const VIEWS = {
     dashboard: { label: 'Dashboard', icon: 'grid', title: 'Dashboard', sub: 'Who hasn’t replied, what’s still open, and who needs a follow-up.' },
@@ -963,6 +983,8 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
 
   const snippet = text => { const line = String(text || '').split('\n')[0]; return line.length > 72 ? line.slice(0, 70).trimEnd() + '…' : line; };
   const msgLink = (m, label) => `<button class="rowlink" type="button" data-open-msg="${esc(m.id)}">${esc(label || m.title)}</button>`;
+  // which group a message came from, shown only when several are tracked and all are on screen
+  const groupTag = m => m && m.groupName && src.groups.length > 1 && state.groupFilter === 'all' ? `${esc(m.groupName)} · ` : '';
   const emptyCard = (title, body) => `<div class="card"><div class="empty"><b>${esc(title)}</b><br>${esc(body)}</div></div>`;
 
   // ---------------- Dashboard ----------------
@@ -972,12 +994,12 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       const top = p.pending[0];
       const extra = p.pending.length - 1;
       return `<tr><td>${who(p.name)}</td>
-        <td>${msgLink(top.msg)}${extra ? ` <span class="more">+${extra} more</span>` : ''}<span class="sub">Sent ${esc(fmtWhen(top.msg.at))}</span></td>
+        <td>${msgLink(top.msg)}${extra ? ` <span class="more">+${extra} more</span>` : ''}<span class="sub">${groupTag(top.msg)}Sent ${esc(fmtWhen(top.msg.at))}</span></td>
         <td class="num">${fmtDur(top.waiting)}</td>
         <td>${stageChip(top.stage, top.msg)}</td></tr>`;
     }).join('');
     const unresolvedRows = D.unresolved.map(m => `<tr>
-        <td>${msgLink(m)}<span class="sub">${esc(m.kind)}${m.priority === 'High' ? ' · High priority' : ''}${(m.chases || []).length ? ` · you followed up ${m.chases.length}×` : ''}</span></td>
+        <td>${msgLink(m)}<span class="sub">${groupTag(m)}${esc(m.kind)}${m.priority === 'High' ? ' · High priority' : ''}${(m.chases || []).length ? ` · followed up ${m.chases.length}×` : ''}</span></td>
         <td class="nowrap">${esc(fmtWhen(m.at))}</td>
         <td>${meter(m.responded, m.req.length)}</td>
         <td>${chip('c-warn', `${m.pending.length} pending`)}</td></tr>`).join('');
@@ -1014,7 +1036,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   function viewMessages() {
     if (!D.messages.length) {
       return emptyCard('No instructions yet', src.mode === 'sample' ? 'Nothing to show.'
-        : `Messages from ${bossNames().join(' or ')} that ask people to do or answer something will show here.`);
+        : 'Messages from the people giving instructions that ask others to do or answer something will show here.');
     }
     if (!state.sel || !D.messages.find(m => m.id === state.sel)) {
       state.sel = (D.unresolved.slice().sort((a, b) => b.pending.length - a.pending.length)[0] || D.messages[0]).id;
@@ -1029,7 +1051,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <span class="m-ic">${ic(open ? 'clock' : 'check')}</span>
         <span class="m-t">${esc(m.title)}</span>
         ${open ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied')}
-        <span class="m-s">${esc(fmtClock(m.at))} · ${m.responded}/${m.req.length} replied${(m.chases || []).length ? ` · followed up ${m.chases.length}×` : ''}</span></button>`;
+        <span class="m-s">${groupTag(m)}${esc(fmtClock(m.at))} · ${m.responded}/${m.req.length} replied${(m.chases || []).length ? ` · followed up ${m.chases.length}×` : ''}</span></button>`;
     }).join('');
 
     const m = D.messages.find(x => x.id === state.sel);
@@ -1037,7 +1059,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const nameById = id => (D.people.find(p => p.id === id) || {}).name || id;
     const reqLabel = m.required === 'all' || m.everyone ? `Everyone (${m.req.length})` : m.req.map(nameById).join(', ');
     const chases = m.chases || [];
-    const chaseHtml = chases.length ? `<div class="chases"><div class="chases-h">${ic('repeat')}You followed up ${chases.length === 1 ? 'once' : chases.length + ' times'}</div>
+    const chaseHtml = chases.length ? `<div class="chases"><div class="chases-h">${ic('repeat')}${esc(m.senderName || 'You')} followed up ${chases.length === 1 ? 'once' : chases.length + ' times'}</div>
         ${chases.map(c => `<div class="chase"><span>${esc(c.text)}</span><time>${esc(fmtClock(c.at))}</time></div>`).join('')}</div>` : '';
     const rows = m.rows.slice().sort((a, b) => (a.replied - b.replied) || (a.replied ? a.delay - b.delay : a.name.localeCompare(b.name))).map(r => `<tr>
         <td>${who(r.name)}</td>
@@ -1050,7 +1072,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       <div class="card"><div class="card-h"><h2>Sent to the group</h2><span class="hint">${plural(D.messages.length, 'message')}, last 30 days</span></div>
         <div class="mlist" id="mlist">${items}</div></div>
       <div class="card"><div class="card-b">
-        <div class="mhead"><div><h2>${esc(m.title)}</h2><p>${esc(fmtWhen(m.at))} · Sent by ${esc(m.senderName || 'Juan')}</p></div>
+        <div class="mhead"><div><h2>${esc(m.title)}</h2><p>${esc(fmtWhen(m.at))} · ${groupTag(m)}Sent by ${esc(m.senderName || 'Juan')}</p></div>
           ${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}</div>
         <div class="bubble">${esc(m.text)}<span class="b-time">${esc(fmtClock(m.at))}</span></div>
         ${chaseHtml}
@@ -1082,7 +1104,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       else when = t.status === 'Completed late' ? `done ${fmtDur(t.doneAt - t.due)} late` : `done ${esc(fmtWhen(t.doneAt))}`;
       return `<tr>
         <td><b>${esc(t.title)}</b></td>
-        <td class="from">${msgLink(t.from, '“' + snippet(t.from.text) + '”')}<span class="sub">${esc(fmtWhen(t.from.at))}</span></td>
+        <td class="from">${msgLink(t.from, '“' + snippet(t.from.text) + '”')}<span class="sub">${groupTag(t.from)}${esc(fmtWhen(t.from.at))} · from ${esc(t.from.senderName || '')}</span></td>
         <td>${who(t.ownerName)}</td>
         <td class="nowrap">${t.due != null ? esc(fmtWhen(t.due)) : '<span class="plain">No deadline</span>'}<span class="sub">${when}</span></td>
         <td>${chip(TASK_TONE[t.status], t.status)}</td>
@@ -1118,7 +1140,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const chasedList = D.people.filter(p => p.chased > 0).sort((a, b) => b.chased - a.chased);
     const maxChase = Math.max(1, ...chasedList.map(p => p.chased));
     const chaseBars = chasedList.map(p => `
-      <div class="bar-row" tabindex="0" data-tip-t="${esc(p.name)}" data-tip="${esc(`You had to follow up ${p.chased === 1 ? 'once' : p.chased + ' times'} before ${p.name} answered, in the last 30 days.`)}">
+      <div class="bar-row" tabindex="0" data-tip-t="${esc(p.name)}" data-tip="${esc(`${p.name} had to be followed up ${p.chased === 1 ? 'once' : p.chased + ' times'} before answering, in the last 30 days.`)}">
         ${who(p.name)}
         <div class="bar-track"><div class="bar" style="width:${(p.chased / maxChase * 100).toFixed(1)}%;background:var(--serious)"></div></div>
         <div class="bar-val">${p.chased}×</div>
@@ -1156,10 +1178,10 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <div class="card-b">${missBars ? `<div class="bars">${missBars}</div>
           <p class="legend">A miss is a reply that didn’t arrive before the ${cfg.escalate}-minute escalation point.</p>`
           : '<div class="empty">Nobody missed more than one reply in the last 30 days.</div>'}</div></div>
-      <div class="card"><div class="card-h"><h2>Times you had to chase</h2><span class="hint">Last 30 days</span></div>
+      <div class="card"><div class="card-h"><h2>Times people had to be chased</h2><span class="hint">Last 30 days</span></div>
         <div class="card-b">${chaseBars ? `<div class="bars">${chaseBars}</div>
           <p class="legend">Each follow-up counts against the people who still hadn’t answered when it was sent.</p>`
-          : '<div class="empty">You didn’t have to chase anyone.</div>'}</div></div>
+          : '<div class="empty">Nobody had to be chased.</div>'}</div></div>
       <div class="card"><div class="card-h"><h2>Replies before escalation, by week</h2><span class="hint">Share of required replies</span></div>
         <div class="card-b"><div class="cols">${weekCols.map(w => w.html).join('')}</div>
           <div class="col-x">${weekCols.map(w => `<span>${esc(w.label)}</span>`).join('')}</div></div></div></div>
@@ -1176,9 +1198,34 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
           : '<div class="empty">No tasks yet.</div>'}</div>`;
   }
 
-  // ---------------- connecting a group (owner, on the computer running WhatsApp Reader) ----------------
-  const sourceKnown = () => !cap.db || saved.loaded.source;
-  const needsSetup = () => live.on && (!live.status || !live.status.linked || (!saved.source && sourceKnown()) || state.setup);
+  // ---------------- choosing groups (owner, on the computer running WhatsApp Reader) ----------------
+  // The groups being tracked. Older pages saved a single group as settings/source.
+  const trackedGroups = () => saved.tracking ? (saved.tracking.groups || [])
+    : saved.legacySource ? [{ groupId: saved.legacySource.groupId, groupName: saved.legacySource.groupName, bossIds: saved.legacySource.bossIds || [] }] : [];
+  const trackingKnown = () => !cap.db || (saved.loaded.tracking && saved.loaded.source);
+  const needsSetup = () => live.on && (!live.status || !live.status.linked || (!trackedGroups().length && trackingKnown()) || state.setup);
+  const looksLikeNumber = n => !n || /^\+?[\d\s()-]+$/.test(n);
+  const nameFor = (id, fallback) => saved.names[id] || (looksLikeNumber(fallback) ? (fallback || '+' + id) : fallback);
+
+  // The form for one group: whose messages are instructions, and names.
+  function groupForm(g, action, label) {
+    const givers = `<div class="choices">${g.participants.map(p => `
+        <label class="choice"><input type="checkbox" name="setup-boss" id="b-${esc(p.id)}" value="${esc(p.id)}"${state.setupBoss && state.setupBoss.has(p.id) ? ' checked' : ''}>
+          <span><b>${esc(nameFor(p.id, p.name))}${p.id === g.me ? ' (this phone)' : ''}</b><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}</span></span></label>`).join('')}</div>`;
+    const nameValue = p => (state.setupNames && p.id in state.setupNames) ? state.setupNames[p.id]
+      : saved.names[p.id] || (looksLikeNumber(p.name) ? '' : p.name);
+    const nameRows = g.participants.map(p => `
+        <label class="name-row" for="n-${esc(p.id)}"><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}${p.id === g.me ? ' (this phone)' : ''}</span>
+          <input class="name-in" type="text" id="n-${esc(p.id)}" data-name-for="${esc(p.id)}" value="${esc(nameValue(p))}" placeholder="Name" maxlength="60" autocomplete="off"></label>`).join('');
+    const ready = state.setupBoss && state.setupBoss.size;
+    return `<h3>Whose messages are the instructions in “${esc(g.name || 'this group')}”?</h3>
+      <p class="plain">Tick everyone who gives instructions here, for example the CEO and the COO. Everyone else in the group is tracked for replies.</p>${givers}
+      <h3>Names</h3><p class="plain">Optional. Shown on the dashboard instead of phone numbers, in every group.</p><div class="names">${nameRows}</div>
+      <div class="dlg-f" style="padding:0;margin-top:16px">
+        <button class="btn" type="button" data-action="cancel-edit">Cancel</button>
+        <button class="btn primary" type="button" data-action="${action}"${ready ? '' : ' disabled'}>${label}</button>
+      </div>`;
+  }
 
   function viewSetup() {
     const st = live.status;
@@ -1195,49 +1242,45 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <button class="btn" type="button" data-action="recheck">Check again</button>
       </div></div>`;
     }
-    const groups = (live.groups || []).slice().sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0));
+    const tracked = trackedGroups();
     const g = live.groupInfo;
-    const pickGroup = live.groups == null ? '<p class="plain">Loading your groups…</p>'
-      : !groups.length ? '<p class="plain">No groups found on the linked phone yet. Send a message in the group, then check again.</p>'
-      : `<div class="choices" role="radiogroup" aria-label="Group">${groups.map(x => `
+    const loaded = id => g && g.id === id;
+    const allNames = id => (live.raws[id] ? nameIndex({ ...live.raws[id], overrides: saved.names }) : (x => nameFor(x, '+' + x)));
+
+    const trackedRows = tracked.map(t => {
+      const nameOf = allNames(t.groupId);
+      const editing = state.editGroup === t.groupId;
+      return `<div class="tracked${editing ? ' editing' : ''}">
+        <div class="tracked-h"><div><b>${esc(t.groupName || 'Unnamed group')}</b>
+          <span class="sub">Instructions from ${esc((t.bossIds || []).map(nameOf).join(', ') || 'nobody yet')}</span></div>
+          ${editing ? '' : `<div class="tracked-a">
+            <button class="btn small" type="button" data-action="edit-group" data-gid="${esc(t.groupId)}">Edit</button>
+            <button class="btn small danger" type="button" data-action="remove-group" data-gid="${esc(t.groupId)}">${state.confirmRemove === t.groupId ? 'Click again to stop' : 'Stop tracking'}</button></div>`}</div>
+        ${editing ? (loaded(t.groupId) ? groupForm(g, 'save-group', 'Save') : '<p class="plain">Loading members…</p>') : ''}
+      </div>`;
+    }).join('');
+
+    const trackedIds = new Set(tracked.map(t => t.groupId));
+    const others = (live.groups || []).filter(x => !trackedIds.has(x.id)).sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0));
+    const adding = !state.editGroup;
+    const pick = live.groups == null ? '<p class="plain">Loading your groups…</p>'
+      : !others.length ? '<p class="plain">Every group on the linked phone is already tracked.</p>'
+      : `<div class="choices" role="radiogroup" aria-label="Group">${others.map(x => `
           <label class="choice"><input type="radio" name="setup-group" id="g-${esc(x.id)}" value="${esc(x.id)}"${state.setupGroup === x.id ? ' checked' : ''}>
             <span><b>${esc(x.name || 'Unnamed group')}</b><span class="sub">${plural(x.members, 'member')} · ${plural(x.message_count, 'message')} saved${x.last_message_at ? ` · last ${esc(fmtWhen(x.last_message_at))}` : ''}</span></span></label>`).join('')}</div>`;
-    let pickBoss = '';
-    if (state.setupGroup) {
-      pickBoss = !g || g.id !== state.setupGroup ? '<p class="plain">Loading members…</p>'
-        : `<div class="choices">${g.participants.map(p => `
-            <label class="choice"><input type="checkbox" name="setup-boss" id="b-${esc(p.id)}" value="${esc(p.id)}"${state.setupBoss && state.setupBoss.has(p.id) ? ' checked' : ''}>
-              <span><b>${esc(p.name)}${p.id === g.me ? ' (this phone)' : ''}</b><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}</span></span></label>`).join('')}</div>`;
-    }
-    const ready = state.setupGroup && state.setupBoss && state.setupBoss.size && g && g.id === state.setupGroup;
-    const looksLikeNumber = n => !n || /^\+?[\d\s()-]+$/.test(n);
-    const nameValue = p => (state.setupNames && p.id in state.setupNames) ? state.setupNames[p.id]
-      : saved.names[p.id] || (looksLikeNumber(p.name) ? '' : p.name);
-    const nameRows = g && g.id === state.setupGroup ? g.participants.map(p => `
-        <label class="name-row" for="n-${esc(p.id)}"><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}${p.id === g.me ? ' (this phone)' : ''}</span>
-          <input class="name-in" type="text" id="n-${esc(p.id)}" data-name-for="${esc(p.id)}" value="${esc(nameValue(p))}" placeholder="Name" maxlength="60" autocomplete="off"></label>`).join('') : '';
+    const addForm = adding && state.setupGroup ? (loaded(state.setupGroup) ? groupForm(g, 'add-group', tracked.length ? 'Add group' : 'Start tracking') : '<p class="plain">Loading members…</p>') : '';
+
     return `<div class="card setup"><div class="card-b">
-      <h2>${ic('link')}Choose the group to track</h2>
+      <h2>${ic('link')}Groups to track</h2>
       <p>WhatsApp Reader is linked to +${esc(st.phone)}. It only reads; nothing is ever sent.</p>
-      <h3>1. Group</h3>${pickGroup}
-      ${state.setupGroup ? `<h3>2. Whose messages are the instructions?</h3><p class="plain">Everyone else in the group is tracked for replies.</p>${pickBoss}` : ''}
-      ${nameRows ? `<h3>3. Names</h3><p class="plain">Optional. Shown on the dashboard instead of phone numbers.</p><div class="names">${nameRows}</div>` : ''}
+      ${tracked.length ? `<div class="tracked-list">${trackedRows}</div>` : ''}
+      ${adding ? `<h3>${tracked.length ? 'Add another group' : 'Pick a group'}</h3>${pick}${addForm}` : ''}
       <p class="dlg-msg err" id="setup-msg" role="status">${esc(live.setupError || '')}</p>
-      <div class="dlg-f" style="padding:0">
-        ${saved.source ? '<button class="btn" type="button" data-action="cancel-setup">Cancel</button>' : ''}
-        <button class="btn primary" type="button" data-action="save-source"${ready ? '' : ' disabled'}>${saved.source ? 'Save' : 'Start tracking'}</button>
-      </div>
+      ${tracked.length && !state.editGroup && !state.setupGroup ? '<div class="dlg-f" style="padding:0"><button class="btn primary" type="button" data-action="done-setup">Done</button></div>' : ''}
     </div></div>`;
   }
 
   // ---------------- frame ----------------
-  function bossNames() {
-    const raw = src.raw;
-    if (!raw) return ['Juan'];
-    const nameOf = nameIndex(raw);
-    return (raw.bossIds || []).map(nameOf);
-  }
-
   function renderNav() {
     const badge = { dashboard: D.pendingPeople.length, messages: D.unresolved.length, tasks: D.overdue.length, reports: null };
     document.getElementById('nav').innerHTML = Object.entries(VIEWS).map(([k, v]) =>
@@ -1245,20 +1288,47 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     document.getElementById('timing-sum').textContent = `Flags at ${cfg.first} and ${cfg.second} min, escalate at ${cfg.escalate}`;
   }
 
+  // The group switcher and the "From" filter at the top.
+  function renderFilters() {
+    const groups = src.groups;
+    const gSel = document.getElementById('group-filter');
+    const fSel = document.getElementById('sender-filter');
+    const pill = document.getElementById('group-pill');
+    if (src.mode === 'sample' || !groups.length) {
+      gSel.hidden = true; fSel.hidden = true; pill.hidden = false;
+      pill.innerHTML = `${ic('users')}THB Construction Team · ${plural(N, 'person', 'people')}`;
+      return;
+    }
+    if (state.groupFilter !== 'all' && !groups.some(g => g.id === state.groupFilter)) state.groupFilter = 'all';
+    pill.hidden = groups.length > 1;
+    gSel.hidden = groups.length < 2;
+    if (groups.length < 2) pill.innerHTML = `${ic('users')}${esc(groups[0].name)} · ${plural(N, 'person', 'people')}`;
+    else gSel.innerHTML = `<option value="all">All groups (${groups.length})</option>` + groups.map(g =>
+      `<option value="${esc(g.id)}"${state.groupFilter === g.id ? ' selected' : ''}>${esc(g.name)}</option>`).join('');
+    // who gives instructions in the groups on screen
+    const senders = new Map();
+    src.S.messages.forEach(m => { if (state.groupFilter === 'all' || m.groupId === state.groupFilter) senders.set(m.senderId, m.senderName); });
+    if (state.senderFilter !== 'all' && !senders.has(state.senderFilter)) state.senderFilter = 'all';
+    fSel.hidden = senders.size < 2;
+    fSel.innerHTML = `<option value="all">From: everyone</option>` + [...senders].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) =>
+      `<option value="${esc(id)}"${state.senderFilter === id ? ' selected' : ''}>From: ${esc(name)}</option>`).join('');
+  }
+
   function renderFrame() {
-    const groupName = src.group && src.group.name ? src.group.name : 'WhatsApp group';
-    document.getElementById('brand-sub').textContent = groupName;
-    document.getElementById('group-pill').innerHTML = `${ic('users')}${esc(groupName)} · ${plural(N, 'person', 'people')}`;
+    const groups = src.groups;
+    const current = state.groupFilter !== 'all' ? groups.find(g => g.id === state.groupFilter) : null;
+    const label = src.mode === 'sample' ? 'THB Construction Team' : current ? current.name : groups.length === 1 ? groups[0].name : plural(groups.length, 'group');
+    const named = groups.length === 1 ? `“${groups[0].name}”` : plural(groups.length, 'group');
+    document.getElementById('brand-sub').textContent = label;
     const pill = document.getElementById('snap');
     const note = document.getElementById('side-note');
     const foot = document.getElementById('foot');
-    const change = document.getElementById('change-group');
-    change.hidden = !(live.on && live.status && live.status.linked && saved.source);
+    document.getElementById('change-group').hidden = !(live.on && live.status && live.status.linked && trackedGroups().length);
     if (src.mode === 'live') {
       pill.className = 'pill live';
       pill.innerHTML = `<i class="dot"></i>Live · updated ${esc(fmtClock(src.updatedAt))}${live.analyzing ? ' · reading new messages…' : ''}`;
-      note.textContent = 'Reading the group on this computer. Nothing is sent to WhatsApp.';
-      foot.textContent = `Reading “${groupName}” through WhatsApp Reader on this computer. Nothing is ever sent to WhatsApp. Each update is saved into this page, so anyone with the link sees the same numbers on any device.`;
+      note.textContent = 'Reading the groups on this computer. Nothing is sent to WhatsApp.';
+      foot.textContent = `Reading ${named} through WhatsApp Reader on this computer. Nothing is ever sent to WhatsApp. Each update is saved into this page, so anyone with the link sees the same numbers on any device.`;
     } else if (src.mode === 'saved') {
       pill.className = 'pill';
       pill.innerHTML = `${ic('clock')}Saved · as of ${esc(fmtDate(src.updatedAt))}, ${esc(fmtClock(src.updatedAt))}`;
@@ -1282,34 +1352,47 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const err = document.getElementById('live-error');
     const msg = live.error ? (live.error.message || String(live.error)) : '';
     err.hidden = !(live.on && msg);
-    err.textContent = msg ? `WhatsApp Reader couldn’t read the group: ${msg}` : '';
+    err.textContent = msg ? `WhatsApp Reader couldn’t read a group: ${msg}` : '';
   }
 
   // Why this window isn't reading WhatsApp Reader, in words that say what to do.
   function connMessage(d) {
     switch (d.code) {
-      case 'connecting': return 'Connecting to WhatsApp Reader\u2026';
-      case 'no-mcp': return 'This window can\u2019t reach programs on your computer. Open this page in the Claude desktop app.';
-      case 'server_not_connected': return 'The Claude app showing this page didn\u2019t connect it to WhatsApp Reader. Check that Settings \u2192 Developer lists whatsapp-reader as running. If this page is open in a side panel, open it in its own window and press Connect.';
+      case 'connecting': return 'Connecting to WhatsApp Reader…';
+      case 'no-mcp': return 'This window can’t reach programs on your computer. Open this page in the Claude desktop app.';
+      case 'server_not_connected': return 'The Claude app showing this page didn’t connect it to WhatsApp Reader. Check that Settings → Developer lists whatsapp-reader as running. If this page is open in a side panel, open it in its own window and press Connect.';
       case 'not_in_manifest': case 'not_granted': case 'approval_required': case 'cancelled': case 'consent_required':
-        return 'Access to WhatsApp Reader wasn\u2019t allowed. Press Connect and choose Allow.';
-      case 'blocked_by_policy': return 'Your organization\u2019s settings block this page from using WhatsApp Reader.';
+        return 'Access to WhatsApp Reader wasn’t allowed. Press Connect and choose Allow.';
+      case 'blocked_by_policy': return 'Your organization’s settings block this page from using WhatsApp Reader.';
       case 'tool_error': return `WhatsApp Reader answered with an error: ${d.message || 'no details'}`;
-      default: return `Couldn\u2019t reach WhatsApp Reader${d.message ? ': ' + d.message : '.'}`;
+      default: return `Couldn’t reach WhatsApp Reader${d.message ? ': ' + d.message : '.'}`;
     }
   }
 
+  // What's on screen: all groups or one, everyone's instructions or one person's.
+  function filtered(all) {
+    if (src.mode === 'sample') return all;
+    let messages = all.messages;
+    if (state.groupFilter !== 'all') messages = messages.filter(m => m.groupId === state.groupFilter);
+    if (state.senderFilter !== 'all') messages = messages.filter(m => m.senderId === state.senderFilter);
+    const ids = new Set(messages.map(m => m.id));
+    const g = state.groupFilter;
+    const people = g === 'all' ? all.people : all.people.filter(p => p.groups.includes(g)).map(p => ({ ...p, former: p.formerIn.includes(g) }));
+    return { people, messages, tasks: all.tasks.filter(t => ids.has(t.msg)) };
+  }
+
   function render() {
-    S = src.S;
+    S = filtered(src.S);
     NOW = src.mode === 'live' ? Date.now() : src.now;
     N = S.people.filter(p => !p.former).length;
     D = derive(S, cfg, NOW);
     renderNav();
+    renderFilters();
     renderFrame();
     const setup = needsSetup();
     const v = VIEWS[state.view];
-    document.getElementById('v-title').textContent = setup ? 'Connect WhatsApp' : v.title;
-    document.getElementById('v-sub').textContent = setup ? 'One-time setup on this computer.' : v.sub;
+    document.getElementById('v-title').textContent = setup ? 'Groups to track' : v.title;
+    document.getElementById('v-sub').textContent = setup ? 'Set up on this computer. Change it any time from the sidebar.' : v.sub;
     const setupEl = document.getElementById('v-setup');
     setupEl.hidden = !setup;
     const typing = document.activeElement && setupEl.contains(document.activeElement) && document.activeElement.matches('input[type="text"]');
@@ -1338,7 +1421,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const sel = e.target.closest('[data-sel]');
     if (sel) { state.sel = sel.dataset.sel; render(); return; }
     const act = e.target.closest('[data-action]');
-    if (act) onAction(act.dataset.action);
+    if (act) onAction(act.dataset.action, act.dataset.gid);
   });
   document.addEventListener('input', e => {
     const id = e.target.dataset && e.target.dataset.nameFor;
@@ -1346,6 +1429,8 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   });
   document.addEventListener('change', e => {
     if (e.target.id === 'task-filter') { state.taskFilter = e.target.value; render(); }
+    if (e.target.id === 'group-filter') { state.groupFilter = e.target.value; state.sel = null; render(); }
+    if (e.target.id === 'sender-filter') { state.senderFilter = e.target.value; state.sel = null; render(); }
     if (e.target.name === 'setup-group') pickGroup(e.target.value);
     if (e.target.name === 'setup-boss') {
       state.setupBoss = new Set([...document.querySelectorAll('input[name="setup-boss"]:checked')].map(x => x.value));
@@ -1417,19 +1502,109 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   });
 
   // ---------------- saved copy (any device) ----------------
-  function applyRaw(raw, mode) {
-    src.mode = mode; src.raw = raw;
-    src.group = raw.group || { name: 'WhatsApp group' };
-    src.updatedAt = raw.syncedAt || Date.now();
-    src.now = mode === 'live' ? Date.now() : src.updatedAt;
-    src.S = buildFromRaw(raw, src.now);
+  // where a group's copy is kept in the page's storage
+  const gkey = gid => String(gid).replace(/[^A-Za-z0-9_.@+:~-]/g, '_');
+
+  // Several groups' messages, people and tasks put together. People are
+  // matched by phone number, so someone in two groups has one record.
+  function combine(parts, now) {
+    const people = new Map(), messages = [], tasks = [];
+    parts.forEach(({ id, name, raw }) => {
+      const Sg = buildFromRaw(raw, now);
+      Sg.people.forEach(p => {
+        const q = people.get(p.id);
+        if (!q) people.set(p.id, { ...p, groups: [id], formerIn: p.former ? [id] : [] });
+        else {
+          q.groups.push(id);
+          if (p.former) q.formerIn.push(id);
+          q.former = q.former && p.former;
+          if (looksLikeNumber(q.name) && !looksLikeNumber(p.name)) q.name = p.name;
+        }
+      });
+      Sg.messages.forEach(m => messages.push({ ...m, groupId: id, groupName: name }));
+      Sg.tasks.forEach(t => tasks.push({ ...t, groupId: id }));
+    });
+    return { people: [...people.values()], messages: messages.sort((a, b) => b.at - a.at), tasks };
+  }
+
+  function showSample() {
+    src.mode = 'sample'; src.S = SAMPLE; src.now = SAMPLE_NOW; src.groups = []; src.updatedAt = null;
     render();
   }
 
+  function show(parts, mode, updatedAt) {
+    src.mode = mode;
+    src.groups = parts.map(p => ({ id: p.id, name: p.name }));
+    src.updatedAt = updatedAt;
+    src.now = mode === 'live' ? Date.now() : updatedAt;
+    src.S = combine(parts, src.now);
+    render();
+  }
+
+  // A tracked group's saved data, or the older single-group copy if it hasn't moved yet.
+  function savedGroupData(gid) {
+    const g = saved.groups[gid];
+    if (g && g.meta) return g;
+    const L = saved.legacy;
+    if (L.meta && L.meta.group && L.meta.group.id === gid) return { meta: L.meta, analysis: L.analysis || {}, days: L.days, legacy: true };
+    return null;
+  }
+
+  function rawFromSaved(gid) {
+    const d = savedGroupData(gid);
+    if (!d) return null;
+    const messages = Object.values(d.days || {}).flatMap(x => (x && x.messages) || []);
+    return { ...d.meta, analysis: d.analysis || {}, messages, overrides: saved.names };
+  }
+
   function applySaved() {
-    if (src.mode === 'live' || !saved.meta || !saved.meta.group) { render(); return; }
-    const messages = Object.values(saved.days).flatMap(d => (d && d.messages) || []);
-    applyRaw({ ...saved.meta, analysis: saved.analysis || {}, messages, overrides: saved.names }, 'saved');
+    if (src.mode === 'live') { render(); return; }
+    const parts = trackedGroups().map(t => {
+      const raw = rawFromSaved(t.groupId);
+      return raw ? { id: t.groupId, name: (raw.group && raw.group.name) || t.groupName, raw } : null;
+    }).filter(Boolean);
+    if (!parts.length) { if (src.mode === 'saved') showSample(); else render(); return; }
+    show(parts, 'saved', Math.max(...parts.map(p => p.raw.syncedAt || 0)));
+  }
+
+  function applyLive() {
+    const parts = trackedGroups().filter(t => live.raws[t.groupId]).map(t => {
+      const raw = { ...live.raws[t.groupId], overrides: saved.names };
+      return { id: t.groupId, name: raw.group.name || t.groupName, raw };
+    });
+    if (!parts.length) { if (!trackedGroups().length) showSample(); return; }
+    show(parts, 'live', Math.max(...parts.map(p => p.raw.syncedAt || 0)));
+  }
+
+  function refreshShown() { if (src.mode === 'live') applyLive(); else applySaved(); }
+
+  // Listen to each tracked group's saved data; stop listening when it's no longer tracked.
+  function syncSubscriptions() {
+    const db = cap.db;
+    if (!db) return;
+    const want = new Set(trackedGroups().map(t => t.groupId));
+    Object.keys(subs).forEach(gid => {
+      if (!want.has(gid)) { subs[gid].forEach(off => off()); delete subs[gid]; delete saved.groups[gid]; }
+    });
+    want.forEach(gid => {
+      if (subs[gid]) return;
+      const box = saved.groups[gid] = { meta: null, analysis: {}, days: {}, loaded: { meta: false, analysis: false } };
+      const fail = () => {};
+      const k = gkey(gid);
+      subs[gid] = [
+        db.doc(`sync/${k}`).onSnapshot(snap => { box.meta = snap.exists ? snap.data() : null; box.loaded.meta = true; applySaved(); }, fail),
+        db.doc(`sync/${k}/extra/analysis`).onSnapshot(snap => { box.analysis = snap.exists ? (snap.data().byId || {}) : {}; box.loaded.analysis = true; applySaved(); }, fail),
+        db.collection(`sync/${k}/days`).onSnapshot(q => { const days = {}; q.docs.forEach(d => { days[d.id] = d.data(); }); box.days = days; applySaved(); }, fail),
+      ];
+    });
+  }
+
+  function onTrackingChanged() {
+    syncSubscriptions();
+    if (live.on && live.status && live.status.linked) {
+      if (trackedGroups().length) syncNow(); else if (trackingKnown()) loadGroups();
+    }
+    refreshShown();
   }
 
   function subscribeSaved(db) {
@@ -1440,28 +1615,24 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       const v = { first: d.first, second: d.second, escalate: d.escalate };
       if (valid(v) && (v.first !== cfg.first || v.second !== cfg.second || v.escalate !== cfg.escalate)) { cfg = v; render(); }
     }, fail);
+    db.doc('settings/tracking').onSnapshot(snap => {
+      saved.tracking = snap.exists ? snap.data() : null;
+      saved.loaded.tracking = true;
+      onTrackingChanged();
+    }, fail);
     db.doc('settings/source').onSnapshot(snap => {
-      saved.source = snap.exists ? snap.data() : null;
+      saved.legacySource = snap.exists ? snap.data() : null;
       saved.loaded.source = true;
-      if (live.on && live.status && live.status.linked) { if (saved.source) syncNow(); else loadGroups(); }
-      render();
+      onTrackingChanged();
     }, fail);
     db.doc('settings/names').onSnapshot(snap => {
       saved.names = snap.exists ? (snap.data().byId || {}) : {};
-      if (src.raw) applyRaw({ ...src.raw, overrides: saved.names }, src.mode); else render();
+      refreshShown();
     }, fail);
-    db.doc('sync/meta').onSnapshot(snap => { saved.meta = snap.exists ? snap.data() : null; saved.loaded.meta = true; applySaved(); }, fail);
-    db.doc('sync/analysis').onSnapshot(snap => {
-      saved.analysis = snap.exists ? (snap.data().byId || {}) : {};
-      saved.loaded.analysis = true;
-      applySaved();
-    }, fail);
-    db.collection('sync/meta/days').onSnapshot(q => {
-      const days = {};
-      q.docs.forEach(d => { days[d.id] = d.data(); });
-      saved.days = days;
-      applySaved();
-    }, fail);
+    // the older single-group copy, read until it has been moved
+    db.doc('sync/meta').onSnapshot(snap => { saved.legacy.meta = snap.exists ? snap.data() : null; saved.loaded.legacyMeta = true; applySaved(); }, fail);
+    db.doc('sync/analysis').onSnapshot(snap => { saved.legacy.analysis = snap.exists ? (snap.data().byId || {}) : {}; saved.loaded.legacyAnalysis = true; applySaved(); }, fail);
+    db.collection('sync/meta/days').onSnapshot(q => { const days = {}; q.docs.forEach(d => { days[d.id] = d.data(); }); saved.legacy.days = days; applySaved(); }, fail);
   }
 
   // ---------------- live reading (Claude desktop app on the computer running WhatsApp Reader) ----------------
@@ -1487,7 +1658,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         const code = e && e.code;
         if (['server_not_connected', 'not_in_manifest', 'blocked_by_policy', 'approval_required', 'not_granted'].includes(code)) {
           live.on = false; live.offCode = code; live.diag = { code, message: e.message };
-          if (src.mode === 'live') { src.mode = 'sample'; src.S = SAMPLE; src.now = SAMPLE_NOW; applySaved(); } else render();
+          if (src.mode === 'live') { src.mode = 'sample'; src.S = SAMPLE; src.now = SAMPLE_NOW; src.groups = []; applySaved(); } else render();
         }
       } finally { live.polling = false; }
     }, 30000);
@@ -1499,9 +1670,9 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const wasLinked = live.status && live.status.linked;
     live.status = st;
     if (!st.linked) { render(); return; }
-    if (!saved.source) {
-      if (sourceKnown() && (!live.groups || !wasLinked)) loadGroups(); // otherwise the saved choice is still loading
-      render(); return;
+    if (!trackedGroups().length || state.setup) {
+      if (trackingKnown() && (!live.groups || !wasLinked)) loadGroups(); // otherwise the saved choice is still loading
+      if (!trackedGroups().length) { render(); return; }
     }
     const sig = `${st.messages_stored}|${st.last_message_at}|${st.groups_known}`;
     if (sig !== live.lastSig || Date.now() - live.lastSync > 10 * MIN) { live.lastSig = sig; syncNow(); }
@@ -1511,57 +1682,107 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   async function loadGroups() {
     try { live.groups = ((await callReader('list_groups')) || {}).groups || []; live.setupError = ''; }
     catch (e) { live.groups = []; live.setupError = e.message || 'Couldn’t list the groups.'; }
-    if (!state.setupGroup && saved.source) state.setupGroup = saved.source.groupId;
-    if (state.setupGroup) pickGroup(state.setupGroup, true);
     render();
   }
 
-  async function pickGroup(id, keepBoss) {
-    state.setupGroup = id;
-    if (!keepBoss) state.setupBoss = null;
-    render();
+  // Reads a group's members for the setup form.
+  async function loadGroupInfo(id) {
     try {
       const g = await callReader('get_group', { group_id: id });
-      if (state.setupGroup !== id) return;
-      live.groupInfo = g;
-      if (!state.setupBoss) {
-        const prev = saved.source && saved.source.groupId === id ? saved.source.bossIds : null;
-        state.setupBoss = new Set(prev && prev.length ? prev : (g.me ? [g.me] : []));
-      }
-      live.setupError = '';
-    } catch (e) { live.setupError = e.message || 'Couldn’t read that group.'; }
-    render();
+      if (state.setupGroup !== id && state.editGroup !== id) return null;
+      live.groupInfo = g; live.setupError = '';
+      return g;
+    } catch (e) { live.setupError = e.message || 'Couldn’t read that group.'; return null; }
+    finally { render(); }
   }
 
-  async function onAction(action) {
+  async function pickGroup(id) {
+    state.setupGroup = id; state.editGroup = null; state.setupBoss = null; state.setupNames = null;
+    render();
+    const g = await loadGroupInfo(id);
+    if (g && state.setupGroup === id && !state.setupBoss) { state.setupBoss = new Set(g.me ? [g.me] : []); render(); }
+  }
+
+  // The names typed into the setup form, merged into the saved list.
+  function namesFromForm(g) {
+    const names = { ...saved.names };
+    g.participants.forEach(p => {
+      if (!state.setupNames || !(p.id in state.setupNames)) return;
+      const v = state.setupNames[p.id].trim();
+      if (v) names[p.id] = v; else delete names[p.id];
+    });
+    return names;
+  }
+
+  async function saveTracking(groups, names) {
+    const tracking = { groups, me: live.status && live.status.phone, savedAt: Date.now() };
+    saved.tracking = tracking;
+    if (names) saved.names = names;
+    if (cap.db) {
+      try {
+        await cap.db.doc('settings/tracking').set(tracking);
+        if (names) await cap.db.doc('settings/names').set({ byId: names });
+      } catch (e) { live.setupError = 'Couldn’t save the change on this page.'; }
+    }
+    onTrackingChanged();
+  }
+
+  // Removes a group's saved copy from the page (the reader keeps its own).
+  async function forgetGroup(gid) {
+    const db = cap.db;
+    delete live.raws[gid];
+    if (!db || cap.canEdit === false) return;
+    const box = saved.groups[gid];
+    const days = Object.keys((box && box.days) || {});
+    const k = gkey(gid);
+    try {
+      for (const day of days) await db.doc(`sync/${k}/days/${day}`).delete();
+      await db.doc(`sync/${k}/extra/analysis`).delete();
+      await db.doc(`sync/${k}`).delete();
+    } catch (_) { /* nothing else to do; it is no longer shown */ }
+  }
+
+  async function onAction(action, gid) {
+    const tracked = trackedGroups();
     if (action === 'connect') {
       startLive();
     } else if (action === 'recheck') {
       try { onStatus(await callReader('status')); } catch (e) { live.on = false; render(); }
     } else if (action === 'change-group') {
-      state.setup = true; state.setupGroup = saved.source ? saved.source.groupId : null; state.setupBoss = null; state.setupNames = null;
-      loadGroups();
-    } else if (action === 'cancel-setup') {
-      state.setup = false; render();
-    } else if (action === 'save-source') {
+      state.setup = true; state.editGroup = null; state.setupGroup = null; state.setupBoss = null; state.setupNames = null; state.confirmRemove = null;
+      render(); loadGroups();
+    } else if (action === 'done-setup') {
+      state.setup = false; state.setupGroup = null; state.editGroup = null; render();
+    } else if (action === 'cancel-edit') {
+      state.editGroup = null; state.setupGroup = null; state.setupBoss = null; state.setupNames = null; render();
+    } else if (action === 'edit-group') {
+      const t = tracked.find(x => x.groupId === gid);
+      if (!t) return;
+      state.editGroup = gid; state.setupGroup = null; state.setupNames = null; state.confirmRemove = null;
+      state.setupBoss = new Set(t.bossIds || []);
+      render(); loadGroupInfo(gid);
+    } else if (action === 'save-group') {
       const g = live.groupInfo;
-      if (!g || !state.setupBoss || !state.setupBoss.size) return;
-      const source = { groupId: g.id, groupName: g.name, bossIds: [...state.setupBoss], me: g.me, savedAt: Date.now() };
-      const names = { ...saved.names };
-      g.participants.forEach(p => {
-        if (!state.setupNames || !(p.id in state.setupNames)) return;
-        const v = state.setupNames[p.id].trim();
-        if (v) names[p.id] = v; else delete names[p.id];
-      });
-      saved.source = source; saved.names = names; state.setup = false; state.setupNames = null;
-      if (cap.db) {
-        try {
-          await cap.db.doc('settings/source').set(source);
-          await cap.db.doc('settings/names').set({ byId: names });
-        } catch (e) { live.setupError = 'Couldn’t save the choice on this page.'; }
-      }
-      if (src.raw) applyRaw({ ...src.raw, overrides: names }, src.mode);
-      live.lastSig = ''; render(); syncNow();
+      if (!g || g.id !== state.editGroup || !state.setupBoss || !state.setupBoss.size) return;
+      const groups = tracked.map(t => t.groupId === g.id ? { groupId: g.id, groupName: g.name || t.groupName, bossIds: [...state.setupBoss] } : t);
+      const names = namesFromForm(g);
+      state.editGroup = null; state.setupBoss = null; state.setupNames = null;
+      live.lastSig = '';
+      await saveTracking(groups, names);
+    } else if (action === 'add-group') {
+      const g = live.groupInfo;
+      if (!g || g.id !== state.setupGroup || !state.setupBoss || !state.setupBoss.size) return;
+      const groups = tracked.concat({ groupId: g.id, groupName: g.name, bossIds: [...state.setupBoss] });
+      const names = namesFromForm(g);
+      state.setupGroup = null; state.setupBoss = null; state.setupNames = null; state.setup = false;
+      live.lastSig = '';
+      await saveTracking(groups, names);
+    } else if (action === 'remove-group') {
+      if (state.confirmRemove !== gid) { state.confirmRemove = gid; render(); return; }
+      state.confirmRemove = null;
+      if (state.groupFilter === gid) state.groupFilter = 'all';
+      await forgetGroup(gid);
+      await saveTracking(tracked.filter(t => t.groupId !== gid), null);
     }
   }
 
@@ -1571,44 +1792,61 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     tick();
   });
 
+  // Reads one tracked group from WhatsApp Reader.
+  async function readGroup(t) {
+    const gid = t.groupId;
+    const g = await callReader('get_group', { group_id: gid });
+    let since = Date.now() - (WINDOW_DAYS + 1) * DAY_MS;
+    const seen = new Map();
+    for (let i = 0; i < 25; i++) {
+      const page = await callReader('get_messages', { group_id: gid, since, limit: 2000 });
+      const list = (page && page.messages) || [];
+      list.forEach(m => seen.set(m.id, m));
+      if (!page.more || !list.length || list[list.length - 1].at === since) break;
+      since = list[list.length - 1].at;
+    }
+    const all = [...seen.values()];
+    const participants = (g.participants || []).map(p => ({ id: p.id, name: p.name, phone: p.phone || '' }));
+    const ids = new Set(participants.map(p => p.id));
+    const names = {};
+    all.forEach(m => { if (m.sender_name && !ids.has(m.sender_id)) names[m.sender_id] = m.sender_name; });
+    const prev = savedGroupData(gid);
+    const prevRaw = live.raws[gid];
+    const now = Date.now();
+    const members = updateMembers(prevRaw ? prevRaw.members : prev ? prev.meta.members : null, participants,
+      live.lastMembersRead[gid] || (prev ? prev.meta.syncedAt : 0), now);
+    live.lastMembersRead[gid] = now;
+    return {
+      group: { id: g.id, name: g.name || t.groupName }, participants, members, names, bossIds: t.bossIds || [], me: g.me,
+      messages: all.map(compactMessage).sort((a, b) => a.t - b.t),
+      analysis: { ...(prevRaw ? prevRaw.analysis : prev ? prev.analysis : {}) },
+      overrides: saved.names,
+      syncedAt: now,
+    };
+  }
+
   async function syncNow() {
     if (live.busy) { live.again = true; return; }
-    if (!live.on || !saved.source) return;
+    if (!live.on || !trackedGroups().length) return;
     live.busy = true; live.again = false;
     try {
-      if (cap.db) await waitFor(() => saved.loaded.analysis && saved.loaded.source && saved.loaded.meta, 6000);
-      const source = saved.source;
-      const g = await callReader('get_group', { group_id: source.groupId });
-      let since = Date.now() - (WINDOW_DAYS + 1) * DAY_MS;
-      const seen = new Map();
-      for (let i = 0; i < 25; i++) {
-        const page = await callReader('get_messages', { group_id: source.groupId, since, limit: 2000 });
-        const list = (page && page.messages) || [];
-        list.forEach(m => seen.set(m.id, m));
-        if (!page.more || !list.length || list[list.length - 1].at === since) break;
-        since = list[list.length - 1].at;
+      if (cap.db) {
+        await waitFor(() => saved.loaded.tracking && saved.loaded.source && saved.loaded.legacyMeta && saved.loaded.legacyAnalysis
+          && trackedGroups().every(t => saved.groups[t.groupId] && saved.groups[t.groupId].loaded.meta && saved.groups[t.groupId].loaded.analysis), 6000);
       }
-      const all = [...seen.values()];
-      const participants = (g.participants || []).map(p => ({ id: p.id, name: p.name, phone: p.phone || '' }));
-      const ids = new Set(participants.map(p => p.id));
-      const names = {};
-      all.forEach(m => { if (m.sender_name && !ids.has(m.sender_id)) names[m.sender_id] = m.sender_name; });
-      const sameGroup = saved.meta && saved.meta.group && saved.meta.group.id === g.id;
-      const now = Date.now();
-      const members = updateMembers(sameGroup ? saved.meta.members : null, participants,
-        live.lastMembersRead || (sameGroup ? saved.meta.syncedAt : 0), now);
-      live.lastMembersRead = now;
-      const raw = {
-        group: { id: g.id, name: g.name || source.groupName }, participants, members, names, bossIds: source.bossIds, me: g.me,
-        messages: all.map(compactMessage).sort((a, b) => a.t - b.t),
-        analysis: { ...(saved.meta && saved.meta.group && saved.meta.group.id === g.id ? saved.analysis : {}) },
-        overrides: saved.names,
-        syncedAt: Date.now(),
-      };
-      await analyze(raw);
-      applyRaw(raw, 'live');
-      live.lastSync = Date.now(); live.error = null;
-      await persist(raw);
+      const errors = [];
+      for (const t of trackedGroups()) {
+        try {
+          const raw = await readGroup(t);
+          await analyze(raw);
+          live.raws[t.groupId] = raw;
+        } catch (e) { errors.push(`${t.groupName || 'a group'}: ${e.message || e.code || e}`); }
+      }
+      live.error = errors.length ? { message: errors.join('; ') } : null;
+      live.lastSync = Date.now();
+      applyLive();
+      for (const t of trackedGroups()) if (live.raws[t.groupId]) await persist(live.raws[t.groupId]);
+      await clearLegacy();
     } catch (e) {
       live.error = e; render();
     } finally {
@@ -1636,7 +1874,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const bosses = (raw.bossIds || []).map(nameOf);
     for (let i = 0; i < todo.length; i += 12) {
       const batch = todo.slice(i, i + 12);
-      // the manager's ten messages before this batch, from the last day
+      // the ten instruction-giver messages before this batch, from the last day
       const context = S0.bossMessages.filter(m => m.t < batch[0].t && m.t > batch[0].t - DAY_MS).slice(-10);
       const earlier = new Set([...context, ...batch].map(m => m.i));
       try {
@@ -1660,7 +1898,9 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   async function persist(raw) {
     const db = cap.db;
     if (!db || cap.canEdit === false) return;
-    const sameGroup = saved.meta && saved.meta.group && saved.meta.group.id === raw.group.id;
+    const gid = raw.group.id;
+    const k = gkey(gid);
+    const box = saved.groups[gid] || { days: {}, analysis: null };
     let changed = false;
     try {
       const byDay = {};
@@ -1669,32 +1909,60 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         let body = { day, messages: list };
         let json = JSON.stringify(body);
         if (json.length > 240000) { body = { day, trimmed: true, messages: list.map(m => m.x && m.x.length > 160 ? { ...m, x: m.x.slice(0, 160) } : m) }; json = JSON.stringify(body); }
-        const prev = live.written[day] ?? (sameGroup && saved.days[day] ? JSON.stringify(saved.days[day]) : null);
+        const key = `${gid}|${day}`;
+        const prev = live.written[key] ?? (box.days[day] ? JSON.stringify(box.days[day]) : null);
         if (prev === json) continue;
-        await db.doc(`sync/meta/days/${day}`).set(body);
-        live.written[day] = json; changed = true;
+        await db.doc(`sync/${k}/days/${day}`).set(body);
+        live.written[key] = json; changed = true;
       }
-      for (const day of Object.keys(saved.days)) {
-        if (!byDay[day]) { await db.doc(`sync/meta/days/${day}`).delete(); delete live.written[day]; changed = true; }
+      for (const day of Object.keys(box.days || {})) {
+        if (!byDay[day]) { await db.doc(`sync/${k}/days/${day}`).delete(); delete live.written[`${gid}|${day}`]; changed = true; }
       }
       const byId = {};
       raw.messages.forEach(m => { if (raw.analysis[m.i]) byId[m.i] = raw.analysis[m.i]; });
       const aJson = JSON.stringify(byId);
-      if (aJson !== (live.writtenAnalysis ?? JSON.stringify(sameGroup ? saved.analysis : null))) {
-        await db.doc('sync/analysis').set({ byId });
-        live.writtenAnalysis = aJson; changed = true;
+      if (aJson !== (live.writtenAnalysis[gid] ?? JSON.stringify(box.analysis))) {
+        await db.doc(`sync/${k}/extra/analysis`).set({ byId });
+        live.writtenAnalysis[gid] = aJson; changed = true;
       }
       const meta = { group: raw.group, participants: raw.participants, members: raw.members, names: raw.names, bossIds: raw.bossIds, me: raw.me };
       const mJson = JSON.stringify(meta);
-      if (changed || mJson !== live.writtenMeta || Date.now() - live.lastMetaWrite > 5 * MIN) {
-        await db.doc('sync/meta').set({ ...meta, syncedAt: raw.syncedAt, messageCount: raw.messages.length });
-        live.writtenMeta = mJson; live.lastMetaWrite = Date.now();
+      if (changed || mJson !== live.writtenMeta[gid] || Date.now() - (live.lastMetaWrite[gid] || 0) > 5 * MIN) {
+        await db.doc(`sync/${k}`).set({ ...meta, syncedAt: raw.syncedAt, messageCount: raw.messages.length });
+        live.writtenMeta[gid] = mJson; live.lastMetaWrite[gid] = Date.now();
       }
     } catch (e) {
       if (e && e.code === 'invalid_argument') cap.canEdit = false;
       if (e && e.code === 'quota_exceeded') live.error = { message: 'this page’s storage is full, so updates aren’t being saved for other devices.' };
       renderFrame();
     }
+  }
+
+  // Once the single-group copy has been saved in the new layout, remove it,
+  // and record the tracked groups in the new place too.
+  async function clearLegacy() {
+    const db = cap.db;
+    if (!db || cap.canEdit === false || live.legacyCleared) return;
+    if (!saved.tracking && saved.legacySource && trackedGroups().length) {
+      try {
+        const tracking = { groups: trackedGroups(), me: live.status && live.status.phone, savedAt: Date.now() };
+        await db.doc('settings/tracking').set(tracking);
+        saved.tracking = tracking;
+        await db.doc('settings/source').delete();
+      } catch (_) { return; }
+    }
+    const L = saved.legacy;
+    if (!L.meta) { live.legacyCleared = true; return; }
+    const gid = L.meta.group && L.meta.group.id;
+    const moved = gid && (live.writtenMeta[gid] || (saved.groups[gid] && saved.groups[gid].meta));
+    const dropped = gid && !trackedGroups().some(t => t.groupId === gid);
+    if (!moved && !dropped) return;
+    try {
+      for (const day of Object.keys(L.days || {})) await db.doc(`sync/meta/days/${day}`).delete();
+      await db.doc('sync/analysis').delete();
+      await db.doc('sync/meta').delete();
+      live.legacyCleared = true;
+    } catch (_) { /* try again on the next update */ }
   }
 
   // keep waiting times current while the page is open

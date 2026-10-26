@@ -141,7 +141,7 @@ function buildSample(now) {
 function derive(S, cfg, now) {
   const esc = cfg.escalate * MIN, marks = [cfg.first, cfg.second, cfg.escalate].map(x => x * MIN);
   const people = {};
-  S.people.forEach(p => { people[p.id] = { ...p, required: 0, replied: 0, delays: [], missed: 0, lastMissed: null, pending: [] }; });
+  S.people.forEach(p => { people[p.id] = { ...p, required: 0, replied: 0, delays: [], missed: 0, lastMissed: null, pending: [], chased: 0 }; });
 
   const messages = S.messages.map(m => {
     const req = m.required === 'all' ? S.people.map(p => p.id) : m.required;
@@ -157,6 +157,8 @@ function derive(S, cfg, now) {
       if (missed) { P.missed++; P.lastMissed = Math.max(P.lastMissed || 0, m.at + esc); }
       const row = { pid, name: P.name, replied: !!r, at: r ? r.at : null, delay: r ? r.at - m.at : null, text: r ? r.text : '', stage, missed, waiting: r ? null : elapsed };
       if (!r) P.pending.push({ msg: m, waiting: elapsed, stage });
+      // each nudge counts against whoever still hadn't answered when it was sent
+      (m.chases || []).forEach(c => { if (!r || r.at > c.at) P.chased++; });
       return row;
     });
     const pending = rows.filter(r => !r.replied);
