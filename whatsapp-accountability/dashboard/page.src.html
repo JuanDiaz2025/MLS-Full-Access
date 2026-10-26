@@ -263,6 +263,10 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .tracked-h .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
 .tracked-a { display: flex; gap: 8px; }
 .btn.small { padding: 6px 12px; font-size: 13px; white-space: nowrap; }
+.btn.refresh { display: inline-flex; align-items: center; gap: 6px; border-radius: 99px; }
+.btn.refresh .ic { width: 15px; height: 15px; }
+@media (prefers-reduced-motion: no-preference) { .btn.refresh[aria-busy="true"] .ic { animation: spin 1s linear infinite; } }
+@keyframes spin { to { transform: rotate(360deg); } }
 .btn.danger { color: var(--crit-ink); }
 .btn.danger:hover { background: var(--crit-soft); }
 .foot { font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 14px; max-width: 80ch; }
@@ -364,6 +368,9 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
           <select class="sel" id="sender-filter" aria-label="Instructions from" hidden></select>
           <span class="pill" id="group-pill"></span>
           <span class="pill sample" id="snap"></span>
+          <button class="btn small refresh" id="refresh" type="button" data-action="refresh" hidden>
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 0 1 14-4l2 2M20 14a8 8 0 0 1-14 4l-2-2"/><path d="M20 4v4h-4M4 20v-4h4"/></svg><span id="refresh-t">Refresh</span>
+          </button>
         </div>
       </header>
       <p class="live-error" id="live-error" role="status" hidden></p>

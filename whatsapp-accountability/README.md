@@ -41,6 +41,7 @@ node dashboard/test/e2e.js        # one group, from setup to a second device
 node dashboard/test/e2e-multi.js  # two groups, filters, edits, and moving an older single-group copy
 node dashboard/test/givers.test.js  # instruction-givers asking each other (no browser needed)
 node dashboard/test/e2e-link.js   # linking a missed reply from another computer, and removing it
+node dashboard/test/e2e-refresh.js  # the Refresh button reads a new message right away
 ```
 
 ## Status

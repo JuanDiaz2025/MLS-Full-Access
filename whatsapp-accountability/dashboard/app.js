@@ -465,6 +465,12 @@
     const note = document.getElementById('side-note');
     const foot = document.getElementById('foot');
     document.getElementById('change-group').hidden = !(live.on && live.status && live.status.linked && trackedGroups().length);
+    // only the computer running WhatsApp Reader can read it right away; elsewhere the saved copy updates by itself
+    const refresh = document.getElementById('refresh');
+    refresh.hidden = !(src.mode === 'live' && live.on);
+    refresh.disabled = !!live.refreshing;
+    refresh.setAttribute('aria-busy', live.refreshing ? 'true' : 'false');
+    document.getElementById('refresh-t').textContent = live.refreshing ? 'Refreshing\u2026' : 'Refresh';
     if (src.mode === 'live') {
       pill.className = 'pill live';
       pill.innerHTML = `<i class="dot"></i>Live · updated ${esc(fmtClock(src.updatedAt))}${live.analyzing ? ' · reading new messages…' : ''}`;
@@ -999,6 +1005,7 @@
     else if (action === 'link-cancel') closeLink();
     else if (action === 'link-save') saveLink();
     else if (action === 'unlink') unlink(data.msg, data.pid);
+    else if (action === 'refresh') refreshNow();
     else if (action === 'connect') {
       startLive();
     } else if (action === 'recheck') {
@@ -1038,6 +1045,25 @@
       if (state.groupFilter === gid) state.groupFilter = 'all';
       await forgetGroup(gid);
       await saveTracking(tracked.filter(t => t.groupId !== gid), null);
+    }
+  }
+
+  // Read WhatsApp Reader now instead of waiting for the next 30-second check.
+  async function refreshNow() {
+    if (!live.on || live.refreshing) return;
+    live.refreshing = true; renderFrame();
+    try {
+      const st = await callReader('status');
+      live.status = st;
+      if (st && st.linked && trackedGroups().length) {
+        live.lastSig = `${st.messages_stored}|${st.last_message_at}|${st.groups_known}`;
+        if (live.busy) { live.again = true; await waitFor(() => !live.busy, 60000); }
+        else await syncNow();
+      } else render();
+    } catch (e) {
+      live.error = { message: `couldn\u2019t refresh (${(e && (e.message || e.code)) || 'no answer'})` };
+    } finally {
+      live.refreshing = false; renderFrame();
     }
   }
 
