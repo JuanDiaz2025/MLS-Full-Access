@@ -297,6 +297,8 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .btn.primary:hover { background: var(--accent-hover); }
 .btn:disabled { opacity: .55; cursor: default; }
 .dlg.wide { width: min(560px, 100%); }
+.draft-in { width: 100%; min-height: 130px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font: inherit; font-size: 14.5px; line-height: 1.5; resize: vertical; box-sizing: border-box; }
+.draft-in[aria-busy="true"] { color: var(--ink-2); }
 .clear-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 14px; padding: 12px 0; border-top: 1px solid var(--line); }
 .clear-row:first-child { border-top: 0; }
 .clear-row b { overflow-wrap: anywhere; }
@@ -450,6 +452,9 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 </div>
 <div class="scrim" id="link-dlg" hidden>
   <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="link-h" id="link-box"></div>
+</div>
+<div class="scrim" id="draft-dlg" hidden>
+  <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="draft-h" id="draft-box"></div>
 </div>
 <div class="tip" id="tip" hidden></div>
 

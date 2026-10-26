@@ -297,6 +297,8 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .btn.primary:hover { background: var(--accent-hover); }
 .btn:disabled { opacity: .55; cursor: default; }
 .dlg.wide { width: min(560px, 100%); }
+.draft-in { width: 100%; min-height: 130px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font: inherit; font-size: 14.5px; line-height: 1.5; resize: vertical; box-sizing: border-box; }
+.draft-in[aria-busy="true"] { color: var(--ink-2); }
 .clear-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 14px; padding: 12px 0; border-top: 1px solid var(--line); }
 .clear-row:first-child { border-top: 0; }
 .clear-row b { overflow-wrap: anywhere; }
@@ -450,6 +452,9 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 </div>
 <div class="scrim" id="link-dlg" hidden>
   <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="link-h" id="link-box"></div>
+</div>
+<div class="scrim" id="draft-dlg" hidden>
+  <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="draft-h" id="draft-box"></div>
 </div>
 <div class="tip" id="tip" hidden></div>
 
@@ -1172,7 +1177,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <div class="mlist" id="mlist">${items}</div></div>
       <div class="card"><div class="card-b">
         <div class="mhead"><div><h2>${esc(m.title)}</h2><p>${esc(fmtWhen(m.at))} · ${groupTag(m)}Sent by ${esc(m.senderName || 'Juan')}</p></div>
-          <div class="mhead-a">${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}${deleteButton(m)}</div></div>
+          <div class="mhead-a">${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}${draftButton(m)}${deleteButton(m)}</div></div>
         <div class="bubble">${esc(m.text)}<span class="b-time">${esc(fmtClock(m.at))}</span></div>
         ${chaseHtml}
         <div class="read"><div class="read-cap">${ic('spark')}${m.by === 'rules' ? 'Read with simple rules, because Claude wasn’t available' : 'What the AI picked out of this message'}</div><dl class="read-grid">
@@ -1531,7 +1536,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       pill.className = 'pill live';
       pill.innerHTML = `<i class="dot"></i>Live · updated ${esc(fmtClock(src.updatedAt))}${live.analyzing ? ' · reading new messages…' : ''}`;
       note.textContent = 'Reading the groups on this computer. Nothing is sent to WhatsApp.';
-      foot.textContent = `Reading ${named} through WhatsApp Reader on this computer. Nothing is ever sent to WhatsApp. Each update is saved into this page, so anyone with the link sees the same numbers on any device.`;
+      foot.textContent = `Reading ${named} through WhatsApp Reader on this computer. Nothing is ever sent to WhatsApp. Each update is saved into this page, so everyone in the company with the link sees the same numbers on any device.`;
     } else if (src.mode === 'saved') {
       pill.className = 'pill';
       pill.innerHTML = `${ic('clock')}Saved · as of ${esc(fmtDate(src.updatedAt))}, ${esc(fmtClock(src.updatedAt))}`;
@@ -1737,6 +1742,145 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       else say('Couldn’t save the timing on this page.', 'err');
     } finally { saveBtn.disabled = cap.canEdit === false; }
   });
+
+  // ---------------- drafting a reply in Juan's voice ----------------
+  // Claude writes it on the viewer's own Claude account. Nothing is sent:
+  // the person reads it, copies it and sends it from their own WhatsApp.
+  // How Juan writes comes from the team's "Ask Juan" page (built from his voice notes).
+  const JUAN_STYLE = `You write one WhatsApp message for Juan Diaz, CEO of Twin Home Buyer, to send in a work group with his team (acquisitions reps, callers, VAs on the Philippines team). Write it exactly as Juan would type it himself: first person, to people by first name. You are not an assistant; never mention Claude, AI or a draft.
+
+HOW JUAN WRITES
+- Direct and fast. Point first. No warm-up, no "hope you're well", no "great question", no cheerleading.
+- Friendly but demanding. He pushes people to own it. Short sentences, plain words.
+- Spoken feel, like a voice note from the car. He may open with "Okay so", "Alright", "Look" or the person's name. Fillers he really uses: "right?", "you know what I mean?", "For sure.", "Let's go.", "Make sense?" Use one at most, often none.
+- Every task has a who and a when. End with who's doing what by when.
+- He likes a confirm-back: "Confirm it back to me so I know we're on the same page."
+- Bad news early: "I never want to be surprised." Don't bring him a problem without options.
+- Lines he uses, only when one truly fits: "If it's not on the calendar, it doesn't get done." "One brick at a time."
+- A WhatsApp message, not an email: usually 1 to 3 sentences, under 50 words. No headers, no bold, no sign-off. A short list only for 2 to 4 steps. No emojis unless the thread uses them.
+
+RULES
+- Use only facts in the thread below. Never invent numbers, prices, addresses, deal status, dates or names. If something Juan has to decide or look up isn't in the thread, put a short placeholder in square brackets, like [time] or [price], for the sender to fill in.
+- Don't approve or commit to an offer price, contract, payment, hire, fire or legal step. Say how he's leaning and "send it to me and I'll sign off".
+- Match the thread's language: English, or Taglish if the team writes in Taglish.
+- Reply with the message text only. No quotes around it, no explanation.`;
+
+  const isJuan = name => /\bjuan\b/i.test(String(name || ''));
+  const canDraft = () => !!cap.sample;
+  const draftButton = m => canDraft()
+    ? `<button class="btn small" type="button" data-action="open-draft" data-msg="${esc(m.id)}">Draft reply as Juan</button>` : '';
+  const clip = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; };
+
+  // Who the draft is for, and what Juan is doing in it.
+  function draftSituation(m) {
+    const sender = m.senderName || 'the sender';
+    const waiting = m.pending.filter(r => !isJuan(r.name));
+    const names = waiting.map(r => r.name).join(', ');
+    const pushes = (m.chases || []).length;
+    if (!isJuan(m.senderName) && m.pending.some(r => isJuan(r.name))) {
+      return { to: sender, ask: `Juan's answer to ${sender}, who asked him this. Answer what the thread lets him answer, and put anything he has to decide or look up in [brackets].` };
+    }
+    if (waiting.length) {
+      const how = isJuan(m.senderName) ? 'A follow-up from Juan' : `Juan backing up ${sender}'s request with a follow-up`;
+      const firmer = pushes ? ` ${sender} already followed up ${pushes === 1 ? 'once' : pushes + ' times'}, so be firmer.` : '';
+      return { to: names, ask: `${how} to ${names}, who ${waiting.length === 1 ? 'hasn’t' : 'haven’t'} answered after ${fmtDur(Math.max(...waiting.map(r => r.waiting)))}.${firmer}` };
+    }
+    return { to: 'the group', ask: 'Juan’s short reply now that everyone has answered: acknowledge it in a few words and give the next step with who and when, if there is one.' };
+  }
+
+  function draftPrompt(m, sit) {
+    const task = m.task ? D.tasks.find(t => t.id === m.task) : null;
+    const lines = [`GROUP: ${m.groupName || 'team group'}`, `MESSAGE from ${m.senderName || 'unknown'}, ${fmtWhen(m.at)}:`, `"${clip(m.text, 1500)}"`];
+    (m.chases || []).forEach(c => lines.push(`Follow-up from ${m.senderName || 'them'}, ${fmtClock(c.at)}: "${clip(c.text, 300)}"`));
+    if (task) lines.push(`TASK: ${task.title} · owner ${task.ownerName} · ${task.due != null ? 'due ' + fmtWhen(task.due) : 'no deadline given'} · ${task.status}`);
+    const replied = m.rows.filter(r => r.replied);
+    lines.push(replied.length ? 'REPLIES:' : 'REPLIES: none yet');
+    replied.forEach(r => lines.push(`- ${r.name}, ${fmtDur(r.delay)} later: "${clip(r.text || 'reacted', 300)}"`));
+    if (m.pending.length) lines.push(`NO REPLY YET: ${m.pending.map(r => `${r.name} (${fmtDur(r.waiting)})`).join(', ')}`);
+    lines.push(`NOW: ${fmtWhen(NOW)}`, '', `WRITE: ${sit.ask}`);
+    return `${JUAN_STYLE}\n\nTHE THREAD\n${lines.join('\n')}`;
+  }
+
+  const cleanDraft = s => String(s || '').trim().replace(/^["“]([\s\S]*)["”]$/, '$1').trim();
+  const draftError = e => e && e.code === 'not_granted' ? 'Claude wasn’t allowed on this page. Allow it from the page’s Permissions menu, then press Write another.'
+    : e && e.code === 'rate_limited' ? 'Claude is busy. Wait a minute, then press Write another.'
+    : `Couldn’t write a draft${e && e.message ? ': ' + e.message : '.'}`;
+
+  const draftDlg = document.getElementById('draft-dlg');
+  const draftBox = document.getElementById('draft-box');
+  function renderDraft() {
+    const R = state.draft;
+    draftDlg.hidden = !R;
+    if (!R) return;
+    const note = R.error || (R.copied ? 'Copied. Paste it into WhatsApp and send it from your phone.' : '');
+    draftBox.innerHTML = `<div class="dlg-h"><div><h2 id="draft-h">Reply as Juan</h2>
+        <p>To ${esc(R.to)}, about “${esc(R.title)}”. Claude writes it the way Juan texts, on your Claude account. Nothing is sent: edit it, copy it and send it from WhatsApp yourself.</p></div>
+        <button class="x" type="button" data-action="draft-close" aria-label="Close"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="dlg-b"><textarea id="draft-text" class="draft-in" rows="6" aria-label="Draft message" placeholder="Writing…"${R.busy ? ' readonly aria-busy="true"' : ''}>${esc(R.text)}</textarea></div>
+      <p class="dlg-msg ${R.error ? 'err' : 'ok'}" role="status">${esc(note)}</p>
+      <div class="dlg-f"><button class="btn" type="button" data-action="draft-close">Close</button>
+        <button class="btn" type="button" data-action="draft-again"${R.busy ? ' disabled' : ''}>Write another</button>
+        <button class="btn primary" type="button" data-action="draft-copy"${R.busy || !R.text.trim() ? ' disabled' : ''}>Copy</button></div>`;
+  }
+
+  function openDraft(msgId) {
+    const m = D && D.messages.find(x => x.id === msgId);
+    if (!m || !canDraft()) return;
+    const sit = draftSituation(m);
+    state.draft = { msgId, title: m.title, to: sit.to, prompt: draftPrompt(m, sit), text: '', busy: false, error: '', copied: false, ctrl: null };
+    writeDraft();
+  }
+
+  function closeDraft() {
+    if (state.draft && state.draft.ctrl) state.draft.ctrl.abort();
+    state.draft = null; renderDraft();
+  }
+
+  async function writeDraft() {
+    const R = state.draft;
+    if (!R || R.busy) return;
+    const ctrl = R.ctrl = new AbortController();
+    R.busy = true; R.error = ''; R.copied = false; R.text = '';
+    renderDraft();
+    try {
+      const out = await cap.sample(R.prompt, { modelTier: 'default', cache: false, signal: ctrl.signal, onText: ({ text }) => {
+        if (state.draft !== R) return;
+        const ta = document.getElementById('draft-text');
+        if (ta) ta.value = text;
+      } });
+      if (state.draft !== R) return;
+      R.text = cleanDraft(out && out.text);
+      if (!R.text) R.error = 'Claude didn’t write anything. Press Write another.';
+    } catch (e) {
+      if (state.draft !== R || ctrl.signal.aborted) return;
+      R.text = cleanDraft(e && e.text);
+      R.error = draftError(e);
+    }
+    R.busy = false; R.ctrl = null;
+    renderDraft();
+    const ta = document.getElementById('draft-text');
+    if (ta) ta.focus();
+  }
+
+  async function copyDraft() {
+    const R = state.draft;
+    const ta = document.getElementById('draft-text');
+    if (!R || !ta) return;
+    R.text = ta.value;
+    let ok = false;
+    try { await navigator.clipboard.writeText(R.text); ok = true; } catch (_) {
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch (_) {}
+    }
+    R.copied = ok;
+    R.error = ok ? '' : 'Couldn’t copy here. The text is selected: press Ctrl+C (or ⌘C) to copy it.';
+    renderDraft();
+    const again = document.getElementById('draft-text');
+    if (!ok && again) again.select();
+  }
+
+  draftDlg.addEventListener('click', e => { if (e.target === draftDlg) closeDraft(); });
+  document.addEventListener('input', e => { if (e.target.id === 'draft-text' && state.draft) { state.draft.text = e.target.value; state.draft.copied = false; } });
 
   // ---------------- saved copy (any device) ----------------
   // where a group's copy is kept in the page's storage
@@ -1987,7 +2131,8 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   linkDlg.addEventListener('click', e => { if (e.target === linkDlg) closeLink(); });
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    if (state.link) closeLink();
+    if (state.draft) closeDraft();
+    else if (state.link) closeLink();
     else if (state.removedOpen) { state.removedOpen = false; renderRemoved(); }
     else if (state.clear && !state.clear.busy) { state.clear = null; renderClear(); }
   });
@@ -2251,6 +2396,10 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   async function onAction(action, gid, data) {
     const tracked = trackedGroups();
     if (action === 'open-link') openLink(data.msg, data.pid);
+    else if (action === 'open-draft') openDraft(data.msg);
+    else if (action === 'draft-close') closeDraft();
+    else if (action === 'draft-again') writeDraft();
+    else if (action === 'draft-copy') copyDraft();
     else if (action === 'delete-msg') {
       if (state.confirmDelete !== data.msg) { state.confirmDelete = data.msg; render(); return; }
       removeMessage(data.msg);

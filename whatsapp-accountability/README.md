@@ -26,6 +26,7 @@ WhatsApp group
 - A quoted reply or a reaction answers that one message. Any other message answers everything still open for that person before it.
 - If a reply was missed (a swipe-reply to a different message, or an answer in the wrong group), the person can react 👍 to the instruction in WhatsApp, or anyone in the company can press **Mark as replied** on the dashboard and pick one of that person's own messages from the 30 minutes after the instruction. It counts from when that message was sent and shows who linked it. Links are kept under `fixes/` in the page's storage, which company members can write; `settings/` and `sync/` stay owner-only.
 - **Delete** on a message (owner and editors only, second click confirms) takes that request off the dashboard with its nudges, replies and task; it's kept under `sync/<group>/removed/` and can be restored from the "deleted messages" list.
+- **Draft reply as Juan** on any message: Claude writes a WhatsApp message the way Juan texts (style taken from the team's "Ask Juan" page, built from his voice notes), using the thread for facts. It is a follow-up to whoever hasn't answered, Juan's answer when someone asked him, or a short next step once everyone has replied. Anything Juan has to decide is left in [brackets]. The person edits it, presses Copy and sends it from their own WhatsApp; nothing is sent or saved by the page. It runs on the Claude account of whoever presses the button.
 - **Clear data** (owner and editors only) wipes one group's saved messages, replies, tasks and linked replies, and records a start time in `settings/tracking`; from then on only messages sent after it count, on every device. WhatsApp Reader keeps its own copy, which is why the start time is needed.
 - A task counts as done when its owner sends a photo, video or document, or says done/finished/sent/etc.
 - Follow-up timing (default 15 / 30 / 60 minutes) only decides when someone is flagged "Needs 1st reminder", "Needs 2nd reminder" or "Escalate to manager". A reply after the escalation point counts as a miss; two or more misses in 30 days is a repeat non-responder.
@@ -54,6 +55,7 @@ node dashboard/test/e2e-clear.js  # Clear data wipes one group and counts only n
 node dashboard/test/e2e-delete.js  # deleting one message, the deleted list, and Restore
 node dashboard/test/e2e-addmany.js  # searching, ticking several groups, and setting each one up side by side
 node dashboard/test/e2e-sort.js  # sorting the group list: newest groups, recent activity, name
+node dashboard/test/e2e-draft.js  # Draft reply as Juan: what Claude is asked, Copy, Write another, no Claude
 ```
 
 ## Why a linked-device reader
