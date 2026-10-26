@@ -365,7 +365,8 @@
     const raw = live.raws[t.groupId] || (savedGroupData(t.groupId) || {}).meta;
     if (!raw || !raw.participants) return '';
     const n = raw.participants.filter(p => !(t.bossIds || []).includes(p.id)).length;
-    return n ? ` \u00B7 tracking ${plural(n, 'person', 'people')}` : ' \u00B7 everyone here gives instructions, so only what they ask each other by name is tracked';
+    const since = t.clearedAt ? ` \u00B7 counting since ${fmtWhen(t.clearedAt)}` : '';
+    return (n ? ` \u00B7 tracking ${plural(n, 'person', 'people')}` : ' \u00B7 everyone here gives instructions, so only what they ask each other by name is tracked') + since;
   }
 
   function viewSetup() {
@@ -465,6 +466,8 @@
     const note = document.getElementById('side-note');
     const foot = document.getElementById('foot');
     document.getElementById('change-group').hidden = !(live.on && live.status && live.status.linked && trackedGroups().length);
+    // clearing is for the page's owner and editors only
+    document.getElementById('open-clear').hidden = !(cap.canEdit === true && src.mode !== 'sample' && trackedGroups().length);
     // only the computer running WhatsApp Reader can read it right away; elsewhere the saved copy updates by itself
     const refresh = document.getElementById('refresh');
     refresh.hidden = !(src.mode === 'live' && live.on);
@@ -653,13 +656,16 @@
   // ---------------- saved copy (any device) ----------------
   // where a group's copy is kept in the page's storage
   const gkey = gid => String(gid).replace(/[^A-Za-z0-9_.@+:~-]/g, '_');
+  // when a group was last cleared: messages before it no longer count
+  const startOf = gid => ((trackedGroups().find(t => t.groupId === gid) || {}).clearedAt) || 0;
 
   // Several groups' messages, people and tasks put together. People are
   // matched by phone number, so someone in two groups has one record.
   function combine(parts, now) {
     const people = new Map(), messages = [], tasks = [];
     parts.forEach(({ id, name, raw }) => {
-      const Sg = buildFromRaw(raw, now);
+      const start = startOf(id);
+      const Sg = buildFromRaw(start ? { ...raw, messages: (raw.messages || []).filter(m => m.t >= start) } : raw, now);
       Sg.people.forEach(p => {
         const q = people.get(p.id);
         if (!q) people.set(p.id, { ...p, groups: [id], formerIn: p.former ? [id] : [], giverIn: p.giver ? [id] : [] });
@@ -888,7 +894,70 @@
   }
 
   linkDlg.addEventListener('click', e => { if (e.target === linkDlg) closeLink(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.link) closeLink(); });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (state.link) closeLink();
+    else if (state.clear && !state.clear.busy) { state.clear = null; renderClear(); }
+  });
+
+  // ---------------- clearing a group's data (owner and editors) ----------------
+  // WhatsApp Reader keeps the last 30 days, so deleting the page's copy alone would
+  // bring everything back on the next update. Clearing also records a start time:
+  // from then on only messages sent after it count, on every device.
+  const clearDlg = document.getElementById('clear-dlg');
+  const clearBox = document.getElementById('clear-box');
+  clearDlg.addEventListener('click', e => { if (e.target === clearDlg && state.clear && !state.clear.busy) { state.clear = null; renderClear(); } });
+
+  function renderClear() {
+    const C = state.clear;
+    clearDlg.hidden = !C;
+    if (!C) return;
+    const rows = trackedGroups().map(t => {
+      const raw = live.raws[t.groupId], d = savedGroupData(t.groupId);
+      const n = raw ? raw.messages.filter(m => m.t >= (t.clearedAt || 0)).length : d && d.meta ? d.meta.messageCount : null;
+      const sub = C.done[t.groupId] ? `<span class="sub ok">Cleared. Counting from ${esc(fmtWhen(C.done[t.groupId]))}.</span>`
+        : `<span class="sub">${[n != null ? plural(n, 'message') + ' saved' : '', t.clearedAt ? 'counting since ' + fmtWhen(t.clearedAt) : 'counting the last 30 days'].filter(Boolean).map(esc).join(' \u00B7 ')}</span>`;
+      const armed = C.confirm === t.groupId;
+      const btn = C.busy === t.groupId ? '<button class="btn small danger" type="button" disabled>Clearing\u2026</button>'
+        : `<button class="btn small danger${armed ? ' armed' : ''}" type="button" data-action="clear-group" data-gid="${esc(t.groupId)}"${C.busy ? ' disabled' : ''}>${armed ? 'Click again to clear' : 'Clear'}</button>`;
+      return `<div class="clear-row"><div><b>${esc(t.groupName || 'Unnamed group')}</b>${sub}</div>${btn}</div>`;
+    }).join('');
+    clearBox.innerHTML = `<div class="dlg-h"><div><h2 id="clear-h">Clear data</h2>
+        <p>Deletes a group's saved messages, replies, tasks and linked replies from this page. The dashboard then counts only messages sent after that moment. WhatsApp and WhatsApp Reader keep their own copy. This can\u2019t be undone.</p></div>
+        <button class="x" type="button" data-action="clear-close" aria-label="Close"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="dlg-b">${rows}</div>
+      <p class="dlg-msg err" role="status">${esc(C.error || '')}</p>
+      <div class="dlg-f"><button class="btn" type="button" data-action="clear-close"${C.busy ? ' disabled' : ''}>Done</button></div>`;
+  }
+
+  async function clearGroup(gid) {
+    const C = state.clear, db = cap.db;
+    if (!C || !db || cap.canEdit !== true) return;
+    const k = gkey(gid), at = Date.now();
+    const groups = trackedGroups().map(t => t.groupId === gid ? { ...t, clearedAt: at } : t);
+    C.busy = gid; C.error = ''; renderClear();
+    // count from now on this computer straight away, so an update running meanwhile saves nothing older
+    const before = saved.tracking;
+    saved.tracking = { ...(saved.tracking || {}), groups };
+    Object.keys(live.written).forEach(key => { if (key.startsWith(gid + '|')) delete live.written[key]; });
+    delete live.writtenAnalysis[gid]; delete live.writtenMeta[gid];
+    const box = saved.groups[gid] || {};
+    try {
+      for (const day of Object.keys(box.days || {})) await db.doc(`sync/${k}/days/${day}`).delete();
+      for (const f of Object.values(box.fixes || {})) await db.doc(`fixes/${k}/links/${f.docId}`).delete();
+      await db.doc(`sync/${k}/extra/analysis`).delete();
+      await db.doc(`sync/${k}`).delete();
+      // then tell every other computer, the one running WhatsApp Reader included
+      await db.doc('settings/tracking').set({ groups, me: (before && before.me) || (live.status && live.status.phone) || null, savedAt: Date.now() });
+      C.done[gid] = at;
+    } catch (e) {
+      C.error = e && e.code === 'invalid_argument' ? 'Only the owner and editors of this page can clear data.'
+        : `Couldn\u2019t finish clearing${e && e.message ? ': ' + e.message : ''}. Press Clear again to retry.`;
+    }
+    C.busy = null; C.confirm = null;
+    renderClear();
+    onTrackingChanged();
+  }
   document.addEventListener('change', e => { if (e.target.name === 'link-pick' && state.link) { state.link.pick = e.target.value; renderLink(); } });
 
   // ---------------- live reading (Claude desktop app on the computer running WhatsApp Reader) ----------------
@@ -1002,6 +1071,13 @@
   async function onAction(action, gid, data) {
     const tracked = trackedGroups();
     if (action === 'open-link') openLink(data.msg, data.pid);
+    else if (action === 'open-clear') { state.clear = { confirm: null, done: {}, busy: null, error: '' }; renderClear(); const b = clearBox.querySelector('button'); if (b) b.focus(); }
+    else if (action === 'clear-close') { state.clear = null; renderClear(); }
+    else if (action === 'clear-group') {
+      if (!state.clear || state.clear.busy) return;
+      if (state.clear.confirm !== gid) { state.clear.confirm = gid; renderClear(); return; }
+      clearGroup(gid);
+    }
     else if (action === 'link-cancel') closeLink();
     else if (action === 'link-save') saveLink();
     else if (action === 'unlink') unlink(data.msg, data.pid);
@@ -1026,7 +1102,7 @@
     } else if (action === 'save-group') {
       const g = live.groupInfo;
       if (!g || g.id !== state.editGroup || !state.setupBoss || !state.setupBoss.size) return;
-      const groups = tracked.map(t => t.groupId === g.id ? { groupId: g.id, groupName: g.name || t.groupName, bossIds: [...state.setupBoss] } : t);
+      const groups = tracked.map(t => t.groupId === g.id ? { ...t, groupId: g.id, groupName: g.name || t.groupName, bossIds: [...state.setupBoss] } : t);
       const names = namesFromForm(g);
       state.editGroup = null; state.setupBoss = null; state.setupNames = null;
       live.lastSig = '';
@@ -1098,10 +1174,11 @@
     // A newly linked reader (another computer, or after relinking) only gets
     // part of the history from WhatsApp, so messages already saved in the page
     // that it doesn't have are kept rather than dropped.
-    const fromReader = all.map(compactMessage);
+    const start = startOf(gid);
+    const fromReader = all.map(compactMessage).filter(m => m.t >= start);
     const have = new Set(fromReader.map(m => m.i));
     const kept = prev ? Object.values(prev.days || {}).flatMap(d => (d && d.messages) || [])
-      .filter(m => m && m.i && !have.has(m.i) && m.t >= windowStart) : [];
+      .filter(m => m && m.i && !have.has(m.i) && m.t >= Math.max(windowStart, start)) : [];
     const members = updateMembers(prevRaw ? prevRaw.members : prev ? prev.meta.members : null, participants,
       live.lastMembersRead[gid] || (prev ? prev.meta.syncedAt : 0), now);
     live.lastMembersRead[gid] = now;

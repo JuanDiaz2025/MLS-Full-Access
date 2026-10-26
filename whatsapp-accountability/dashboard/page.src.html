@@ -297,6 +297,13 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .btn.primary:hover { background: var(--accent-hover); }
 .btn:disabled { opacity: .55; cursor: default; }
 .dlg.wide { width: min(560px, 100%); }
+.clear-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.clear-row:first-child { border-top: 0; }
+.clear-row b { overflow-wrap: anywhere; }
+.clear-row .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
+.clear-row .sub.ok { color: var(--good-ink); font-weight: 600; }
+.btn.danger.armed { background: var(--crit-soft); border-color: var(--crit); }
+.dlg-b .note { font-size: 13.5px; color: var(--ink-2); margin: 0 0 6px; }
 .dlg-b { padding: 8px 20px 4px; max-height: min(52vh, 460px); overflow-y: auto; }
 .dlg-b .plain { margin: 6px 0; }
 .pick-list { display: flex; flex-direction: column; gap: 8px; }
@@ -348,6 +355,10 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
       <button class="timing-btn" id="open-timing" type="button" aria-haspopup="dialog">
         <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 1.5M9.5 3h5"/></svg>
         <span class="t-txt"><b>Follow-up timing</b><span id="timing-sum"></span></span>
+      </button>
+      <button class="timing-btn" id="open-clear" type="button" data-action="open-clear" aria-haspopup="dialog" hidden>
+        <svg class="ic" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+        <span class="t-txt"><b>Clear data</b><span>Start a group's numbers fresh</span></span>
       </button>
       <div class="conn" id="conn" hidden>
         <b>WhatsApp Reader</b>
@@ -406,6 +417,9 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
       </div>
     </form>
   </div>
+</div>
+<div class="scrim" id="clear-dlg" hidden>
+  <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="clear-h" id="clear-box"></div>
 </div>
 <div class="scrim" id="link-dlg" hidden>
   <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="link-h" id="link-box"></div>

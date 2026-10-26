@@ -24,6 +24,7 @@ WhatsApp group
 - People are matched by phone number, so someone in two groups has one record. The top of the page switches between all groups and one, and a "From" filter shows only one instruction-giver's messages (for example only the CEO's, or only the COO's).
 - A quoted reply or a reaction answers that one message. Any other message answers everything still open for that person before it.
 - If a reply was missed (a swipe-reply to a different message, or an answer in the wrong group), the person can react 👍 to the instruction in WhatsApp, or anyone in the company can press **Mark as replied** on the dashboard and pick one of that person's own messages from the 30 minutes after the instruction. It counts from when that message was sent and shows who linked it. Links are kept under `fixes/` in the page's storage, which company members can write; `settings/` and `sync/` stay owner-only.
+- **Clear data** (owner and editors only) wipes one group's saved messages, replies, tasks and linked replies, and records a start time in `settings/tracking`; from then on only messages sent after it count, on every device. WhatsApp Reader keeps its own copy, which is why the start time is needed.
 - A task counts as done when its owner sends a photo, video or document, or says done/finished/sent/etc.
 - Follow-up timing (default 15 / 30 / 60 minutes) only decides when someone is flagged "Needs 1st reminder", "Needs 2nd reminder" or "Escalate to manager". A reply after the escalation point counts as a miss; two or more misses in 30 days is a repeat non-responder.
 
@@ -47,6 +48,7 @@ node dashboard/test/givers.test.js  # instruction-givers asking each other (no b
 node dashboard/test/e2e-link.js   # linking a missed reply from another computer, and removing it
 node dashboard/test/e2e-refresh.js  # the Refresh button reads a new message right away
 node dashboard/test/e2e-newpc.js  # a newly linked reader with less history keeps what the page already saved
+node dashboard/test/e2e-clear.js  # Clear data wipes one group and counts only newer messages
 ```
 
 ## Status
