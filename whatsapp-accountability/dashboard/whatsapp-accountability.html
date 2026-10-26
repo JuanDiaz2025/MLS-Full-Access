@@ -876,7 +876,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   const state = { view: 'dashboard', sel: null, taskFilter: 'open', setup: false, setupGroup: null, setupBoss: null };
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
   const src = { mode: 'sample', raw: null, S: SAMPLE, now: SAMPLE_NOW, group: { name: 'THB Construction Team' }, updatedAt: null };
-  const cap = { db: null, mcp: null, sample: null, canEdit: null };
+  const cap = { db: null, mcp: null, sample: null, canEdit: null, isOwner: null };
   const saved = { source: null, meta: null, analysis: {}, days: {}, names: {}, loaded: { source: false, analysis: false, meta: false } };
   const live = { on: false, status: null, groups: null, groupInfo: null, busy: false, again: false, lastSig: '', lastSync: 0,
     unwatch: null, diag: null, written: {}, writtenAnalysis: null, writtenMeta: null, lastMetaWrite: 0, sampleDenied: false, analyzing: 0, error: null, offCode: null };
@@ -1271,7 +1271,8 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       foot.textContent = 'Everything on this page is sample data for 18 example team members. Real numbers appear once this page is opened in the Claude desktop app on the computer running WhatsApp Reader. Nothing is ever sent to WhatsApp.';
     }
     const conn = document.getElementById('conn');
-    conn.hidden = live.on || !live.diag;
+    // only the owner can connect, so only the owner sees why it isn't connected
+    conn.hidden = live.on || !live.diag || cap.isOwner === false;
     if (!conn.hidden) {
       const d = live.diag;
       document.getElementById('conn-text').textContent = connMessage(d);
@@ -1475,14 +1476,21 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     live.on = true; live.status = st; live.diag = null;
     render();
     if (live.unwatch) return;
-    live.unwatch = cap.mcp.watchTool(READER, 'status', null, ev => {
-      if (ev.type === 'data') { onStatus(ev.result.payload); return; }
-      const code = ev.error && ev.error.code;
-      if (['server_not_connected', 'not_in_manifest', 'blocked_by_policy', 'approval_required', 'not_granted'].includes(code)) {
-        live.on = false; live.offCode = code; live.diag = { code, message: ev.error.message };
-        if (src.mode === 'live') { src.mode = 'sample'; src.S = SAMPLE; src.now = SAMPLE_NOW; applySaved(); } else render();
-      }
-    }, { refetchInterval: 30000 });
+    // Ask the reader for news every 30 seconds. A plain timer keeps going
+    // while the window is minimized (the browser slows it to about once a
+    // minute), so the shared copy stays current in the background.
+    live.unwatch = setInterval(async () => {
+      if (!live.on || live.polling) return;
+      live.polling = true;
+      try { onStatus(await callReader('status')); }
+      catch (e) {
+        const code = e && e.code;
+        if (['server_not_connected', 'not_in_manifest', 'blocked_by_policy', 'approval_required', 'not_granted'].includes(code)) {
+          live.on = false; live.offCode = code; live.diag = { code, message: e.message };
+          if (src.mode === 'live') { src.mode = 'sample'; src.S = SAMPLE; src.now = SAMPLE_NOW; applySaved(); } else render();
+        }
+      } finally { live.polling = false; }
+    }, 30000);
     onStatus(st);
   }
 
@@ -1690,7 +1698,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   }
 
   // keep waiting times current while the page is open
-  setInterval(() => { if (src.mode === 'live' && !document.hidden && !live.busy) { src.now = Date.now(); render(); } }, 60000);
+  setInterval(() => { if (src.mode === 'live' && !live.busy) { src.now = Date.now(); render(); } }, 60000);
 
   async function boot() {
     const claude = window.claude;
@@ -1698,7 +1706,10 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const use = name => claude.use(name).catch(() => null);
     const [db, mcp, sample, user] = await Promise.all([use('db'), use('mcp'), use('sample'), use('user')]);
     cap.db = db; cap.mcp = mcp; cap.sample = sample;
-    if (user) { try { cap.canEdit = await user.canEdit(); } catch (_) { cap.canEdit = null; } }
+    if (user) {
+      try { cap.canEdit = await user.canEdit(); } catch (_) { cap.canEdit = null; }
+      try { cap.isOwner = await user.isOwner(); } catch (_) { cap.isOwner = null; }
+    }
     if (db) subscribeSaved(db);
     if (mcp) startLive(); else { live.diag = { code: 'no-mcp' }; render(); }
   }
