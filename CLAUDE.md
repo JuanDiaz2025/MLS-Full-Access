@@ -118,7 +118,7 @@ Check every photo first — the whole gallery, not the cover shot or the remarks
   timed driving route (one event per stop in time order, next stop + drive
   time in the notes, an all-day route summary with a Google Maps link). Each event carries a
   `[twin-network-openhouse:<MLS>:<start>]` tag so nothing is added twice.
-- **Area:** SF and the Peninsula (San Mateo County), active leads on the board.
+- **Area:** San Francisco only (Bryan, 26 Oct) — no Peninsula or other cities. Active leads on the board.
 
 ### The hourly open-house routine (set up 22 Oct)
 

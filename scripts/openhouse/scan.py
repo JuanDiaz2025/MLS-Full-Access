@@ -1,4 +1,4 @@
-"""Find upcoming open houses for active SF / Peninsula leads on the board.
+"""Find upcoming open houses for active San Francisco leads on the board.
 
     python3 -I scan.py <data.js> <verdicts.json> > candidates.json
 
@@ -10,10 +10,9 @@ rejected house is never looked at (or added) again.
 """
 import html, json, re, subprocess, sys, time
 
-AREA = re.compile(r", (San Francisco|Daly City|Pacifica|South San Francisco|Redwood City|San Bruno|San Mateo|"
-                  r"Menlo Park|East Palo Alto|Belmont|San Carlos|Burlingame|Foster City|Millbrae|Half Moon Bay|"
-                  r"Woodside|Atherton|Portola Valley|Brisbane|Colma|Hillsborough|Montara|Moss Beach|El Granada|"
-                  r"Emerald Hills|La Honda|Pescadero), CA", re.I)
+# San Francisco only (Bryan, 26 Oct).
+AREA = re.compile(r", San Francisco, CA", re.I)
+
 GONE = re.compile(r"sold|withdrawn|expired|cancel|off.?market|closed|duplicate|pending|contingent", re.I)
 SLOT = re.compile(r"(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day, (\w+) (\d+) ([\d:]+ [ap]m) - ([\d:]+ [ap]m)")
 MONTHS = {m: i + 1 for i, m in enumerate("January February March April May June July August September October November December".split())}
