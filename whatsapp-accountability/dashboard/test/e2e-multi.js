@@ -160,6 +160,17 @@ const card = (p, view, h) => p.$$eval(`#${view} .card`, (cs, h) => { const c = c
   console.log('8 stored:', keys.join(', '));
   await p.click('[data-action="done-setup"]'); await p.waitForTimeout(300);
   console.log('8 after stop:', await text(p, '#brand-sub'), '| group select hidden:', await p.$eval('#group-filter', e => e.hidden), '| pill:', await text(p, '#group-pill'));
+  // 9. ticking everyone as an instruction-giver is caught before saving
+  await p.click('#change-group'); await p.waitForTimeout(600);
+  console.log('9 tracked row:', (await rows(p, '.tracked')).join(' || '));
+  await p.click(`[data-action="edit-group"][data-gid="${G1}"]`); await p.waitForTimeout(600);
+  await p.check('input[name="setup-boss"][value="1002"]'); await p.waitForTimeout(150);
+  await p.check('input[name="setup-boss"][value="1003"]'); await p.waitForTimeout(150);
+  console.log('9 all ticked:', await text(p, '.setup p.warn'), '| save disabled:', await p.isDisabled('[data-action="save-group"]'));
+  await p.screenshot({ path: 'shots/multi-allticked.png', fullPage: true });
+  await p.uncheck('input[name="setup-boss"][value="1002"]'); await p.waitForTimeout(150);
+  console.log('9 one left:', await p.$eval('.setup .choices + p', e => e.textContent), '| save disabled:', await p.isDisabled('[data-action="save-group"]'));
+  await p.click('[data-action="cancel-edit"]');
   console.log('errors:', errs);
   await b.close();
 })();

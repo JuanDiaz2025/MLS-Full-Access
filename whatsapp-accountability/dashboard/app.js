@@ -336,14 +336,28 @@
     const nameRows = g.participants.map(p => `
         <label class="name-row" for="n-${esc(p.id)}"><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}${p.id === g.me ? ' (this phone)' : ''}</span>
           <input class="name-in" type="text" id="n-${esc(p.id)}" data-name-for="${esc(p.id)}" value="${esc(nameValue(p))}" placeholder="Name" maxlength="60" autocomplete="off"></label>`).join('');
-    const ready = state.setupBoss && state.setupBoss.size;
-    return `<h3>Whose messages are the instructions in “${esc(g.name || 'this group')}”?</h3>
-      <p class="plain">Tick everyone who gives instructions here, for example the CEO and the COO. Everyone else in the group is tracked for replies.</p>${givers}
+    const boss = state.setupBoss || new Set();
+    const left = g.participants.filter(p => !boss.has(p.id));
+    // a group where everyone gives instructions has nobody to track
+    const who = !boss.size ? '<p class="plain">Tick at least one person who gives instructions.</p>'
+      : !left.length ? '<p class="warn">Everyone is ticked, so nobody is left to track. Untick the people who should reply.</p>'
+      : `<p class="plain">Tracked for replies: ${esc(left.map(p => nameFor(p.id, p.name)).join(', '))} (${plural(left.length, 'person', 'people')})</p>`;
+    const ready = boss.size && left.length;
+    return `<h3>Who gives the instructions in “${esc(g.name || 'this group')}”?</h3>
+      <p class="plain">Tick only the people who give instructions, for example the CEO and the COO. Leave everyone who should reply unticked: they are the ones tracked.</p>${givers}${who}
       <h3>Names</h3><p class="plain">Optional. Shown on the dashboard instead of phone numbers, in every group.</p><div class="names">${nameRows}</div>
       <div class="dlg-f" style="padding:0;margin-top:16px">
         <button class="btn" type="button" data-action="cancel-edit">Cancel</button>
         <button class="btn primary" type="button" data-action="${action}"${ready ? '' : ' disabled'}>${label}</button>
       </div>`;
+  }
+
+  // " · tracking 2 people", from the last member list read for that group
+  function trackedCount(t) {
+    const raw = live.raws[t.groupId] || (savedGroupData(t.groupId) || {}).meta;
+    if (!raw || !raw.participants) return '';
+    const n = raw.participants.filter(p => !(t.bossIds || []).includes(p.id)).length;
+    return n ? ` \u00B7 tracking ${plural(n, 'person', 'people')}` : ' \u00B7 nobody left to track, press Edit and untick the people who reply';
   }
 
   function viewSetup() {
@@ -371,7 +385,7 @@
       const editing = state.editGroup === t.groupId;
       return `<div class="tracked${editing ? ' editing' : ''}">
         <div class="tracked-h"><div><b>${esc(t.groupName || 'Unnamed group')}</b>
-          <span class="sub">Instructions from ${esc((t.bossIds || []).map(nameOf).join(', ') || 'nobody yet')}</span></div>
+          <span class="sub">Instructions from ${esc((t.bossIds || []).map(nameOf).join(', ') || 'nobody yet')}${trackedCount(t)}</span></div>
           ${editing ? '' : `<div class="tracked-a">
             <button class="btn small" type="button" data-action="edit-group" data-gid="${esc(t.groupId)}">Edit</button>
             <button class="btn small danger" type="button" data-action="remove-group" data-gid="${esc(t.groupId)}">${state.confirmRemove === t.groupId ? 'Click again to stop' : 'Stop tracking'}</button></div>`}</div>
