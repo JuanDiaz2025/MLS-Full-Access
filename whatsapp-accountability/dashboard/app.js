@@ -111,7 +111,7 @@
         <td>${stageChip(top.stage, top.msg)}</td></tr>`;
     }).join('');
     const unresolvedRows = D.unresolved.map(m => `<tr>
-        <td>${msgLink(m)}<span class="sub">${esc(m.kind)}${m.priority === 'High' ? ' · High priority' : ''}</span></td>
+        <td>${msgLink(m)}<span class="sub">${esc(m.kind)}${m.priority === 'High' ? ' · High priority' : ''}${(m.chases || []).length ? ` · you followed up ${m.chases.length}×` : ''}</span></td>
         <td class="nowrap">${esc(fmtWhen(m.at))}</td>
         <td>${meter(m.responded, m.req.length)}</td>
         <td>${chip('c-warn', `${m.pending.length} pending`)}</td></tr>`).join('');
@@ -163,13 +163,16 @@
         <span class="m-ic">${ic(open ? 'clock' : 'check')}</span>
         <span class="m-t">${esc(m.title)}</span>
         ${open ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied')}
-        <span class="m-s">${esc(fmtClock(m.at))} · ${m.responded}/${m.req.length} replied</span></button>`;
+        <span class="m-s">${esc(fmtClock(m.at))} · ${m.responded}/${m.req.length} replied${(m.chases || []).length ? ` · followed up ${m.chases.length}×` : ''}</span></button>`;
     }).join('');
 
     const m = D.messages.find(x => x.id === state.sel);
     const task = m.task ? D.tasks.find(t => t.id === m.task) : null;
     const nameById = id => (D.people.find(p => p.id === id) || {}).name || id;
-    const reqLabel = m.required === 'all' ? `Everyone (${N})` : m.req.map(nameById).join(', ');
+    const reqLabel = m.required === 'all' || m.everyone ? `Everyone (${m.req.length})` : m.req.map(nameById).join(', ');
+    const chases = m.chases || [];
+    const chaseHtml = chases.length ? `<div class="chases"><div class="chases-h">${ic('repeat')}You followed up ${chases.length === 1 ? 'once' : chases.length + ' times'}</div>
+        ${chases.map(c => `<div class="chase"><span>${esc(c.text)}</span><time>${esc(fmtClock(c.at))}</time></div>`).join('')}</div>` : '';
     const rows = m.rows.slice().sort((a, b) => (a.replied - b.replied) || (a.replied ? a.delay - b.delay : a.name.localeCompare(b.name))).map(r => `<tr>
         <td>${who(r.name)}</td>
         <td>${r.replied ? chip('c-good', 'Replied', 'check') : chip('c-crit', 'No response')}</td>
@@ -184,6 +187,7 @@
         <div class="mhead"><div><h2>${esc(m.title)}</h2><p>${esc(fmtWhen(m.at))} · Sent by ${esc(m.senderName || 'Juan')}</p></div>
           ${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}</div>
         <div class="bubble">${esc(m.text)}<span class="b-time">${esc(fmtClock(m.at))}</span></div>
+        ${chaseHtml}
         <div class="read"><div class="read-cap">${ic('spark')}${m.by === 'rules' ? 'Read with simple rules, because Claude wasn’t available' : 'What the AI picked out of this message'}</div><dl class="read-grid">
           <div><dt>Type</dt><dd>${esc(m.kind)}</dd></div>
           <div><dt>Needs a reply from</dt><dd>${esc(reqLabel)}</dd></div>
@@ -245,6 +249,14 @@
         <div class="bar-val">${plural(p.missed, 'miss', 'misses')}<span>${esc(fmtAgo(p.lastMissed))}</span></div>
       </div>`).join('');
 
+    const chasedList = D.people.filter(p => p.chased > 0).sort((a, b) => b.chased - a.chased);
+    const maxChase = Math.max(1, ...chasedList.map(p => p.chased));
+    const chaseBars = chasedList.map(p => `
+      <div class="bar-row" tabindex="0" data-tip-t="${esc(p.name)}" data-tip="${esc(`You had to follow up ${p.chased === 1 ? 'once' : p.chased + ' times'} before ${p.name} answered, in the last 30 days.`)}">
+        ${who(p.name)}
+        <div class="bar-track"><div class="bar" style="width:${(p.chased / maxChase * 100).toFixed(1)}%;background:var(--serious)"></div></div>
+        <div class="bar-val">${p.chased}×</div>
+      </div>`).join('');
     const speed = D.people.filter(p => p.avg != null).sort((a, b) => b.avg - a.avg);
     const top = Math.max(cfg.escalate, ...speed.map(p => p.avg / MIN)) * 1.06;
     const tone = m => m < cfg.first ? 'var(--good)' : m < cfg.escalate ? 'var(--warn)' : 'var(--crit)';
@@ -278,6 +290,10 @@
         <div class="card-b">${missBars ? `<div class="bars">${missBars}</div>
           <p class="legend">A miss is a reply that didn’t arrive before the ${cfg.escalate}-minute escalation point.</p>`
           : '<div class="empty">Nobody missed more than one reply in the last 30 days.</div>'}</div></div>
+      <div class="card"><div class="card-h"><h2>Times you had to chase</h2><span class="hint">Last 30 days</span></div>
+        <div class="card-b">${chaseBars ? `<div class="bars">${chaseBars}</div>
+          <p class="legend">Each follow-up counts against the people who still hadn’t answered when it was sent.</p>`
+          : '<div class="empty">You didn’t have to chase anyone.</div>'}</div></div>
       <div class="card"><div class="card-h"><h2>Replies before escalation, by week</h2><span class="hint">Share of required replies</span></div>
         <div class="card-b"><div class="cols">${weekCols.map(w => w.html).join('')}</div>
           <div class="col-x">${weekCols.map(w => `<span>${esc(w.label)}</span>`).join('')}</div></div></div></div>
@@ -419,7 +435,7 @@
   function render() {
     S = src.S;
     NOW = src.mode === 'live' ? Date.now() : src.now;
-    N = S.people.length;
+    N = S.people.filter(p => !p.former).length;
     D = derive(S, cfg, NOW);
     renderNav();
     renderFrame();
@@ -703,8 +719,13 @@
       const ids = new Set(participants.map(p => p.id));
       const names = {};
       all.forEach(m => { if (m.sender_name && !ids.has(m.sender_id)) names[m.sender_id] = m.sender_name; });
+      const sameGroup = saved.meta && saved.meta.group && saved.meta.group.id === g.id;
+      const now = Date.now();
+      const members = updateMembers(sameGroup ? saved.meta.members : null, participants,
+        live.lastMembersRead || (sameGroup ? saved.meta.syncedAt : 0), now);
+      live.lastMembersRead = now;
       const raw = {
-        group: { id: g.id, name: g.name || source.groupName }, participants, names, bossIds: source.bossIds, me: g.me,
+        group: { id: g.id, name: g.name || source.groupName }, participants, members, names, bossIds: source.bossIds, me: g.me,
         messages: all.map(compactMessage).sort((a, b) => a.t - b.t),
         analysis: { ...(saved.meta && saved.meta.group && saved.meta.group.id === g.id ? saved.analysis : {}) },
         overrides: saved.names,
@@ -729,23 +750,32 @@
     const people = S0.people;
     const nameOf = nameIndex(raw);
     const canAsk = cap.sample && !live.sampleDenied;
-    const todo = S0.bossMessages.filter(m => { const a = raw.analysis[m.i]; return !a || (a.by === 'rules' && canAsk); });
+    const bossIdSet = new Set(S0.bossMessages.map(m => m.i));
+    const fallback = m => fallbackAnalysis(m, people, bossIdSet);
+    const todo = S0.bossMessages.filter(m => {
+      const a = raw.analysis[m.i];
+      return !a || (canAsk && (a.by === 'rules' || a.v !== ANALYSIS_VERSION));
+    });
     if (!todo.length) return;
-    if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallbackAnalysis(m, people); }); return; }
+    if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); }); return; }
     live.analyzing = todo.length; renderFrame();
     const bosses = (raw.bossIds || []).map(nameOf);
     for (let i = 0; i < todo.length; i += 12) {
       const batch = todo.slice(i, i + 12);
+      // the manager's ten messages before this batch, from the last day
+      const context = S0.bossMessages.filter(m => m.t < batch[0].t && m.t > batch[0].t - DAY_MS).slice(-10);
+      const earlier = new Set([...context, ...batch].map(m => m.i));
       try {
-        const out = await cap.sample.json(analysisPrompt(batch, people, bosses, nameOf), { modelTier: 'default' });
+        const out = await cap.sample.json(analysisPrompt(batch, context, people, bosses, nameOf), { modelTier: 'default' });
         const results = out && Array.isArray(out.results) ? out.results : [];
         batch.forEach(m => {
-          const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people);
-          raw.analysis[m.i] = a || raw.analysis[m.i] || fallbackAnalysis(m, people);
+          const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people, earlier);
+          if (a && a.follow_up_of === m.i) a.follow_up_of = null;
+          raw.analysis[m.i] = a || raw.analysis[m.i] || fallback(m);
         });
       } catch (e) {
         if (e && e.code === 'not_granted') live.sampleDenied = true;
-        todo.slice(i).forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallbackAnalysis(m, people); });
+        todo.slice(i).forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); });
         break;
       }
     }
@@ -780,7 +810,7 @@
         await db.doc('sync/analysis').set({ byId });
         live.writtenAnalysis = aJson; changed = true;
       }
-      const meta = { group: raw.group, participants: raw.participants, names: raw.names, bossIds: raw.bossIds, me: raw.me };
+      const meta = { group: raw.group, participants: raw.participants, members: raw.members, names: raw.names, bossIds: raw.bossIds, me: raw.me };
       const mJson = JSON.stringify(meta);
       if (changed || mJson !== live.writtenMeta || Date.now() - live.lastMetaWrite > 5 * MIN) {
         await db.doc('sync/meta').set({ ...meta, syncedAt: raw.syncedAt, messageCount: raw.messages.length });

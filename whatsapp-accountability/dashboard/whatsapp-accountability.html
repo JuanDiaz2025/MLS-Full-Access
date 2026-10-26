@@ -243,6 +243,11 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .choice b { overflow-wrap: anywhere; }
 .choice .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
 .empty b { color: var(--ink); }
+.chases { margin-top: 10px; max-width: 560px; padding: 10px 14px; border-radius: 12px; border: 1px dashed var(--line-2); display: flex; flex-direction: column; gap: 6px; }
+.chases-h { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--serious-ink); }
+.chases-h .ic { width: 15px; height: 15px; }
+.chase { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; }
+.chase time { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
 .names { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 10px; }
 .name-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .name-row .sub { font-size: 12.5px; color: var(--ink-3); }
@@ -651,8 +656,10 @@ function replyText(m, nameOf) {
   return text;
 }
 
+const ANALYSIS_VERSION = 2; // 2: also spots messages that chase an earlier request
+
 // Used when Claude isn't available to read a message.
-function fallbackAnalysis(m, people) {
+function fallbackAnalysis(m, people, bossIds) {
   const text = (m.x || '').trim();
   const ids = new Set(people.map(p => p.id));
   const named = (m.m || []).filter(id => ids.has(id));
@@ -664,33 +671,45 @@ function fallbackAnalysis(m, people) {
     required: named.length ? named : 'all',
     priority: /\b(urgent|asap|important|now|today)\b/i.test(text) ? 'High' : 'Normal',
     task: null,
-    by: 'rules',
+    // quoting your own earlier message is a nudge on it
+    follow_up_of: m.q && bossIds && bossIds.has(m.q) ? m.q : null,
+    by: 'rules', v: ANALYSIS_VERSION,
   };
 }
 
-function analysisPrompt(batch, people, bossNames, nameOf) {
+// context: the manager's earlier messages (oldest first), so Claude can tell
+// a nudge on an earlier request from a new one. batch: the ones to read now.
+function analysisPrompt(batch, context, people, bossNames, nameOf) {
   const members = people.map(p => `${p.id}: ${p.name}`).join('\n');
-  const msgs = batch.map(m => ({ id: m.i, sent: localStamp(m.t), text: readableText(m, nameOf) }));
+  const show = m => {
+    const o = { id: m.i, sent: localStamp(m.t), text: readableText(m, nameOf) };
+    if (m.q) o.replying_to = m.q;
+    return o;
+  };
   return `You read messages a manager posted in a WhatsApp work group, so a dashboard can track who has to reply.
 
 Manager: ${bossNames.join(', ')}
 Group members who may need to reply (id: name):
 ${members}
 
-For each message return JSON in exactly this shape:
-{"results":[{"id":"<message id>","title":"<3 to 6 word summary>","type":"Instruction" or "Question" or "Info","needs_reply":true or false,"required":"all" or ["<member id>"],"priority":"High" or "Normal","task":null or {"title":"<short task name>","owner_id":"<member id>","due":"YYYY-MM-DDTHH:MM" or null}}]}
+For each message under "Messages to read", return JSON in exactly this shape:
+{"results":[{"id":"<message id>","title":"<3 to 6 word summary>","type":"Instruction" or "Question" or "Info","needs_reply":true or false,"required":"all" or ["<member id>"],"priority":"High" or "Normal","task":null or {"title":"<short task name>","owner_id":"<member id>","due":"YYYY-MM-DDTHH:MM" or null},"follow_up_of":null or "<id of an earlier manager message>"}]}
 
 Rules:
 - needs_reply is true when the message asks people to do, confirm or answer something. Greetings, thanks and plain announcements are "Info" with needs_reply false.
 - required is "all" when the message is meant for the whole group. Otherwise list the ids of the people it addresses by name or @mention. Use only ids from the member list.
 - task is set only when a specific member is asked to complete a piece of work. owner_id is that member. due is the deadline written in the same local time as "sent", or null when no deadline is given.
 - priority is "High" only when the message says it is urgent or important, or the work is due the same day.
+- follow_up_of is set when the manager is chasing or repeating an earlier request because nobody answered ("can you confirm this???", "hello?", "what's happening?", "can anyone see this?") and the message asks for nothing new. Give the id of the earlier request being chased, from either list. If the message also asks for something new, it is a new request: follow_up_of is null. "replying_to" means the manager quoted that earlier message.
 
-Messages:
-${JSON.stringify(msgs)}`;
+Earlier messages from the manager, for context only:
+${JSON.stringify(context.map(show))}
+
+Messages to read:
+${JSON.stringify(batch.map(show))}`;
 }
 
-function cleanAnalysis(a, people) {
+function cleanAnalysis(a, people, earlierIds) {
   const ids = new Set(people.map(p => p.id));
   if (!a || typeof a !== 'object') return null;
   const out = {
@@ -700,7 +719,8 @@ function cleanAnalysis(a, people) {
     required: Array.isArray(a.required) ? a.required.map(String).filter(id => ids.has(id)) : 'all',
     priority: a.priority === 'High' ? 'High' : 'Normal',
     task: null,
-    by: 'claude',
+    follow_up_of: a.follow_up_of && earlierIds && earlierIds.has(String(a.follow_up_of)) ? String(a.follow_up_of) : null,
+    by: 'claude', v: ANALYSIS_VERSION,
   };
   if (Array.isArray(out.required) && !out.required.length) out.required = 'all';
   if (a.task && ids.has(String(a.task.owner_id))) {
@@ -709,55 +729,96 @@ function cleanAnalysis(a, people) {
   return out;
 }
 
-// raw: { participants, names, bossIds, messages (compact), analysis, group }
+const NOT_A_REPLY = new Set(['reaction', 'joined', 'left']);
+
+// raw: { participants, members, names, bossIds, messages (compact), analysis, overrides, group }
+// members: { id: { firstSeen, leftAt } } kept by the dashboard. Someone is only
+// expected to answer messages sent while they were in the group.
 function buildFromRaw(raw, now) {
   const nameOf = nameIndex(raw);
   const boss = new Set(raw.bossIds || []);
-  const people = (raw.participants || []).filter(p => !boss.has(p.id)).map(p => ({ id: p.id, name: nameOf(p.id) }));
+  const members = raw.members || {};
+  const current = new Set((raw.participants || []).map(p => p.id));
+  const ids = new Set([...current, ...Object.keys(members)].filter(id => !boss.has(id)));
+  const people = [...ids].map(id => ({ id, name: nameOf(id), former: !current.has(id) }));
   const pset = new Set(people.map(p => p.id));
+  const inGroup = (id, t) => {
+    const m = members[id];
+    if (!m) return current.has(id);
+    return (m.firstSeen || 0) <= t && !(m.leftAt && m.leftAt <= t);
+  };
   const since = now - WINDOW_DAYS * 24 * 60 * 60000;
   const msgs = (raw.messages || []).filter(m => m.t <= now).sort((a, b) => a.t - b.t);
-  const byId = new Map(msgs.map(m => [m.i, m]));
+  const bossMessages = msgs.filter(m => boss.has(m.s) && !NOT_A_REPLY.has(m.k) && !m.d && m.t >= since);
+  const bossIds = new Set(bossMessages.map(m => m.i));
+  const analysisOf = m => (raw.analysis || {})[m.i] || fallbackAnalysis(m, people, bossIds);
 
+  // Requests, and the nudges that chase them
   const tracked = [];
-  msgs.forEach(m => {
-    if (!boss.has(m.s) || m.k === 'reaction' || m.d || m.t < since) return;
-    const a = (raw.analysis || {})[m.i] || fallbackAnalysis(m, people);
+  const trackedById = new Map();
+  const rootOf = new Map(); // message id (request or nudge) -> request
+  bossMessages.forEach(m => {
+    const a = analysisOf(m);
+    const root = a.follow_up_of && rootOf.get(a.follow_up_of);
+    if (root && m.t > root.m.t) {
+      root.chases.push({ id: m.i, at: m.t, text: readableText(m, nameOf) });
+      rootOf.set(m.i, root);
+      return;
+    }
     if (!a.needs_reply) return;
     let req = a.required === 'all' ? [...pset] : a.required.filter(id => pset.has(id));
     if (a.task && pset.has(a.task.owner_id) && !req.includes(a.task.owner_id)) req = req.concat(a.task.owner_id);
-    if (req.length) tracked.push({ m, a, req: new Set(req) });
+    req = req.filter(id => inGroup(id, m.t));
+    if (!req.length) return;
+    const x = { m, a, req: new Set(req), chases: [], replies: {} };
+    tracked.push(x); trackedById.set(m.i, x); rootOf.set(m.i, x);
   });
-  const trackedById = new Map(tracked.map(x => [x.m.i, x]));
-  const replies = new Map(tracked.map(x => [x.m.i, {}]));
-  const setReply = (id, pid, at, text) => { const r = replies.get(id); if (!r[pid]) r[pid] = { at, text }; };
+  const setReply = (x, pid, at, text, extra) => { if (!x.replies[pid]) x.replies[pid] = { at, text, ...extra }; };
 
-  // Who acknowledged what: a quoted reply or a reaction answers that one
-  // message; any other message answers everything still open before it.
+  // Who acknowledged what: a quoted reply or a reaction answers that request
+  // (a nudge counts as its request); any other message answers everything
+  // still open before it.
   msgs.forEach(msg => {
     const pid = msg.s;
-    if (!pset.has(pid)) return;
+    if (!pset.has(pid) || msg.k === 'joined' || msg.k === 'left') return;
     if (msg.k === 'reaction') {
-      const x = trackedById.get(msg.r);
-      if (x && x.req.has(pid) && msg.t >= x.m.t) setReply(x.m.i, pid, msg.t, msg.x || '');
+      const x = rootOf.get(msg.r);
+      if (x && x.req.has(pid) && msg.t >= x.m.t) setReply(x, pid, msg.t, msg.x || '');
       return;
     }
     const text = replyText(msg, nameOf);
-    const quoted = msg.q && trackedById.get(msg.q);
-    if (quoted) { if (quoted.req.has(pid)) setReply(quoted.m.i, pid, msg.t, text); return; }
-    tracked.forEach(x => { if (x.m.t < msg.t && x.req.has(pid)) setReply(x.m.i, pid, msg.t, text); });
+    const quoted = msg.q && rootOf.get(msg.q);
+    if (quoted) { if (quoted.req.has(pid) && msg.t >= quoted.m.t) setReply(quoted, pid, msg.t, text); return; }
+    tracked.forEach(x => { if (x.m.t < msg.t && x.req.has(pid)) setReply(x, pid, msg.t, text); });
   });
+
+  // Someone who left without answering is no longer waited on; it counts as
+  // a late answer at the moment they left.
+  tracked.forEach(x => x.req.forEach(pid => {
+    const left = members[pid] && members[pid].leftAt;
+    if (left && left > x.m.t && !x.replies[pid]) setReply(x, pid, left, 'Left the group', { left: true });
+  }));
+
+  // How often each person had to be chased: every nudge counts against the
+  // people who still hadn't answered when it was sent.
+  const chased = {};
+  tracked.forEach(x => x.chases.forEach(c => x.req.forEach(pid => {
+    const r = x.replies[pid];
+    if (!r || r.at > c.at) chased[pid] = (chased[pid] || 0) + 1;
+  })));
+  people.forEach(p => { p.chased = chased[p.id] || 0; });
 
   const tasks = [];
   const messages = tracked.map(x => {
     const { m, a } = x;
     let taskId = null;
-    if (a.task && pset.has(a.task.owner_id)) {
+    if (a.task && pset.has(a.task.owner_id) && x.req.has(a.task.owner_id)) {
       const owner = a.task.owner_id;
       let doneAt = null, photos = 0, doc = null, doneText = '';
       for (const msg of msgs) {
-        if (msg.s !== owner || msg.t <= m.t || msg.k === 'reaction') continue;
-        if (msg.q && msg.q !== m.i && trackedById.has(msg.q)) continue; // about a different instruction
+        if (msg.s !== owner || msg.t <= m.t || NOT_A_REPLY.has(msg.k)) continue;
+        const about = msg.q && rootOf.get(msg.q);
+        if (about && about !== x) continue; // about a different request
         if (msg.k === 'image' || msg.k === 'video') photos++;
         if (msg.k === 'document' && !doc) doc = (msg.x || 'Document').split('\n')[0];
         if (msg.k === 'image' || msg.k === 'video' || msg.k === 'document' || DONE_RE.test(msg.x || '')) { doneAt = msg.t; doneText = msg.x || ''; break; }
@@ -765,24 +826,41 @@ function buildFromRaw(raw, now) {
       taskId = 'k' + m.i;
       tasks.push({
         id: taskId, title: a.task.title || a.title, msg: m.i, owner,
-        due: parseLocal(a.task.due), ackAt: (replies.get(m.i)[owner] || {}).at || null, doneAt,
+        due: parseLocal(a.task.due), ackAt: (x.replies[owner] || {}).at || null, doneAt,
         evidence: photos ? { photos } : doc ? { doc } : doneAt ? { reply: doneText } : null,
       });
     }
     return {
       id: m.i, at: m.t, title: a.title || (m.x || '').split('\n')[0].slice(0, 48) || 'Message',
       text: readableText(m, nameOf), kind: a.type === 'Question' ? 'Question' : 'Instruction',
-      required: a.required === 'all' ? 'all' : [...x.req], priority: a.priority || 'Normal',
-      task: taskId, replies: replies.get(m.i), senderName: nameOf(m.s), by: a.by || 'claude',
+      required: [...x.req], everyone: a.required === 'all', priority: a.priority || 'Normal',
+      task: taskId, replies: x.replies, senderName: nameOf(m.s), by: a.by || 'claude', chases: x.chases,
     };
   }).sort((a, b) => b.at - a.at);
 
-  // 'all' must mean the people in the group now
-  messages.forEach(m => { if (m.required === 'all') m.required = 'all'; });
-  return { people, messages, tasks, bossMessages: msgs.filter(m => boss.has(m.s) && m.k !== 'reaction' && !m.d && m.t >= since) };
+  return { people, messages, tasks, bossMessages };
 }
 
-if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromRaw, fallbackAnalysis, cleanAnalysis, analysisPrompt, parseLocal, dayKey, nameIndex };
+// Keeps track of who has been in the group and when, from one read of the
+// member list to the next. A new face is assumed to have joined just after
+// the previous read; someone missing is assumed to have left just after it.
+function updateMembers(prev, participants, lastRead, now) {
+  const out = {};
+  const first = !prev;
+  const seen = new Set(participants.map(p => p.id));
+  Object.entries(prev || {}).forEach(([id, m]) => { out[id] = { ...m }; });
+  participants.forEach(p => {
+    const m = out[p.id];
+    if (!m) out[p.id] = { firstSeen: first ? 0 : (lastRead || now) };
+    else if (m.leftAt) out[p.id] = { firstSeen: lastRead || now };
+  });
+  Object.entries(out).forEach(([id, m]) => {
+    if (!seen.has(id) && !m.leftAt) m.leftAt = lastRead || now;
+  });
+  return out;
+}
+
+if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromRaw, fallbackAnalysis, cleanAnalysis, analysisPrompt, parseLocal, dayKey, nameIndex, updateMembers, ANALYSIS_VERSION };
 
 </script>
 <script>
@@ -899,7 +977,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <td>${stageChip(top.stage, top.msg)}</td></tr>`;
     }).join('');
     const unresolvedRows = D.unresolved.map(m => `<tr>
-        <td>${msgLink(m)}<span class="sub">${esc(m.kind)}${m.priority === 'High' ? ' · High priority' : ''}</span></td>
+        <td>${msgLink(m)}<span class="sub">${esc(m.kind)}${m.priority === 'High' ? ' · High priority' : ''}${(m.chases || []).length ? ` · you followed up ${m.chases.length}×` : ''}</span></td>
         <td class="nowrap">${esc(fmtWhen(m.at))}</td>
         <td>${meter(m.responded, m.req.length)}</td>
         <td>${chip('c-warn', `${m.pending.length} pending`)}</td></tr>`).join('');
@@ -951,13 +1029,16 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <span class="m-ic">${ic(open ? 'clock' : 'check')}</span>
         <span class="m-t">${esc(m.title)}</span>
         ${open ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied')}
-        <span class="m-s">${esc(fmtClock(m.at))} · ${m.responded}/${m.req.length} replied</span></button>`;
+        <span class="m-s">${esc(fmtClock(m.at))} · ${m.responded}/${m.req.length} replied${(m.chases || []).length ? ` · followed up ${m.chases.length}×` : ''}</span></button>`;
     }).join('');
 
     const m = D.messages.find(x => x.id === state.sel);
     const task = m.task ? D.tasks.find(t => t.id === m.task) : null;
     const nameById = id => (D.people.find(p => p.id === id) || {}).name || id;
-    const reqLabel = m.required === 'all' ? `Everyone (${N})` : m.req.map(nameById).join(', ');
+    const reqLabel = m.required === 'all' || m.everyone ? `Everyone (${m.req.length})` : m.req.map(nameById).join(', ');
+    const chases = m.chases || [];
+    const chaseHtml = chases.length ? `<div class="chases"><div class="chases-h">${ic('repeat')}You followed up ${chases.length === 1 ? 'once' : chases.length + ' times'}</div>
+        ${chases.map(c => `<div class="chase"><span>${esc(c.text)}</span><time>${esc(fmtClock(c.at))}</time></div>`).join('')}</div>` : '';
     const rows = m.rows.slice().sort((a, b) => (a.replied - b.replied) || (a.replied ? a.delay - b.delay : a.name.localeCompare(b.name))).map(r => `<tr>
         <td>${who(r.name)}</td>
         <td>${r.replied ? chip('c-good', 'Replied', 'check') : chip('c-crit', 'No response')}</td>
@@ -972,6 +1053,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <div class="mhead"><div><h2>${esc(m.title)}</h2><p>${esc(fmtWhen(m.at))} · Sent by ${esc(m.senderName || 'Juan')}</p></div>
           ${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}</div>
         <div class="bubble">${esc(m.text)}<span class="b-time">${esc(fmtClock(m.at))}</span></div>
+        ${chaseHtml}
         <div class="read"><div class="read-cap">${ic('spark')}${m.by === 'rules' ? 'Read with simple rules, because Claude wasn’t available' : 'What the AI picked out of this message'}</div><dl class="read-grid">
           <div><dt>Type</dt><dd>${esc(m.kind)}</dd></div>
           <div><dt>Needs a reply from</dt><dd>${esc(reqLabel)}</dd></div>
@@ -1033,6 +1115,14 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <div class="bar-val">${plural(p.missed, 'miss', 'misses')}<span>${esc(fmtAgo(p.lastMissed))}</span></div>
       </div>`).join('');
 
+    const chasedList = D.people.filter(p => p.chased > 0).sort((a, b) => b.chased - a.chased);
+    const maxChase = Math.max(1, ...chasedList.map(p => p.chased));
+    const chaseBars = chasedList.map(p => `
+      <div class="bar-row" tabindex="0" data-tip-t="${esc(p.name)}" data-tip="${esc(`You had to follow up ${p.chased === 1 ? 'once' : p.chased + ' times'} before ${p.name} answered, in the last 30 days.`)}">
+        ${who(p.name)}
+        <div class="bar-track"><div class="bar" style="width:${(p.chased / maxChase * 100).toFixed(1)}%;background:var(--serious)"></div></div>
+        <div class="bar-val">${p.chased}×</div>
+      </div>`).join('');
     const speed = D.people.filter(p => p.avg != null).sort((a, b) => b.avg - a.avg);
     const top = Math.max(cfg.escalate, ...speed.map(p => p.avg / MIN)) * 1.06;
     const tone = m => m < cfg.first ? 'var(--good)' : m < cfg.escalate ? 'var(--warn)' : 'var(--crit)';
@@ -1066,6 +1156,10 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         <div class="card-b">${missBars ? `<div class="bars">${missBars}</div>
           <p class="legend">A miss is a reply that didn’t arrive before the ${cfg.escalate}-minute escalation point.</p>`
           : '<div class="empty">Nobody missed more than one reply in the last 30 days.</div>'}</div></div>
+      <div class="card"><div class="card-h"><h2>Times you had to chase</h2><span class="hint">Last 30 days</span></div>
+        <div class="card-b">${chaseBars ? `<div class="bars">${chaseBars}</div>
+          <p class="legend">Each follow-up counts against the people who still hadn’t answered when it was sent.</p>`
+          : '<div class="empty">You didn’t have to chase anyone.</div>'}</div></div>
       <div class="card"><div class="card-h"><h2>Replies before escalation, by week</h2><span class="hint">Share of required replies</span></div>
         <div class="card-b"><div class="cols">${weekCols.map(w => w.html).join('')}</div>
           <div class="col-x">${weekCols.map(w => `<span>${esc(w.label)}</span>`).join('')}</div></div></div></div>
@@ -1207,7 +1301,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   function render() {
     S = src.S;
     NOW = src.mode === 'live' ? Date.now() : src.now;
-    N = S.people.length;
+    N = S.people.filter(p => !p.former).length;
     D = derive(S, cfg, NOW);
     renderNav();
     renderFrame();
@@ -1491,8 +1585,13 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       const ids = new Set(participants.map(p => p.id));
       const names = {};
       all.forEach(m => { if (m.sender_name && !ids.has(m.sender_id)) names[m.sender_id] = m.sender_name; });
+      const sameGroup = saved.meta && saved.meta.group && saved.meta.group.id === g.id;
+      const now = Date.now();
+      const members = updateMembers(sameGroup ? saved.meta.members : null, participants,
+        live.lastMembersRead || (sameGroup ? saved.meta.syncedAt : 0), now);
+      live.lastMembersRead = now;
       const raw = {
-        group: { id: g.id, name: g.name || source.groupName }, participants, names, bossIds: source.bossIds, me: g.me,
+        group: { id: g.id, name: g.name || source.groupName }, participants, members, names, bossIds: source.bossIds, me: g.me,
         messages: all.map(compactMessage).sort((a, b) => a.t - b.t),
         analysis: { ...(saved.meta && saved.meta.group && saved.meta.group.id === g.id ? saved.analysis : {}) },
         overrides: saved.names,
@@ -1517,23 +1616,32 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const people = S0.people;
     const nameOf = nameIndex(raw);
     const canAsk = cap.sample && !live.sampleDenied;
-    const todo = S0.bossMessages.filter(m => { const a = raw.analysis[m.i]; return !a || (a.by === 'rules' && canAsk); });
+    const bossIdSet = new Set(S0.bossMessages.map(m => m.i));
+    const fallback = m => fallbackAnalysis(m, people, bossIdSet);
+    const todo = S0.bossMessages.filter(m => {
+      const a = raw.analysis[m.i];
+      return !a || (canAsk && (a.by === 'rules' || a.v !== ANALYSIS_VERSION));
+    });
     if (!todo.length) return;
-    if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallbackAnalysis(m, people); }); return; }
+    if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); }); return; }
     live.analyzing = todo.length; renderFrame();
     const bosses = (raw.bossIds || []).map(nameOf);
     for (let i = 0; i < todo.length; i += 12) {
       const batch = todo.slice(i, i + 12);
+      // the manager's ten messages before this batch, from the last day
+      const context = S0.bossMessages.filter(m => m.t < batch[0].t && m.t > batch[0].t - DAY_MS).slice(-10);
+      const earlier = new Set([...context, ...batch].map(m => m.i));
       try {
-        const out = await cap.sample.json(analysisPrompt(batch, people, bosses, nameOf), { modelTier: 'default' });
+        const out = await cap.sample.json(analysisPrompt(batch, context, people, bosses, nameOf), { modelTier: 'default' });
         const results = out && Array.isArray(out.results) ? out.results : [];
         batch.forEach(m => {
-          const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people);
-          raw.analysis[m.i] = a || raw.analysis[m.i] || fallbackAnalysis(m, people);
+          const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people, earlier);
+          if (a && a.follow_up_of === m.i) a.follow_up_of = null;
+          raw.analysis[m.i] = a || raw.analysis[m.i] || fallback(m);
         });
       } catch (e) {
         if (e && e.code === 'not_granted') live.sampleDenied = true;
-        todo.slice(i).forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallbackAnalysis(m, people); });
+        todo.slice(i).forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); });
         break;
       }
     }
@@ -1568,7 +1676,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         await db.doc('sync/analysis').set({ byId });
         live.writtenAnalysis = aJson; changed = true;
       }
-      const meta = { group: raw.group, participants: raw.participants, names: raw.names, bossIds: raw.bossIds, me: raw.me };
+      const meta = { group: raw.group, participants: raw.participants, members: raw.members, names: raw.names, bossIds: raw.bossIds, me: raw.me };
       const mJson = JSON.stringify(meta);
       if (changed || mJson !== live.writtenMeta || Date.now() - live.lastMetaWrite > 5 * MIN) {
         await db.doc('sync/meta').set({ ...meta, syncedAt: raw.syncedAt, messageCount: raw.messages.length });
