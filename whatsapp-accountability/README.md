@@ -12,7 +12,7 @@ WhatsApp group
   → reader/ (whatsapp-reader.exe on one Windows computer, saves group messages locally)
   → Claude desktop app on that computer (runs the reader, lets the page call it)
   → dashboard/ (the artifact: reads the reader, saves each update into the page)
-  → anyone with the link sees the last saved update on any device
+  → people in the company with the link see the last saved update on any device
 ```
 
 - **reader/** is a small Go program built on [whatsmeow](https://github.com/tulir/whatsmeow). It links once by QR code, keeps group messages, members, quoted replies, reactions, edits and deletions in `messages.db` next to the exe, and answers four read-only tools for the Claude desktop app: `status`, `list_groups`, `get_group`, `get_messages`. One-to-one chats are never stored. Setup steps for the person running it are in `reader/README.txt`.
@@ -56,8 +56,23 @@ node dashboard/test/e2e-addmany.js  # searching, ticking several groups, and set
 node dashboard/test/e2e-sort.js  # sorting the group list: newest groups, recent activity, name
 ```
 
+## Why a linked-device reader
+
+Checked against Meta's documentation on 26 Oct 2026. Juan's groups already exist and have more than 8 people.
+
+| Option | Can it read Juan's existing groups? | Why |
+|---|---|---|
+| WhatsApp Cloud API, Groups API | No | It only works with groups the business creates through the API. Each one is capped at 8 participants, people join by invite link, and the number must be an Official Business Account ([Meta: Groups API](https://developers.facebook.com/documentation/business-messaging/whatsapp/groups/)). |
+| Cloud API with Coexistence (Business app and API on one number) | No | Only one-to-one chats reach the API. Group chats stay in the app and are listed as not supported on the API ([Meta: onboarding WhatsApp Business app users](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users)). |
+| Exporting the chat by hand | Only after someone exports it | Never live, so reply times can't be measured as they happen, and someone has to remember to do it. |
+| Linked-device reader (chosen) | Yes, as messages arrive | It links like WhatsApp Web and receives each group message when the phone does. |
+
+**Ban risk.** WhatsApp's [terms of service](https://www.whatsapp.com/legal/terms-of-service) don't allow unofficial or automated access, so the risk isn't zero. Reported bans target bulk or automated sending and modified WhatsApp apps ([Ubergizmo, Nov 2025](https://www.ubergizmo.com/2025/11/whatsapp-bans/), [Fullpress](https://www.fullpress.it/en/whatsapp-suspension-of-some-accounts-here-are-the-reasons/)). The reader sends nothing. Its four tools are marked read-only, and the code makes no call to whatsmeow's send, presence or read-receipt functions:
+
+```
+grep -n -i -E "SendMessage|SendPresence|SendChatPresence|MarkRead|CreateGroup" reader/*.go   # no matches
+```
+
 ## Status
 
-Tested for real: a phone linked to the reader on Windows, a test group read live through the Claude desktop app, and the saved copy matching WhatsApp. Message saving is covered by `reader/reader_test.go`. Tracking several groups at once has only been tested against the simulated reader so far.
-
-WhatsApp's terms don't allow third-party linked devices, even read-only ones. The risk is low because nothing is sent, but it isn't zero.
+Tested for real from 24 Oct 2026: a phone linked to the reader on Windows, a test group read live through the Claude desktop app, and the saved copy matching WhatsApp. No warnings from WhatsApp on the test number as of 26 Oct. Message saving is covered by `reader/reader_test.go` (3 tests, passing on 26 Oct). Tracking several groups at once has only been tested against the simulated reader so far.
