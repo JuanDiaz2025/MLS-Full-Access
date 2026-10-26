@@ -11,9 +11,9 @@
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
   const src = { mode: 'sample', raw: null, S: SAMPLE, now: SAMPLE_NOW, group: { name: 'THB Construction Team' }, updatedAt: null };
   const cap = { db: null, mcp: null, sample: null, canEdit: null };
-  const saved = { source: null, meta: null, analysis: {}, days: {}, loaded: { source: false, analysis: false, meta: false } };
+  const saved = { source: null, meta: null, analysis: {}, days: {}, names: {}, loaded: { source: false, analysis: false, meta: false } };
   const live = { on: false, status: null, groups: null, groupInfo: null, busy: false, again: false, lastSig: '', lastSync: 0,
-    written: {}, writtenAnalysis: null, writtenMeta: null, lastMetaWrite: 0, sampleDenied: false, analyzing: 0, error: null, offCode: null };
+    unwatch: null, diag: null, written: {}, writtenAnalysis: null, writtenMeta: null, lastMetaWrite: 0, sampleDenied: false, analyzing: 0, error: null, offCode: null };
 
   const VIEWS = {
     dashboard: { label: 'Dashboard', icon: 'grid', title: 'Dashboard', sub: 'Who hasn’t replied, what’s still open, and who needs a follow-up.' },
@@ -328,15 +328,22 @@
               <span><b>${esc(p.name)}${p.id === g.me ? ' (this phone)' : ''}</b><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}</span></span></label>`).join('')}</div>`;
     }
     const ready = state.setupGroup && state.setupBoss && state.setupBoss.size && g && g.id === state.setupGroup;
+    const looksLikeNumber = n => !n || /^\+?[\d\s()-]+$/.test(n);
+    const nameValue = p => (state.setupNames && p.id in state.setupNames) ? state.setupNames[p.id]
+      : saved.names[p.id] || (looksLikeNumber(p.name) ? '' : p.name);
+    const nameRows = g && g.id === state.setupGroup ? g.participants.map(p => `
+        <label class="name-row" for="n-${esc(p.id)}"><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}${p.id === g.me ? ' (this phone)' : ''}</span>
+          <input class="name-in" type="text" id="n-${esc(p.id)}" data-name-for="${esc(p.id)}" value="${esc(nameValue(p))}" placeholder="Name" maxlength="60" autocomplete="off"></label>`).join('') : '';
     return `<div class="card setup"><div class="card-b">
       <h2>${ic('link')}Choose the group to track</h2>
       <p>WhatsApp Reader is linked to +${esc(st.phone)}. It only reads; nothing is ever sent.</p>
       <h3>1. Group</h3>${pickGroup}
       ${state.setupGroup ? `<h3>2. Whose messages are the instructions?</h3><p class="plain">Everyone else in the group is tracked for replies.</p>${pickBoss}` : ''}
+      ${nameRows ? `<h3>3. Names</h3><p class="plain">Optional. Shown on the dashboard instead of phone numbers.</p><div class="names">${nameRows}</div>` : ''}
       <p class="dlg-msg err" id="setup-msg" role="status">${esc(live.setupError || '')}</p>
       <div class="dlg-f" style="padding:0">
         ${saved.source ? '<button class="btn" type="button" data-action="cancel-setup">Cancel</button>' : ''}
-        <button class="btn primary" type="button" data-action="save-source"${ready ? '' : ' disabled'}>Start tracking</button>
+        <button class="btn primary" type="button" data-action="save-source"${ready ? '' : ' disabled'}>${saved.source ? 'Save' : 'Start tracking'}</button>
       </div>
     </div></div>`;
   }
@@ -381,10 +388,32 @@
       note.textContent = 'Sample data. Not connected to WhatsApp yet.';
       foot.textContent = 'Everything on this page is sample data for 18 example team members. Real numbers appear once this page is opened in the Claude desktop app on the computer running WhatsApp Reader. Nothing is ever sent to WhatsApp.';
     }
+    const conn = document.getElementById('conn');
+    conn.hidden = live.on || !live.diag;
+    if (!conn.hidden) {
+      const d = live.diag;
+      document.getElementById('conn-text').textContent = connMessage(d);
+      document.getElementById('conn-code').textContent = d.code === 'connecting' ? '' : `Code: ${d.code}`;
+      document.getElementById('conn-btn').disabled = d.code === 'connecting';
+    }
     const err = document.getElementById('live-error');
     const msg = live.error ? (live.error.message || String(live.error)) : '';
     err.hidden = !(live.on && msg);
     err.textContent = msg ? `WhatsApp Reader couldn’t read the group: ${msg}` : '';
+  }
+
+  // Why this window isn't reading WhatsApp Reader, in words that say what to do.
+  function connMessage(d) {
+    switch (d.code) {
+      case 'connecting': return 'Connecting to WhatsApp Reader\u2026';
+      case 'no-mcp': return 'This window can\u2019t reach programs on your computer. Open this page in the Claude desktop app.';
+      case 'server_not_connected': return 'The Claude app showing this page didn\u2019t connect it to WhatsApp Reader. Check that Settings \u2192 Developer lists whatsapp-reader as running. If this page is open in a side panel, open it in its own window and press Connect.';
+      case 'not_in_manifest': case 'not_granted': case 'approval_required': case 'cancelled': case 'consent_required':
+        return 'Access to WhatsApp Reader wasn\u2019t allowed. Press Connect and choose Allow.';
+      case 'blocked_by_policy': return 'Your organization\u2019s settings block this page from using WhatsApp Reader.';
+      case 'tool_error': return `WhatsApp Reader answered with an error: ${d.message || 'no details'}`;
+      default: return `Couldn\u2019t reach WhatsApp Reader${d.message ? ': ' + d.message : '.'}`;
+    }
   }
 
   function render() {
@@ -400,7 +429,8 @@
     document.getElementById('v-sub').textContent = setup ? 'One-time setup on this computer.' : v.sub;
     const setupEl = document.getElementById('v-setup');
     setupEl.hidden = !setup;
-    if (setup) setupEl.innerHTML = viewSetup();
+    const typing = document.activeElement && setupEl.contains(document.activeElement) && document.activeElement.matches('input[type="text"]');
+    if (setup && !typing) setupEl.innerHTML = viewSetup();
     const list = document.getElementById('mlist');
     const keepScroll = list ? list.scrollTop : 0;
     const builders = { dashboard: viewDashboard, messages: viewMessages, tasks: viewTasks, reports: viewReports };
@@ -426,6 +456,10 @@
     if (sel) { state.sel = sel.dataset.sel; render(); return; }
     const act = e.target.closest('[data-action]');
     if (act) onAction(act.dataset.action);
+  });
+  document.addEventListener('input', e => {
+    const id = e.target.dataset && e.target.dataset.nameFor;
+    if (id) { state.setupNames = state.setupNames || {}; state.setupNames[id] = e.target.value; }
   });
   document.addEventListener('change', e => {
     if (e.target.id === 'task-filter') { state.taskFilter = e.target.value; render(); }
@@ -512,7 +546,7 @@
   function applySaved() {
     if (src.mode === 'live' || !saved.meta || !saved.meta.group) { render(); return; }
     const messages = Object.values(saved.days).flatMap(d => (d && d.messages) || []);
-    applyRaw({ ...saved.meta, analysis: saved.analysis || {}, messages }, 'saved');
+    applyRaw({ ...saved.meta, analysis: saved.analysis || {}, messages, overrides: saved.names }, 'saved');
   }
 
   function subscribeSaved(db) {
@@ -528,6 +562,10 @@
       saved.loaded.source = true;
       if (live.on && live.status && live.status.linked) { if (saved.source) syncNow(); else loadGroups(); }
       render();
+    }, fail);
+    db.doc('settings/names').onSnapshot(snap => {
+      saved.names = snap.exists ? (snap.data().byId || {}) : {};
+      if (src.raw) applyRaw({ ...src.raw, overrides: saved.names }, src.mode); else render();
     }, fail);
     db.doc('sync/meta').onSnapshot(snap => { saved.meta = snap.exists ? snap.data() : null; saved.loaded.meta = true; applySaved(); }, fail);
     db.doc('sync/analysis').onSnapshot(snap => {
@@ -547,16 +585,19 @@
   const callReader = async (tool, input) => (await cap.mcp.callTool(READER, tool, input || {}, { cache: false })).payload;
 
   async function startLive() {
+    if (!cap.mcp) { live.diag = { code: 'no-mcp' }; render(); return; }
     let st;
+    live.diag = { code: 'connecting' }; renderFrame();
     try { st = await callReader('status'); }
-    catch (e) { live.on = false; live.offCode = e && e.code; render(); return; }
-    live.on = true; live.status = st;
+    catch (e) { live.on = false; live.offCode = e && e.code; live.diag = { code: (e && e.code) || 'unknown', message: e && e.message }; render(); return; }
+    live.on = true; live.status = st; live.diag = null;
     render();
-    cap.mcp.watchTool(READER, 'status', null, ev => {
+    if (live.unwatch) return;
+    live.unwatch = cap.mcp.watchTool(READER, 'status', null, ev => {
       if (ev.type === 'data') { onStatus(ev.result.payload); return; }
       const code = ev.error && ev.error.code;
       if (['server_not_connected', 'not_in_manifest', 'blocked_by_policy', 'approval_required', 'not_granted'].includes(code)) {
-        live.on = false; live.offCode = code;
+        live.on = false; live.offCode = code; live.diag = { code, message: ev.error.message };
         if (src.mode === 'live') { src.mode = 'sample'; src.S = SAMPLE; src.now = SAMPLE_NOW; applySaved(); } else render();
       }
     }, { refetchInterval: 30000 });
@@ -603,10 +644,12 @@
   }
 
   async function onAction(action) {
-    if (action === 'recheck') {
+    if (action === 'connect') {
+      startLive();
+    } else if (action === 'recheck') {
       try { onStatus(await callReader('status')); } catch (e) { live.on = false; render(); }
     } else if (action === 'change-group') {
-      state.setup = true; state.setupGroup = saved.source ? saved.source.groupId : null; state.setupBoss = null;
+      state.setup = true; state.setupGroup = saved.source ? saved.source.groupId : null; state.setupBoss = null; state.setupNames = null;
       loadGroups();
     } else if (action === 'cancel-setup') {
       state.setup = false; render();
@@ -614,8 +657,20 @@
       const g = live.groupInfo;
       if (!g || !state.setupBoss || !state.setupBoss.size) return;
       const source = { groupId: g.id, groupName: g.name, bossIds: [...state.setupBoss], me: g.me, savedAt: Date.now() };
-      saved.source = source; state.setup = false;
-      if (cap.db) { try { await cap.db.doc('settings/source').set(source); } catch (e) { live.setupError = 'Couldn’t save the choice on this page.'; } }
+      const names = { ...saved.names };
+      g.participants.forEach(p => {
+        if (!state.setupNames || !(p.id in state.setupNames)) return;
+        const v = state.setupNames[p.id].trim();
+        if (v) names[p.id] = v; else delete names[p.id];
+      });
+      saved.source = source; saved.names = names; state.setup = false; state.setupNames = null;
+      if (cap.db) {
+        try {
+          await cap.db.doc('settings/source').set(source);
+          await cap.db.doc('settings/names').set({ byId: names });
+        } catch (e) { live.setupError = 'Couldn’t save the choice on this page.'; }
+      }
+      if (src.raw) applyRaw({ ...src.raw, overrides: names }, src.mode);
       live.lastSig = ''; render(); syncNow();
     }
   }
@@ -652,6 +707,7 @@
         group: { id: g.id, name: g.name || source.groupName }, participants, names, bossIds: source.bossIds, me: g.me,
         messages: all.map(compactMessage).sort((a, b) => a.t - b.t),
         analysis: { ...(saved.meta && saved.meta.group && saved.meta.group.id === g.id ? saved.analysis : {}) },
+        overrides: saved.names,
         syncedAt: Date.now(),
       };
       await analyze(raw);
@@ -748,7 +804,7 @@
     cap.db = db; cap.mcp = mcp; cap.sample = sample;
     if (user) { try { cap.canEdit = await user.canEdit(); } catch (_) { cap.canEdit = null; } }
     if (db) subscribeSaved(db);
-    if (mcp) startLive();
+    if (mcp) startLive(); else { live.diag = { code: 'no-mcp' }; render(); }
   }
 
   state.view = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : 'dashboard';

@@ -36,6 +36,8 @@ function localStamp(t) {
 function nameIndex(raw) {
   const names = { ...(raw.names || {}) };
   (raw.participants || []).forEach(p => { if (p.name) names[p.id] = p.name; });
+  // names typed in on the dashboard win over what WhatsApp shows
+  Object.entries(raw.overrides || {}).forEach(([id, n]) => { if (n) names[id] = n; });
   return id => names[id] || (String(id).endsWith('@lid') ? 'Unknown member' : '+' + id);
 }
 

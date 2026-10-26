@@ -80,6 +80,11 @@ button { cursor: pointer; }
 .timing-btn:hover { border-color: #3c6b62; }
 .timing-btn b { display: block; font-weight: 600; }
 .timing-btn span { display: block; font-size: 12px; color: var(--side-ink-2); margin-top: 1px; }
+.conn { display: flex; flex-direction: column; gap: 6px; padding: 11px 12px; border-radius: 10px; background: var(--side-2); border: 1px solid var(--side-line); font-size: 12.5px; color: var(--side-ink-2); }
+.conn b { color: var(--side-ink); font-weight: 600; }
+.conn-code { font-size: 11.5px; opacity: .8; }
+.conn-btn { align-self: flex-start; padding: 6px 12px; border-radius: 8px; border: 0; background: var(--brand); color: var(--on-brand); font-weight: 600; }
+.conn-btn:disabled { opacity: .6; cursor: default; }
 .side-note { font-size: 12px; color: var(--side-ink-2); padding-inline: 4px; }
 
 .main { min-width: 0; padding-block: 26px 40px; padding-left: 30px; padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -238,6 +243,10 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .choice b { overflow-wrap: anywhere; }
 .choice .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
 .empty b { color: var(--ink); }
+.names { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 10px; }
+.name-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.name-row .sub { font-size: 12.5px; color: var(--ink-3); }
+.name-in { padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); width: 100%; }
 .foot { font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 14px; max-width: 80ch; }
 
 /* ---------- timing dialog ---------- */
@@ -278,6 +287,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .side-foot { margin: 0 0 0 auto; }
   .timing-btn { padding: 8px 10px; }
   .timing-btn .t-txt, .side-note { display: none; }
+  .conn { width: 100%; order: 4; }
   .main { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-top: 20px; }
   .top h1 { font-size: 24px; }
 }
@@ -305,12 +315,18 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
     <div class="side-foot">
       <button class="timing-btn" id="change-group" type="button" data-action="change-group" hidden>
         <svg class="ic" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
-        <span class="t-txt"><b>Change group</b><span>Pick the group or whose messages count</span></span>
+        <span class="t-txt"><b>Change group or names</b><span>Pick the group, who gives instructions, and names</span></span>
       </button>
       <button class="timing-btn" id="open-timing" type="button" aria-haspopup="dialog">
         <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 1.5M9.5 3h5"/></svg>
         <span class="t-txt"><b>Follow-up timing</b><span id="timing-sum"></span></span>
       </button>
+      <div class="conn" id="conn" hidden>
+        <b>WhatsApp Reader</b>
+        <span id="conn-text"></span>
+        <span class="conn-code" id="conn-code"></span>
+        <button class="conn-btn" id="conn-btn" type="button" data-action="connect">Connect</button>
+      </div>
       <div class="side-note" id="side-note">Sample data. Not connected to WhatsApp yet.</div>
     </div>
   </aside>
@@ -612,6 +628,8 @@ function localStamp(t) {
 function nameIndex(raw) {
   const names = { ...(raw.names || {}) };
   (raw.participants || []).forEach(p => { if (p.name) names[p.id] = p.name; });
+  // names typed in on the dashboard win over what WhatsApp shows
+  Object.entries(raw.overrides || {}).forEach(([id, n]) => { if (n) names[id] = n; });
   return id => names[id] || (String(id).endsWith('@lid') ? 'Unknown member' : '+' + id);
 }
 
@@ -781,9 +799,9 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
   const src = { mode: 'sample', raw: null, S: SAMPLE, now: SAMPLE_NOW, group: { name: 'THB Construction Team' }, updatedAt: null };
   const cap = { db: null, mcp: null, sample: null, canEdit: null };
-  const saved = { source: null, meta: null, analysis: {}, days: {}, loaded: { source: false, analysis: false, meta: false } };
+  const saved = { source: null, meta: null, analysis: {}, days: {}, names: {}, loaded: { source: false, analysis: false, meta: false } };
   const live = { on: false, status: null, groups: null, groupInfo: null, busy: false, again: false, lastSig: '', lastSync: 0,
-    written: {}, writtenAnalysis: null, writtenMeta: null, lastMetaWrite: 0, sampleDenied: false, analyzing: 0, error: null, offCode: null };
+    unwatch: null, diag: null, written: {}, writtenAnalysis: null, writtenMeta: null, lastMetaWrite: 0, sampleDenied: false, analyzing: 0, error: null, offCode: null };
 
   const VIEWS = {
     dashboard: { label: 'Dashboard', icon: 'grid', title: 'Dashboard', sub: 'Who hasn’t replied, what’s still open, and who needs a follow-up.' },
@@ -1098,15 +1116,22 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
               <span><b>${esc(p.name)}${p.id === g.me ? ' (this phone)' : ''}</b><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}</span></span></label>`).join('')}</div>`;
     }
     const ready = state.setupGroup && state.setupBoss && state.setupBoss.size && g && g.id === state.setupGroup;
+    const looksLikeNumber = n => !n || /^\+?[\d\s()-]+$/.test(n);
+    const nameValue = p => (state.setupNames && p.id in state.setupNames) ? state.setupNames[p.id]
+      : saved.names[p.id] || (looksLikeNumber(p.name) ? '' : p.name);
+    const nameRows = g && g.id === state.setupGroup ? g.participants.map(p => `
+        <label class="name-row" for="n-${esc(p.id)}"><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}${p.id === g.me ? ' (this phone)' : ''}</span>
+          <input class="name-in" type="text" id="n-${esc(p.id)}" data-name-for="${esc(p.id)}" value="${esc(nameValue(p))}" placeholder="Name" maxlength="60" autocomplete="off"></label>`).join('') : '';
     return `<div class="card setup"><div class="card-b">
       <h2>${ic('link')}Choose the group to track</h2>
       <p>WhatsApp Reader is linked to +${esc(st.phone)}. It only reads; nothing is ever sent.</p>
       <h3>1. Group</h3>${pickGroup}
       ${state.setupGroup ? `<h3>2. Whose messages are the instructions?</h3><p class="plain">Everyone else in the group is tracked for replies.</p>${pickBoss}` : ''}
+      ${nameRows ? `<h3>3. Names</h3><p class="plain">Optional. Shown on the dashboard instead of phone numbers.</p><div class="names">${nameRows}</div>` : ''}
       <p class="dlg-msg err" id="setup-msg" role="status">${esc(live.setupError || '')}</p>
       <div class="dlg-f" style="padding:0">
         ${saved.source ? '<button class="btn" type="button" data-action="cancel-setup">Cancel</button>' : ''}
-        <button class="btn primary" type="button" data-action="save-source"${ready ? '' : ' disabled'}>Start tracking</button>
+        <button class="btn primary" type="button" data-action="save-source"${ready ? '' : ' disabled'}>${saved.source ? 'Save' : 'Start tracking'}</button>
       </div>
     </div></div>`;
   }
@@ -1151,10 +1176,32 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       note.textContent = 'Sample data. Not connected to WhatsApp yet.';
       foot.textContent = 'Everything on this page is sample data for 18 example team members. Real numbers appear once this page is opened in the Claude desktop app on the computer running WhatsApp Reader. Nothing is ever sent to WhatsApp.';
     }
+    const conn = document.getElementById('conn');
+    conn.hidden = live.on || !live.diag;
+    if (!conn.hidden) {
+      const d = live.diag;
+      document.getElementById('conn-text').textContent = connMessage(d);
+      document.getElementById('conn-code').textContent = d.code === 'connecting' ? '' : `Code: ${d.code}`;
+      document.getElementById('conn-btn').disabled = d.code === 'connecting';
+    }
     const err = document.getElementById('live-error');
     const msg = live.error ? (live.error.message || String(live.error)) : '';
     err.hidden = !(live.on && msg);
     err.textContent = msg ? `WhatsApp Reader couldn’t read the group: ${msg}` : '';
+  }
+
+  // Why this window isn't reading WhatsApp Reader, in words that say what to do.
+  function connMessage(d) {
+    switch (d.code) {
+      case 'connecting': return 'Connecting to WhatsApp Reader\u2026';
+      case 'no-mcp': return 'This window can\u2019t reach programs on your computer. Open this page in the Claude desktop app.';
+      case 'server_not_connected': return 'The Claude app showing this page didn\u2019t connect it to WhatsApp Reader. Check that Settings \u2192 Developer lists whatsapp-reader as running. If this page is open in a side panel, open it in its own window and press Connect.';
+      case 'not_in_manifest': case 'not_granted': case 'approval_required': case 'cancelled': case 'consent_required':
+        return 'Access to WhatsApp Reader wasn\u2019t allowed. Press Connect and choose Allow.';
+      case 'blocked_by_policy': return 'Your organization\u2019s settings block this page from using WhatsApp Reader.';
+      case 'tool_error': return `WhatsApp Reader answered with an error: ${d.message || 'no details'}`;
+      default: return `Couldn\u2019t reach WhatsApp Reader${d.message ? ': ' + d.message : '.'}`;
+    }
   }
 
   function render() {
@@ -1170,7 +1217,8 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     document.getElementById('v-sub').textContent = setup ? 'One-time setup on this computer.' : v.sub;
     const setupEl = document.getElementById('v-setup');
     setupEl.hidden = !setup;
-    if (setup) setupEl.innerHTML = viewSetup();
+    const typing = document.activeElement && setupEl.contains(document.activeElement) && document.activeElement.matches('input[type="text"]');
+    if (setup && !typing) setupEl.innerHTML = viewSetup();
     const list = document.getElementById('mlist');
     const keepScroll = list ? list.scrollTop : 0;
     const builders = { dashboard: viewDashboard, messages: viewMessages, tasks: viewTasks, reports: viewReports };
@@ -1196,6 +1244,10 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     if (sel) { state.sel = sel.dataset.sel; render(); return; }
     const act = e.target.closest('[data-action]');
     if (act) onAction(act.dataset.action);
+  });
+  document.addEventListener('input', e => {
+    const id = e.target.dataset && e.target.dataset.nameFor;
+    if (id) { state.setupNames = state.setupNames || {}; state.setupNames[id] = e.target.value; }
   });
   document.addEventListener('change', e => {
     if (e.target.id === 'task-filter') { state.taskFilter = e.target.value; render(); }
@@ -1282,7 +1334,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   function applySaved() {
     if (src.mode === 'live' || !saved.meta || !saved.meta.group) { render(); return; }
     const messages = Object.values(saved.days).flatMap(d => (d && d.messages) || []);
-    applyRaw({ ...saved.meta, analysis: saved.analysis || {}, messages }, 'saved');
+    applyRaw({ ...saved.meta, analysis: saved.analysis || {}, messages, overrides: saved.names }, 'saved');
   }
 
   function subscribeSaved(db) {
@@ -1298,6 +1350,10 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       saved.loaded.source = true;
       if (live.on && live.status && live.status.linked) { if (saved.source) syncNow(); else loadGroups(); }
       render();
+    }, fail);
+    db.doc('settings/names').onSnapshot(snap => {
+      saved.names = snap.exists ? (snap.data().byId || {}) : {};
+      if (src.raw) applyRaw({ ...src.raw, overrides: saved.names }, src.mode); else render();
     }, fail);
     db.doc('sync/meta').onSnapshot(snap => { saved.meta = snap.exists ? snap.data() : null; saved.loaded.meta = true; applySaved(); }, fail);
     db.doc('sync/analysis').onSnapshot(snap => {
@@ -1317,16 +1373,19 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   const callReader = async (tool, input) => (await cap.mcp.callTool(READER, tool, input || {}, { cache: false })).payload;
 
   async function startLive() {
+    if (!cap.mcp) { live.diag = { code: 'no-mcp' }; render(); return; }
     let st;
+    live.diag = { code: 'connecting' }; renderFrame();
     try { st = await callReader('status'); }
-    catch (e) { live.on = false; live.offCode = e && e.code; render(); return; }
-    live.on = true; live.status = st;
+    catch (e) { live.on = false; live.offCode = e && e.code; live.diag = { code: (e && e.code) || 'unknown', message: e && e.message }; render(); return; }
+    live.on = true; live.status = st; live.diag = null;
     render();
-    cap.mcp.watchTool(READER, 'status', null, ev => {
+    if (live.unwatch) return;
+    live.unwatch = cap.mcp.watchTool(READER, 'status', null, ev => {
       if (ev.type === 'data') { onStatus(ev.result.payload); return; }
       const code = ev.error && ev.error.code;
       if (['server_not_connected', 'not_in_manifest', 'blocked_by_policy', 'approval_required', 'not_granted'].includes(code)) {
-        live.on = false; live.offCode = code;
+        live.on = false; live.offCode = code; live.diag = { code, message: ev.error.message };
         if (src.mode === 'live') { src.mode = 'sample'; src.S = SAMPLE; src.now = SAMPLE_NOW; applySaved(); } else render();
       }
     }, { refetchInterval: 30000 });
@@ -1373,10 +1432,12 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   }
 
   async function onAction(action) {
-    if (action === 'recheck') {
+    if (action === 'connect') {
+      startLive();
+    } else if (action === 'recheck') {
       try { onStatus(await callReader('status')); } catch (e) { live.on = false; render(); }
     } else if (action === 'change-group') {
-      state.setup = true; state.setupGroup = saved.source ? saved.source.groupId : null; state.setupBoss = null;
+      state.setup = true; state.setupGroup = saved.source ? saved.source.groupId : null; state.setupBoss = null; state.setupNames = null;
       loadGroups();
     } else if (action === 'cancel-setup') {
       state.setup = false; render();
@@ -1384,8 +1445,20 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       const g = live.groupInfo;
       if (!g || !state.setupBoss || !state.setupBoss.size) return;
       const source = { groupId: g.id, groupName: g.name, bossIds: [...state.setupBoss], me: g.me, savedAt: Date.now() };
-      saved.source = source; state.setup = false;
-      if (cap.db) { try { await cap.db.doc('settings/source').set(source); } catch (e) { live.setupError = 'Couldn’t save the choice on this page.'; } }
+      const names = { ...saved.names };
+      g.participants.forEach(p => {
+        if (!state.setupNames || !(p.id in state.setupNames)) return;
+        const v = state.setupNames[p.id].trim();
+        if (v) names[p.id] = v; else delete names[p.id];
+      });
+      saved.source = source; saved.names = names; state.setup = false; state.setupNames = null;
+      if (cap.db) {
+        try {
+          await cap.db.doc('settings/source').set(source);
+          await cap.db.doc('settings/names').set({ byId: names });
+        } catch (e) { live.setupError = 'Couldn’t save the choice on this page.'; }
+      }
+      if (src.raw) applyRaw({ ...src.raw, overrides: names }, src.mode);
       live.lastSig = ''; render(); syncNow();
     }
   }
@@ -1422,6 +1495,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
         group: { id: g.id, name: g.name || source.groupName }, participants, names, bossIds: source.bossIds, me: g.me,
         messages: all.map(compactMessage).sort((a, b) => a.t - b.t),
         analysis: { ...(saved.meta && saved.meta.group && saved.meta.group.id === g.id ? saved.analysis : {}) },
+        overrides: saved.names,
         syncedAt: Date.now(),
       };
       await analyze(raw);
@@ -1518,7 +1592,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     cap.db = db; cap.mcp = mcp; cap.sample = sample;
     if (user) { try { cap.canEdit = await user.canEdit(); } catch (_) { cap.canEdit = null; } }
     if (db) subscribeSaved(db);
-    if (mcp) startLive();
+    if (mcp) startLive(); else { live.diag = { code: 'no-mcp' }; render(); }
   }
 
   state.view = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : 'dashboard';
