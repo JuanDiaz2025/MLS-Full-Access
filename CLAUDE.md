@@ -144,7 +144,7 @@ A Routine fires every hour in a fresh session and does exactly this:
    list the next 14 days and read the
    `[twin-network-openhouse:<MLS>:<start>]` tags. Add every FIXER slot that is
    not there yet; rebuild that day's route (times by location, next stop and
-   drive time in each event, the "Open House on <day> · Route" summary) so
+   drive time in each event, the "Open house route · <day> <date> · SF (<n> stops)" summary) so
    stops don't overlap. Delete any tagged event whose house is now RENOVATED,
    DATED, sold, pending or no longer has that slot.
 5. Commit and push `verdicts.json` only if it changed. Touch nothing else on
