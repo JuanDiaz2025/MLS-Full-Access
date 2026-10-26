@@ -303,6 +303,26 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .clear-row .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
 .clear-row .sub.ok { color: var(--good-ink); font-weight: 600; }
 .btn.danger.armed { background: var(--crit-soft); border-color: var(--crit); }
+.pick-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
+.search-in { width: min(100%, 360px); }
+.pick-bar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom, 0px)); z-index: 2; margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px 10px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-2); box-shadow: 0 6px 20px rgba(0, 0, 0, .12); font-weight: 600; }
+.pick-bar-a { display: flex; flex-wrap: wrap; gap: 8px; }
+.addflow { display: grid; grid-template-columns: minmax(200px, 290px) minmax(0, 1fr); gap: 20px; margin-top: 14px; align-items: start; }
+.addside { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 12px; max-height: 72vh; overflow-y: auto; padding-right: 2px; }
+.addg { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); width: 100%; }
+.addg:hover { border-color: var(--accent); }
+.addg.active { border-color: var(--accent); background: var(--accent-soft); }
+.addg-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--warn); flex: none; }
+.addg.done .addg-dot { background: var(--good); }
+.addg-t { min-width: 0; }
+.addg b { display: block; overflow-wrap: anywhere; font-size: 13.5px; }
+.addg .sub { display: block; font-size: 12px; color: var(--ink-3); }
+.addmain { min-width: 0; }
+.addmain h3:first-child { margin-top: 0; }
+.apply-all { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
+.add-foot { padding: 0; margin-top: 18px; align-items: center; flex-wrap: wrap; }
+.add-foot .plain { margin-right: auto; }
+@media (max-width: 760px) { .addflow { grid-template-columns: minmax(0, 1fr); } .addside { position: static; max-height: 40vh; } }
 .mhead-a { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .hint-line { margin: 10px 0 0; font-size: 13px; color: var(--ink-3); }
 .card-h .hint .link { font-size: 12.5px; }
@@ -954,7 +974,9 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   let cfg = { ...DEFAULTS };
   let D = null, S = SAMPLE, NOW = SAMPLE_NOW, N = SAMPLE.people.length;
   const state = { view: 'dashboard', sel: null, taskFilter: 'open', groupFilter: 'all', senderFilter: 'all',
-    setup: false, editGroup: null, setupGroup: null, setupBoss: null, setupNames: null, confirmRemove: null };
+    setup: false, editGroup: null, setupBoss: null, setupNames: null, confirmRemove: null,
+    // adding groups: the ones ticked, the search, then who gives instructions in each
+    pickGroups: new Set(), groupQuery: '', addStep: null, addActive: null, addBoss: {}, addTemplate: null, addNote: '' };
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
   const src = { mode: 'sample', S: SAMPLE, now: SAMPLE_NOW, updatedAt: null, groups: [] };
   const cap = { db: null, mcp: null, sample: null, user: null, canEdit: null, isOwner: null, canWrite: null, me: null };
@@ -962,7 +984,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   const saved = { tracking: null, legacySource: null, names: {}, groups: {}, legacy: { meta: null, analysis: {}, days: {} },
     loaded: { tracking: false, source: false, legacyMeta: false, legacyAnalysis: false } };
   const subs = {};
-  const live = { on: false, status: null, groups: null, groupInfo: null, busy: false, again: false, lastSig: '', lastSync: 0,
+  const live = { on: false, status: null, groups: null, groupInfo: null, groupInfos: {}, busy: false, again: false, lastSig: '', lastSync: 0,
     unwatch: null, diag: null, raws: {}, written: {}, writtenAnalysis: {}, writtenMeta: {}, lastMetaWrite: {}, lastMembersRead: {},
     legacyCleared: false, sampleDenied: false, analyzing: 0, error: null, offCode: null };
 
@@ -1281,26 +1303,32 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   const looksLikeNumber = n => !n || /^\+?[\d\s()-]+$/.test(n);
   const nameFor = (id, fallback) => saved.names[id] || (looksLikeNumber(fallback) ? (fallback || '+' + id) : fallback);
 
-  // The form for one group: whose messages are instructions, and names.
-  function groupForm(g, action, label) {
+  // Who gives the instructions in one group, and names. inputName tells the
+  // change handler which form the ticks belong to.
+  function giversBlock(g, boss, inputName, afterGivers) {
     const givers = `<div class="choices">${g.participants.map(p => `
-        <label class="choice"><input type="checkbox" name="setup-boss" id="b-${esc(p.id)}" value="${esc(p.id)}"${state.setupBoss && state.setupBoss.has(p.id) ? ' checked' : ''}>
+        <label class="choice"><input type="checkbox" name="${inputName}" data-gid="${esc(g.id)}" id="b-${esc(p.id)}" value="${esc(p.id)}"${boss.has(p.id) ? ' checked' : ''}>
           <span><b>${esc(nameFor(p.id, p.name))}${p.id === g.me ? ' (this phone)' : ''}</b><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}</span></span></label>`).join('')}</div>`;
     const nameValue = p => (state.setupNames && p.id in state.setupNames) ? state.setupNames[p.id]
       : saved.names[p.id] || (looksLikeNumber(p.name) ? '' : p.name);
     const nameRows = g.participants.map(p => `
         <label class="name-row" for="n-${esc(p.id)}"><span class="sub">${esc(p.phone || 'Phone number hidden by WhatsApp')}${p.id === g.me ? ' (this phone)' : ''}</span>
           <input class="name-in" type="text" id="n-${esc(p.id)}" data-name-for="${esc(p.id)}" value="${esc(nameValue(p))}" placeholder="Name" maxlength="60" autocomplete="off"></label>`).join('');
-    const boss = state.setupBoss || new Set();
     const left = g.participants.filter(p => !boss.has(p.id));
     // a group where everyone gives instructions has nobody to track
     const who = !boss.size ? '<p class="plain">Tick at least one person who gives instructions.</p>'
       : !left.length ? '<p class="warn">Everyone is ticked. Messages to everyone won\u2019t be tracked, only what one instruction-giver asks another by name. Untick the people who should reply.</p>'
       : `<p class="plain">Tracked for replies: ${esc(left.map(p => nameFor(p.id, p.name)).join(', '))} (${plural(left.length, 'person', 'people')})${boss.size > 1 ? '. The ticked people are tracked too when one of them asks another by name.' : ''}</p>`;
-    const ready = boss.size;
     return `<h3>Who gives the instructions in “${esc(g.name || 'this group')}”?</h3>
-      <p class="plain">Tick only the people who give instructions, for example the CEO and the COO. Leave everyone who should reply unticked: they are the ones tracked.</p>${givers}${who}
-      <h3>Names</h3><p class="plain">Optional. Shown on the dashboard instead of phone numbers, in every group.</p><div class="names">${nameRows}</div>
+      <p class="plain">Tick only the people who give instructions, for example the CEO and the COO. Leave everyone who should reply unticked: they are the ones tracked.</p>${givers}${who}${afterGivers || ''}
+      <h3>Names</h3><p class="plain">Optional. Shown on the dashboard instead of phone numbers, in every group.</p><div class="names">${nameRows}</div>`;
+  }
+
+  // Editing one tracked group.
+  function groupForm(g, action, label) {
+    const boss = state.setupBoss || new Set();
+    const ready = boss.size;
+    return `${giversBlock(g, boss, 'setup-boss')}
       <div class="dlg-f" style="padding:0;margin-top:16px">
         <button class="btn" type="button" data-action="cancel-edit">Cancel</button>
         <button class="btn primary" type="button" data-action="${action}"${ready ? '' : ' disabled'}>${label}</button>
@@ -1349,24 +1377,84 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       </div>`;
     }).join('');
 
-    const trackedIds = new Set(tracked.map(t => t.groupId));
-    const others = (live.groups || []).filter(x => !trackedIds.has(x.id)).sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0));
+    const others = untrackedGroups();
     const adding = !state.editGroup;
+    const head = `<h2>${ic('link')}Groups to track</h2>
+      <p>WhatsApp Reader is linked to +${esc(st.phone)}. It only reads; nothing is ever sent.</p>`;
+    const msg = `<p class="dlg-msg err" id="setup-msg" role="status">${esc(live.setupError || '')}</p>`;
+    if (adding && state.addStep === 'setup' && state.pickGroups.size) {
+      return `<div class="card setup"><div class="card-b">${head}${addFlow(tracked.length)}${msg}</div></div>`;
+    }
+    const q = state.groupQuery.trim().toLowerCase();
+    const match = x => !q || (x.name || '').toLowerCase().includes(q);
+    const shown = others.filter(match).length;
+    const n = state.pickGroups.size;
     const pick = live.groups == null ? '<p class="plain">Loading your groups…</p>'
       : !others.length ? '<p class="plain">Every group on the linked phone is already tracked.</p>'
-      : `<div class="choices" role="radiogroup" aria-label="Group">${others.map(x => `
-          <label class="choice"><input type="radio" name="setup-group" id="g-${esc(x.id)}" value="${esc(x.id)}"${state.setupGroup === x.id ? ' checked' : ''}>
-            <span><b>${esc(x.name || 'Unnamed group')}</b><span class="sub">${plural(x.members, 'member')} · ${plural(x.message_count, 'message')} saved${x.last_message_at ? ` · last ${esc(fmtWhen(x.last_message_at))}` : ''}</span></span></label>`).join('')}</div>`;
-    const addForm = adding && state.setupGroup ? (loaded(state.setupGroup) ? groupForm(g, 'add-group', tracked.length ? 'Add group' : 'Start tracking') : '<p class="plain">Loading members…</p>') : '';
+      : `<div class="pick-tools">
+          <input class="name-in search-in" type="search" id="group-q" value="${esc(state.groupQuery)}" placeholder="Search groups" aria-label="Search groups" autocomplete="off">
+          <span class="plain" id="group-q-count">${esc(groupCountText(shown, others.length))}</span>
+        </div>
+        <div class="choices" id="group-choices" aria-label="Groups">${others.map(x => `
+          <label class="choice" data-gname="${esc((x.name || '').toLowerCase())}"${match(x) ? '' : ' hidden'}><input type="checkbox" name="pick-group" id="g-${esc(x.id)}" value="${esc(x.id)}"${state.pickGroups.has(x.id) ? ' checked' : ''}>
+            <span><b>${esc(x.name || 'Unnamed group')}</b><span class="sub">${plural(x.members, 'member')} · ${plural(x.message_count, 'message')} saved${x.last_message_at > 0 ? ` · last ${esc(fmtWhen(x.last_message_at))}` : ''}</span></span></label>`).join('')}</div>
+        <p class="plain" id="group-q-none"${shown ? ' hidden' : ''}>No group matches that search.</p>
+        <div class="pick-bar" id="pick-bar">
+          <span id="pick-count">${esc(pickCountText(n))}</span>
+          <span class="pick-bar-a">
+            <button class="btn" type="button" data-action="pick-clear" id="pick-clear"${n ? '' : ' disabled'}>Clear</button>
+            <button class="btn primary" type="button" data-action="pick-next" id="pick-next"${n ? '' : ' disabled'}>Next: who gives instructions</button>
+          </span>
+        </div>`;
 
-    return `<div class="card setup"><div class="card-b">
-      <h2>${ic('link')}Groups to track</h2>
-      <p>WhatsApp Reader is linked to +${esc(st.phone)}. It only reads; nothing is ever sent.</p>
+    return `<div class="card setup"><div class="card-b">${head}
       ${tracked.length ? `<div class="tracked-list">${trackedRows}</div>` : ''}
-      ${adding ? `<h3>${tracked.length ? 'Add another group' : 'Pick a group'}</h3>${pick}${addForm}` : ''}
-      <p class="dlg-msg err" id="setup-msg" role="status">${esc(live.setupError || '')}</p>
-      ${tracked.length && !state.editGroup && !state.setupGroup ? '<div class="dlg-f" style="padding:0"><button class="btn primary" type="button" data-action="done-setup">Done</button></div>' : ''}
+      ${adding ? `<h3>${tracked.length ? 'Add more groups' : 'Pick the groups to track'}</h3>${pick}` : ''}
+      ${msg}
+      ${tracked.length && !state.editGroup && !n ? '<div class="dlg-f" style="padding:0"><button class="btn primary" type="button" data-action="done-setup">Done</button></div>' : ''}
     </div></div>`;
+  }
+
+  // ---------------- adding several groups at once ----------------
+  const trackedIds = () => new Set(trackedGroups().map(t => t.groupId));
+  const untrackedGroups = () => { const ids = trackedIds(); return (live.groups || []).filter(x => !ids.has(x.id)).sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0)); };
+  const groupCountText = (shown, all) => state.groupQuery.trim() ? `${shown} of ${plural(all, 'group')}` : plural(all, 'group');
+  const pickCountText = n => n ? `${plural(n, 'group')} selected` : 'Tick the groups to track';
+  // the ticked groups, in the order they appear in the list
+  const pickedInOrder = () => untrackedGroups().map(x => x.id).filter(id => state.pickGroups.has(id));
+  const pickedName = id => ((live.groupInfos[id] || {}).name) || ((live.groups || []).find(x => x.id === id) || {}).name || 'Unnamed group';
+
+  function addFlow(trackedCount) {
+    const ids = pickedInOrder();
+    if (!ids.includes(state.addActive)) state.addActive = ids[0];
+    const active = state.addActive;
+    const ready = ids.filter(id => live.groupInfos[id] && state.addBoss[id] && state.addBoss[id].size);
+    const side = ids.map(id => {
+      const info = live.groupInfos[id], boss = state.addBoss[id];
+      const done = !!(info && boss && boss.size);
+      const sub = info === undefined ? 'Loading members\u2026' : info === null ? 'Couldn\u2019t read the members'
+        : done ? `${plural(boss.size, 'instruction-giver')} \u00B7 ${plural(info.participants.filter(p => !boss.has(p.id)).length, 'person', 'people')} tracked`
+        : 'Pick who gives instructions';
+      return `<button class="addg${id === active ? ' active' : ''}${done ? ' done' : ''}" type="button" data-action="add-active" data-gid="${esc(id)}"${id === active ? ' aria-current="true"' : ''}>
+          <span class="addg-dot" aria-hidden="true"></span><span class="addg-t"><b>${esc(pickedName(id))}</b><span class="sub">${esc(sub)}</span></span></button>`;
+    }).join('');
+    const info = live.groupInfos[active];
+    const main = info === undefined ? '<p class="plain">Loading members\u2026</p>'
+      : info === null ? `<p class="plain">WhatsApp Reader couldn\u2019t read this group\u2019s members.</p><button class="btn small" type="button" data-action="add-retry" data-gid="${esc(active)}">Try again</button>`
+      : giversBlock(info, state.addBoss[active] || new Set(), 'add-boss',
+        ids.length > 1 && state.addBoss[active] && state.addBoss[active].size
+          ? `<div class="apply-all"><button class="btn small" type="button" data-action="add-apply" data-gid="${esc(active)}">Use these instruction-givers in every selected group they\u2019re in</button>${state.addNote ? `<span class="plain">${esc(state.addNote)}</span>` : ''}</div>` : '');
+    return `<h3>Who gives the instructions in each group?</h3>
+      <p class="plain">Pick a group on the left, then tick who gives instructions there. A green dot means it\u2019s ready.</p>
+      <div class="addflow">
+        <nav class="addside" aria-label="Selected groups">${side}</nav>
+        <div class="addmain">${main}</div>
+      </div>
+      <div class="dlg-f add-foot">
+        <span class="plain">${ready.length} of ${plural(ids.length, 'group')} ready</span>
+        <button class="btn" type="button" data-action="add-back">Back</button>
+        <button class="btn primary" type="button" data-action="add-groups"${ready.length === ids.length ? '' : ' disabled'}>${trackedCount ? 'Add' : 'Start tracking'} ${plural(ids.length, 'group')}</button>
+      </div>`;
   }
 
   // ---------------- frame ----------------
@@ -1494,8 +1582,13 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     document.getElementById('v-sub').textContent = setup ? 'Set up on this computer. Change it any time from the sidebar.' : v.sub;
     const setupEl = document.getElementById('v-setup');
     setupEl.hidden = !setup;
-    const typing = document.activeElement && setupEl.contains(document.activeElement) && document.activeElement.matches('input[type="text"]');
-    if (setup && !typing) setupEl.innerHTML = viewSetup();
+    const typing = document.activeElement && setupEl.contains(document.activeElement) && document.activeElement.matches('input[type="text"], input[type="search"]');
+    const focusId = document.activeElement && setupEl.contains(document.activeElement) ? document.activeElement.id : '';
+    if (setup && !typing) {
+      setupEl.innerHTML = viewSetup();
+      const again = focusId && document.getElementById(focusId);
+      if (again) again.focus();
+    }
     const list = document.getElementById('mlist');
     const keepScroll = list ? list.scrollTop : 0;
     const builders = { dashboard: viewDashboard, messages: viewMessages, tasks: viewTasks, reports: viewReports };
@@ -1525,12 +1618,34 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   document.addEventListener('input', e => {
     const id = e.target.dataset && e.target.dataset.nameFor;
     if (id) { state.setupNames = state.setupNames || {}; state.setupNames[id] = e.target.value; }
+    // filter the group list as you type, without redrawing it
+    if (e.target.id === 'group-q') {
+      state.groupQuery = e.target.value;
+      const q = state.groupQuery.trim().toLowerCase();
+      const labels = [...document.querySelectorAll('#group-choices .choice')];
+      let shown = 0;
+      labels.forEach(l => { const hit = !q || l.dataset.gname.includes(q); l.hidden = !hit; if (hit) shown++; });
+      document.getElementById('group-q-count').textContent = groupCountText(shown, labels.length);
+      document.getElementById('group-q-none').hidden = shown > 0;
+    }
   });
   document.addEventListener('change', e => {
     if (e.target.id === 'task-filter') { state.taskFilter = e.target.value; render(); }
     if (e.target.id === 'group-filter') { state.groupFilter = e.target.value; state.sel = null; render(); }
     if (e.target.id === 'sender-filter') { state.senderFilter = e.target.value; state.sel = null; render(); }
-    if (e.target.name === 'setup-group') pickGroup(e.target.value);
+    if (e.target.name === 'pick-group') {
+      if (e.target.checked) state.pickGroups.add(e.target.value); else state.pickGroups.delete(e.target.value);
+      const n = state.pickGroups.size;
+      document.getElementById('pick-count').textContent = pickCountText(n);
+      document.getElementById('pick-next').disabled = !n;
+      document.getElementById('pick-clear').disabled = !n;
+    }
+    if (e.target.name === 'add-boss') {
+      const gid = e.target.dataset.gid;
+      state.addBoss[gid] = new Set([...document.querySelectorAll('input[name="add-boss"]:checked')].map(x => x.value));
+      state.addNote = '';
+      render();
+    }
     if (e.target.name === 'setup-boss') {
       state.setupBoss = new Set([...document.querySelectorAll('input[name="setup-boss"]:checked')].map(x => x.value));
       render();
@@ -2032,18 +2147,36 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   async function loadGroupInfo(id) {
     try {
       const g = await callReader('get_group', { group_id: id });
-      if (state.setupGroup !== id && state.editGroup !== id) return null;
+      if (state.editGroup !== id) return null;
       live.groupInfo = g; live.setupError = '';
       return g;
     } catch (e) { live.setupError = e.message || 'Couldn’t read that group.'; return null; }
     finally { render(); }
   }
 
-  async function pickGroup(id) {
-    state.setupGroup = id; state.editGroup = null; state.setupBoss = null; state.setupNames = null;
+  // Members of a group being added, read one group at a time. A new group
+  // starts with the instruction-givers used for the others, else this phone.
+  async function loadAddInfo(id, force) {
+    if (!force && live.groupInfos[id]) return;
+    try {
+      const g = await callReader('get_group', { group_id: id });
+      live.groupInfos[id] = g;
+      if (!state.addBoss[id]) {
+        const ids = new Set(g.participants.map(p => p.id));
+        const fromTemplate = state.addTemplate ? [...state.addTemplate].filter(x => ids.has(x)) : [];
+        state.addBoss[id] = new Set(fromTemplate.length ? fromTemplate : g.me && ids.has(g.me) ? [g.me] : []);
+      }
+    } catch (e) { live.groupInfos[id] = null; }
     render();
-    const g = await loadGroupInfo(id);
-    if (g && state.setupGroup === id && !state.setupBoss) { state.setupBoss = new Set(g.me ? [g.me] : []); render(); }
+  }
+  async function loadAddInfos(first) {
+    const ids = pickedInOrder();
+    if (first) await loadAddInfo(first);
+    for (const id of ids) { if (state.addStep !== 'setup') return; await loadAddInfo(id); }
+  }
+  function resetAdding() {
+    state.pickGroups = new Set(); state.groupQuery = ''; state.addStep = null; state.addActive = null;
+    state.addBoss = {}; state.addTemplate = null; state.addNote = '';
   }
 
   // The names typed into the setup form, merged into the saved list.
@@ -2054,6 +2187,11 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       const v = state.setupNames[p.id].trim();
       if (v) names[p.id] = v; else delete names[p.id];
     });
+    return names;
+  }
+  function namesFromEdits() {
+    const names = { ...saved.names };
+    Object.entries(state.setupNames || {}).forEach(([id, v]) => { v = v.trim(); if (v) names[id] = v; else delete names[id]; });
     return names;
   }
 
@@ -2113,16 +2251,50 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     } else if (action === 'recheck') {
       try { onStatus(await callReader('status')); } catch (e) { live.on = false; render(); }
     } else if (action === 'change-group') {
-      state.setup = true; state.editGroup = null; state.setupGroup = null; state.setupBoss = null; state.setupNames = null; state.confirmRemove = null;
-      render(); loadGroups();
+      state.setup = true; state.editGroup = null; state.setupBoss = null; state.setupNames = null; state.confirmRemove = null;
+      resetAdding(); render(); loadGroups();
     } else if (action === 'done-setup') {
-      state.setup = false; state.setupGroup = null; state.editGroup = null; render();
+      state.setup = false; state.editGroup = null; resetAdding(); render();
     } else if (action === 'cancel-edit') {
-      state.editGroup = null; state.setupGroup = null; state.setupBoss = null; state.setupNames = null; render();
+      state.editGroup = null; state.setupBoss = null; state.setupNames = null; render();
+    } else if (action === 'pick-clear') {
+      state.pickGroups = new Set(); render();
+    } else if (action === 'pick-next') {
+      if (!state.pickGroups.size) return;
+      state.addStep = 'setup'; state.addActive = pickedInOrder()[0]; state.addNote = '';
+      render(); window.scrollTo(0, 0); loadAddInfos(state.addActive);
+    } else if (action === 'add-back') {
+      state.addStep = null; render();
+    } else if (action === 'add-active') {
+      state.addActive = gid; state.addNote = ''; render(); loadAddInfo(gid);
+    } else if (action === 'add-retry') {
+      live.groupInfos[gid] = undefined; render(); loadAddInfo(gid, true);
+    } else if (action === 'add-apply') {
+      // the same people give instructions across most groups: tick them everywhere they're members
+      const chosen = state.addBoss[gid];
+      if (!chosen || !chosen.size) return;
+      state.addTemplate = new Set(chosen);
+      let applied = 0, missing = 0;
+      pickedInOrder().filter(id => id !== gid).forEach(id => {
+        const info = live.groupInfos[id];
+        if (!info) return;
+        const here = info.participants.filter(p => chosen.has(p.id)).map(p => p.id);
+        if (here.length) { state.addBoss[id] = new Set(here); applied++; } else missing++;
+      });
+      state.addNote = `Applied to ${plural(applied, 'other group')}.${missing ? ` ${plural(missing, 'group')} ${missing === 1 ? 'doesn\u2019t' : 'don\u2019t'} have these people; pick for ${missing === 1 ? 'it' : 'those'} yourself.` : ''} Groups still loading will use them too.`;
+      render();
+    } else if (action === 'add-groups') {
+      const ids = pickedInOrder();
+      if (!ids.length || !ids.every(id => live.groupInfos[id] && state.addBoss[id] && state.addBoss[id].size)) return;
+      const groups = tracked.concat(ids.map(id => ({ groupId: id, groupName: live.groupInfos[id].name || pickedName(id), bossIds: [...state.addBoss[id]] })));
+      const names = namesFromEdits();
+      resetAdding(); state.setupNames = null; state.setup = false;
+      live.lastSig = '';
+      await saveTracking(groups, names);
     } else if (action === 'edit-group') {
       const t = tracked.find(x => x.groupId === gid);
       if (!t) return;
-      state.editGroup = gid; state.setupGroup = null; state.setupNames = null; state.confirmRemove = null;
+      state.editGroup = gid; state.setupNames = null; state.confirmRemove = null;
       state.setupBoss = new Set(t.bossIds || []);
       render(); loadGroupInfo(gid);
     } else if (action === 'save-group') {
@@ -2131,14 +2303,6 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
       const groups = tracked.map(t => t.groupId === g.id ? { ...t, groupId: g.id, groupName: g.name || t.groupName, bossIds: [...state.setupBoss] } : t);
       const names = namesFromForm(g);
       state.editGroup = null; state.setupBoss = null; state.setupNames = null;
-      live.lastSig = '';
-      await saveTracking(groups, names);
-    } else if (action === 'add-group') {
-      const g = live.groupInfo;
-      if (!g || g.id !== state.setupGroup || !state.setupBoss || !state.setupBoss.size) return;
-      const groups = tracked.concat({ groupId: g.id, groupName: g.name, bossIds: [...state.setupBoss] });
-      const names = namesFromForm(g);
-      state.setupGroup = null; state.setupBoss = null; state.setupNames = null; state.setup = false;
       live.lastSig = '';
       await saveTracking(groups, names);
     } else if (action === 'remove-group') {
@@ -2217,6 +2381,12 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     };
   }
 
+  // Whether the linked phone is in a group, from the reader's group list (null if unknown).
+  async function phoneHasGroup(gid) {
+    if (!live.groups) { try { live.groups = ((await callReader('list_groups')) || {}).groups || null; } catch (_) { return null; } }
+    return live.groups ? live.groups.some(x => x.id === gid) : null;
+  }
+
   async function syncNow() {
     if (live.busy) { live.again = true; return; }
     if (!live.on || !trackedGroups().length) return;
@@ -2232,7 +2402,12 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
           const raw = await readGroup(t);
           await analyze(raw);
           live.raws[t.groupId] = raw;
-        } catch (e) { errors.push(`${t.groupName || 'a group'}: ${e.message || e.code || e}`); }
+        } catch (e) {
+          const inPhone = await phoneHasGroup(t.groupId);
+          errors.push(`${t.groupName || 'a group'}: ${inPhone === false
+            ? 'the linked phone isn\u2019t in this group, so it can\u2019t be read. Add that phone to the group, or stop tracking it in Groups and names'
+            : (e.message || e.code || e)}`);
+        }
       }
       live.error = errors.length ? { message: errors.join('; ') } : null;
       live.lastSync = Date.now();
