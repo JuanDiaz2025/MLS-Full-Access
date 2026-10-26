@@ -11,7 +11,7 @@
     setup: false, editGroup: null, setupGroup: null, setupBoss: null, setupNames: null, confirmRemove: null };
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
   const src = { mode: 'sample', S: SAMPLE, now: SAMPLE_NOW, updatedAt: null, groups: [] };
-  const cap = { db: null, mcp: null, sample: null, canEdit: null, isOwner: null };
+  const cap = { db: null, mcp: null, sample: null, user: null, canEdit: null, isOwner: null, canWrite: null, me: null };
   // tracking: the groups being tracked, each with whose messages are instructions
   const saved = { tracking: null, legacySource: null, names: {}, groups: {}, legacy: { meta: null, analysis: {}, days: {} },
     loaded: { tracking: false, source: false, legacyMeta: false, legacyAnalysis: false } };
@@ -180,11 +180,19 @@
     const chases = m.chases || [];
     const chaseHtml = chases.length ? `<div class="chases"><div class="chases-h">${ic('repeat')}${esc(m.senderName || 'You')} followed up ${chases.length === 1 ? 'once' : chases.length + ' times'}</div>
         ${chases.map(c => `<div class="chase"><span>${esc(c.text)}</span><time>${esc(fmtClock(c.at))}</time></div>`).join('')}</div>` : '';
+    const canLink = canLinkReplies();
+    const linkedNote = r => {
+      if (!r.linked) return '';
+      const undo = canLink ? ` \u00B7 <button class="link" type="button" data-action="unlink" data-msg="${esc(m.id)}" data-pid="${esc(r.pid)}">Remove</button>` : '';
+      return `<span class="sub">Linked by ${esc(linkerName(r.linked.by))}${r.linked.on ? ` on ${esc(fmtWhen(r.linked.on))}` : ''}${undo}</span>`;
+    };
     const rows = m.rows.slice().sort((a, b) => (a.replied - b.replied) || (a.replied ? a.delay - b.delay : a.name.localeCompare(b.name))).map(r => `<tr>
         <td>${who(r.name)}</td>
         <td>${r.replied ? chip('c-good', 'Replied', 'check') : chip('c-crit', 'No response')}</td>
         <td class="num">${r.replied ? fmtDur(r.delay) : `<span class="plain">${fmtDur(r.waiting)} so far</span>`}</td>
-        <td>${r.replied ? esc(r.text) : '<span class="plain">None</span>'}</td>
+        <td>${r.replied ? esc(r.text) + linkedNote(r)
+          : canLink ? `<button class="btn small" type="button" data-action="open-link" data-msg="${esc(m.id)}" data-pid="${esc(r.pid)}">Mark as replied</button>`
+          : '<span class="plain">None</span>'}</td>
         <td>${r.replied ? `<span class="plain">${replyNote(r.stage)}</span>` : stageChip(r.stage, m)}</td></tr>`).join('');
 
     return `<div class="msgs">
@@ -556,7 +564,7 @@
     const sel = e.target.closest('[data-sel]');
     if (sel) { state.sel = sel.dataset.sel; render(); return; }
     const act = e.target.closest('[data-action]');
-    if (act) onAction(act.dataset.action, act.dataset.gid);
+    if (act) onAction(act.dataset.action, act.dataset.gid, act.dataset);
   });
   document.addEventListener('input', e => {
     const id = e.target.dataset && e.target.dataset.nameFor;
@@ -691,7 +699,7 @@
     const d = savedGroupData(gid);
     if (!d) return null;
     const messages = Object.values(d.days || {}).flatMap(x => (x && x.messages) || []);
-    return { ...d.meta, analysis: d.analysis || {}, messages, overrides: saved.names };
+    return { ...d.meta, analysis: d.analysis || {}, messages, overrides: saved.names, fixes: fixesFor(gid) };
   }
 
   function applySaved() {
@@ -706,7 +714,7 @@
 
   function applyLive() {
     const parts = trackedGroups().filter(t => live.raws[t.groupId]).map(t => {
-      const raw = { ...live.raws[t.groupId], overrides: saved.names };
+      const raw = { ...live.raws[t.groupId], overrides: saved.names, fixes: fixesFor(t.groupId) };
       return { id: t.groupId, name: raw.group.name || t.groupName, raw };
     });
     if (!parts.length) { if (!trackedGroups().length) showSample(); return; }
@@ -725,13 +733,19 @@
     });
     want.forEach(gid => {
       if (subs[gid]) return;
-      const box = saved.groups[gid] = { meta: null, analysis: {}, days: {}, loaded: { meta: false, analysis: false } };
+      const box = saved.groups[gid] = { meta: null, analysis: {}, days: {}, fixes: {}, loaded: { meta: false, analysis: false } };
       const fail = () => {};
       const k = gkey(gid);
       subs[gid] = [
         db.doc(`sync/${k}`).onSnapshot(snap => { box.meta = snap.exists ? snap.data() : null; box.loaded.meta = true; applySaved(); }, fail),
         db.doc(`sync/${k}/extra/analysis`).onSnapshot(snap => { box.analysis = snap.exists ? (snap.data().byId || {}) : {}; box.loaded.analysis = true; applySaved(); }, fail),
         db.collection(`sync/${k}/days`).onSnapshot(q => { const days = {}; q.docs.forEach(d => { days[d.id] = d.data(); }); box.days = days; applySaved(); }, fail),
+        // replies people linked by hand, written by anyone in the company who can use the page
+        db.collection(`fixes/${k}/links`).onSnapshot(q => {
+          const fixes = {};
+          q.docs.forEach(d => { const v = d.data(); if (v && v.request && v.person) fixes[`${v.request}~${v.person}`] = { ...v, docId: d.id }; });
+          box.fixes = fixes; refreshShown();
+        }, fail),
       ];
     });
   }
@@ -771,6 +785,105 @@
     db.doc('sync/analysis').onSnapshot(snap => { saved.legacy.analysis = snap.exists ? (snap.data().byId || {}) : {}; saved.loaded.legacyAnalysis = true; applySaved(); }, fail);
     db.collection('sync/meta/days').onSnapshot(q => { const days = {}; q.docs.forEach(d => { days[d.id] = d.data(); }); saved.legacy.days = days; applySaved(); }, fail);
   }
+
+  // ---------------- linking a reply by hand (anyone in the company who can use the page) ----------------
+  // When someone did answer but the rules counted it somewhere else (a swipe-reply
+  // to another message, the wrong group), they or anyone else can link one of
+  // that person's own messages from the half hour after the request.
+  const LINK_WINDOW = 30 * MIN;
+  const fixesFor = gid => (saved.groups[gid] && saved.groups[gid].fixes) || {};
+  const canLinkReplies = () => src.mode !== 'sample' && !!cap.db && cap.canWrite !== false;
+  const linkers = { names: {}, asked: new Set() };
+  function linkerName(id) {
+    if (!id) return 'someone';
+    if (id === cap.me) return 'you';
+    if (linkers.names[id]) return linkers.names[id];
+    if (cap.user && !linkers.asked.has(id)) {
+      linkers.asked.add(id);
+      cap.user.profiles([id]).then(ps => { const n = ps && ps[id] && ps[id].name; if (n) { linkers.names[id] = n; render(); } }, () => {});
+    }
+    return 'someone';
+  }
+
+  // The person's own messages, in any tracked group, from the half hour after the request.
+  function linkCandidates(m, pid) {
+    const out = [];
+    trackedGroups().forEach(t => {
+      const raw = src.mode === 'live' ? live.raws[t.groupId] : rawFromSaved(t.groupId);
+      if (!raw) return;
+      const nameOf = nameIndex({ ...raw, overrides: saved.names });
+      (raw.messages || []).forEach(c => {
+        if (c.s !== pid || c.d || c.k === 'joined' || c.k === 'left' || c.i === m.id) return;
+        if (c.t < m.at || c.t > m.at + LINK_WINDOW) return;
+        const text = c.k === 'reaction' ? `Reacted ${c.x || ''}` : replyText(c, nameOf);
+        out.push({ id: c.i, at: c.t, group: t.groupId, groupName: (raw.group && raw.group.name) || t.groupName, text: (text || 'Message').slice(0, 300) });
+      });
+    });
+    return out.sort((a, b) => a.at - b.at);
+  }
+
+  const linkDlg = document.getElementById('link-dlg');
+  const linkBox = document.getElementById('link-box');
+  function renderLink() {
+    const L = state.link;
+    linkDlg.hidden = !L;
+    if (!L) return;
+    const multi = trackedGroups().length > 1;
+    const list = L.items.length ? `<div class="pick-list" role="radiogroup" aria-label="${esc(L.name)}\u2019s messages">${L.items.map(c => `
+        <label class="choice"><input type="radio" name="link-pick" value="${esc(c.id)}"${L.pick === c.id ? ' checked' : ''}>
+          <span><b>${esc(c.text)}</b><span class="sub">${multi ? esc(c.groupName) + ' \u00B7 ' : ''}${esc(fmtWhen(c.at))} \u00B7 ${fmtDur(c.at - L.at)} after the message</span></span></label>`).join('')}</div>`
+      : `<p class="plain">${esc(L.name)} didn\u2019t send anything in the 30 minutes after this message. If they answered later or somewhere else, they can react \u{1F44D} to the message in WhatsApp and it will count.</p>`;
+    linkBox.innerHTML = `<div class="dlg-h"><div><h2 id="link-h">Mark ${esc(L.name)} as replied</h2>
+        <p>Pick the message ${esc(L.name)} sent that answers \u201C${esc(L.title)}\u201D. Only their own messages from the 30 minutes after it was sent are listed. Everyone can see who linked it.</p></div>
+        <button class="x" type="button" data-action="link-cancel" aria-label="Close">${'<svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>'}</button></div>
+      <div class="dlg-b">${list}</div>
+      <p class="dlg-msg err" role="status">${esc(L.error || '')}</p>
+      <div class="dlg-f"><button class="btn" type="button" data-action="link-cancel">Cancel</button>
+        ${L.items.length ? `<button class="btn primary" type="button" data-action="link-save"${L.pick && !L.saving ? '' : ' disabled'}>${L.saving ? 'Saving\u2026' : 'Link reply'}</button>` : ''}</div>`;
+  }
+
+  function openLink(msgId, pid) {
+    const m = src.S.messages.find(x => x.id === msgId);
+    if (!m) return;
+    const person = src.S.people.find(p => p.id === pid);
+    state.link = { msgId, pid, groupId: m.groupId, at: m.at, title: m.title, name: (person && person.name) || 'this person',
+      items: linkCandidates(m, pid), pick: null, saving: false, error: '' };
+    renderLink();
+    const first = linkBox.querySelector('input, button.btn');
+    if (first) first.focus();
+  }
+
+  function closeLink() { state.link = null; renderLink(); }
+
+  const linkError = e => e && e.code === 'invalid_argument' ? 'You can\u2019t change this page. Ask the owner to give you access.'
+    : `Couldn\u2019t save the link${e && e.message ? ': ' + e.message : '.'}`;
+
+  async function saveLink() {
+    const L = state.link;
+    const c = L && L.items.find(x => x.id === L.pick);
+    if (!c || L.saving || !cap.db) return;
+    L.saving = true; L.error = ''; renderLink();
+    const doc = { request: L.msgId, person: L.pid, msg: c.id, group: c.group, at: c.at, text: c.text, by: cap.me || null, on: Date.now() };
+    try {
+      await cap.db.doc(`fixes/${gkey(L.groupId)}/links/${gkey(`${L.msgId}~${L.pid}`)}`).set(doc);
+      closeLink();
+    } catch (e) {
+      if (e && e.code === 'invalid_argument') cap.canWrite = false;
+      L.saving = false; L.error = linkError(e); renderLink();
+    }
+  }
+
+  async function unlink(msgId, pid) {
+    const m = src.S.messages.find(x => x.id === msgId);
+    const f = m && fixesFor(m.groupId)[`${msgId}~${pid}`];
+    if (!f || !cap.db) return;
+    try { await cap.db.doc(`fixes/${gkey(m.groupId)}/links/${f.docId}`).delete(); }
+    catch (e) { live.error = { message: linkError(e) }; renderFrame(); }
+  }
+
+  linkDlg.addEventListener('click', e => { if (e.target === linkDlg) closeLink(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.link) closeLink(); });
+  document.addEventListener('change', e => { if (e.target.name === 'link-pick' && state.link) { state.link.pick = e.target.value; renderLink(); } });
 
   // ---------------- live reading (Claude desktop app on the computer running WhatsApp Reader) ----------------
   const callReader = async (tool, input) => (await cap.mcp.callTool(READER, tool, input || {}, { cache: false })).payload;
@@ -874,14 +987,19 @@
     const k = gkey(gid);
     try {
       for (const day of days) await db.doc(`sync/${k}/days/${day}`).delete();
+      for (const f of Object.values((box && box.fixes) || {})) await db.doc(`fixes/${k}/links/${f.docId}`).delete();
       await db.doc(`sync/${k}/extra/analysis`).delete();
       await db.doc(`sync/${k}`).delete();
     } catch (_) { /* nothing else to do; it is no longer shown */ }
   }
 
-  async function onAction(action, gid) {
+  async function onAction(action, gid, data) {
     const tracked = trackedGroups();
-    if (action === 'connect') {
+    if (action === 'open-link') openLink(data.msg, data.pid);
+    else if (action === 'link-cancel') closeLink();
+    else if (action === 'link-save') saveLink();
+    else if (action === 'unlink') unlink(data.msg, data.pid);
+    else if (action === 'connect') {
       startLive();
     } else if (action === 'recheck') {
       try { onStatus(await callReader('status')); } catch (e) { live.on = false; render(); }
@@ -1110,10 +1228,12 @@
     if (!claude || typeof claude.use !== 'function') return;
     const use = name => claude.use(name).catch(() => null);
     const [db, mcp, sample, user] = await Promise.all([use('db'), use('mcp'), use('sample'), use('user')]);
-    cap.db = db; cap.mcp = mcp; cap.sample = sample;
+    cap.db = db; cap.mcp = mcp; cap.sample = sample; cap.user = user;
     if (user) {
       try { cap.canEdit = await user.canEdit(); } catch (_) { cap.canEdit = null; }
       try { cap.isOwner = await user.isOwner(); } catch (_) { cap.isOwner = null; }
+      try { cap.canWrite = await user.can('data.write'); } catch (_) { cap.canWrite = null; }
+      try { cap.me = await user.id(); } catch (_) { cap.me = null; }
     }
     if (db) subscribeSaved(db);
     if (mcp) startLive(); else { live.diag = { code: 'no-mcp' }; render(); }

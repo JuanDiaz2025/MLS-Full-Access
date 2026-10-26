@@ -262,7 +262,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .tracked-h b { overflow-wrap: anywhere; }
 .tracked-h .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
 .tracked-a { display: flex; gap: 8px; }
-.btn.small { padding: 6px 12px; font-size: 13px; }
+.btn.small { padding: 6px 12px; font-size: 13px; white-space: nowrap; }
 .btn.danger { color: var(--crit-ink); }
 .btn.danger:hover { background: var(--crit-soft); }
 .foot { font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 14px; max-width: 80ch; }
@@ -292,6 +292,12 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover { background: var(--accent-hover); }
 .btn:disabled { opacity: .55; cursor: default; }
+.dlg.wide { width: min(560px, 100%); }
+.dlg-b { padding: 8px 20px 4px; max-height: min(52vh, 460px); overflow-y: auto; }
+.dlg-b .plain { margin: 6px 0; }
+.pick-list { display: flex; flex-direction: column; gap: 8px; }
+.pick-list .choice b { font-weight: 500; white-space: pre-wrap; }
+.t td .sub .link { font-size: 12px; font-weight: 600; }
 
 /* ---------- narrow screens ---------- */
 @media (max-width: 1040px) { .msgs { grid-template-columns: minmax(0, 1fr); } .mlist { max-height: 340px; } }
@@ -393,6 +399,9 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
       </div>
     </form>
   </div>
+</div>
+<div class="scrim" id="link-dlg" hidden>
+  <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="link-h" id="link-box"></div>
 </div>
 <div class="tip" id="tip" hidden></div>
 

@@ -137,7 +137,8 @@ function cleanAnalysis(a, people, earlier, sender) {
 
 const NOT_A_REPLY = new Set(['reaction', 'joined', 'left']);
 
-// raw: { participants, members, names, bossIds, messages (compact), analysis, overrides, group }
+// raw: { participants, members, names, bossIds, messages (compact), analysis, overrides, group, fixes }
+// fixes: replies linked by hand on the dashboard, "<request id>~<person id>" -> { msg, at, text, by, on, group }
 // members: { id: { firstSeen, leftAt } } kept by the dashboard. Someone is only
 // expected to answer messages sent while they were in the group.
 function buildFromRaw(raw, now) {
@@ -200,6 +201,20 @@ function buildFromRaw(raw, now) {
     if (quoted) { if (quoted.req.has(pid) && msg.t >= quoted.m.t) setReply(quoted, pid, msg.t, text); return; }
     tracked.forEach(x => { if (x.m.t < msg.t && x.req.has(pid)) setReply(x, pid, msg.t, text); });
   });
+
+  // A reply someone linked by hand: one of the person's own messages that the
+  // rules above counted somewhere else. It counts from when it was sent.
+  const fixes = raw.fixes || {};
+  const byId = new Map(msgs.map(x => [x.i, x]));
+  tracked.forEach(x => x.req.forEach(pid => {
+    const f = fixes[`${x.m.i}~${pid}`];
+    if (!f || !Number.isFinite(f.at)) return;
+    const own = byId.get(f.msg);
+    if (own && own.s !== pid) return; // only the person's own message can answer for them
+    const at = Math.max(f.at, x.m.t);
+    const r = x.replies[pid];
+    if (!r || at < r.at) x.replies[pid] = { at, text: f.text || '', linked: { by: f.by || null, on: f.on || null, msg: f.msg, group: f.group || null } };
+  }));
 
   // Someone who left without answering is no longer waited on; it counts as
   // a late answer at the moment they left.
