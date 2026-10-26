@@ -59,13 +59,14 @@ function replyText(m, nameOf) {
   return text;
 }
 
-const ANALYSIS_VERSION = 2; // 2: also spots messages that chase an earlier request
+const ANALYSIS_VERSION = 3; // 2: also spots messages that chase an earlier request. 3: givers can ask each other
 
 // Used when Claude isn't available to read a message.
-function fallbackAnalysis(m, people, bossIds) {
+// senderOf: instruction id -> who sent it, for spotting a nudge on your own request.
+function fallbackAnalysis(m, people, senderOf) {
   const text = (m.x || '').trim();
   const ids = new Set(people.map(p => p.id));
-  const named = (m.m || []).filter(id => ids.has(id));
+  const named = (m.m || []).filter(id => ids.has(id) && id !== m.s);
   const chatter = /^(thanks|thank you|thx|ok|okay|good morning|good night|gracias|buenos dias)\b[\s!.]*$/i.test(text) || /^\p{Extended_Pictographic}+$/u.test(text);
   return {
     title: text.split('\n')[0].slice(0, 48) || 'Message',
@@ -75,23 +76,23 @@ function fallbackAnalysis(m, people, bossIds) {
     priority: /\b(urgent|asap|important|now|today)\b/i.test(text) ? 'High' : 'Normal',
     task: null,
     // quoting your own earlier message is a nudge on it
-    follow_up_of: m.q && bossIds && bossIds.has(m.q) ? m.q : null,
+    follow_up_of: m.q && senderOf && senderOf.get(m.q) === m.s ? m.q : null,
     by: 'rules', v: ANALYSIS_VERSION,
   };
 }
 
-// context: the manager's earlier messages (oldest first), so Claude can tell
+// context: the managers' earlier messages (oldest first), so Claude can tell
 // a nudge on an earlier request from a new one. batch: the ones to read now.
 function analysisPrompt(batch, context, people, bossNames, nameOf) {
-  const members = people.map(p => `${p.id}: ${p.name}`).join('\n');
+  const members = people.map(p => `${p.id}: ${p.name}${p.giver ? ' (manager)' : ''}`).join('\n');
   const show = m => {
-    const o = { id: m.i, sent: localStamp(m.t), text: readableText(m, nameOf) };
+    const o = { id: m.i, from: nameOf(m.s), sent: localStamp(m.t), text: readableText(m, nameOf) };
     if (m.q) o.replying_to = m.q;
     return o;
   };
-  return `You read messages a manager posted in a WhatsApp work group, so a dashboard can track who has to reply.
+  return `You read messages the managers posted in a WhatsApp work group, so a dashboard can track who has to reply.
 
-Manager: ${bossNames.join(', ')}
+Managers: ${bossNames.join(', ')}
 Group members who may need to reply (id: name):
 ${members}
 
@@ -100,20 +101,22 @@ For each message under "Messages to read", return JSON in exactly this shape:
 
 Rules:
 - needs_reply is true when the message asks people to do, confirm or answer something. Greetings, thanks and plain announcements are "Info" with needs_reply false.
-- required is "all" when the message is meant for the whole group. Otherwise list the ids of the people it addresses by name or @mention. Use only ids from the member list.
+- required is "all" when the message is meant for the whole group. Otherwise list the ids of the people it addresses by name or @mention, which can include another manager (for example the COO asking the CEO). Never list the person who sent it ("from"). Use only ids from the member list.
 - task is set only when a specific member is asked to complete a piece of work. owner_id is that member. due is the deadline written in the same local time as "sent", or null when no deadline is given.
 - priority is "High" only when the message says it is urgent or important, or the work is due the same day.
-- follow_up_of is set when the manager is chasing or repeating an earlier request because nobody answered ("can you confirm this???", "hello?", "what's happening?", "can anyone see this?") and the message asks for nothing new. Give the id of the earlier request being chased, from either list. If the message also asks for something new, it is a new request: follow_up_of is null. "replying_to" means the manager quoted that earlier message.
+- follow_up_of is set when the sender is chasing or repeating their OWN earlier request because nobody answered ("can you confirm this???", "hello?", "what's happening?", "can anyone see this?") and the message asks for nothing new. Give the id of that earlier request (same "from"), from either list. If the message also asks for something new, it is a new request: follow_up_of is null. A manager answering or quoting another manager's message is never a follow-up. "replying_to" means the sender quoted that earlier message.
 
-Earlier messages from the manager, for context only:
+Earlier messages from the managers, for context only:
 ${JSON.stringify(context.map(show))}
 
 Messages to read:
 ${JSON.stringify(batch.map(show))}`;
 }
 
-function cleanAnalysis(a, people, earlierIds) {
+// earlier: earlier instruction id -> who sent it. sender: who sent this one.
+function cleanAnalysis(a, people, earlier, sender) {
   const ids = new Set(people.map(p => p.id));
+  ids.delete(sender);
   if (!a || typeof a !== 'object') return null;
   const out = {
     title: String(a.title || '').slice(0, 60),
@@ -122,7 +125,7 @@ function cleanAnalysis(a, people, earlierIds) {
     required: Array.isArray(a.required) ? a.required.map(String).filter(id => ids.has(id)) : 'all',
     priority: a.priority === 'High' ? 'High' : 'Normal',
     task: null,
-    follow_up_of: a.follow_up_of && earlierIds && earlierIds.has(String(a.follow_up_of)) ? String(a.follow_up_of) : null,
+    follow_up_of: a.follow_up_of && earlier && earlier.get(String(a.follow_up_of)) === sender ? String(a.follow_up_of) : null,
     by: 'claude', v: ANALYSIS_VERSION,
   };
   if (Array.isArray(out.required) && !out.required.length) out.required = 'all';
@@ -142,9 +145,12 @@ function buildFromRaw(raw, now) {
   const boss = new Set(raw.bossIds || []);
   const members = raw.members || {};
   const current = new Set((raw.participants || []).map(p => p.id));
-  const ids = new Set([...current, ...Object.keys(members)].filter(id => !boss.has(id)));
-  const people = [...ids].map(id => ({ id, name: nameOf(id), former: !current.has(id) }));
+  // Instruction-givers are people too: "everyone" leaves them out, but one
+  // giver can ask another by name and is then waited on like anyone else.
+  const ids = new Set([...current, ...Object.keys(members)]);
+  const people = [...ids].map(id => ({ id, name: nameOf(id), former: !current.has(id), giver: boss.has(id) }));
   const pset = new Set(people.map(p => p.id));
+  const team = people.filter(p => !p.giver).map(p => p.id);
   const inGroup = (id, t) => {
     const m = members[id];
     if (!m) return current.has(id);
@@ -153,8 +159,8 @@ function buildFromRaw(raw, now) {
   const since = now - WINDOW_DAYS * 24 * 60 * 60000;
   const msgs = (raw.messages || []).filter(m => m.t <= now).sort((a, b) => a.t - b.t);
   const bossMessages = msgs.filter(m => boss.has(m.s) && !NOT_A_REPLY.has(m.k) && !m.d && m.t >= since);
-  const bossIds = new Set(bossMessages.map(m => m.i));
-  const analysisOf = m => (raw.analysis || {})[m.i] || fallbackAnalysis(m, people, bossIds);
+  const senderOf = new Map(bossMessages.map(m => [m.i, m.s]));
+  const analysisOf = m => (raw.analysis || {})[m.i] || fallbackAnalysis(m, people, senderOf);
 
   // Requests, and the nudges that chase them
   const tracked = [];
@@ -163,15 +169,15 @@ function buildFromRaw(raw, now) {
   bossMessages.forEach(m => {
     const a = analysisOf(m);
     const root = a.follow_up_of && rootOf.get(a.follow_up_of);
-    if (root && m.t > root.m.t) {
+    if (root && m.t > root.m.t && root.m.s === m.s) {
       root.chases.push({ id: m.i, at: m.t, text: readableText(m, nameOf) });
       rootOf.set(m.i, root);
       return;
     }
     if (!a.needs_reply) return;
-    let req = a.required === 'all' ? [...pset] : a.required.filter(id => pset.has(id));
+    let req = a.required === 'all' ? team : a.required.filter(id => pset.has(id));
     if (a.task && pset.has(a.task.owner_id) && !req.includes(a.task.owner_id)) req = req.concat(a.task.owner_id);
-    req = req.filter(id => inGroup(id, m.t));
+    req = req.filter(id => id !== m.s && inGroup(id, m.t));
     if (!req.length) return;
     const x = { m, a, req: new Set(req), chases: [], replies: {} };
     tracked.push(x); trackedById.set(m.i, x); rootOf.set(m.i, x);

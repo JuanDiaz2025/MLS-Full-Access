@@ -340,9 +340,9 @@
     const left = g.participants.filter(p => !boss.has(p.id));
     // a group where everyone gives instructions has nobody to track
     const who = !boss.size ? '<p class="plain">Tick at least one person who gives instructions.</p>'
-      : !left.length ? '<p class="warn">Everyone is ticked, so nobody is left to track. Untick the people who should reply.</p>'
-      : `<p class="plain">Tracked for replies: ${esc(left.map(p => nameFor(p.id, p.name)).join(', '))} (${plural(left.length, 'person', 'people')})</p>`;
-    const ready = boss.size && left.length;
+      : !left.length ? '<p class="warn">Everyone is ticked. Messages to everyone won\u2019t be tracked, only what one instruction-giver asks another by name. Untick the people who should reply.</p>'
+      : `<p class="plain">Tracked for replies: ${esc(left.map(p => nameFor(p.id, p.name)).join(', '))} (${plural(left.length, 'person', 'people')})${boss.size > 1 ? '. The ticked people are tracked too when one of them asks another by name.' : ''}</p>`;
+    const ready = boss.size;
     return `<h3>Who gives the instructions in “${esc(g.name || 'this group')}”?</h3>
       <p class="plain">Tick only the people who give instructions, for example the CEO and the COO. Leave everyone who should reply unticked: they are the ones tracked.</p>${givers}${who}
       <h3>Names</h3><p class="plain">Optional. Shown on the dashboard instead of phone numbers, in every group.</p><div class="names">${nameRows}</div>
@@ -357,7 +357,7 @@
     const raw = live.raws[t.groupId] || (savedGroupData(t.groupId) || {}).meta;
     if (!raw || !raw.participants) return '';
     const n = raw.participants.filter(p => !(t.bossIds || []).includes(p.id)).length;
-    return n ? ` \u00B7 tracking ${plural(n, 'person', 'people')}` : ' \u00B7 nobody left to track, press Edit and untick the people who reply';
+    return n ? ` \u00B7 tracking ${plural(n, 'person', 'people')}` : ' \u00B7 everyone here gives instructions, so only what they ask each other by name is tracked';
   }
 
   function viewSetup() {
@@ -510,15 +510,17 @@
     if (state.senderFilter !== 'all') messages = messages.filter(m => m.senderId === state.senderFilter);
     const ids = new Set(messages.map(m => m.id));
     const g = state.groupFilter;
-    const people = g === 'all' ? all.people : all.people.filter(p => p.groups.includes(g)).map(p => ({ ...p, former: p.formerIn.includes(g) }));
+    const people = g === 'all' ? all.people : all.people.filter(p => p.groups.includes(g))
+      .map(p => ({ ...p, former: p.formerIn.includes(g), giver: p.giverIn.includes(g) }));
     return { people, messages, tasks: all.tasks.filter(t => ids.has(t.msg)) };
   }
 
   function render() {
     S = filtered(src.S);
     NOW = src.mode === 'live' ? Date.now() : src.now;
-    N = S.people.filter(p => !p.former).length;
     D = derive(S, cfg, NOW);
+    // instruction-givers count only when someone asked them for something
+    N = D.people.filter(p => !p.former && (!p.giver || p.required)).length;
     renderNav();
     renderFilters();
     renderFrame();
@@ -646,11 +648,13 @@
       const Sg = buildFromRaw(raw, now);
       Sg.people.forEach(p => {
         const q = people.get(p.id);
-        if (!q) people.set(p.id, { ...p, groups: [id], formerIn: p.former ? [id] : [] });
+        if (!q) people.set(p.id, { ...p, groups: [id], formerIn: p.former ? [id] : [], giverIn: p.giver ? [id] : [] });
         else {
           q.groups.push(id);
           if (p.former) q.formerIn.push(id);
+          if (p.giver) q.giverIn.push(id);
           q.former = q.former && p.former;
+          q.giver = q.giver && p.giver;
           if (looksLikeNumber(q.name) && !looksLikeNumber(p.name)) q.name = p.name;
         }
       });
@@ -995,8 +999,8 @@
     const people = S0.people;
     const nameOf = nameIndex(raw);
     const canAsk = cap.sample && !live.sampleDenied;
-    const bossIdSet = new Set(S0.bossMessages.map(m => m.i));
-    const fallback = m => fallbackAnalysis(m, people, bossIdSet);
+    const senderOf = new Map(S0.bossMessages.map(m => [m.i, m.s]));
+    const fallback = m => fallbackAnalysis(m, people, senderOf);
     const todo = S0.bossMessages.filter(m => {
       const a = raw.analysis[m.i];
       return !a || (canAsk && (a.by === 'rules' || a.v !== ANALYSIS_VERSION));
@@ -1009,12 +1013,12 @@
       const batch = todo.slice(i, i + 12);
       // the ten instruction-giver messages before this batch, from the last day
       const context = S0.bossMessages.filter(m => m.t < batch[0].t && m.t > batch[0].t - DAY_MS).slice(-10);
-      const earlier = new Set([...context, ...batch].map(m => m.i));
+      const earlier = new Map([...context, ...batch].map(m => [m.i, m.s]));
       try {
         const out = await cap.sample.json(analysisPrompt(batch, context, people, bosses, nameOf), { modelTier: 'default' });
         const results = out && Array.isArray(out.results) ? out.results : [];
         batch.forEach(m => {
-          const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people, earlier);
+          const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people, earlier, m.s);
           if (a && a.follow_up_of === m.i) a.follow_up_of = null;
           raw.analysis[m.i] = a || raw.analysis[m.i] || fallback(m);
         });

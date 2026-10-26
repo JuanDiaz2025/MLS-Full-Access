@@ -20,7 +20,7 @@ WhatsApp group
 
 ## Rules the dashboard uses
 
-- Each tracked group has its own instruction-givers, chosen at setup. Everyone else in that group is tracked. Groups can be added, edited or dropped later from "Groups and names" in the sidebar.
+- Each tracked group has its own instruction-givers, chosen at setup. Everyone else in that group is tracked. A message to everyone means the team, not the other givers, but when one giver asks another by name or @mention (Juan: "Cherry can you do this?") the one asked is tracked like anyone else. Groups can be added, edited or dropped later from "Groups and names" in the sidebar.
 - People are matched by phone number, so someone in two groups has one record. The top of the page switches between all groups and one, and a "From" filter shows only one instruction-giver's messages (for example only the CEO's, or only the COO's).
 - A quoted reply or a reaction answers that one message. Any other message answers everything still open for that person before it.
 - A task counts as done when its owner sends a photo, video or document, or says done/finished/sent/etc.
@@ -38,6 +38,7 @@ python3 dashboard/build.py
 # dashboard end-to-end checks against a simulated reader, Claude and storage (need Playwright)
 node dashboard/test/e2e.js        # one group, from setup to a second device
 node dashboard/test/e2e-multi.js  # two groups, filters, edits, and moving an older single-group copy
+node dashboard/test/givers.test.js  # instruction-givers asking each other (no browser needed)
 ```
 
 ## Status
