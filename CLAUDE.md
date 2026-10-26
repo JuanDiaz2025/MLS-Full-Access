@@ -113,10 +113,16 @@ Check every photo first — the whole gallery, not the cover shot or the remarks
   nothing to fix) → never add either; remove it if it is already there.
 - **Calendars:** both **bryan@twinhomebuyer.com** and Juan's
   **pecuniary2@gmail.com** ("Juan's Official Calendar" — Bryan added it 22 Oct).
-  Same events on both. Title format: **"Open House on Sat 10/24 · 136 Rae Ave, SF · FIXER"**
-  (day + date first, then address, then the verdict). Arrange by location as a
-  timed driving route (one event per stop in time order, next stop + drive
-  time in the notes, an all-day route summary with a Google Maps link). Each event carries a
+  Same events on both. **How every event is written (Bryan, 26 Oct):**
+  - **Title:** what it is + the address, e.g. **"Open house · 146 Lenox Way, SF"**.
+  - **Location:** the full address, so it opens in Maps.
+  - **Description:** WHY (why we're going: the photo verdict and evidence), CHECK
+    (what to look at on site), NUMBERS (list price, $/sqft, sqft, beds, year),
+    OFFER RANGE (from ARV/comps; if none are on file, say "not set yet" and
+    never invent one), AGENT, MLS # + link, OPEN (the time window), NEXT STOP
+    (address, time and drive time), then the tag.
+  Arrange by location as a timed driving route (one event per stop in time
+  order, plus an all-day route summary with a Google Maps link). Each event carries a
   `[twin-network-openhouse:<MLS>:<start>]` tag so nothing is added twice.
 - **Area:** San Francisco only (Bryan, 26 Oct) — no Peninsula or other cities. Active leads on the board.
 
