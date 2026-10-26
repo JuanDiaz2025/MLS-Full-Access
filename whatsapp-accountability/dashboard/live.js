@@ -137,7 +137,8 @@ function cleanAnalysis(a, people, earlier, sender) {
 
 const NOT_A_REPLY = new Set(['reaction', 'joined', 'left']);
 
-// raw: { participants, members, names, bossIds, messages (compact), analysis, overrides, group, fixes }
+// raw: { participants, members, names, bossIds, messages (compact), analysis, overrides, group, fixes, removed }
+// removed: request id -> who deleted it from the dashboard
 // fixes: replies linked by hand on the dashboard, "<request id>~<person id>" -> { msg, at, text, by, on, group }
 // members: { id: { firstSeen, leftAt } } kept by the dashboard. Someone is only
 // expected to answer messages sent while they were in the group.
@@ -223,17 +224,22 @@ function buildFromRaw(raw, now) {
     if (left && left > x.m.t && !x.replies[pid]) setReply(x, pid, left, 'Left the group', { left: true });
   }));
 
+  // Requests an editor deleted from the dashboard drop out here, with their
+  // nudges, replies and task.
+  const removed = raw.removed || {};
+  const shown = tracked.filter(x => !removed[x.m.i]);
+
   // How often each person had to be chased: every nudge counts against the
   // people who still hadn't answered when it was sent.
   const chased = {};
-  tracked.forEach(x => x.chases.forEach(c => x.req.forEach(pid => {
+  shown.forEach(x => x.chases.forEach(c => x.req.forEach(pid => {
     const r = x.replies[pid];
     if (!r || r.at > c.at) chased[pid] = (chased[pid] || 0) + 1;
   })));
   people.forEach(p => { p.chased = chased[p.id] || 0; });
 
   const tasks = [];
-  const messages = tracked.map(x => {
+  const messages = shown.map(x => {
     const { m, a } = x;
     let taskId = null;
     if (a.task && pset.has(a.task.owner_id) && x.req.has(a.task.owner_id)) {

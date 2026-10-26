@@ -155,7 +155,8 @@
   function viewMessages() {
     if (!D.messages.length) {
       return emptyCard('No instructions yet', src.mode === 'sample' ? 'Nothing to show.'
-        : 'Messages from the people giving instructions that ask others to do or answer something will show here.');
+        : 'Messages from the people giving instructions that ask others to do or answer something will show here.')
+        + (removedCount() ? `<p class="hint-line">${removedLink()}</p>` : '');
     }
     if (!state.sel || !D.messages.find(m => m.id === state.sel)) {
       state.sel = (D.unresolved.slice().sort((a, b) => b.pending.length - a.pending.length)[0] || D.messages[0]).id;
@@ -196,11 +197,11 @@
         <td>${r.replied ? `<span class="plain">${replyNote(r.stage)}</span>` : stageChip(r.stage, m)}</td></tr>`).join('');
 
     return `<div class="msgs">
-      <div class="card"><div class="card-h"><h2>Sent to the group</h2><span class="hint">${plural(D.messages.length, 'message')}, last 30 days</span></div>
+      <div class="card"><div class="card-h"><h2>Sent to the group</h2><span class="hint">${plural(D.messages.length, 'message')}, last 30 days${removedCount() ? ' \u00B7 ' + removedLink() : ''}</span></div>
         <div class="mlist" id="mlist">${items}</div></div>
       <div class="card"><div class="card-b">
         <div class="mhead"><div><h2>${esc(m.title)}</h2><p>${esc(fmtWhen(m.at))} · ${groupTag(m)}Sent by ${esc(m.senderName || 'Juan')}</p></div>
-          ${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}</div>
+          <div class="mhead-a">${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}${deleteButton(m)}</div></div>
         <div class="bubble">${esc(m.text)}<span class="b-time">${esc(fmtClock(m.at))}</span></div>
         ${chaseHtml}
         <div class="read"><div class="read-cap">${ic('spark')}${m.by === 'rules' ? 'Read with simple rules, because Claude wasn’t available' : 'What the AI picked out of this message'}</div><dl class="read-grid">
@@ -500,9 +501,9 @@
       document.getElementById('conn-btn').disabled = d.code === 'connecting';
     }
     const err = document.getElementById('live-error');
-    const msg = live.error ? (live.error.message || String(live.error)) : '';
-    err.hidden = !(live.on && msg);
-    err.textContent = msg ? `WhatsApp Reader couldn’t read a group: ${msg}` : '';
+    const msg = live.on && live.error ? `WhatsApp Reader couldn\u2019t read a group: ${live.error.message || String(live.error)}` : (state.notice || '');
+    err.hidden = !msg;
+    err.textContent = msg;
   }
 
   // Why this window isn't reading WhatsApp Reader, in words that say what to do.
@@ -571,7 +572,7 @@
     const open = e.target.closest('[data-open-msg]');
     if (open) { state.sel = open.dataset.openMsg; if (state.view === 'messages') render(); else location.hash = 'messages'; return; }
     const sel = e.target.closest('[data-sel]');
-    if (sel) { state.sel = sel.dataset.sel; render(); return; }
+    if (sel) { state.sel = sel.dataset.sel; state.confirmDelete = null; render(); return; }
     const act = e.target.closest('[data-action]');
     if (act) onAction(act.dataset.action, act.dataset.gid, act.dataset);
   });
@@ -665,7 +666,7 @@
     const people = new Map(), messages = [], tasks = [];
     parts.forEach(({ id, name, raw }) => {
       const start = startOf(id);
-      const Sg = buildFromRaw(start ? { ...raw, messages: (raw.messages || []).filter(m => m.t >= start) } : raw, now);
+      const Sg = buildFromRaw({ ...raw, messages: start ? (raw.messages || []).filter(m => m.t >= start) : raw.messages, removed: removedFor(id) }, now);
       Sg.people.forEach(p => {
         const q = people.get(p.id);
         if (!q) people.set(p.id, { ...p, groups: [id], formerIn: p.former ? [id] : [], giverIn: p.giver ? [id] : [] });
@@ -745,7 +746,7 @@
     });
     want.forEach(gid => {
       if (subs[gid]) return;
-      const box = saved.groups[gid] = { meta: null, analysis: {}, days: {}, fixes: {}, loaded: { meta: false, analysis: false } };
+      const box = saved.groups[gid] = { meta: null, analysis: {}, days: {}, fixes: {}, removed: {}, loaded: { meta: false, analysis: false } };
       const fail = () => {};
       const k = gkey(gid);
       subs[gid] = [
@@ -757,6 +758,12 @@
           const fixes = {};
           q.docs.forEach(d => { const v = d.data(); if (v && v.request && v.person) fixes[`${v.request}~${v.person}`] = { ...v, docId: d.id }; });
           box.fixes = fixes; refreshShown();
+        }, fail),
+        // messages the owner or an editor deleted from the dashboard
+        db.collection(`sync/${k}/removed`).onSnapshot(q => {
+          const removed = {};
+          q.docs.forEach(d => { const v = d.data(); if (v && v.msg) removed[v.msg] = { ...v, docId: d.id }; });
+          box.removed = removed; refreshShown(); if (state.removedOpen) renderRemoved();
         }, fail),
       ];
     });
@@ -890,15 +897,79 @@
     const f = m && fixesFor(m.groupId)[`${msgId}~${pid}`];
     if (!f || !cap.db) return;
     try { await cap.db.doc(`fixes/${gkey(m.groupId)}/links/${f.docId}`).delete(); }
-    catch (e) { live.error = { message: linkError(e) }; renderFrame(); }
+    catch (e) { notify(linkError(e)); }
   }
 
   linkDlg.addEventListener('click', e => { if (e.target === linkDlg) closeLink(); });
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     if (state.link) closeLink();
+    else if (state.removedOpen) { state.removedOpen = false; renderRemoved(); }
     else if (state.clear && !state.clear.busy) { state.clear = null; renderClear(); }
   });
+
+  // ---------------- deleting a message from the dashboard (owner and editors) ----------------
+  // Hides one request, with its nudges, replies and task. Nothing in WhatsApp
+  // changes, and it can be brought back from the deleted list.
+  const removedFor = gid => (saved.groups[gid] && saved.groups[gid].removed) || {};
+  const canDelete = () => cap.canEdit === true && src.mode !== 'sample';
+  const allRemoved = () => trackedGroups().flatMap(t => Object.values(removedFor(t.groupId))
+    .map(r => ({ ...r, gid: t.groupId, groupName: t.groupName }))).sort((a, b) => (b.on || 0) - (a.on || 0));
+  const removedCount = () => canDelete() ? allRemoved().length : 0;
+  const removedLink = () => `<button class="link" type="button" data-action="open-removed">${plural(removedCount(), 'deleted message')}</button>`;
+  const deleteButton = m => canDelete() && m.groupId
+    ? `<button class="btn small danger${state.confirmDelete === m.id ? ' armed' : ''}" type="button" data-action="delete-msg" data-msg="${esc(m.id)}">${state.confirmDelete === m.id ? 'Click again to delete' : 'Delete'}</button>` : '';
+  let noticeTimer = 0;
+  function notify(text) {
+    state.notice = text; renderFrame();
+    clearTimeout(noticeTimer); noticeTimer = setTimeout(() => { state.notice = ''; renderFrame(); }, 9000);
+  }
+  const removeError = e => e && e.code === 'invalid_argument' ? 'Only the owner and editors of this page can delete messages.'
+    : `Couldn\u2019t delete that message${e && e.message ? ': ' + e.message : '.'}`;
+
+  async function removeMessage(msgId) {
+    const m = src.S.messages.find(x => x.id === msgId);
+    if (!m || !m.groupId || !cap.db || !canDelete()) return;
+    const id = gkey(m.id), box = saved.groups[m.groupId];
+    const doc = { msg: m.id, title: m.title, text: String(m.text || '').slice(0, 160), at: m.at, group: m.groupId, by: cap.me || null, on: Date.now() };
+    state.confirmDelete = null; state.sel = null;
+    // gone from the screen straight away; the saved copy follows
+    if (box) box.removed = { ...(box.removed || {}), [m.id]: { ...doc, docId: id } };
+    refreshShown();
+    try { await cap.db.doc(`sync/${gkey(m.groupId)}/removed/${id}`).set(doc); }
+    catch (e) {
+      if (box) { const r = { ...box.removed }; delete r[m.id]; box.removed = r; }
+      notify(removeError(e)); refreshShown();
+    }
+  }
+
+  async function restoreMessage(gid, msgId) {
+    const box = saved.groups[gid], r = removedFor(gid)[msgId];
+    if (!r || !cap.db || !canDelete()) return;
+    if (box) { const next = { ...box.removed }; delete next[msgId]; box.removed = next; }
+    refreshShown(); renderRemoved();
+    try { await cap.db.doc(`sync/${gkey(gid)}/removed/${r.docId}`).delete(); }
+    catch (e) { if (box) box.removed = { ...box.removed, [msgId]: r }; notify(removeError(e)); refreshShown(); renderRemoved(); }
+  }
+
+  const removedDlg = document.getElementById('removed-dlg');
+  const removedBox = document.getElementById('removed-box');
+  removedDlg.addEventListener('click', e => { if (e.target === removedDlg) { state.removedOpen = false; renderRemoved(); } });
+  function renderRemoved() {
+    removedDlg.hidden = !state.removedOpen;
+    if (!state.removedOpen) return;
+    const list = allRemoved();
+    const multi = trackedGroups().length > 1;
+    const rows = list.length ? list.map(r => `<div class="clear-row"><div><b>${esc(r.title || 'Message')}</b>
+        <span class="sub">${multi ? esc(r.groupName) + ' \u00B7 ' : ''}sent ${esc(fmtWhen(r.at))} \u00B7 deleted by ${esc(linkerName(r.by))}${r.on ? ' ' + esc(fmtWhen(r.on)) : ''}</span></div>
+        <button class="btn small" type="button" data-action="restore-msg" data-gid="${esc(r.gid)}" data-msg="${esc(r.msg)}">Restore</button></div>`).join('')
+      : '<p class="plain">Nothing has been deleted.</p>';
+    removedBox.innerHTML = `<div class="dlg-h"><div><h2 id="removed-h">Deleted messages</h2>
+        <p>These no longer count anywhere on the dashboard. Restore one to count it again.</p></div>
+        <button class="x" type="button" data-action="removed-close" aria-label="Close"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="dlg-b">${rows}</div>
+      <div class="dlg-f"><button class="btn" type="button" data-action="removed-close">Done</button></div>`;
+  }
 
   // ---------------- clearing a group's data (owner and editors) ----------------
   // WhatsApp Reader keeps the last 30 days, so deleting the page's copy alone would
@@ -945,6 +1016,7 @@
     try {
       for (const day of Object.keys(box.days || {})) await db.doc(`sync/${k}/days/${day}`).delete();
       for (const f of Object.values(box.fixes || {})) await db.doc(`fixes/${k}/links/${f.docId}`).delete();
+      for (const r of Object.values(box.removed || {})) await db.doc(`sync/${k}/removed/${r.docId}`).delete();
       await db.doc(`sync/${k}/extra/analysis`).delete();
       await db.doc(`sync/${k}`).delete();
       // then tell every other computer, the one running WhatsApp Reader included
@@ -1063,6 +1135,7 @@
     try {
       for (const day of days) await db.doc(`sync/${k}/days/${day}`).delete();
       for (const f of Object.values((box && box.fixes) || {})) await db.doc(`fixes/${k}/links/${f.docId}`).delete();
+      for (const r of Object.values((box && box.removed) || {})) await db.doc(`sync/${k}/removed/${r.docId}`).delete();
       await db.doc(`sync/${k}/extra/analysis`).delete();
       await db.doc(`sync/${k}`).delete();
     } catch (_) { /* nothing else to do; it is no longer shown */ }
@@ -1071,6 +1144,13 @@
   async function onAction(action, gid, data) {
     const tracked = trackedGroups();
     if (action === 'open-link') openLink(data.msg, data.pid);
+    else if (action === 'delete-msg') {
+      if (state.confirmDelete !== data.msg) { state.confirmDelete = data.msg; render(); return; }
+      removeMessage(data.msg);
+    }
+    else if (action === 'open-removed') { state.removedOpen = true; renderRemoved(); const b = removedBox.querySelector('button'); if (b) b.focus(); }
+    else if (action === 'removed-close') { state.removedOpen = false; renderRemoved(); }
+    else if (action === 'restore-msg') restoreMessage(gid, data.msg);
     else if (action === 'open-clear') { state.clear = { confirm: null, done: {}, busy: null, error: '' }; renderClear(); const b = clearBox.querySelector('button'); if (b) b.focus(); }
     else if (action === 'clear-close') { state.clear = null; renderClear(); }
     else if (action === 'clear-group') {

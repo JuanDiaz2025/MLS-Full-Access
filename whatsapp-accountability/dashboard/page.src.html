@@ -303,6 +303,9 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .clear-row .sub { display: block; font-size: 12.5px; color: var(--ink-3); }
 .clear-row .sub.ok { color: var(--good-ink); font-weight: 600; }
 .btn.danger.armed { background: var(--crit-soft); border-color: var(--crit); }
+.mhead-a { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hint-line { margin: 10px 0 0; font-size: 13px; color: var(--ink-3); }
+.card-h .hint .link { font-size: 12.5px; }
 .dlg-b .note { font-size: 13.5px; color: var(--ink-2); margin: 0 0 6px; }
 .dlg-b { padding: 8px 20px 4px; max-height: min(52vh, 460px); overflow-y: auto; }
 .dlg-b .plain { margin: 6px 0; }
@@ -417,6 +420,9 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
       </div>
     </form>
   </div>
+</div>
+<div class="scrim" id="removed-dlg" hidden>
+  <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="removed-h" id="removed-box"></div>
 </div>
 <div class="scrim" id="clear-dlg" hidden>
   <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="clear-h" id="clear-box"></div>
