@@ -122,7 +122,8 @@ Check every photo first — the whole gallery, not the cover shot or the remarks
     never invent one), AGENT, MLS # + link, OPEN (the time window), NEXT STOP
     (address, time and drive time), then the tag.
   Arrange by location as a timed driving route (one event per stop in time
-  order, plus an all-day route summary with a Google Maps link). Each event carries a
+  order, plus an all-day summary titled "Open house route · Tue 10/27 · SF (3 stops)"
+  with a Google Maps link). Flag any offer deadline in the event. Each event carries a
   `[twin-network-openhouse:<MLS>:<start>]` tag so nothing is added twice.
 - **Area:** San Francisco only (Bryan, 26 Oct) — no Peninsula or other cities. Active leads on the board.
 
