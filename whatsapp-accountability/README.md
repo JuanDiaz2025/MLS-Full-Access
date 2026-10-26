@@ -27,6 +27,10 @@ WhatsApp group
 - A task counts as done when its owner sends a photo, video or document, or says done/finished/sent/etc.
 - Follow-up timing (default 15 / 30 / 60 minutes) only decides when someone is flagged "Needs 1st reminder", "Needs 2nd reminder" or "Escalate to manager". A reply after the escalation point counts as a miss; two or more misses in 30 days is a repeat non-responder.
 
+## Download
+
+`release/whatsapp-reader.exe` is WhatsApp Reader 1.0.1 for Windows, ready to use; setup steps are in `reader/README.txt`. Its SHA-256 is in `release/SHA256SUMS.txt`, and `reader/build.sh` rebuilds the same file byte for byte from `reader/`.
+
 ## Building
 
 ```sh
