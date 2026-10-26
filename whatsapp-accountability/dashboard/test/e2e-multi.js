@@ -106,13 +106,14 @@ const card = (p, view, h) => p.$$eval(`#${view} .card`, (cs, h) => { const c = c
   // 3. add a second group
   await p.click('#change-group'); await p.waitForTimeout(500);
   console.log('3 setup:', await text(p, '#v-title'), '| tracked:', (await rows(p, '.tracked')).join(' || '));
-  console.log('3 can add:', (await p.$$eval('input[name="setup-group"]', xs => xs.map(x => x.value))).join(', '));
-  await p.check(`input[name="setup-group"][value="${G2}"]`); await p.waitForTimeout(500);
-  console.log('3 givers preset (this phone):', await p.isChecked('input[name="setup-boss"][value="1000"]'));
-  await p.check('input[name="setup-boss"][value="2001"]');
+  console.log('3 can add:', (await p.$$eval('input[name="pick-group"]', xs => xs.map(x => x.value))).join(', '));
+  await p.check(`input[name="pick-group"][value="${G2}"]`);
+  await p.click('[data-action="pick-next"]'); await p.waitForTimeout(600);
+  console.log('3 givers preset (this phone):', await p.isChecked('input[name="add-boss"][value="1000"]'));
+  await p.check('input[name="add-boss"][value="2001"]'); await p.waitForTimeout(150);
   await p.fill('input[data-name-for="1004"]', 'Rosa Reyes');
   await p.screenshot({ path: 'shots/multi-add.png', fullPage: true });
-  await p.click('[data-action="add-group"]'); await p.waitForTimeout(2500);
+  await p.click('[data-action="add-groups"]'); await p.waitForTimeout(2500);
   console.log('3 after add:', await text(p, '#v-title'), '| brand:', await text(p, '#brand-sub'));
   console.log('3 group options:', (await p.$$eval('#group-filter option', o => o.map(x => x.textContent))).join(' / '), '| from:', (await p.$$eval('#sender-filter option', o => o.map(x => x.textContent))).join(' / '));
   const unresolved = async () => (await card(p, 'v-dashboard', 'Unresolved messages')).concat(['PEOPLE:'], await card(p, 'v-dashboard', 'People who haven’t replied'));
