@@ -1663,13 +1663,18 @@ RULES
     if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); }); return; }
     if (!todo.length) { await judgeReplies(raw, people, bosses, nameOf); return; }
     live.analyzing = todo.length; renderFrame();
+    const byId = new Map(raw.messages.map(m => [m.i, m]));
     for (let i = 0; i < todo.length; i += 12) {
       const batch = todo.slice(i, i + 12);
       // the ten instruction-giver messages before this batch, from the last day
       const context = S0.bossMessages.filter(m => m.t < batch[0].t && m.t > batch[0].t - DAY_MS).slice(-10);
       const earlier = new Map([...context, ...batch].map(m => [m.i, m.s]));
+      // what anyone said in the two hours before the batch and between its messages
+      const inBatch = new Set(batch.map(m => m.i));
+      const around = raw.messages.filter(m => !inBatch.has(m.i) && !m.d && !['reaction', 'joined', 'left'].includes(m.k)
+        && m.t >= batch[0].t - 2 * 60 * MIN && m.t <= batch[batch.length - 1].t).slice(-40);
       try {
-        const out = await cap.sample.json(analysisPrompt(batch, context, people, bosses, nameOf), { modelTier: 'default' });
+        const out = await cap.sample.json(analysisPrompt(batch, context, people, bosses, nameOf, around, byId), { modelTier: 'default' });
         const results = out && Array.isArray(out.results) ? out.results : [];
         batch.forEach(m => {
           const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people, earlier, m.s);

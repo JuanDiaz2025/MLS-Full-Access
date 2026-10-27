@@ -743,7 +743,7 @@ function replyText(m, nameOf) {
   return text;
 }
 
-const ANALYSIS_VERSION = 4; // 2: also spots messages that chase an earlier request. 3: givers can ask each other. 4: questions anyone can answer
+const ANALYSIS_VERSION = 5; // 2: also spots messages that chase an earlier request. 3: givers can ask each other. 4: questions anyone can answer. 5: sees what everyone said around it
 
 const ANYONE_RE = /^\s*(who|who's|whos|sino|anyone|anybody|does anyone|did anyone|has anyone|is anyone|can anyone|may nakakaalam)\b/i;
 
@@ -770,13 +770,21 @@ function fallbackAnalysis(m, people, senderOf) {
 
 // context: the managers' earlier messages (oldest first), so Claude can tell
 // a nudge on an earlier request from a new one. batch: the ones to read now.
-function analysisPrompt(batch, context, people, bossNames, nameOf) {
+// around: what anyone else said just before and between them, so "what is
+// this?" after Cherry sent something is read as a question for Cherry.
+// byId: every message by id, to show the text of a quoted message.
+function analysisPrompt(batch, context, people, bossNames, nameOf, around, byId) {
   const members = people.map(p => `${p.id}: ${p.name}${p.giver ? ' (manager)' : ''}`).join('\n');
   const show = m => {
     const o = { id: m.i, from: nameOf(m.s), sent: localStamp(m.t), text: readableText(m, nameOf) };
-    if (m.q) o.replying_to = m.q;
+    if (m.q) {
+      o.replying_to = m.q;
+      const q = byId && byId.get(m.q);
+      if (q) o.replying_to_message = { from: nameOf(q.s), text: replyText(q, nameOf).slice(0, 300) };
+    }
     return o;
   };
+  const near = (around || []).map(m => ({ id: m.i, from: nameOf(m.s), sent: localStamp(m.t), text: replyText(m, nameOf).slice(0, 300) }));
   return `You read messages the managers posted in a WhatsApp work group, so a dashboard can track who has to reply.
 
 Managers: ${bossNames.join(', ')}
@@ -788,12 +796,13 @@ For each message under "Messages to read", return JSON in exactly this shape:
 
 Rules:
 - needs_reply is true when the message asks people to do, confirm or answer something. Greetings, thanks and plain announcements are "Info" with needs_reply false.
+- Read each message in its place in the conversation. When it reacts to something a member just said or sent ("what is this?", "what does that mean?", "send it again", "which one?"), or quotes a member's message, it is for that member: list their id, even with no name or @mention.
 - required is "all" when every member of the group has to respond, for example "everyone confirm you saw the schedule". It is "any" when one answer from anyone settles it, for example "who is tracking this order?", "who has the key?", "anyone know where the ladder is?", "who can cover Saturday?". Otherwise list the ids of the people it addresses by name or @mention, which can include another manager (for example the COO asking the CEO). Never list the person who sent it ("from"). Use only ids from the member list.
 - task is set only when a specific member is asked to complete a piece of work. owner_id is that member. due is the deadline written in the same local time as "sent", or null when no deadline is given.
 - priority is "High" only when the message says it is urgent or important, or the work is due the same day.
 - follow_up_of is set when the sender is chasing or repeating their OWN earlier request because nobody answered ("can you confirm this???", "hello?", "what's happening?", "can anyone see this?") and the message asks for nothing new. Give the id of that earlier request (same "from"), from either list. If the message also asks for something new, it is a new request: follow_up_of is null. A manager answering or quoting another manager's message is never a follow-up. "replying_to" means the sender quoted that earlier message.
 
-Earlier messages from the managers, for context only:
+${near.length ? `What everyone said around these, in order, for context only:\n${JSON.stringify(near)}\n\n` : ''}Earlier messages from the managers, for context only:
 ${JSON.stringify(context.map(show))}
 
 Messages to read:
@@ -2734,13 +2743,18 @@ RULES
     if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); }); return; }
     if (!todo.length) { await judgeReplies(raw, people, bosses, nameOf); return; }
     live.analyzing = todo.length; renderFrame();
+    const byId = new Map(raw.messages.map(m => [m.i, m]));
     for (let i = 0; i < todo.length; i += 12) {
       const batch = todo.slice(i, i + 12);
       // the ten instruction-giver messages before this batch, from the last day
       const context = S0.bossMessages.filter(m => m.t < batch[0].t && m.t > batch[0].t - DAY_MS).slice(-10);
       const earlier = new Map([...context, ...batch].map(m => [m.i, m.s]));
+      // what anyone said in the two hours before the batch and between its messages
+      const inBatch = new Set(batch.map(m => m.i));
+      const around = raw.messages.filter(m => !inBatch.has(m.i) && !m.d && !['reaction', 'joined', 'left'].includes(m.k)
+        && m.t >= batch[0].t - 2 * 60 * MIN && m.t <= batch[batch.length - 1].t).slice(-40);
       try {
-        const out = await cap.sample.json(analysisPrompt(batch, context, people, bosses, nameOf), { modelTier: 'default' });
+        const out = await cap.sample.json(analysisPrompt(batch, context, people, bosses, nameOf, around, byId), { modelTier: 'default' });
         const results = out && Array.isArray(out.results) ? out.results : [];
         batch.forEach(m => {
           const a = cleanAnalysis(results.find(r => r && String(r.id) === m.i), people, earlier, m.s);

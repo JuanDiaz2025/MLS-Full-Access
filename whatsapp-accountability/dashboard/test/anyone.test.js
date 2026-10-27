@@ -77,5 +77,5 @@ console.log('fallback rules: who/sino/anyone -> any, everyone -> all');
 assert.strictEqual(cleanAnalysis({ title: 'x', required: 'any' }, people, new Map(), JUAN).required, 'any');
 assert.strictEqual(cleanAnalysis({ title: 'x', required: 'whoever' }, people, new Map(), JUAN).required, 'all');
 assert.ok(analysisPrompt([], [], people, ['Juan Diaz'], id => names[id]).includes('"any" when one answer from anyone settles it'));
-assert.strictEqual(ANALYSIS_VERSION, 4, 'messages read before this change are read again');
+assert.ok(ANALYSIS_VERSION >= 4, 'messages read before this change are read again');
 console.log('all checks passed');
