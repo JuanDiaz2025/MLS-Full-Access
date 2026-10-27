@@ -20,7 +20,7 @@ WhatsApp group
 
 ## Rules the dashboard uses
 
-- Groups are added from "Groups and names": search the linked phone's groups (sorted by newest group, recent activity or name; newest needs WhatsApp Reader 1.0.2), tick several, then pick each one on the left and tick who gives instructions there. "Use these instruction-givers in every selected group they're in" copies the ticks to the other groups.
+- Groups are added from "Groups and names": search the linked phone's groups (sorted by newest group, recent activity or name; newest needs WhatsApp Reader 1.0.2), tick several, then pick each one on the left and tick who gives instructions there. "Use these instruction-givers in every selected group they're in" copies the ticks to the other groups. **Select all N shown** ticks every group the search and filter leave on screen (more than 20 at once asks for a second click). **Hide groups with 0 members** (on by default, remembered on that computer) leaves out groups the phone has left or that were deleted.
 - Each tracked group has its own instruction-givers, chosen at setup. Everyone else in that group is tracked. A message to everyone means the team, not the other givers, but when one giver asks another by name or @mention (Juan: "Cherry can you do this?") the one asked is tracked like anyone else. Groups can be added, edited or dropped later from "Groups and names" in the sidebar.
 - People are matched by phone number, so someone in two groups has one record. The top of the page switches between all groups and one, and a "From" filter shows only one instruction-giver's messages (for example only the CEO's, or only the COO's).
 - A quoted reply or a reaction answers that one message. Any other message answers everything still open for that person before it.
@@ -60,6 +60,7 @@ node dashboard/test/e2e-addmany.js  # searching, ticking several groups, and set
 node dashboard/test/e2e-sort.js  # sorting the group list: newest groups, recent activity, name
 node dashboard/test/e2e-draft.js  # Draft reply as Juan: what Claude is asked, Copy, Write another, no Claude
 node dashboard/test/e2e-leave.js  # Back to dashboard from Groups to track, with nothing tracked yet (run e2e-addmany.js first)
+node dashboard/test/e2e-pickall.js  # Select all shown, the second click over 20, and hiding 0-member groups
 node dashboard/test/anyone.test.js  # questions anyone can answer: first answer closes it, nobody else owes it
 node dashboard/test/e2e-anyone.js  # the same on the page, plus Mark as answered
 node dashboard/test/judge.test.js  # Claude's reading of replies, using its real answers to a sample thread (test/judge-sample.json)

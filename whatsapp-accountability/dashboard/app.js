@@ -10,9 +10,10 @@
   const state = { view: 'dashboard', sel: null, taskFilter: 'open', groupFilter: 'all', senderFilter: 'all',
     setup: false, editGroup: null, setupBoss: null, setupNames: null, confirmRemove: null,
     // adding groups: the ones ticked, the search, then who gives instructions in each
-    pickGroups: new Set(), groupQuery: '', groupSort: null, addStep: null, addActive: null, addBoss: {}, addTemplate: null, addNote: '' };
+    pickGroups: new Set(), groupQuery: '', groupSort: null, hideEmpty: true, confirmAll: 0, addStep: null, addActive: null, addBoss: {}, addTemplate: null, addNote: '' };
   // how the group list is sorted is remembered on this computer
   try { const v = localStorage.getItem('wa-group-sort'); if (['new', 'active', 'name'].includes(v)) state.groupSort = v; } catch (_) {}
+  try { if (localStorage.getItem('wa-hide-empty') === '0') state.hideEmpty = false; } catch (_) {}
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
   const src = { mode: 'sample', S: SAMPLE, now: SAMPLE_NOW, updatedAt: null, groups: [] };
   const cap = { db: null, mcp: null, sample: null, user: null, canEdit: null, isOwner: null, canWrite: null, me: null };
@@ -429,8 +430,12 @@
       return `<div class="card setup"><div class="card-b">${head}${addFlow(tracked.length)}${msg}</div></div>`;
     }
     const q = state.groupQuery.trim().toLowerCase();
-    const match = x => !q || (x.name || '').toLowerCase().includes(q);
+    // groups with nobody left in them (the phone left, or the group was deleted) can be hidden
+    const empty = x => !(x.members > 0);
+    const match = x => !(state.hideEmpty && empty(x)) && (!q || (x.name || '').toLowerCase().includes(q));
     const shown = others.filter(match).length;
+    const emptyCount = others.filter(empty).length;
+    const listed = state.hideEmpty ? others.length - emptyCount : others.length;
     const n = state.pickGroups.size;
     const pick = live.groups == null ? '<p class="plain">Loading your groups…</p>'
       : !others.length ? '<p class="plain">Every group on the linked phone is already tracked.</p>'
@@ -442,10 +447,12 @@
               <option value="active"${groupSort() === 'active' ? ' selected' : ''}>Recent activity</option>
               <option value="name"${groupSort() === 'name' ? ' selected' : ''}>Name A\u2013Z</option>
             </select></label>
-          <span class="plain" id="group-q-count">${esc(groupCountText(shown, others.length))}</span>
+          <label class="check-l"><input type="checkbox" id="hide-empty"${state.hideEmpty ? ' checked' : ''}>Hide groups with 0 members${emptyCount ? ` (${emptyCount})` : ''}</label>
+          <span class="plain" id="group-q-count">${esc(groupCountText(shown, listed))}</span>
+          <button class="btn small" type="button" data-action="pick-all" id="pick-all"${shown ? '' : ' disabled'}>${esc(selectAllText(shown))}</button>
         </div>
         <div class="choices" id="group-choices" aria-label="Groups">${others.map(x => `
-          <label class="choice" data-gname="${esc((x.name || '').toLowerCase())}"${match(x) ? '' : ' hidden'}><input type="checkbox" name="pick-group" id="g-${esc(x.id)}" value="${esc(x.id)}"${state.pickGroups.has(x.id) ? ' checked' : ''}>
+          <label class="choice" data-gname="${esc((x.name || '').toLowerCase())}"${empty(x) ? ' data-empty="1"' : ''}${match(x) ? '' : ' hidden'}><input type="checkbox" name="pick-group" id="g-${esc(x.id)}" value="${esc(x.id)}"${state.pickGroups.has(x.id) ? ' checked' : ''}>
             <span><b>${esc(x.name || 'Unnamed group')}</b><span class="sub">${x.created_at > 0 ? `Created ${esc(createdDay(x.created_at))} \u00B7 ` : ''}${plural(x.members, 'member')} · ${plural(x.message_count, 'message')} saved${x.last_message_at > 0 ? ` · last ${esc(fmtWhen(x.last_message_at))}` : ''}</span></span></label>`).join('')}</div>
         <p class="plain" id="group-q-none"${shown ? ' hidden' : ''}>No group matches that search.</p>
         <div class="pick-bar" id="pick-bar">
@@ -478,6 +485,8 @@
   const untrackedGroups = () => { const ids = trackedIds(); return (live.groups || []).filter(x => !ids.has(x.id)).sort(SORTS[groupSort()]); };
   const groupCountText = (shown, all) => state.groupQuery.trim() ? `${shown} of ${plural(all, 'group')}` : plural(all, 'group');
   const pickCountText = n => n ? `${plural(n, 'group')} selected` : 'Tick the groups to track';
+  // more than 20 at once asks for a second click: each tracked group is read by Claude
+  const selectAllText = n => state.confirmAll && state.confirmAll === n ? `Click again to tick ${n} groups` : `Select all ${n} shown`;
   // the ticked groups, in the order they appear in the list
   const pickedInOrder = () => untrackedGroups().map(x => x.id).filter(id => state.pickGroups.has(id));
   const pickedName = id => ((live.groupInfos[id] || {}).name) || ((live.groups || []).find(x => x.id === id) || {}).name || 'Unnamed group';
@@ -680,17 +689,25 @@
     if (e.target.id === 'group-q') {
       state.groupQuery = e.target.value;
       const q = state.groupQuery.trim().toLowerCase();
-      const labels = [...document.querySelectorAll('#group-choices .choice')];
+      const labels = [...document.querySelectorAll('#group-choices .choice')].filter(l => !(state.hideEmpty && l.dataset.empty));
       let shown = 0;
       labels.forEach(l => { const hit = !q || l.dataset.gname.includes(q); l.hidden = !hit; if (hit) shown++; });
       document.getElementById('group-q-count').textContent = groupCountText(shown, labels.length);
       document.getElementById('group-q-none').hidden = shown > 0;
+      state.confirmAll = 0;
+      const all = document.getElementById('pick-all');
+      if (all) { all.textContent = selectAllText(shown); all.disabled = !shown; }
     }
   });
   document.addEventListener('change', e => {
     if (e.target.id === 'task-filter') { state.taskFilter = e.target.value; render(); }
     if (e.target.id === 'group-filter') { state.groupFilter = e.target.value; state.sel = null; render(); }
     if (e.target.id === 'sender-filter') { state.senderFilter = e.target.value; state.sel = null; render(); }
+    if (e.target.id === 'hide-empty') {
+      state.hideEmpty = e.target.checked; state.confirmAll = 0;
+      try { localStorage.setItem('wa-hide-empty', state.hideEmpty ? '1' : '0'); } catch (_) {}
+      render();
+    }
     if (e.target.id === 'group-sort') {
       state.groupSort = e.target.value;
       try { localStorage.setItem('wa-group-sort', state.groupSort); } catch (_) {}
@@ -1480,6 +1497,12 @@ RULES
       state.setup = false; state.editGroup = null; resetAdding(); render();
     } else if (action === 'cancel-edit') {
       state.editGroup = null; state.setupBoss = null; state.setupNames = null; render();
+    } else if (action === 'pick-all') {
+      // tick every group showing right now (after the search and the 0-member filter)
+      const ids = [...document.querySelectorAll('#group-choices .choice:not([hidden]) input[name="pick-group"]')].map(x => x.value);
+      if (!ids.length) return;
+      if (ids.length > 20 && state.confirmAll !== ids.length) { state.confirmAll = ids.length; render(); return; }
+      state.confirmAll = 0; ids.forEach(id => state.pickGroups.add(id)); render();
     } else if (action === 'pick-clear') {
       state.pickGroups = new Set(); render();
     } else if (action === 'pick-next') {
