@@ -2,8 +2,9 @@
   const DEFAULTS = { first: 15, second: 30, escalate: 60 };
   const READER = 'host:whatsapp-reader';
   const DAY_MS = 24 * 60 * MIN;
-  const SAMPLE_NOW = sampleNow();
-  const SAMPLE = buildSample(SAMPLE_NOW);
+  // Before any real data has loaded, nothing is shown: no made-up team.
+  const SAMPLE_NOW = Date.now();
+  const SAMPLE = { people: [], messages: [], tasks: [] };
 
   let cfg = { ...DEFAULTS };
   let D = null, S = SAMPLE, NOW = SAMPLE_NOW, N = SAMPLE.people.length;
@@ -115,6 +116,14 @@
   const msgLink = (m, label) => `<button class="rowlink" type="button" data-open-msg="${esc(m.id)}">${esc(label || m.title)}</button>`;
   // which group a message came from, shown only when several are tracked and all are on screen
   const groupTag = m => m && m.groupName && src.groups.length > 1 && state.groupFilter === 'all' ? `${esc(m.groupName)} · ` : '';
+  // What shows before there is real data, and what to do about it.
+  function noDataCard() {
+    const loading = cap.db && (!saved.loaded.tracking || (trackedGroups().length && !trackedGroups().every(t => saved.groups[t.groupId] && saved.groups[t.groupId].loaded.meta)));
+    const [title, body] = loading ? ['Loading\u2026', 'Getting the latest saved numbers.']
+      : !trackedGroups().length ? ['No WhatsApp groups yet', 'No group is being tracked yet. On the computer running WhatsApp Reader, open this page in the Claude desktop app and pick the groups under Groups and names.']
+      : ['No numbers yet', 'The groups are picked, but the computer running WhatsApp Reader hasn\u2019t saved its first update yet. It appears here once this page is open in the Claude desktop app on that computer.'];
+    return `<div class="card"><div class="empty"><b>${esc(title)}</b><br>${esc(body)}</div></div>`;
+  }
   const emptyCard = (title, body) => `<div class="card"><div class="empty"><b>${esc(title)}</b><br>${esc(body)}</div></div>`;
 
   // ---------------- Dashboard ----------------
@@ -589,8 +598,7 @@
     const fSel = document.getElementById('sender-filter');
     const pill = document.getElementById('group-pill');
     if (src.mode === 'sample' || !groups.length) {
-      gSel.hidden = true; fSel.hidden = true; pill.hidden = false;
-      pill.innerHTML = `${ic('users')}THB Construction Team · ${plural(N, 'person', 'people')}`;
+      gSel.hidden = true; fSel.hidden = true; pill.hidden = true;
       return;
     }
     if (state.groupFilter !== 'all' && !groups.some(g => g.id === state.groupFilter)) state.groupFilter = 'all';
@@ -611,7 +619,7 @@
   function renderFrame() {
     const groups = src.groups;
     const current = state.groupFilter !== 'all' ? groups.find(g => g.id === state.groupFilter) : null;
-    const label = src.mode === 'sample' ? 'THB Construction Team' : current ? current.name : groups.length === 1 ? groups[0].name : plural(groups.length, 'group');
+    const label = src.mode === 'sample' ? 'No data yet' : current ? current.name : groups.length === 1 ? groups[0].name : plural(groups.length, 'group');
     const named = groups.length === 1 ? `“${groups[0].name}”` : plural(groups.length, 'group');
     document.getElementById('brand-sub').textContent = label;
     const pill = document.getElementById('snap');
@@ -638,9 +646,9 @@
       foot.textContent = `These numbers were saved at ${fmtClock(src.updatedAt)} on ${fmtDate(src.updatedAt)}, the last time this page was open in the Claude desktop app on the computer running WhatsApp Reader. Response times are counted up to that moment. Nothing is ever sent to WhatsApp.`;
     } else {
       pill.className = 'pill sample';
-      pill.innerHTML = `${ic('clock')}Sample data · as of ${esc(fmtClock(SAMPLE_NOW))} today`;
-      note.textContent = 'Sample data. Not connected to WhatsApp yet.';
-      foot.textContent = 'Everything on this page is sample data for 18 example team members. Real numbers appear once this page is opened in the Claude desktop app on the computer running WhatsApp Reader. Nothing is ever sent to WhatsApp.';
+      pill.innerHTML = `${ic('clock')}No data yet`;
+      note.textContent = 'No WhatsApp data yet. Nothing is sent to WhatsApp.';
+      foot.textContent = 'Numbers appear once this page has been opened in the Claude desktop app on the computer running WhatsApp Reader. Nothing is ever sent to WhatsApp.';
     }
     const conn = document.getElementById('conn');
     // only the owner can connect, so only the owner sees why it isn't connected
@@ -716,7 +724,7 @@
     for (const k of Object.keys(VIEWS)) {
       const el = document.getElementById('v-' + k);
       el.hidden = setup || k !== state.view;
-      if (!el.hidden) el.innerHTML = builders[k]();
+      if (!el.hidden) el.innerHTML = src.mode === 'sample' ? noDataCard() : builders[k]();
     }
     const list2 = document.getElementById('mlist');
     if (list2 && keepScroll) list2.scrollTop = keepScroll;
