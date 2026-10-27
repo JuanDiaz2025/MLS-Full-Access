@@ -932,7 +932,9 @@ const JS_FORM_DUMP = `(() => {
   const fields = [...document.querySelectorAll('input, select, textarea')].map(e => ({
     tag: e.tagName, type: e.getAttribute('type') || '', id: e.id || '', name: e.name || '', visible: vis(e),
     value: e.type === 'password' ? '' : String(e.value || '').slice(0, 60), mark: e.getAttribute('data-fs-radius') || '',
-    near: txt(e.closest('tr, li, fieldset, div')).slice(0, 160) }));
+    near: txt(e.closest('tr, li, fieldset, div')).slice(0, 160),
+    options: e.tagName === 'SELECT' ? e.options.length : undefined,
+    first: e.tagName === 'SELECT' ? [...e.options].slice(0, 8).map(o => o.text.trim()) : undefined }));
   const words = [...document.querySelectorAll('a, button, label, legend, h1, h2, h3, h4, span, td, th')].map(txt)
     .filter(t => t && t.length < 60 && /radius|map|distance|within|mile|proximity|location|lat|long/i.test(t));
   return { url: location.href, title: document.title, matches: (document.body.innerText.match(/([\\d,]+\\+?)\\s*match/i) || [])[1] || '',
@@ -954,10 +956,54 @@ async function saveTeamDebug(tag) {
   return dir;
 }
 
+/** The form's match count once it has settled after a change: Matrix
+ *  recounts in the background, so it is read until two reads agree. */
+const JS_TEAM_COUNT = `(() => { const t = document.body.innerText; const m = t.match(/([\\d,]+\\+?)\\s*match/i);
+  return m ? m[1].replace(/,/g, '') : /\\bno\\s+match/i.test(t) ? '0' : '?'; })()`;
+async function teamCount() {
+  await sleep(1200);
+  let a = await js(JS_TEAM_COUNT).catch(() => '?');
+  for (let k = 0; k < 4; k++) {
+    await sleep(600);
+    const b = await js(JS_TEAM_COUNT).catch(() => '?');
+    if (a === b) return a;
+    a = b;
+  }
+  return a;
+}
+// tick only the Area options lo..hi-1, or only the one named `name`
+const teamTickArea = (lo, hi, name) => `(() => {
+  const el = document.querySelector(${JSON.stringify(core.FIELDS.area)}); if (!el) return 0; let n = 0;
+  [...el.options].forEach((o, i) => { const on = ${JSON.stringify(name || '')} ? o.text.trim() === ${JSON.stringify(name || '')} : i >= ${lo} && i < ${hi}; o.selected = on; if (on) n++; });
+  el.dispatchEvent(new Event('change', { bubbles: true })); return n; })()`;
+
+/** The lead's MLS area (v1.75.1; Seth, 27 Oct: same side of the freeways).
+ *  Neither the results grid nor the reports show it, so it is read off the
+ *  search form's own Area list: the lead's MLS # alone, in every status,
+ *  counts 1 match; ticking a set of areas keeps that 1 only when the lead's
+ *  area is among them. Halving the list finds it in about ten counts.
+ *  { area, why }: area '' when the list or the count does not behave. */
+async function teamLeadArea(mls) {
+  await nav(core.SEARCH_URL, 2200);
+  await js(selectOnly(core.FIELDS.status, ['.'])).catch(() => null);
+  await sleep(300);
+  await js(setInput(core.FIELDS.mls, mls));
+  const all = await teamCount();
+  if (all !== '1') return { area: '', why: `its MLS # alone counts ${all} match(es), not 1` };
+  const n = await js(`(() => { const el = document.querySelector(${JSON.stringify(core.FIELDS.area)}); return el ? el.options.length : -1; })()`).catch(() => -1);
+  if (!(n > 0)) return { area: '', why: n < 0 ? 'the search form has no Area list' : 'the Area list is empty' };
+  let counts = 0;
+  const i = await core.teamFindArea(n, async (lo, hi) => { counts++; await js(teamTickArea(lo, hi)); return teamCount(); });
+  if (i < 0) return { area: '', why: `the Area list (${n} areas) did not narrow to one after ${counts} counts` };
+  const area = await js(`(() => { const el = document.querySelector(${JSON.stringify(core.FIELDS.area)}); return el && el.options[${i}] ? el.options[${i}].text.trim() : ''; })()`).catch(() => '');
+  return { area, why: area ? '' : 'the area option had no name', n, counts };
+}
+
 /** Sold single-family homes within `miles` of `addr`, listed in the last
- *  TEAM_LIST_MONTHS. Throws when the form has no radius boxes or the radius
- *  plainly did not apply, after saving the page. */
-async function teamSoldSearch(addr, miles) {
+ *  TEAM_LIST_MONTHS, and only in MLS area `area` when one is given. Throws
+ *  when the form has no radius boxes or the radius plainly did not apply,
+ *  after saving the page. */
+async function teamSoldSearch(addr, miles, area) {
   await nav(core.SEARCH_URL, 2200);
   const st = await js(selectOnly(core.FIELDS.status, ['^sold\\b'])).catch(() => null);
   if (!st || !st.length) throw new Error('the search form has no "Sold" status');
@@ -966,6 +1012,11 @@ async function teamSoldSearch(addr, miles) {
   const to = new Date(), from = new Date(to.getFullYear(), to.getMonth() - core.TEAM_LIST_MONTHS, 1);
   const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`)); await sleep(800);
+  if (area) {
+    const ticked = await js(teamTickArea(0, 0, area)).catch(() => 0);
+    if (ticked !== 1) throw new Error(`the Area list has no "${area}"`);
+    await sleep(800);
+  }
   let f = await js(JS_TEAM_RADIUS).catch(() => null);
   if (!f || !f.ok) {
     const opened = await js(JS_TEAM_RADIUS_OPEN).catch(() => '');
@@ -3169,20 +3220,26 @@ ipcMain.handle('team-comps', async (_e, opts) => {
     let todo = rows.slice(1).map((r, i) => ({ r, i }))
       .filter(x => isMlsId(val(x.r, 'MLS #')) && (val(x.r, 'Comps Run On') || val(x.r, 'ARV')) && val(x.r, 'Address'))
       .sort((a, b) => rankOf(a.r) - rankOf(b.r) || b.i - a.i);
-    // a run stopped earlier today picks up where it stopped
-    let doneToday = new Set();
+    // Seth runs it daily: a lead searched in the last week is skipped (so a run
+    // stopped earlier picks up where it stopped), and a lead's MLS area, once
+    // found, is kept from the tab rather than looked up again
+    const fresh = new Set(), areaOf = {};
     try {
       const tr = await gsheets.readAll(token, g.sheetId, core.TEAM_TAB);
-      const th = (tr[0] || []).map(h => String(h).trim()), ki = th.indexOf('MLS #'), di = th.indexOf('Team Comps Run On');
-      if (ki >= 0 && di >= 0) tr.slice(1).forEach(r => { if (String(r[di] || '').trim() === tday) doneToday.add(String(r[ki] || '').trim().toUpperCase()); });
+      const th = (tr[0] || []).map(h => String(h).trim()), ki = th.indexOf('MLS #'), di = th.indexOf('Team Comps Run On'), ai = th.indexOf('Lead Area');
+      if (ki >= 0) tr.slice(1).forEach(r => {
+        const m = String(r[ki] || '').trim().toUpperCase();
+        if (di >= 0 && core.teamFresh(r[di], tday)) fresh.add(m);
+        if (ai >= 0 && String(r[ai] || '').trim()) areaOf[m] = String(r[ai]).trim();
+      });
     } catch (_) { /* no tab yet */ }
     const before = todo.length;
     if (dry) todo = todo.slice(0, 1);
-    else todo = todo.filter(x => !doneToday.has(val(x.r, 'MLS #').toUpperCase()));
+    else todo = todo.filter(x => !fresh.has(val(x.r, 'MLS #').toUpperCase()));
     log(dry ? `Checking the Matrix radius search on ${val((todo[0] || {}).r || [], 'Address') || 'the first comped lead'} — nothing is saved…`
       : `Team comps for ${todo.length} comped lead(s), A first`
-        + (before - todo.length ? ` (skipping ${before - todo.length} already done today)` : '')
-        + ` — a sold search by radius each, widened while fewer than ${core.TEAM_ENOUGH} sales fit…`, 'good');
+        + (before - todo.length ? ` (skipping ${before - todo.length} searched in the last ${core.TEAM_FRESH_DAYS} days)` : '')
+        + ` — the lead's MLS area, then a sold search by radius, widened while fewer than ${core.TEAM_ENOUGH} sales fit…`, 'good');
     let batch = [];
     const flush = async () => {
       if (!batch.length) return;
@@ -3193,10 +3250,20 @@ ipcMain.handle('team-comps', async (_e, opts) => {
     for (let i = 0; i < todo.length; i++) {
       if (await stopRequested()) break;
       const r = todo[i].r, mls = val(r, 'MLS #'), addr = val(r, 'Address');
-      const lead = { mls, addr, sqft: core.num(val(r, 'SqFt')), beds: core.num(val(r, 'Beds')), year: core.num(val(r, 'Year Built')) };
+      const lead = { mls, addr, sqft: core.num(val(r, 'SqFt')), beds: core.num(val(r, 'Beds')), year: core.num(val(r, 'Year Built')),
+        area: areaOf[mls.toUpperCase()] || '' };
       const market = core.teamMarket(addr), steps = core.TEAM_STEPS[market];
       log(`  [${i + 1}/${todo.length}] ${addr} · ${market === 'sf' ? 'San Francisco' : market === 'city' ? 'Bay Area city' : 'thin area'}: ${steps.join(' → ')} mi`);
       let radius = 0, found = [], note = '', stoppedMid = false;
+      // the lead's MLS area: a failed lookup costs only the same-area check
+      if (!lead.area) {
+        try {
+          const a = await teamLeadArea(mls);
+          lead.area = a.area;
+          log(a.area ? `    MLS area: ${a.area}` + (dry ? ` (found in ${a.counts} counts over ${a.n} areas)` : '') : `    MLS area not found — ${a.why}; sales are not marked same area or not`, a.area ? 'info' : 'warn');
+        } catch (e) { log('    MLS area not found — ' + e.message, 'warn'); }
+        if (control.stopped) { log('    stopped part-way — not saved; the next run does it whole'); break; }
+      } else log(`    MLS area: ${lead.area} (from the tab)`);
       try {
         for (const mi of (dry ? steps.slice(0, 1) : steps)) {
           const res = await teamSoldSearch(addr, mi);
@@ -3210,6 +3277,14 @@ ipcMain.handle('team-comps', async (_e, opts) => {
             log(`    columns read: ${['dist', 'dom', 'area', 'city'].filter(k => res.rows.some(x => x[k])).join(', ') || 'no Distance, DOM or Area'}`);
           }
           if (fit >= core.TEAM_ENOUGH || await stopRequested()) break;
+        }
+        // which of them are in the lead's MLS area: the same search, limited to it
+        if (lead.area && found.length && !stoppedMid && !control.stopped) {
+          try {
+            const same = await teamSoldSearch(addr, radius, lead.area);
+            core.teamSameArea(found, core.teamRows(same.rows, mls).map(x => x.mls));
+            log(`    in its MLS area: ${found.filter(x => x.sa).length} of ${found.length} sold`, 'info');
+          } catch (e) { log('    same-area search failed — ' + e.message + '; sales are not marked', 'warn'); }
         }
       } catch (e) {
         note = 'search failed: ' + e.message; failed++;

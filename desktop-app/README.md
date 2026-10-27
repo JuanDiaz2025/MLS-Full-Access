@@ -126,9 +126,21 @@ install (creates a desktop shortcut) or run the portable exe directly.
    days on market (never 0). The sales, with Matrix's distance and days on market,
    go to their own **Team Comps** tab, one row per lead; the Leads tab, its ARV
    and the real board are untouched. The Test board's `compcheck.py` reads that
-   tab and applies the rest of the rules. A run stopped part-way picks up where it
-   stopped the same day. **Check the Matrix radius search** first: it runs one
-   search, logs the boxes and columns it found, saves nothing, and saves the
+   tab and applies the rest of the rules. **The lead's MLS area** (v1.75.1; Seth,
+   27 Oct: comps from the same side of the freeways): neither the results grid
+   nor the reports show it, so the app reads it off the search form's own Area
+   list — the lead's MLS # alone counts 1 match, ticking a set of areas keeps
+   that 1 only when its area is among them, and halving the list finds it in
+   about a dozen counts. It goes in the tab's **Lead Area** column (looked up
+   once, then read back from there), and the same radius search limited to that
+   area marks each sale in it (`"sa":1`) or not (`"sa":0`); `compcheck.py` leaves
+   out a sale in another area. A lookup that does not narrow to one area is
+   logged and costs only the same-area check, never a guess. **Run it daily**:
+   a lead searched in the last 7 days is skipped, so a day's run is the newly
+   comped leads plus the ones due again, and a run stopped part-way picks up
+   where it stopped. **Check the Matrix radius search** first: it does the first
+   lead (its area, one radius search and the same-area search), logs the boxes,
+   columns and area it found, saves nothing to the sheet, and saves the
    search page under `team-comps-debug` in the app's data folder. The radius
    boxes are found by the words around them ("within … miles of …"), so if the
    form lays them out differently the run stops on the first lead, says so, and

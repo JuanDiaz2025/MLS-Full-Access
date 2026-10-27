@@ -446,12 +446,14 @@ only. `compcheck.py` applies them to the comps the FlipScout app saved
 With `--xlsx`, the sheet's **Team Comps** tab (the FlipScout app's radius
 search, v1.75: the sold homes within the market's radius steps, with Matrix's
 distance and days on market) is added to each lead's saved comps; a sale with
-0 days on market is out.
+0 days on market is out. Since app v1.75.1 the tab also has the lead's MLS area
+(**Lead Area**) and marks each sale `"sa":1` (in that area) or `"sa":0`; a sale
+in another MLS area is out ("a different MLS area"), which stands in for the
+same side of the freeways. A lead with no Lead Area, and the app's own zip
+comps (which carry no mark), are not area-checked.
 
 Not checked yet: the county square footage (drop a comp more than 10% off;
-only Matrix's Tax tab has it), the same side of the freeways, and sales
-outside the app's zip search (Gen's way is a 1-mile Matrix search). Those
-need the app, which feeds both boards, so they wait for Seth's OK.
+only Matrix's Tax tab has it).
 
 Never put `teamcomps.js` or the Team rules block on the real board until Seth
 says so.

@@ -16,6 +16,7 @@ const FIELDS = {
   price: '#Fm9_Ctrl63_TB',      // (000s) box checked -> thousands
   zip: '#Fm9_Ctrl1780_TextBox',
   mls: '#Fm9_Ctrl75_TextBox',
+  area: '#Fm9_Ctrl1740_LB',     // MLS Area (multi): team comps (v1.75.1)
 };
 
 const SEARCH_URL = 'https://search.mlslistings.com/Matrix/Search/Residential/ResidentialSearch';
@@ -737,7 +738,8 @@ function parseCompReport(text, mls) {
 // remarks and applies the rest of the rules. Nothing here touches the Leads
 // tab or the ARV the real board shows.
 const TEAM_TAB = 'Team Comps';
-const TEAM_HEADERS = ['MLS #', 'Address', 'Market', 'Radius Searched', 'Sales Found', 'Team Comps', 'Team Comps Run On', 'Note'];
+// 'Lead Area' (v1.75.1) is last, where a sheet made by v1.75.0 widens to it
+const TEAM_HEADERS = ['MLS #', 'Address', 'Market', 'Radius Searched', 'Sales Found', 'Team Comps', 'Team Comps Run On', 'Note', 'Lead Area'];
 const TEAM_STEPS = { sf: [0.5, 1, 2], city: [1, 2], thin: [1, 2, 3, 5] };
 // a sale closed in the last 6 months was listed up to ~9 months ago; the close
 // date itself is checked by compcheck.py from each sale's page
@@ -746,6 +748,9 @@ const TEAM_LIST_MONTHS = 9;
 // about half of them turn out light updates or silent on condition
 const TEAM_ENOUGH = 6;
 const TEAM_PAGES = 20;
+// Seth runs it daily: a lead searched in the last week is skipped, so a day's
+// run is the new comped leads plus the ones due again
+const TEAM_FRESH_DAYS = 7;
 // the five Bay counties around San Francisco widen to 2 miles; the rest to 5
 const TEAM_CITY_COUNTY = (() => {
   const m = {}, add = (county, cities) => cities.split('|').forEach(c => { m[c.toLowerCase()] = county; });
@@ -792,6 +797,41 @@ function teamFits(rows, lead) {
     && r.dom !== 0);
 }
 
+/** Whether a lead last searched on `runOn` (YYYY-MM-DD) is still fresh on
+ *  `today`: searched in the last TEAM_FRESH_DAYS days. */
+function teamFresh(runOn, today) {
+  const a = Date.parse(String(runOn || '').trim()), b = Date.parse(String(today || '').trim());
+  return isFinite(a) && isFinite(b) && b - a >= 0 && b - a < TEAM_FRESH_DAYS * 86400000;
+}
+
+/** The index of the one Area option that holds the lead, by halving the list.
+ *  countOf(lo, hi) ticks options lo..hi-1 only and answers the form's match
+ *  count for the lead's MLS # alone: '1' when its area is among them, '0'
+ *  when not. -1 when a count reads anything else, the last option does not
+ *  check out, or the other options do not count 0 (a list that filters
+ *  nothing), so a wrong area is never guessed. About log2(n) + 2 counts. */
+async function teamFindArea(n, countOf) {
+  if (!(n > 0)) return -1;
+  let lo = 0, hi = n;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1, c = String(await countOf(lo, mid));
+    if (c === '1') hi = mid;
+    else if (c === '0') lo = mid;
+    else return -1;
+  }
+  if (String(await countOf(lo, lo + 1)) !== '1') return -1;
+  if (n > 1 && String(await (lo > 0 ? countOf(0, lo) : countOf(1, n))) !== '0') return -1;
+  return lo;
+}
+
+/** Mark each sale in the lead's MLS area (sa 1) or not (sa 0), from the MLS #s
+ *  a search limited to that area found. */
+function teamSameArea(rows, sameIds) {
+  const ids = new Set([...(sameIds || [])].map(m => String(m || '').trim().toUpperCase()));
+  (rows || []).forEach(r => { r.sa = ids.has(r.mls) ? 1 : 0; });
+  return rows;
+}
+
 /** The Team Comps tab's row for one lead. The sales list is compact JSON,
  *  nearest first, kept well under a cell's 50,000 characters. */
 function teamRecord(lead, market, radius, rows, note, today) {
@@ -799,7 +839,8 @@ function teamRecord(lead, market, radius, rows, note, today) {
   let l = keep, s = JSON.stringify(l);
   while (s.length > 45000 && l.length) { l = l.slice(0, -1); s = JSON.stringify(l); }
   return { 'MLS #': lead.mls, 'Address': lead.addr || '', 'Market': market, 'Radius Searched': radius ? radius + ' mi' : '',
-    'Sales Found': rows.length, 'Team Comps': l.length ? s : '', 'Team Comps Run On': today, 'Note': note || '' };
+    'Sales Found': rows.length, 'Team Comps': l.length ? s : '', 'Team Comps Run On': today, 'Note': note || '',
+    'Lead Area': lead.area || '' };
 }
 
 /**
@@ -2117,7 +2158,8 @@ module.exports = {
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   compRows, compBand, classifyComp, compArv, compSummary, compsJson, parseCompReport, JS_SCRAPE_SOLD,
-  TEAM_TAB, TEAM_HEADERS, TEAM_STEPS, TEAM_LIST_MONTHS, TEAM_ENOUGH, TEAM_PAGES, teamMarket, teamRows, teamFits, teamRecord,
+  TEAM_TAB, TEAM_HEADERS, TEAM_STEPS, TEAM_LIST_MONTHS, TEAM_ENOUGH, TEAM_PAGES, TEAM_FRESH_DAYS, teamMarket, teamRows, teamFits, teamRecord,
+  teamFresh, teamFindArea, teamSameArea,
   COMP_BANDS, COMP_READ, COMP_LIST_MAX,
   boardLead,
   redfinUrlFrom,

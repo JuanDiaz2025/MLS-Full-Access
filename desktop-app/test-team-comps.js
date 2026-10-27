@@ -63,5 +63,36 @@ const big = core.teamRecord({ mls: 'L', addr: 'a' }, 'thin', 5, many, '', '2026-
 eq(big['Team Comps'].length <= 45000 && JSON.parse(big['Team Comps']).length > 100, true, 'a big result is trimmed (farthest first) to fit a cell');
 eq(big['Sales Found'], 400, 'the count says how many were found before trimming');
 
-console.log(fails ? `\n${fails} FAILED` : '\nall team comps tests pass');
-process.exit(fails ? 1 : 0);
+// ---- v1.75.1: the lead's MLS area, same-area marks, the weekly skip ----
+eq(core.TEAM_HEADERS[core.TEAM_HEADERS.length - 1], 'Lead Area', 'Lead Area is the last column, where a v1.75.0 tab widens to it');
+eq(core.teamRecord({ mls: 'L', addr: 'a', area: '330 - Dumbarton Etc.' }, 'city', 1, [], '', '2026-10-27')['Lead Area'], '330 - Dumbarton Etc.', 'the record carries the lead\'s area');
+eq(rec['Lead Area'], '', 'no area found -> blank');
+eq(core.teamFresh('2026-10-27', '2026-10-27'), true, 'searched today: skipped');
+eq(core.teamFresh('2026-10-21', '2026-10-27'), true, 'searched 6 days ago: skipped');
+eq(core.teamFresh('2026-10-20', '2026-10-27'), false, 'searched 7 days ago: due again');
+eq([core.teamFresh('', '2026-10-27'), core.teamFresh('junk', '2026-10-27'), core.teamFresh('2026-10-28', '2026-10-27')], [false, false, false],
+  'no date, a bad date or a future date: searched again');
+
+// the Area list, halved: a mock form whose lead sits in option `at` of `n`
+const form = (n, at, also) => {
+  const asked = [];
+  return { asked, countOf: async (lo, hi) => { asked.push([lo, hi]); return also ? also(lo, hi) : (at >= lo && at < hi ? '1' : '0'); } };
+};
+(async () => {
+  for (const [n, at] of [[1, 0], [2, 1], [7, 0], [7, 6], [600, 331], [601, 600]]) {
+    const f = form(n, at);
+    eq(await core.teamFindArea(n, f.countOf), at, `finds area ${at} of ${n}`);
+    if (n === 600) eq(f.asked.length <= Math.ceil(Math.log2(n)) + 2, true, `in ${f.asked.length} counts (600 areas)`);
+  }
+  eq(await core.teamFindArea(0, form(0, 0).countOf), -1, 'an empty list finds nothing');
+  eq(await core.teamFindArea(8, form(8, 3, () => '?').countOf), -1, 'a count that will not read: no area, never a guess');
+  eq(await core.teamFindArea(8, form(8, 3, () => '0').countOf), -1, 'a lead in none of the areas: the last one does not check out');
+  eq(await core.teamFindArea(8, form(8, 3, () => '1').countOf), -1, 'a list that filters nothing (always 1): the other areas do not count 0, so no area');
+  eq(await core.teamFindArea(1, form(1, 0, () => '1').countOf), 0, 'a one-area list that counts 1 is that area');
+
+  const marked = core.teamSameArea([{ mls: 'ML1' }, { mls: 'ML2' }, { mls: 'ML3' }], ['ml2', 'ML3']);
+  eq(marked.map(r => r.sa), [0, 1, 1], 'sales are marked in the area (1) or not (0)');
+
+  console.log(fails ? `\n${fails} FAILED` : '\nall team comps tests pass');
+  process.exit(fails ? 1 : 0);
+})();

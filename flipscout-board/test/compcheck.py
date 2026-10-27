@@ -6,7 +6,9 @@ for the FlipScout Board TEST only (Seth, 26 Oct: "for test page, only ok? go!").
 
 With --xlsx, the sheet's "Team Comps" tab (the FlipScout app's radius search,
 v1.75) is added to each lead's saved comps, with Matrix's days on market
-(0 = out) and distance.
+(0 = out) and distance. Since v1.75.1 the tab also has the lead's MLS area
+("Lead Area") and marks each sale in the same area or not; a sale in another
+MLS area is out (Seth, 27 Oct: same side of the freeways).
 
 The rules (Seth, 26 Oct, from Gen's three comp write-ups):
   1. Condition: the kitchen AND a bath remodeled. Luxury remodels count. Light
@@ -269,6 +271,8 @@ def judge(lead, subj, comps, F, today):
             x = 'no location'
         elif r['mi'] > RADII[-1]:
             x = '%.1f mi away' % r['mi']
+        elif lead.get('area') and c.get('sa') == 0:
+            x = 'a different MLS area'
         elif not (sq and csq) or abs(csq - sq) / sq > RULES['size']:
             x = '%+d%% size' % round((csq - sq) / sq * 100) if sq and csq else 'no size'
         elif by and cbd not in (None, '') and abs(cbd - by) > RULES['beds']:
@@ -286,6 +290,8 @@ def judge(lead, subj, comps, F, today):
     mk = market(lead.get('addr', ''))
     steps = MARKET_STEPS[mk]
     out = {'mk': mk, 'steps': steps, 'win': RULES['months'], 'subj': {k: subj[k] for k in ('lat', 'lng', 'ba') if k in subj}}
+    if lead.get('area'):
+        out['area'] = lead['area']
     radii = []
     for R in RADII:
         used = [r for r in rows if not r['x'] and r['mi'] is not None and r['mi'] <= R]
@@ -336,23 +342,27 @@ def judge(lead, subj, comps, F, today):
 
 
 def load_team(xlsx):
-    """The prod sheet's "Team Comps" tab (FlipScout app v1.75): lead MLS # ->
+    """The prod sheet's "Team Comps" tab (FlipScout app v1.75): (lead MLS # ->
     the sold homes its radius search found, in the shape of comps.js's list
-    plus dom, gmi (Matrix's distance in miles) and area. {} with no tab."""
+    plus dom, gmi (Matrix's distance in miles), area and sa (1 = in the lead's
+    MLS area, 0 = not), lead MLS # -> its MLS area). ({}, {}) with no tab."""
     if not xlsx or not os.path.exists(xlsx):
-        return {}
+        return {}, {}
     import openpyxl
     wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
     if 'Team Comps' not in wb.sheetnames:
-        return {}
+        return {}, {}
     rows = wb['Team Comps'].iter_rows(values_only=True)
     head = [str(h or '').strip() for h in next(rows, [])]
     if 'MLS #' not in head or 'Team Comps' not in head:
-        return {}
+        return {}, {}
     ki, ci = head.index('MLS #'), head.index('Team Comps')
-    out = {}
+    ai = head.index('Lead Area') if 'Lead Area' in head else -1
+    out, areas = {}, {}
     for r in rows:
         m = str(r[ki] or '').strip().upper() if ki < len(r) else ''
+        if m and 0 <= ai < len(r) and str(r[ai] or '').strip():
+            areas[m] = str(r[ai]).strip()
         try:
             sales = json.loads(r[ci]) if ci < len(r) and r[ci] else []
         except (ValueError, TypeError):
@@ -369,10 +379,12 @@ def load_team(xlsx):
                 c['gmi'] = s['mi']
             if s.get('area'):
                 c['area'] = s['area']
+            if s.get('sa') in (0, 1):
+                c['sa'] = s['sa']
             keep.append(c)
         if m and keep:
             out[m] = keep
-    return out
+    return out, areas
 
 
 def load_js(path, empty):
@@ -398,7 +410,10 @@ def main():
     leads = {r[ix['mls']]: {k: r[ix[k]] for k in ('mls', 'addr', 'sqft', 'beds', 'year')} for r in data['rows']}
     by = {m: {'list': list(c['list'])} for m, c in (comps.get('by') or {}).items() if m in leads and c and c.get('list')}
     # the app's radius search (v1.75, the prod sheet's "Team Comps" tab), added to the saved comps
-    team = load_team(opt('--xlsx', ''))
+    team, areas = load_team(opt('--xlsx', ''))
+    for m, area in areas.items():
+        if m in leads:
+            leads[m]['area'] = area
     n_team = 0
     for m, sales in team.items():
         if m not in leads:
@@ -408,7 +423,7 @@ def main():
         for s in sales:
             c = seen.get(s['mls'])
             if c:                       # in both: keep the app's row, take the radius search's DOM and distance
-                c.update({k: s[k] for k in ('dom', 'gmi', 'area') if k in s})
+                c.update({k: s[k] for k in ('dom', 'gmi', 'area', 'sa') if k in s})
                 continue
             have.append(s)
             n_team += 1
