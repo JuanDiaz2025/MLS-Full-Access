@@ -826,6 +826,26 @@ async function teamFindArea(n, countOf) {
   return lo;
 }
 
+/** The form's match count once Matrix has recounted after a change (v1.75.3).
+ *  Until a recount lands the old number stays on screen, and a slow one reads
+ *  the same stale number twice: Seth's run, 27 Oct, read "2500+" with Coastal
+ *  Sonoma ticked and stopped. So when the count before the change is known
+ *  (`prev`), wait up to `wait` ms for it to move; then read until two reads in
+ *  a row agree. `read()` gives the count on screen, `pause(ms)` waits. */
+async function teamSettledCount(read, pause, prev, wait) {
+  let waited = 700;
+  await pause(700);
+  let a = await read();
+  while (prev != null && a === prev && waited < (wait || 0)) { await pause(500); waited += 500; a = await read(); }
+  for (let k = 0; k < 4; k++) {
+    await pause(600);
+    const b = await read();
+    if (a === b) return a;
+    a = b;
+  }
+  return a;
+}
+
 /** Mark each sale in the lead's MLS area (sa 1) or not (sa 0), from the MLS #s
  *  a search limited to that area found. */
 function teamSameArea(rows, sameIds) {
@@ -2165,7 +2185,7 @@ module.exports = {
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   compRows, compBand, classifyComp, compArv, compSummary, compsJson, parseCompReport, JS_SCRAPE_SOLD,
   TEAM_TAB, TEAM_HEADERS, TEAM_SOLD_MONTHS, TEAM_LIST_MONTHS, TEAM_PAGES, TEAM_FRESH_DAYS, teamMarket, teamRows, teamFits, teamRecord,
-  teamFresh, teamFindArea, teamSameArea,
+  teamFresh, teamFindArea, teamSameArea, teamSettledCount,
   COMP_BANDS, COMP_READ, COMP_LIST_MAX,
   boardLead,
   redfinUrlFrom,

@@ -94,6 +94,23 @@ const form = (n, at, also) => {
   eq(await core.teamFindArea(8, form(8, 3, () => '1').countOf), -1, 'a list that filters nothing (always 1): the other areas do not count 0, so no area');
   eq(await core.teamFindArea(1, form(1, 0, () => '1').countOf), 0, 'a one-area list that counts 1 is that area');
 
+  // ---- v1.75.3: a slow recount leaves the old number on screen ----
+  // a virtual clock: pause() moves it, read() answers what the screen shows at that time
+  const screen = steps => { let t = 0; return { pause: async ms => { t += ms; }, read: async () => steps.filter(s => t >= s[0]).pop()[1], now: () => t }; };
+  let sc = screen([[0, '2500+'], [3000, '36']]);
+  eq(await core.teamSettledCount(sc.read, sc.pause, '2500+', 12000), '36',
+    'Coastal Sonoma: "2500+" stays up for 3 s after the area is ticked; the count waits for it to move (it used to read 2500+ twice and stop the run)');
+  sc = screen([[0, '2500+']]);
+  eq(await core.teamSettledCount(sc.read, sc.pause, '2500+', 12000), '2500+', 'a count that never moves is returned as it is, after the wait');
+  eq(sc.now() >= 12000, true, '…having waited the whole 12 s');
+  sc = screen([[0, '1']]);
+  eq(await core.teamSettledCount(sc.read, sc.pause, '1', 3500), '1', 'halving the Area list: 1 -> 1 is believed after 3.5 s');
+  eq(sc.now() >= 3500 && sc.now() < 7000, true, '…and not much later');
+  sc = screen([[0, '1'], [1500, '0']]);
+  eq(await core.teamSettledCount(sc.read, sc.pause, '1', 3500), '0', '1 -> 0 lands after 1.5 s: read as 0');
+  sc = screen([[0, '0'], [900, '12'], [1500, '36']]);
+  eq(await core.teamSettledCount(sc.read, sc.pause, null, 0), '36', 'no earlier count: read until two reads agree');
+
   const marked = core.teamSameArea([{ mls: 'ML1' }, { mls: 'ML2' }, { mls: 'ML3' }], ['ml2', 'ML3']);
   eq(marked.map(r => r.sa), [0, 1, 1], 'sales are marked in the area (1) or not (0)');
 

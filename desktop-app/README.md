@@ -146,7 +146,14 @@ install (creates a desktop shortcut) or run the portable exe directly.
    The Leads tab, its ARV and the real board are untouched. **Run it daily**: a
    lead searched in the last 7 days is skipped, so a day's run is the newly
    comped leads plus the ones due again, and a run stopped part-way picks up
-   where it stopped. **Check the Team comps search** first: it does the first
+   where it stopped; a lead whose area was not found (searched by zip) is tried
+   again on the next run. Matrix recounts in the background and leaves the old
+   number on screen until it lands, so a count is believed only once it has
+   moved from the one before the change, or has stayed put for a few seconds
+   (v1.75.3: a slow recount read "2500+" for Coastal Sonoma and stopped the
+   run); an area that still reads "2500+" is set again once, then that lead is
+   left for the next run, and only three such leads in a row stop the run.
+   **Check the Team comps search** first: it does the first
    lead only, logs its area and what the search found, saves nothing to the
    sheet, and saves the search page under `team-comps-debug` in the app's data
    folder. A search that plainly ignored the area (thousands of sales) stops the

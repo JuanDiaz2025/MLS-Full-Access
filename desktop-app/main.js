@@ -920,21 +920,12 @@ async function saveTeamDebug(tag) {
   return dir;
 }
 
-/** The form's match count once it has settled after a change: Matrix
- *  recounts in the background, so it is read until two reads agree. */
+/** The form's match count on screen, and once it has settled after a change
+ *  from `prev` (core.teamSettledCount: a slow recount leaves the old number up). */
 const JS_TEAM_COUNT = `(() => { const t = document.body.innerText; const m = t.match(/([\\d,]+\\+?)\\s*match/i);
   return m ? m[1].replace(/,/g, '') : /\\bno\\s+match/i.test(t) ? '0' : '?'; })()`;
-async function teamCount() {
-  await sleep(1200);
-  let a = await js(JS_TEAM_COUNT).catch(() => '?');
-  for (let k = 0; k < 4; k++) {
-    await sleep(600);
-    const b = await js(JS_TEAM_COUNT).catch(() => '?');
-    if (a === b) return a;
-    a = b;
-  }
-  return a;
-}
+const teamRead = () => js(JS_TEAM_COUNT).catch(() => '?');
+const teamCount = (prev, wait) => core.teamSettledCount(teamRead, sleep, prev, wait);
 // tick only the Area options lo..hi-1, or only the one named `name`
 const teamTickArea = (lo, hi, name) => `(() => {
   const el = document.querySelector(${JSON.stringify(core.FIELDS.area)}); if (!el) return 0; let n = 0;
@@ -951,13 +942,15 @@ async function teamLeadArea(mls) {
   await nav(core.SEARCH_URL, 2200);
   await js(selectOnly(core.FIELDS.status, ['.'])).catch(() => null);
   await sleep(300);
+  const before = await teamRead();
   await js(setInput(core.FIELDS.mls, mls));
-  const all = await teamCount();
+  const all = await teamCount(before, 8000);
   if (all !== '1') return { area: '', why: `its MLS # alone counts ${all} match(es), not 1` };
   const n = await js(`(() => { const el = document.querySelector(${JSON.stringify(core.FIELDS.area)}); return el ? el.options.length : -1; })()`).catch(() => -1);
   if (!(n > 0)) return { area: '', why: n < 0 ? 'the search form has no Area list' : 'the Area list is empty' };
   let counts = 0;
-  const i = await core.teamFindArea(n, async (lo, hi) => { counts++; await js(teamTickArea(lo, hi)); return teamCount(); });
+  // a count that stays the same (1 -> 1, 0 -> 0) is waited out for 3.5 s before it is believed
+  const i = await core.teamFindArea(n, async (lo, hi) => { counts++; const was = await teamRead(); await js(teamTickArea(lo, hi)); return teamCount(was, 3500); });
   if (i < 0) return { area: '', why: `the Area list (${n} areas) did not narrow to one after ${counts} counts` };
   const area = await js(`(() => { const el = document.querySelector(${JSON.stringify(core.FIELDS.area)}); return el && el.options[${i}] ? el.options[${i}].text.trim() : ''; })()`).catch(() => '');
   return { area, why: area ? '' : 'the area option had no name', n, counts };
@@ -983,13 +976,22 @@ async function teamSoldSearch(where, onListDate) {
   const box = onListDate ? core.FIELDS.listDate : core.FIELDS.saleDate;
   if (!(await js(setInput(box, `${fmt(from)}-${fmt(to)}`)).catch(() => false))) throw new Error(`the search form has no ${onListDate ? 'List' : 'Sale'} Date box`);
   await sleep(600);
-  if (where.area) {
+  // the whole MLS's sales on screen ("2500+") until the area or zip is counted
+  const before = await teamRead();
+  const apply = async () => {
+    if (!where.area) return js(setInput(core.FIELDS.zip, where.zip));
     const ticked = await js(teamTickArea(0, 0, where.area)).catch(() => 0);
     if (ticked !== 1) throw new Error(`the Area list has no "${where.area}"`);
-  } else await js(setInput(core.FIELDS.zip, where.zip));
-  const count = await teamCount();
+  };
+  await apply();
+  let count = await teamCount(before, 12000);
+  const tooMany = c => /\+$/.test(c) || core.num(c) > 2000;
+  if (tooMany(count)) {   // once more, cleared and set again, in case Matrix missed the change
+    await js(where.area ? teamTickArea(0, 0) : setInput(core.FIELDS.zip, '')).catch(() => null); await sleep(800);
+    await apply(); count = await teamCount(before, 12000);
+  }
   // a whole MLS's sold homes run to thousands: the area or zip did not take
-  if (/\+$/.test(count) || core.num(count) > 2000) {
+  if (tooMany(count)) {
     const dir = await saveTeamDebug('area-not-applied');
     throw new Error(`the search found ${count} sales, so the ${where.area ? 'MLS area' : 'zip'} did not apply. The page is saved in ${dir} — send those files to Claude`);
   }
@@ -3194,7 +3196,8 @@ ipcMain.handle('team-comps', async (_e, opts) => {
       const th = (tr[0] || []).map(h => String(h).trim()), ki = th.indexOf('MLS #'), di = th.indexOf('Team Comps Run On'), ai = th.indexOf('Lead Area');
       if (ki >= 0) tr.slice(1).forEach(r => {
         const m = String(r[ki] || '').trim().toUpperCase();
-        if (di >= 0 && core.teamFresh(r[di], tday)) fresh.add(m);
+        // a lead whose area was not found (searched by zip instead) is tried again next run
+        if (di >= 0 && core.teamFresh(r[di], tday) && ai >= 0 && String(r[ai] || '').trim()) fresh.add(m);
         if (ai >= 0 && String(r[ai] || '').trim()) areaOf[m] = String(r[ai]).trim();
       });
     } catch (_) { /* no tab yet */ }
@@ -3211,7 +3214,7 @@ ipcMain.handle('team-comps', async (_e, opts) => {
       await gsheets.syncRows(await googleToken(), g.sheetId, core.TEAM_TAB, core.TEAM_HEADERS, 'MLS #', batch, { overwrite: core.TEAM_HEADERS });
       batch = [];
     };
-    let blocked = '';
+    let blocked = '', applyFails = 0;
     for (let i = 0; i < todo.length; i++) {
       if (await stopRequested()) break;
       const r = todo[i].r, mls = val(r, 'MLS #'), addr = val(r, 'Address');
@@ -3234,7 +3237,7 @@ ipcMain.handle('team-comps', async (_e, opts) => {
         const res = await teamSoldSearch(lead.area ? { area: lead.area } : { zip });
         if (control.stopped) stoppedMid = true;
         else {
-          searched = lead.area ? 'MLS area' : 'zip ' + zip;
+          searched = lead.area ? 'MLS area' : 'zip ' + zip; applyFails = 0;
           found = core.teamRows(res.rows, mls);
           // every sale on every page was read: only then can a comp missing from them be called another area's
           complete = res.rows.length >= core.num(res.count);
@@ -3247,8 +3250,11 @@ ipcMain.handle('team-comps', async (_e, opts) => {
       } catch (e) {
         note = 'search failed: ' + e.message; failed++;
         log('    ' + note, 'warn');
-        // the form itself is the problem: every lead would fail the same way
-        if (/did not apply|no "Sold"|Date box/.test(e.message)) blocked = e.message;
+        // the form itself is the problem: every lead would fail the same way. One
+        // area that would not apply is that lead's (it is tried again next run);
+        // three leads in a row is the form.
+        applyFails = /did not apply/.test(e.message) ? applyFails + 1 : 0;
+        if (/no "Sold"|Date box/.test(e.message) || applyFails >= 3) blocked = e.message;
       }
       if (dry) { const dir = await saveTeamDebug('check'); log(`  The search page is saved in ${dir} — send it to Claude if anything above looks wrong.`, 'good'); break; }
       if (blocked) break;
