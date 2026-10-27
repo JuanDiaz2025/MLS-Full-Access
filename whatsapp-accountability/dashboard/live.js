@@ -140,6 +140,49 @@ function cleanAnalysis(a, people, earlier, sender) {
 
 const NOT_A_REPLY = new Set(['reaction', 'joined', 'left']);
 
+// Claude reads plain replies (not swipe-replies or reactions) from the last
+// week to say which request each one answers, and whether the sender took on
+// the work. Older ones, or any Claude hasn't read yet, use the simple rules.
+const REPLY_VERSION = 1;
+const JUDGE_DAYS = 7;
+const JUDGE_LOOKBACK = 3 * 24 * 60 * 60000; // only requests from the 3 days before a reply
+
+function replyPrompt(requests, items, people, bossNames) {
+  const members = people.map(p => `${p.id}: ${p.name}${p.giver ? ' (manager)' : ''}`).join('\n');
+  return `You read replies in a WhatsApp work group, so a dashboard can tell who actually answered which request.
+
+Managers: ${bossNames.join(', ')}
+Group members (id: name):
+${members}
+
+Open requests from the managers:
+${JSON.stringify(requests)}
+
+Messages sent after them, in order. "could_answer" lists the requests each one might be answering:
+${JSON.stringify(items)}
+
+For every message, return JSON in exactly this shape:
+{"results":[{"id":"<message id>","answers":["<request id>"],"takes_task":null or {"request":"<request id>","title":"<short task name>"},"why":"<6 to 12 words>"}]}
+
+Rules:
+- answers lists the requests this message actually responds to, chosen only from its "could_answer". A short acknowledgement ("noted", "noted po", "copy", "ok", "on it", a thumbs up) answers the latest of them that asked the sender for something. A message about something else answers nothing, even if it comes right after a request.
+- takes_task is set when the sender says they own or will do the work ("I'm the one tracking it", "ako na po", "I'll handle it"). request is the request it belongs to, from "could_answer". title is the work in a few words.
+- The messages may be in English, Tagalog or Taglish.
+- why says in plain words why you decided, for a manager reading the dashboard.
+- Return JSON only.`;
+}
+
+// allowed: message id -> the request ids it could answer
+function cleanReply(r, allowed) {
+  if (!r || typeof r !== 'object' || !allowed) return null;
+  const ok = new Set(allowed);
+  const answers = (Array.isArray(r.answers) ? r.answers : []).map(String).filter(id => ok.has(id));
+  const t = r.takes_task;
+  const task = t && typeof t === 'object' && ok.has(String(t.request)) && String(t.title || '').trim()
+    ? { request: String(t.request), title: String(t.title).trim().slice(0, 60) } : null;
+  return { answers: [...new Set(answers)], task, why: String(r.why || '').slice(0, 120), by: 'claude', v: REPLY_VERSION };
+}
+
 // raw: { participants, members, names, bossIds, messages (compact), analysis, overrides, group, fixes, removed }
 // removed: request id -> who deleted it from the dashboard
 // fixes: replies linked by hand on the dashboard, "<request id>~<person id>" -> { msg, at, text, by, on, group }
@@ -184,10 +227,16 @@ function buildFromRaw(raw, now) {
     if (a.task && pset.has(a.task.owner_id) && !req.includes(a.task.owner_id)) req = req.concat(a.task.owner_id);
     req = req.filter(id => id !== m.s && inGroup(id, m.t));
     if (!req.length) return;
-    const x = { m, a, req: new Set(req), chases: [], replies: {}, anyone: a.required === 'any' };
+    const x = { m, a, req: new Set(req), chases: [], replies: {}, sure: new Set(), anyone: a.required === 'any' };
     tracked.push(x); trackedById.set(m.i, x); rootOf.set(m.i, x);
   });
   const setReply = (x, pid, at, text, extra) => { if (!x.replies[pid]) x.replies[pid] = { at, text, ...extra }; };
+  // a quote, a reaction or Claude's reading is sure; the plain-message rule is a guess
+  const setSure = (x, pid, at, text, extra) => { setReply(x, pid, at, text, extra); x.sure.add(pid); };
+  const judged = raw.replies || {};
+  const judgeSince = now - JUDGE_DAYS * 24 * 60 * 60000;
+  const unjudged = []; // plain replies Claude should read: { m, requests: [request ids] }
+  const claims = []; // someone said the work is theirs: { x, pid, msg, title }
 
   // Who acknowledged what: a quoted reply or a reaction answers that request
   // (a nudge counts as its request); any other message answers everything
@@ -200,13 +249,26 @@ function buildFromRaw(raw, now) {
     if (!pset.has(pid) || msg.k === 'joined' || msg.k === 'left') return;
     if (msg.k === 'reaction') {
       const x = rootOf.get(msg.r);
-      if (x && x.req.has(pid) && msg.t >= x.m.t) setReply(x, pid, msg.t, msg.x || '');
+      if (x && x.req.has(pid) && msg.t >= x.m.t) setSure(x, pid, msg.t, msg.x || '');
       return;
     }
     const text = replyText(msg, nameOf);
     const quoted = msg.q && rootOf.get(msg.q);
-    if (quoted) { if (quoted.req.has(pid) && msg.t >= quoted.m.t) setReply(quoted, pid, msg.t, text); return; }
-    tracked.forEach(x => { if (x.m.t < msg.t && x.req.has(pid) && !(x.anyone && newerRequest(x, msg.t))) setReply(x, pid, msg.t, text); });
+    if (quoted) { if (quoted.req.has(pid) && msg.t >= quoted.m.t) setSure(quoted, pid, msg.t, text); return; }
+    const fallback = () => tracked.forEach(x => { if (x.m.t < msg.t && x.req.has(pid) && !(x.anyone && newerRequest(x, msg.t))) setReply(x, pid, msg.t, text); });
+    if (rootOf.has(msg.i)) { fallback(); return; } // a request or nudge of its own: not something Claude reads as a reply
+    const j = judged[msg.i] && judged[msg.i].v === REPLY_VERSION ? judged[msg.i] : null;
+    if (j && !Array.isArray(j.answers)) { fallback(); return; } // Claude couldn't tell
+    if (j) {
+      (j.answers || []).forEach(id => { const x = rootOf.get(id); if (x && x.m.t < msg.t && x.req.has(pid)) setSure(x, pid, msg.t, text, { why: j.why }); });
+      const x = j.task && rootOf.get(j.task.request);
+      if (x && x.m.t < msg.t) claims.push({ x, pid, msg, title: j.task.title });
+      return;
+    }
+    // not read by Claude: queue it if it could answer something recent, and use the rules meanwhile
+    const could = tracked.filter(x => x.m.t < msg.t && x.m.t >= msg.t - JUDGE_LOOKBACK && x.req.has(pid) && !x.sure.has(pid) && !(x.anyone && x.sure.size));
+    if (could.length && msg.t >= judgeSince && msg.k !== 'sticker') unjudged.push({ m: msg, requests: could.slice(-6).map(x => x.m.i) });
+    fallback();
   });
 
   // A reply someone linked by hand: one of the person's own messages that the
@@ -257,28 +319,38 @@ function buildFromRaw(raw, now) {
   })));
   people.forEach(p => { p.chased = chased[p.id] || 0; });
 
+  // When the owner delivered: a photo, video or document, or a "done" message,
+  // that isn't about a different request.
+  const delivered = (x, owner, after) => {
+    let doneAt = null, photos = 0, doc = null, doneText = '';
+    for (const msg of msgs) {
+      if (msg.s !== owner || msg.t <= after || NOT_A_REPLY.has(msg.k)) continue;
+      const about = msg.q && rootOf.get(msg.q);
+      if (about && about !== x) continue;
+      if (msg.k === 'image' || msg.k === 'video') photos++;
+      if (msg.k === 'document' && !doc) doc = (msg.x || 'Document').split('\n')[0];
+      if (msg.k === 'image' || msg.k === 'video' || msg.k === 'document' || DONE_RE.test(msg.x || '')) { doneAt = msg.t; doneText = msg.x || ''; break; }
+    }
+    return { doneAt, evidence: photos ? { photos } : doc ? { doc } : doneAt ? { reply: doneText } : null };
+  };
+
   const tasks = [];
   const messages = shown.map(x => {
     const { m, a } = x;
     let taskId = null;
     if (a.task && pset.has(a.task.owner_id) && x.req.has(a.task.owner_id)) {
       const owner = a.task.owner_id;
-      let doneAt = null, photos = 0, doc = null, doneText = '';
-      for (const msg of msgs) {
-        if (msg.s !== owner || msg.t <= m.t || NOT_A_REPLY.has(msg.k)) continue;
-        const about = msg.q && rootOf.get(msg.q);
-        if (about && about !== x) continue; // about a different request
-        if (msg.k === 'image' || msg.k === 'video') photos++;
-        if (msg.k === 'document' && !doc) doc = (msg.x || 'Document').split('\n')[0];
-        if (msg.k === 'image' || msg.k === 'video' || msg.k === 'document' || DONE_RE.test(msg.x || '')) { doneAt = msg.t; doneText = msg.x || ''; break; }
-      }
+      const d = delivered(x, owner, m.t);
       taskId = 'k' + m.i;
-      tasks.push({
-        id: taskId, title: a.task.title || a.title, msg: m.i, owner,
-        due: parseLocal(a.task.due), ackAt: (x.replies[owner] || {}).at || null, doneAt,
-        evidence: photos ? { photos } : doc ? { doc } : doneAt ? { reply: doneText } : null,
-      });
+      tasks.push({ id: taskId, title: a.task.title || a.title, msg: m.i, owner, due: parseLocal(a.task.due), ackAt: (x.replies[owner] || {}).at || null, ...d });
     }
+    // work someone took on in a reply ("I'm the one tracking it"), unless it is already theirs
+    claims.filter(c => c.x === x && !(a.task && a.task.owner_id === c.pid)).forEach(c => {
+      if (tasks.some(t => t.msg === m.i && t.owner === c.pid)) return;
+      const id = 'c' + c.msg.i;
+      tasks.push({ id, title: c.title, msg: m.i, owner: c.pid, due: null, ackAt: c.msg.t, claimed: true, ...delivered(x, c.pid, c.msg.t) });
+      if (!taskId) taskId = id;
+    });
     return {
       id: m.i, at: m.t, title: a.title || (m.x || '').split('\n')[0].slice(0, 48) || 'Message',
       text: readableText(m, nameOf), kind: a.type === 'Question' ? 'Question' : 'Instruction',
@@ -287,7 +359,7 @@ function buildFromRaw(raw, now) {
     };
   }).sort((a, b) => b.at - a.at);
 
-  return { people, messages, tasks, bossMessages };
+  return { people, messages, tasks, bossMessages, unjudged };
 }
 
 // Keeps track of who has been in the group and when, from one read of the
@@ -309,4 +381,4 @@ function updateMembers(prev, participants, lastRead, now) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromRaw, fallbackAnalysis, cleanAnalysis, analysisPrompt, parseLocal, dayKey, nameIndex, updateMembers, ANALYSIS_VERSION };
+if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromRaw, fallbackAnalysis, cleanAnalysis, analysisPrompt, replyPrompt, cleanReply, parseLocal, dayKey, nameIndex, updateMembers, localStamp, readableText, replyText, ANALYSIS_VERSION, REPLY_VERSION };

@@ -155,7 +155,7 @@ function derive(S, cfg, now) {
       P.required++;
       if (r) { P.replied++; P.delays.push(r.at - m.at); }
       if (missed) { P.missed++; P.lastMissed = Math.max(P.lastMissed || 0, m.at + esc); }
-      const row = { pid, name: P.name, replied: !!r, at: r ? r.at : null, delay: r ? r.at - m.at : null, text: r ? r.text : '', linked: r && r.linked || null, stage, missed, waiting: r ? null : elapsed };
+      const row = { pid, name: P.name, replied: !!r, at: r ? r.at : null, delay: r ? r.at - m.at : null, text: r ? r.text : '', why: r && r.why || '', linked: r && r.linked || null, stage, missed, waiting: r ? null : elapsed };
       if (!r) P.pending.push({ msg: m, waiting: elapsed, stage });
       // each nudge counts against whoever still hadn't answered when it was sent
       (m.chases || []).forEach(c => { if (!r || r.at > c.at) P.chased++; });

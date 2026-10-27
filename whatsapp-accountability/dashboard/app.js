@@ -200,7 +200,7 @@
         <td>${who(r.name)}</td>
         <td>${r.replied ? chip('c-good', 'Replied', 'check') : chip('c-crit', 'No response')}</td>
         <td class="num">${r.replied ? fmtDur(r.delay) : `<span class="plain">${fmtDur(r.waiting)} so far</span>`}</td>
-        <td>${r.replied ? esc(r.text) + linkedNote(r)
+        <td>${r.replied ? esc(r.text) + (r.why && !r.linked ? `<span class="sub why">${ic('spark')}${esc(r.why)}</span>` : '') + linkedNote(r)
           : canLink ? `<button class="btn small" type="button" data-action="open-link" data-msg="${esc(m.id)}" data-pid="${esc(r.pid)}">Mark as replied</button>`
           : '<span class="plain">None</span>'}</td>
         <td>${r.replied ? `<span class="plain">${replyNote(r.stage)}</span>` : stageChip(r.stage, m)}</td></tr>`).join('');
@@ -242,7 +242,7 @@
       else when = t.status === 'Completed late' ? `done ${fmtDur(t.doneAt - t.due)} late` : `done ${esc(fmtWhen(t.doneAt))}`;
       return `<tr>
         <td><b>${esc(t.title)}</b></td>
-        <td class="from">${msgLink(t.from, '“' + snippet(t.from.text) + '”')}<span class="sub">${groupTag(t.from)}${esc(fmtWhen(t.from.at))} · from ${esc(t.from.senderName || '')}</span></td>
+        <td class="from">${msgLink(t.from, '“' + snippet(t.from.text) + '”')}<span class="sub">${groupTag(t.from)}${esc(fmtWhen(t.from.at))} · from ${esc(t.from.senderName || '')}${t.claimed ? ` · ${esc(t.ownerName)} took it on in a reply` : ''}</span></td>
         <td>${who(t.ownerName)}</td>
         <td class="nowrap">${t.due != null ? esc(fmtWhen(t.due)) : '<span class="plain">No deadline</span>'}<span class="sub">${when}</span></td>
         <td>${chip(TASK_TONE[t.status], t.status)}</td>
@@ -971,7 +971,7 @@ RULES
     const g = saved.groups[gid];
     if (g && g.meta) return g;
     const L = saved.legacy;
-    if (L.meta && L.meta.group && L.meta.group.id === gid) return { meta: L.meta, analysis: L.analysis || {}, days: L.days, legacy: true };
+    if (L.meta && L.meta.group && L.meta.group.id === gid) return { meta: L.meta, analysis: L.analysis || {}, replies: {}, days: L.days, legacy: true };
     return null;
   }
 
@@ -979,7 +979,7 @@ RULES
     const d = savedGroupData(gid);
     if (!d) return null;
     const messages = Object.values(d.days || {}).flatMap(x => (x && x.messages) || []);
-    return { ...d.meta, analysis: d.analysis || {}, messages, overrides: saved.names, fixes: fixesFor(gid) };
+    return { ...d.meta, analysis: d.analysis || {}, replies: d.replies || {}, messages, overrides: saved.names, fixes: fixesFor(gid) };
   }
 
   function applySaved() {
@@ -1013,12 +1013,13 @@ RULES
     });
     want.forEach(gid => {
       if (subs[gid]) return;
-      const box = saved.groups[gid] = { meta: null, analysis: {}, days: {}, fixes: {}, removed: {}, loaded: { meta: false, analysis: false } };
+      const box = saved.groups[gid] = { meta: null, analysis: {}, replies: {}, days: {}, fixes: {}, removed: {}, loaded: { meta: false, analysis: false } };
       const fail = () => {};
       const k = gkey(gid);
       subs[gid] = [
         db.doc(`sync/${k}`).onSnapshot(snap => { box.meta = snap.exists ? snap.data() : null; box.loaded.meta = true; applySaved(); }, fail),
-        db.doc(`sync/${k}/extra/analysis`).onSnapshot(snap => { box.analysis = snap.exists ? (snap.data().byId || {}) : {}; box.loaded.analysis = true; applySaved(); }, fail),
+        // what Claude read: the instructions (byId) and the replies to them (replies)
+        db.doc(`sync/${k}/extra/analysis`).onSnapshot(snap => { const v = snap.exists ? snap.data() : {}; box.analysis = v.byId || {}; box.replies = v.replies || {}; box.loaded.analysis = true; applySaved(); }, fail),
         db.collection(`sync/${k}/days`).onSnapshot(q => { const days = {}; q.docs.forEach(d => { days[d.id] = d.data(); }); box.days = days; applySaved(); }, fail),
         // replies people linked by hand, written by anyone in the company who can use the page
         db.collection(`fixes/${k}/links`).onSnapshot(q => {
@@ -1598,6 +1599,7 @@ RULES
       group: { id: g.id, name: g.name || t.groupName }, participants, members, names, bossIds: t.bossIds || [], me: g.me,
       messages: fromReader.concat(kept).sort((a, b) => a.t - b.t),
       analysis: { ...(prevRaw ? prevRaw.analysis : prev ? prev.analysis : {}) },
+      replies: { ...(prevRaw ? prevRaw.replies : prev ? prev.replies : {}) },
       overrides: saved.names,
       syncedAt: now,
     };
@@ -1657,10 +1659,10 @@ RULES
       const a = raw.analysis[m.i];
       return !a || (canAsk && (a.by === 'rules' || a.v !== ANALYSIS_VERSION));
     });
-    if (!todo.length) return;
-    if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); }); return; }
-    live.analyzing = todo.length; renderFrame();
     const bosses = (raw.bossIds || []).map(nameOf);
+    if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); }); return; }
+    if (!todo.length) { await judgeReplies(raw, people, bosses, nameOf); return; }
+    live.analyzing = todo.length; renderFrame();
     for (let i = 0; i < todo.length; i += 12) {
       const batch = todo.slice(i, i + 12);
       // the ten instruction-giver messages before this batch, from the last day
@@ -1677,6 +1679,41 @@ RULES
       } catch (e) {
         if (e && e.code === 'not_granted') live.sampleDenied = true;
         todo.slice(i).forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); });
+        break;
+      }
+    }
+    live.analyzing = 0;
+    await judgeReplies(raw, people, bosses, nameOf);
+  }
+
+  // Claude reads each plain reply once (swipe-replies and reactions are already
+  // certain) to say which request it answers and whether the sender took on the
+  // work. Until it has, and for anything older than a week, the rules decide.
+  async function judgeReplies(raw, people, bosses, nameOf) {
+    if (!cap.sample || live.sampleDenied || Date.now() - (live.judgeFailAt || 0) < 5 * MIN) return;
+    raw.replies = raw.replies || {};
+    const S1 = buildFromRaw(raw, Date.now());
+    const todo = S1.unjudged.slice(0, 60);
+    if (!todo.length) return;
+    const reqs = new Map(S1.messages.map(m => [m.id, m]));
+    const needs = m => m.anyone ? 'one answer from anyone' : m.everyone ? 'a reply from everyone' : `a reply from ${m.required.map(nameOf).join(', ')}`;
+    live.analyzing = todo.length; renderFrame();
+    for (let i = 0; i < todo.length; i += 20) {
+      const batch = todo.slice(i, i + 20);
+      const ids = [...new Set(batch.flatMap(b => b.requests))].filter(id => reqs.has(id));
+      const requests = ids.map(id => { const m = reqs.get(id); return { id, from: m.senderName, sent: localStamp(m.at), text: m.text, needs: needs(m) }; });
+      const items = batch.map(b => ({ id: b.m.i, from: nameOf(b.m.s), sent: localStamp(b.m.t), text: replyText(b.m, nameOf), could_answer: b.requests.filter(id => reqs.has(id)) }));
+      try {
+        const out = await cap.sample.json(replyPrompt(requests, items, people, bosses), { modelTier: 'default' });
+        const results = out && Array.isArray(out.results) ? out.results : [];
+        batch.forEach(b => {
+          // left out of Claude's answer: keep the rules for it rather than asking again every update
+          raw.replies[b.m.i] = cleanReply(results.find(x => x && String(x.id) === b.m.i), b.requests)
+            || { answers: null, task: null, why: '', by: 'claude', v: REPLY_VERSION };
+        });
+      } catch (e) {
+        if (e && e.code === 'not_granted') live.sampleDenied = true;
+        live.judgeFailAt = Date.now(); // try again in a few minutes, not every update
         break;
       }
     }
@@ -1707,11 +1744,14 @@ RULES
       for (const day of Object.keys(box.days || {})) {
         if (!byDay[day]) { await db.doc(`sync/${k}/days/${day}`).delete(); delete live.written[`${gid}|${day}`]; changed = true; }
       }
-      const byId = {};
-      raw.messages.forEach(m => { if (raw.analysis[m.i]) byId[m.i] = raw.analysis[m.i]; });
-      const aJson = JSON.stringify(byId);
-      if (aJson !== (live.writtenAnalysis[gid] ?? JSON.stringify(box.analysis))) {
-        await db.doc(`sync/${k}/extra/analysis`).set({ byId });
+      const byId = {}, replies = {};
+      raw.messages.forEach(m => {
+        if (raw.analysis[m.i]) byId[m.i] = raw.analysis[m.i];
+        if (raw.replies && raw.replies[m.i]) replies[m.i] = raw.replies[m.i];
+      });
+      const aJson = JSON.stringify({ byId, replies });
+      if (aJson !== (live.writtenAnalysis[gid] ?? JSON.stringify({ byId: box.analysis, replies: box.replies || {} }))) {
+        await db.doc(`sync/${k}/extra/analysis`).set({ byId, replies });
         live.writtenAnalysis[gid] = aJson; changed = true;
       }
       const meta = { group: raw.group, participants: raw.participants, members: raw.members, names: raw.names, bossIds: raw.bossIds, me: raw.me };
