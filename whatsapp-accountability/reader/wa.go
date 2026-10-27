@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -32,6 +33,80 @@ type Reader struct {
 	loggedOut atomic.Bool
 	lastEvent atomic.Int64
 	history   atomic.Int64 // messages saved from history sync, for the link screen
+	groupAsk  groupLimiter
+}
+
+// Asking WhatsApp for a group's members is a request to its servers, and a
+// burst of them (one per tracked group every update) is the kind of traffic
+// that gets a number limited. The saved copy is kept current by group change
+// events and by the group list, so it is used while it is recent, and the
+// real requests are spaced out and paused when WhatsApp says to slow down.
+const (
+	groupFresh   = time.Hour
+	groupGap     = 2 * time.Second
+	groupBackoff = 10 * time.Minute
+)
+
+type groupLimiter struct {
+	mu          sync.Mutex
+	last        time.Time
+	pausedUntil time.Time
+}
+
+var errSlowDown = errors.New("WhatsApp asked to slow down, so the saved copy is used for now")
+
+// do runs ask no sooner than groupGap after the previous one, and not at all
+// while paused. now and sleep are passed in so tests don't wait.
+func (l *groupLimiter) do(now func() time.Time, sleep func(time.Duration), ask func() error) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now().Before(l.pausedUntil) {
+		return errSlowDown
+	}
+	if wait := groupGap - now().Sub(l.last); !l.last.IsZero() && wait > 0 {
+		sleep(wait)
+	}
+	err := ask()
+	l.last = now()
+	if err != nil && isRateLimit(err) {
+		l.pausedUntil = now().Add(groupBackoff)
+	}
+	return err
+}
+
+func isRateLimit(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "rate-overlimit") || strings.Contains(s, "429") || strings.Contains(s, "rate limit")
+}
+
+func groupFreshAt(updatedAt int64, now time.Time) bool {
+	return updatedAt > 0 && now.Sub(time.UnixMilli(updatedAt)) < groupFresh
+}
+
+// groupForTool answers get_group: the saved copy while it is recent, else one
+// spaced-out request to WhatsApp, else the saved copy however old.
+func (r *Reader) groupForTool(jid types.JID) (GroupRecord, bool, error) {
+	if g, ok := r.store.Group(jid.String()); ok && groupFreshAt(g.UpdatedAt, time.Now()) {
+		return g, true, nil
+	}
+	var g GroupRecord
+	err := r.groupAsk.do(time.Now, time.Sleep, func() error {
+		var e error
+		g, e = r.refreshGroup(jid)
+		return e
+	})
+	if err != nil {
+		if cached, ok := r.store.Group(jid.String()); ok {
+			return cached, true, nil
+		}
+		return GroupRecord{}, false, err
+	}
+	return g, false, nil
+}
+
+// refreshGroupSoon updates a group after WhatsApp says it changed, spaced out like the rest.
+func (r *Reader) refreshGroupSoon(jid types.JID) {
+	_ = r.groupAsk.do(time.Now, time.Sleep, func() error { _, err := r.refreshGroup(jid); return err })
 }
 
 func init() {
@@ -108,9 +183,9 @@ func (r *Reader) handle(evt any) {
 		r.connected.Store(false)
 		r.log.Warnf("Another copy of WhatsApp Reader connected with the same link, so this one stopped.")
 	case *events.GroupInfo:
-		go r.refreshGroup(v.JID)
+		go r.refreshGroupSoon(v.JID)
 	case *events.JoinedGroup:
-		go r.refreshGroup(v.JID)
+		go r.refreshGroupSoon(v.JID)
 	}
 }
 

@@ -1,8 +1,9 @@
 package main
 
 import (
-	"database/sql"
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -171,5 +172,41 @@ func TestGroupCreatedDate(t *testing.T) {
 	}
 	if g, ok := st.Group("g2@g.us"); !ok || g.CreatedAt != created || g.Name != "New deal renamed" {
 		t.Fatalf("Group(g2) = %+v", g)
+	}
+}
+
+// Member lists come from the saved copy while it is recent; real requests to
+// WhatsApp are spaced out and pause when WhatsApp says to slow down.
+func TestGroupRequestsAreSpacedOut(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	slept := time.Duration(0)
+	sleep := func(d time.Duration) { slept += d; now = now.Add(d) }
+	var l groupLimiter
+	asks := 0
+	ok := func() error { asks++; return nil }
+
+	if err := l.do(clock, sleep, ok); err != nil || asks != 1 || slept != 0 {
+		t.Fatalf("first request should go straight away: err=%v asks=%d slept=%v", err, asks, slept)
+	}
+	if err := l.do(clock, sleep, ok); err != nil || asks != 2 || slept != groupGap {
+		t.Fatalf("second request should wait %v: asks=%d slept=%v", groupGap, asks, slept)
+	}
+	now = now.Add(time.Minute)
+	limited := func() error { asks++; return errors.New("server returned error 429: rate-overlimit") }
+	if err := l.do(clock, sleep, limited); err == nil || asks != 3 {
+		t.Fatalf("the refused request should report its error")
+	}
+	if err := l.do(clock, sleep, ok); err != errSlowDown || asks != 3 {
+		t.Fatalf("after a rate limit, requests should pause: err=%v asks=%d", err, asks)
+	}
+	now = now.Add(groupBackoff + time.Second)
+	if err := l.do(clock, sleep, ok); err != nil || asks != 4 {
+		t.Fatalf("after the pause, requests should resume: err=%v asks=%d", err, asks)
+	}
+
+	at := now.Add(-30 * time.Minute).UnixMilli()
+	if !groupFreshAt(at, now) || groupFreshAt(now.Add(-2*time.Hour).UnixMilli(), now) || groupFreshAt(0, now) {
+		t.Fatal("a saved member list counts as recent for an hour, and never when it has no time")
 	}
 }

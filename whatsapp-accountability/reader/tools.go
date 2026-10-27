@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -115,13 +116,9 @@ func addTools(s *mcp.Server, r *Reader) {
 			if err != nil || jid.Server != types.GroupServer {
 				return nil, GroupOut{}, errors.New("group_id must be a group id ending in @g.us")
 			}
-			g, err := r.refreshGroup(jid)
-			fromCache := err != nil
-			if fromCache {
-				var ok bool
-				if g, ok = r.store.Group(jid.String()); !ok {
-					return nil, GroupOut{}, errors.New("this group isn't saved yet and WhatsApp Reader is offline")
-				}
+			g, fromCache, err := r.groupForTool(jid)
+			if err != nil {
+				return nil, GroupOut{}, fmt.Errorf("couldn't read this group's members: %w", err)
 			}
 			return nil, GroupOut{ID: g.ID, Name: g.Name, Me: r.MyID(), Participants: g.Participants, UpdatedAt: g.UpdatedAt, CreatedAt: g.CreatedAt, FromCache: fromCache}, nil
 		})

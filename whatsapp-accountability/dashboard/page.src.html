@@ -312,6 +312,19 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .btn.danger.armed { background: var(--crit-soft); border-color: var(--crit); }
 .pick-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
 .search-in { width: min(100%, 360px); }
+.defaults { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 6px 0 14px; background: var(--surface-2); }
+.defaults-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.defaults .plain { margin: 8px 0 0; font-size: 13px; }
+.gchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.gchip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line-2); font-size: 13px; font-weight: 600; }
+.gchip button { border: 0; background: none; color: var(--ink-3); font-size: 16px; line-height: 1; padding: 0 6px; cursor: pointer; border-radius: 99px; }
+.gchip button:hover { background: var(--crit-soft); color: var(--crit-ink); }
+.combo { position: relative; max-width: 460px; }
+.combo-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.combo-list:empty { display: none; }
+.combo-list .opt { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; }
+.combo-list .opt:hover, .combo-list .opt:focus-visible { border-color: var(--accent); }
+.combo-list .opt .sub { font-size: 12px; color: var(--ink-3); }
 .check-l { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
 .sort-l { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); font-weight: 600; }
 .pick-bar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom, 0px)); z-index: 2; margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px 10px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-2); box-shadow: 0 6px 20px rgba(0, 0, 0, .12); font-weight: 600; }

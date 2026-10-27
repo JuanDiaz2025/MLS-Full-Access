@@ -10,7 +10,7 @@
   const state = { view: 'dashboard', sel: null, taskFilter: 'open', groupFilter: 'all', senderFilter: 'all',
     setup: false, editGroup: null, setupBoss: null, setupNames: null, confirmRemove: null,
     // adding groups: the ones ticked, the search, then who gives instructions in each
-    pickGroups: new Set(), groupQuery: '', groupSort: null, hideEmpty: true, confirmAll: 0, addStep: null, addActive: null, addBoss: {}, addTemplate: null, addNote: '' };
+    pickGroups: new Set(), groupQuery: '', groupSort: null, hideEmpty: true, confirmAll: 0, addManual: new Set(), giverQuery: '', addStep: null, addActive: null, addBoss: {}, addTemplate: null, addNote: '' };
   // how the group list is sorted is remembered on this computer
   try { const v = localStorage.getItem('wa-group-sort'); if (['new', 'active', 'name'].includes(v)) state.groupSort = v; } catch (_) {}
   try { if (localStorage.getItem('wa-hide-empty') === '0') state.hideEmpty = false; } catch (_) {}
@@ -18,7 +18,8 @@
   const src = { mode: 'sample', S: SAMPLE, now: SAMPLE_NOW, updatedAt: null, groups: [] };
   const cap = { db: null, mcp: null, sample: null, user: null, canEdit: null, isOwner: null, canWrite: null, me: null };
   // tracking: the groups being tracked, each with whose messages are instructions
-  const saved = { tracking: null, legacySource: null, names: {}, groups: {}, legacy: { meta: null, analysis: {}, days: {} },
+  // givers: the default instruction-givers, ticked in every group they're in
+  const saved = { tracking: null, legacySource: null, names: {}, givers: [], groups: {}, legacy: { meta: null, analysis: {}, days: {} },
     loaded: { tracking: false, source: false, legacyMeta: false, legacyAnalysis: false } };
   const subs = {};
   const live = { on: false, status: null, groups: null, groupInfo: null, groupInfos: {}, busy: false, again: false, lastSig: '', lastSync: 0,
@@ -511,7 +512,10 @@
       : giversBlock(info, state.addBoss[active] || new Set(), 'add-boss',
         ids.length > 1 && state.addBoss[active] && state.addBoss[active].size
           ? `<div class="apply-all"><button class="btn small" type="button" data-action="add-apply" data-gid="${esc(active)}">Use these instruction-givers in every selected group they\u2019re in</button>${state.addNote ? `<span class="plain">${esc(state.addNote)}</span>` : ''}</div>` : '');
+    const missing = ids.filter(id => !ready.includes(id) && live.groupInfos[id] !== null).length;
+    const failed = ids.filter(id => live.groupInfos[id] === null).length;
     return `<h3>Who gives the instructions in each group?</h3>
+      ${defaultsBox(ids)}
       <p class="plain">Pick a group on the left, then tick who gives instructions there. A green dot means it\u2019s ready.</p>
       <div class="addflow">
         <nav class="addside" aria-label="Selected groups">${side}</nav>
@@ -519,8 +523,54 @@
       </div>
       <div class="dlg-f add-foot">
         <span class="plain">${ready.length} of ${plural(ids.length, 'group')} ready</span>
+        ${failed ? `<button class="btn small" type="button" data-action="add-retry-all">Try the ${plural(failed, 'group')} that failed again</button>` : ''}
+        ${missing ? `<button class="btn small" type="button" data-action="add-next-missing">Next group to pick (${missing})</button>` : ''}
         <button class="btn" type="button" data-action="add-back">Back</button>
         <button class="btn primary" type="button" data-action="add-groups"${ready.length === ids.length ? '' : ' disabled'}>${trackedCount ? 'Add' : 'Start tracking'} ${plural(ids.length, 'group')}</button>
+      </div>`;
+  }
+
+  // ---------------- default instruction-givers ----------------
+  // Everyone in the groups being added (and the tracked ones), once each, with
+  // how many of the selected groups they're in.
+  function peoplePool(ids) {
+    const pool = new Map();
+    const add = (p, counted) => {
+      const x = pool.get(p.id) || { id: p.id, name: nameFor(p.id, p.name), phone: p.phone || '', groups: 0 };
+      if (counted) x.groups++;
+      pool.set(p.id, x);
+    };
+    ids.forEach(id => { const g = live.groupInfos[id]; if (g) g.participants.forEach(p => add(p, true)); });
+    trackedGroups().forEach(t => { const raw = live.raws[t.groupId]; if (raw) raw.participants.forEach(p => add(p, false)); });
+    saved.givers.forEach(id => { if (!pool.has(id)) pool.set(id, { id, name: nameFor(id, '+' + id), phone: '+' + id, groups: 0 }); });
+    return pool;
+  }
+
+  function giverOptions(pool, q) {
+    q = q.trim().toLowerCase();
+    if (!q) return '';
+    const digits = q.replace(/\D/g, '');
+    const hits = [...pool.values()].filter(p => !saved.givers.includes(p.id)
+      && (p.name.toLowerCase().includes(q) || (digits.length >= 3 && p.phone.replace(/\D/g, '').includes(digits))))
+      .sort((a, b) => b.groups - a.groups || a.name.localeCompare(b.name)).slice(0, 8);
+    return hits.length ? hits.map(p => `<button class="opt" type="button" data-action="add-default" data-pid="${esc(p.id)}">
+        <b>${esc(p.name)}</b><span class="sub">${esc(p.phone)}${p.groups ? ` · in ${plural(p.groups, 'selected group')}` : ''}</span></button>`).join('')
+      : '<p class="plain">Nobody matches. Members show here once their group has loaded.</p>';
+  }
+
+  function defaultsBox(ids) {
+    const pool = peoplePool(ids);
+    const loaded = ids.filter(id => live.groupInfos[id]);
+    const inIt = loaded.filter(id => live.groupInfos[id].participants.some(p => saved.givers.includes(p.id)));
+    const chips = saved.givers.map(id => { const p = pool.get(id); return `<span class="gchip">${esc(p ? p.name : '+' + id)}
+        <button type="button" data-action="remove-default" data-pid="${esc(id)}" aria-label="Remove ${esc(p ? p.name : id)}">×</button></span>`; }).join('');
+    const summary = !saved.givers.length ? 'Pick the people who give instructions in most groups, like Juan. They’re ticked in every group they’re in, and remembered for next time.'
+      : `In ${inIt.length} of the ${plural(loaded.length, 'loaded group')}.${loaded.length - inIt.length ? ` ${plural(loaded.length - inIt.length, 'group')} ${loaded.length - inIt.length === 1 ? 'has' : 'have'} none of them: use “Next group to pick” below to go through those.` : ''}`;
+    return `<div class="defaults">
+        <div class="defaults-top"><b>Default instruction-givers</b>${chips ? `<span class="gchips">${chips}</span>` : ''}</div>
+        <div class="combo"><input class="name-in" type="search" id="giver-q" value="${esc(state.giverQuery)}" placeholder="Search people by name or number" aria-label="Search people to add as default instruction-givers" autocomplete="off">
+          <div class="combo-list" id="giver-list">${giverOptions(pool, state.giverQuery)}</div></div>
+        <p class="plain">${esc(summary)}</p>
       </div>`;
   }
 
@@ -652,7 +702,11 @@
     const typing = document.activeElement && setupEl.contains(document.activeElement) && document.activeElement.matches('input[type="text"], input[type="search"]');
     const focusId = document.activeElement && setupEl.contains(document.activeElement) ? document.activeElement.id : '';
     if (setup && !typing) {
+      const side = setupEl.querySelector('.addside');
+      const sideTop = side ? side.scrollTop : 0;
       setupEl.innerHTML = viewSetup();
+      const side2 = setupEl.querySelector('.addside');
+      if (side2 && sideTop) side2.scrollTop = sideTop;
       const again = focusId && document.getElementById(focusId);
       if (again) again.focus();
     }
@@ -685,6 +739,10 @@
   document.addEventListener('input', e => {
     const id = e.target.dataset && e.target.dataset.nameFor;
     if (id) { state.setupNames = state.setupNames || {}; state.setupNames[id] = e.target.value; }
+    if (e.target.id === 'giver-q') {
+      state.giverQuery = e.target.value;
+      document.getElementById('giver-list').innerHTML = giverOptions(peoplePool(pickedInOrder()), state.giverQuery);
+    }
     // filter the group list as you type, without redrawing it
     if (e.target.id === 'group-q') {
       state.groupQuery = e.target.value;
@@ -722,6 +780,7 @@
     }
     if (e.target.name === 'add-boss') {
       const gid = e.target.dataset.gid;
+      state.addManual.add(gid);
       state.addBoss[gid] = new Set([...document.querySelectorAll('input[name="add-boss"]:checked')].map(x => x.value));
       state.addNote = '';
       render();
@@ -1080,6 +1139,10 @@ RULES
       saved.loaded.source = true;
       onTrackingChanged();
     }, fail);
+    db.doc('settings/givers').onSnapshot(snap => {
+      saved.givers = snap.exists ? (snap.data().ids || []).map(String) : [];
+      render();
+    }, fail);
     db.doc('settings/names').onSnapshot(snap => {
       saved.names = snap.exists ? (snap.data().byId || {}) : {};
       refreshShown();
@@ -1385,29 +1448,66 @@ RULES
     finally { render(); }
   }
 
-  // Members of a group being added, read one group at a time. A new group
-  // starts with the instruction-givers used for the others, else this phone.
+  // WhatsApp Reader 1.0.3 answers member lists from its own saved copy. An
+  // older one asks WhatsApp each time, so those requests are spaced out.
+  const readerAtLeast = v => {
+    const have = String((live.status && live.status.version) || '0').split('.').map(Number);
+    const want = v.split('.').map(Number);
+    for (let i = 0; i < want.length; i++) { if ((have[i] || 0) !== want[i]) return (have[i] || 0) > want[i]; }
+    return true;
+  };
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+
+  // Who starts ticked in a group being added: the default instruction-givers
+  // who are in it (none if none are), else the ones used for the others, else this phone.
+  function presetGivers(g) {
+    const ids = new Set(g.participants.map(p => p.id));
+    if (saved.givers.length) return new Set(saved.givers.filter(x => ids.has(x)));
+    const fromTemplate = state.addTemplate ? [...state.addTemplate].filter(x => ids.has(x)) : [];
+    return new Set(fromTemplate.length ? fromTemplate : g.me && ids.has(g.me) ? [g.me] : []);
+  }
+
+  // Members of a group being added, read one group at a time.
   async function loadAddInfo(id, force) {
     if (!force && live.groupInfos[id]) return;
     try {
       const g = await callReader('get_group', { group_id: id });
       live.groupInfos[id] = g;
-      if (!state.addBoss[id]) {
-        const ids = new Set(g.participants.map(p => p.id));
-        const fromTemplate = state.addTemplate ? [...state.addTemplate].filter(x => ids.has(x)) : [];
-        state.addBoss[id] = new Set(fromTemplate.length ? fromTemplate : g.me && ids.has(g.me) ? [g.me] : []);
-      }
+      if (!state.addBoss[id]) state.addBoss[id] = presetGivers(g);
     } catch (e) { live.groupInfos[id] = null; }
     render();
   }
   async function loadAddInfos(first) {
-    const ids = pickedInOrder();
+    const gap = readerAtLeast('1.0.3') ? 0 : 1500;
     if (first) await loadAddInfo(first);
-    for (const id of ids) { if (state.addStep !== 'setup') return; await loadAddInfo(id); }
+    for (const id of pickedInOrder()) {
+      if (state.addStep !== 'setup') return;
+      if (live.groupInfos[id] !== undefined) continue;
+      if (gap) await pause(gap);
+      await loadAddInfo(id);
+    }
   }
   function resetAdding() {
     state.pickGroups = new Set(); state.groupQuery = ''; state.addStep = null; state.addActive = null;
-    state.addBoss = {}; state.addTemplate = null; state.addNote = '';
+    state.addBoss = {}; state.addTemplate = null; state.addNote = ''; state.addManual = new Set(); state.giverQuery = '';
+  }
+
+  // The default instruction-givers changed: tick them again in every group
+  // nobody has picked for by hand, and save them for next time.
+  async function setDefaultGivers(ids) {
+    saved.givers = [...new Set(ids)];
+    pickedInOrder().forEach(id => {
+      const g = live.groupInfos[id];
+      if (g && !state.addManual.has(id)) state.addBoss[id] = presetGivers(g);
+    });
+    state.giverQuery = '';
+    render();
+    const q = document.getElementById('giver-q');
+    if (q) q.focus();
+    if (cap.db && cap.canEdit !== false) {
+      try { await cap.db.doc('settings/givers').set({ ids: saved.givers, savedAt: Date.now() }); }
+      catch (e) { notify('Couldn\u2019t save the default instruction-givers for next time. They still apply now.'); }
+    }
   }
 
   // The names typed into the setup form, merged into the saved list.
@@ -1513,6 +1613,23 @@ RULES
       state.addStep = null; render();
     } else if (action === 'add-active') {
       state.addActive = gid; state.addNote = ''; render(); loadAddInfo(gid);
+    } else if (action === 'add-default') {
+      setDefaultGivers(saved.givers.concat(data.pid));
+    } else if (action === 'remove-default') {
+      setDefaultGivers(saved.givers.filter(x => x !== data.pid));
+    } else if (action === 'add-next-missing') {
+      // the next group after this one that still needs someone ticked
+      const ids = pickedInOrder(), at = ids.indexOf(state.addActive);
+      const need = id => !(live.groupInfos[id] && state.addBoss[id] && state.addBoss[id].size);
+      const next = ids.slice(at + 1).concat(ids.slice(0, at + 1)).find(need);
+      if (!next) return;
+      state.addActive = next; state.addNote = ''; render(); loadAddInfo(next);
+      const el = document.querySelector(`.addg[data-gid="${CSS.escape(next)}"]`);
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    } else if (action === 'add-retry-all') {
+      const failed = pickedInOrder().filter(id => live.groupInfos[id] === null);
+      failed.forEach(id => { live.groupInfos[id] = undefined; });
+      render(); loadAddInfos();
     } else if (action === 'add-retry') {
       live.groupInfos[gid] = undefined; render(); loadAddInfo(gid, true);
     } else if (action === 'add-apply') {
@@ -1586,9 +1703,15 @@ RULES
   });
 
   // Reads one tracked group from WhatsApp Reader.
+  // Members are read again at most every 10 minutes: with an older WhatsApp
+  // Reader each read is a request to WhatsApp, and messages don't need it.
+  const MEMBERS_EVERY = 10 * MIN;
   async function readGroup(t) {
     const gid = t.groupId;
-    const g = await callReader('get_group', { group_id: gid });
+    const before = live.raws[gid];
+    const reuse = before && before.participants && Date.now() - (live.lastMembersRead[gid] || 0) < MEMBERS_EVERY;
+    const g = reuse ? { id: gid, name: before.group.name, me: before.me, participants: before.participants }
+      : await callReader('get_group', { group_id: gid });
     const windowStart = Date.now() - (WINDOW_DAYS + 1) * DAY_MS;
     let since = windowStart;
     const seen = new Map();
@@ -1615,9 +1738,9 @@ RULES
     const have = new Set(fromReader.map(m => m.i));
     const kept = prev ? Object.values(prev.days || {}).flatMap(d => (d && d.messages) || [])
       .filter(m => m && m.i && !have.has(m.i) && m.t >= Math.max(windowStart, start)) : [];
-    const members = updateMembers(prevRaw ? prevRaw.members : prev ? prev.meta.members : null, participants,
+    const members = reuse ? prevRaw.members : updateMembers(prevRaw ? prevRaw.members : prev ? prev.meta.members : null, participants,
       live.lastMembersRead[gid] || (prev ? prev.meta.syncedAt : 0), now);
-    live.lastMembersRead[gid] = now;
+    if (!reuse) live.lastMembersRead[gid] = now;
     return {
       group: { id: g.id, name: g.name || t.groupName }, participants, members, names, bossIds: t.bossIds || [], me: g.me,
       messages: fromReader.concat(kept).sort((a, b) => a.t - b.t),

@@ -15,12 +15,12 @@ WhatsApp group
   → people in the company with the link see the last saved update on any device
 ```
 
-- **reader/** is a small Go program built on [whatsmeow](https://github.com/tulir/whatsmeow). It links once by QR code, keeps group messages, members, quoted replies, reactions, edits and deletions in `messages.db` next to the exe, and answers four read-only tools for the Claude desktop app: `status`, `list_groups`, `get_group`, `get_messages`. One-to-one chats are never stored. Setup steps for the person running it are in `reader/README.txt`.
+- **reader/** is a small Go program built on [whatsmeow](https://github.com/tulir/whatsmeow). It links once by QR code, keeps group messages, members, quoted replies, reactions, edits and deletions in `messages.db` next to the exe, and answers four read-only tools for the Claude desktop app: `status`, `list_groups`, `get_group`, `get_messages`. One-to-one chats are never stored. Setup steps for the person running it are in `reader/README.txt`. From 1.0.3, `get_group` answers from its saved member list while it is under an hour old (group change events keep it current) and spaces real requests to WhatsApp at least 2 seconds apart, pausing 10 minutes if WhatsApp says to slow down. The dashboard also reads members at most every 10 minutes per group, and spaces them 1.5 seconds apart for an older reader.
 - **dashboard/** is the artifact. On the computer running the reader it reads live and saves to the page's storage. Everywhere else it shows the saved copy. Claude reads each new instruction once (through the viewer's own Claude, no API key) to decide who must reply, whether there is a task, its owner and deadline.
 
 ## Rules the dashboard uses
 
-- Groups are added from "Groups and names": search the linked phone's groups (sorted by newest group, recent activity or name; newest needs WhatsApp Reader 1.0.2), tick several, then pick each one on the left and tick who gives instructions there. "Use these instruction-givers in every selected group they're in" copies the ticks to the other groups. **Select all N shown** ticks every group the search and filter leave on screen (more than 20 at once asks for a second click). **Hide groups with 0 members** (on by default, remembered on that computer) leaves out groups the phone has left or that were deleted.
+- Groups are added from "Groups and names": search the linked phone's groups (sorted by newest group, recent activity or name; newest needs WhatsApp Reader 1.0.2), tick several, then pick each one on the left and tick who gives instructions there. "Use these instruction-givers in every selected group they're in" copies the ticks to the other groups. **Select all N shown** ticks every group the search and filter leave on screen (more than 20 at once asks for a second click). **Hide groups with 0 members** (on by default, remembered on that computer) leaves out groups the phone has left or that were deleted. **Default instruction-givers** (search people by name or number, pick one or more) are ticked in every selected group they're in and saved in `settings/givers`; groups with none of them are left for a person to pick, and **Next group to pick** steps through those. A group picked by hand is never changed by the defaults.
 - Each tracked group has its own instruction-givers, chosen at setup. Everyone else in that group is tracked. A message to everyone means the team, not the other givers, but when one giver asks another by name or @mention (Juan: "Cherry can you do this?") the one asked is tracked like anyone else. Groups can be added, edited or dropped later from "Groups and names" in the sidebar.
 - People are matched by phone number, so someone in two groups has one record. The top of the page switches between all groups and one, and a "From" filter shows only one instruction-giver's messages (for example only the CEO's, or only the COO's).
 - A quoted reply or a reaction answers that one message. Any other message answers everything still open for that person before it.
@@ -36,7 +36,7 @@ WhatsApp group
 
 ## Download
 
-`release/whatsapp-reader.exe` is WhatsApp Reader 1.0.2 for Windows, ready to use; setup steps are in `reader/README.txt`. Its SHA-256 is in `release/SHA256SUMS.txt`, and `reader/build.sh` rebuilds the same file byte for byte from `reader/`.
+`release/whatsapp-reader.exe` is WhatsApp Reader 1.0.3 for Windows, ready to use; setup steps are in `reader/README.txt`. Its SHA-256 is in `release/SHA256SUMS.txt`, and `reader/build.sh` rebuilds the same file byte for byte from `reader/`.
 
 ## Building
 
@@ -61,6 +61,7 @@ node dashboard/test/e2e-sort.js  # sorting the group list: newest groups, recent
 node dashboard/test/e2e-draft.js  # Draft reply as Juan: what Claude is asked, Copy, Write another, no Claude
 node dashboard/test/e2e-leave.js  # Back to dashboard from Groups to track, with nothing tracked yet (run e2e-addmany.js first)
 node dashboard/test/e2e-pickall.js  # Select all shown, the second click over 20, and hiding 0-member groups
+node dashboard/test/e2e-givers.js  # default instruction-givers, picks made by hand, next group to pick, member reads spaced out
 node dashboard/test/anyone.test.js  # questions anyone can answer: first answer closes it, nobody else owes it
 node dashboard/test/e2e-anyone.js  # the same on the page, plus Mark as answered
 node dashboard/test/judge.test.js  # Claude's reading of replies, using its real answers to a sample thread (test/judge-sample.json)

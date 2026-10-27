@@ -1,4 +1,4 @@
-WhatsApp Reader 1.0.2
+WhatsApp Reader 1.0.3
 =====================
 
 WhatsApp Reader links to your phone the same way WhatsApp Web does and saves
