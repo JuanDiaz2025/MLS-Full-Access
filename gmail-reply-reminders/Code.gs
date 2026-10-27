@@ -11,7 +11,7 @@
  * who sent it, to whom, when, and the message id. It cannot open bodies or
  * attachments, and Juan installs nothing. Setup steps are in README.md.
  *
- * It runs every 15 minutes on Google's servers. No Claude, no WhatsApp.
+ * It runs every few minutes on Google's servers. No Claude, no WhatsApp.
  */
 
 const CONFIG = {
@@ -21,8 +21,12 @@ const CONFIG = {
   TEAM_DOMAIN: 'twinhomebuyer.com',
   // addresses never reminded, such as group lists
   IGNORE: [],
-  // a reminder once each of these waits has passed, then no more
-  REMIND_AFTER_HOURS: [4, 24, 48],
+  // a reminder once each of these waits has passed, in minutes, then no more.
+  // 240 = 4 hours, 1440 = 1 day, 2880 = 2 days. For a quick test: [1, 5, 10].
+  REMIND_AFTER_MINUTES: [240, 1440, 2880],
+  // how often it checks, in minutes: 1, 5, 10, 15 or 30. A reminder goes out
+  // within this long of being due. Run installTrigger again after changing it.
+  CHECK_EVERY_MINUTES: 5,
   // emails older than this are left alone
   LOOKBACK_DAYS: 7,
   // Juan can put this Gmail label on an email that needs no reply
@@ -33,13 +37,14 @@ const CONFIG = {
   ONLY_THREADS_STARTED: true,
   // emails whose subject starts with one of these need no reply
   SKIP_SUBJECT_PREFIXES: ['fyi'],
-  // no reminders are sent between these hours where the person is (they
-  // wait until morning there)
-  QUIET_FROM_HOUR: 20,
-  QUIET_TO_HOUR: 8,
-  // everyone's time zone, unless listed below
+  // Off (both 0): everyone gets the reminder as soon as it's due, day or
+  // night, wherever they are. To hold reminders overnight instead, set for
+  // example 20 and 8: nothing between 8 PM and 8 AM in the person's time zone.
+  QUIET_FROM_HOUR: 0,
+  QUIET_TO_HOUR: 0,
+  // the time zone used for the time shown in the email (and for quiet hours,
+  // if they're on), unless the person is listed below
   TIME_ZONE: 'Asia/Manila',
-  // people somewhere else, for example the US team
   PEOPLE_TIME_ZONES: {
     'bryan@twinhomebuyer.com': 'America/Los_Angeles',
   },
@@ -47,7 +52,8 @@ const CONFIG = {
   DRY_RUN: true,
 };
 
-const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 // ---------------- reading the headers (pure, tested in test/) ----------------
@@ -123,7 +129,7 @@ function pendingInThread(thread, watch, cfg, now, skipLabelId) {
 
 // How many reminders are due after waiting this long.
 function stageFor(waitMs, cfg) {
-  return cfg.REMIND_AFTER_HOURS.filter(h => waitMs >= h * HOUR).length;
+  return cfg.REMIND_AFTER_MINUTES.filter(m => waitMs >= m * MINUTE).length;
 }
 
 function timeZoneFor(email, cfg) {
@@ -132,6 +138,7 @@ function timeZoneFor(email, cfg) {
 
 function isQuietHour(hour, cfg) {
   const a = cfg.QUIET_FROM_HOUR, b = cfg.QUIET_TO_HOUR;
+  if (a === b) return false; // off
   return a > b ? hour >= a || hour < b : hour >= a && hour < b;
 }
 
@@ -152,7 +159,7 @@ function buildReminder(person, senderName, items, cfg, formatTime) {
   const n = items.length;
   const subject = n === 1 ? senderName + ' is waiting for your reply' : senderName + ' is waiting for your reply to ' + n + ' emails';
   const lines = items.map(it => senderName + ' emailed you on ' + formatTime(it.since) + '. Open it: ' + gmailLink(person.email, it.messageId));
-  const total = cfg.REMIND_AFTER_HOURS.length;
+  const total = cfg.REMIND_AFTER_MINUTES.length;
   const stage = Math.max.apply(null, items.map(it => it.stage));
   const body = 'Hi ' + firstName(person) + ',\n\n'
     + (n === 1 ? senderName + ' sent you an email and is still waiting for your reply.\n\n' : senderName + ' sent you ' + n + ' emails that are still waiting for your reply.\n\n')
@@ -352,9 +359,11 @@ function sendSampleToMe() {
 }
 
 function installTrigger() {
+  const every = CONFIG.CHECK_EVERY_MINUTES;
+  if ([1, 5, 10, 15, 30].indexOf(every) < 0) throw new Error('CHECK_EVERY_MINUTES must be 1, 5, 10, 15 or 30.');
   removeTrigger();
-  ScriptApp.newTrigger('run').timeBased().everyMinutes(15).create();
-  console.log('Running every 15 minutes.');
+  ScriptApp.newTrigger('run').timeBased().everyMinutes(every).create();
+  console.log('Checking every ' + every + ' minute' + (every === 1 ? '' : 's') + '.');
 }
 
 function removeTrigger() {
@@ -362,5 +371,5 @@ function removeTrigger() {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { CONFIG, parseAddresses, toMessage, pendingInThread, stageFor, isQuietHour, timeZoneFor, gmailLink, buildReminder, dueReminders, reminderKey, HOUR, DAY };
+  module.exports = { CONFIG, MINUTE, parseAddresses, toMessage, pendingInThread, stageFor, isQuietHour, timeZoneFor, gmailLink, buildReminder, dueReminders, reminderKey, HOUR, DAY };
 }

@@ -68,6 +68,8 @@ const ctx = {
   MailApp: { sendEmail: o => sent.push(o) },
 };
 vm.runInNewContext(src + '\n;this.CONFIG = CONFIG; this.run = run;', ctx);
+// the part below tests quiet hours, so turn them on
+ctx.CONFIG.QUIET_FROM_HOUR = 20; ctx.CONFIG.QUIET_TO_HOUR = 8;
 const check = (label, ok, got) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${got !== undefined ? ' | ' + got : ''}`); if (!ok) process.exitCode = 1; };
 
 // dry run: logs, sends nothing, records nothing
@@ -100,4 +102,12 @@ now = Date.UTC(2026, 9, 29, 0, 30); // 8:30 AM Manila, 5:30 PM California
 ctx.run();
 const morning = sent.slice(2).map(s => s.to).sort().join(',');
 check('Manila morning: Mike, Cherry again, and Bryan\'s 24-hour one', morning === 'bryan@twinhomebuyer.com,cherry@twinhomebuyer.com,mike@twinhomebuyer.com', morning);
+// quiet hours off (the default): Carlos in Manila gets his at 3 AM Manila, as soon as it's due
+ctx.CONFIG.QUIET_FROM_HOUR = 0; ctx.CONFIG.QUIET_TO_HOUR = 0;
+now = Date.UTC(2026, 9, 29, 19, 0); // 3 AM Manila
+threads.t7 = [juanMsg('m8', 'Carlos <carlos@twinhomebuyer.com>', 4.1)]; order.unshift('t7');
+const before3am = sent.length;
+ctx.run();
+const at3am = sent.slice(before3am).map(s => s.to);
+check('quiet hours off: Carlos gets it at 3 AM his time, on time', at3am.includes('carlos@twinhomebuyer.com'), at3am.join(','));
 console.log(process.exitCode ? 'FAILED' : 'all checks passed');

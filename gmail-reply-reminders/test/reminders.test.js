@@ -58,6 +58,7 @@ console.log('2-6 outside, Cc, lists, replies to others, label, FYI, old: skipped
 
 // 7. stages: at 4h, 24h and 48h, then no more; each stage sent once; one email per person
 assert.strictEqual(JSON.stringify([3, 4, 23, 24, 47, 48, 200].map(h => R.stageFor(h * HOUR, cfg))), '[0,1,1,2,2,3,3]');
+assert.strictEqual(JSON.stringify([0.5, 1, 4, 5, 9, 10].map(m => R.stageFor(m * R.MINUTE, { ...cfg, REMIND_AFTER_MINUTES: [1, 5, 10] }))), '[0,1,1,2,2,3]');
 const pend = [
   { email: 'cherry@twinhomebuyer.com', name: 'Cherry Ann', since: now - 5 * HOUR, messageId: 'a@m', senderName: 'Juan Diaz' },
   { email: 'cherry@twinhomebuyer.com', name: 'Cherry Ann', since: now - 30 * HOUR, messageId: 'b@m', senderName: 'Juan Diaz' },
@@ -71,10 +72,12 @@ assert.strictEqual(R.dueReminders(pend, sent, cfg, now).length, 0, 'nothing is s
 // 20 hours later: the 5-hour one passes 24h (2nd reminder), the 30-hour one passes 48h (3rd)
 assert.strictEqual(JSON.stringify(R.dueReminders(pend, sent, cfg, now + 20 * HOUR)[0].items.map(it => it.stage)), '[2,3]');
 assert.strictEqual(R.dueReminders(pend, { 'cherry@twinhomebuyer.com|a@m': 3, 'cherry@twinhomebuyer.com|b@m': 3, 'mike@twinhomebuyer.com|c@m': 3 }, cfg, now + 500 * HOUR).length, 0, 'no more after the 3rd');
-console.log('7 stages 4h/24h/48h, once each, one email per person');
+console.log('7 stages 4h/24h/48h (or minutes), once each, one email per person');
 
-// 8. quiet hours 8 PM to 8 AM
-assert.strictEqual(JSON.stringify([7, 8, 19, 20, 23, 0].map(h => R.isQuietHour(h, cfg))), '[true,false,false,true,true,true]');
+// 8. quiet hours are off by default; when set to 8 PM to 8 AM they hold reminders overnight
+assert.ok([0, 3, 8, 12, 20, 23].every(h => !R.isQuietHour(h, cfg)), 'off by default');
+const night = { ...cfg, QUIET_FROM_HOUR: 20, QUIET_TO_HOUR: 8 };
+assert.strictEqual(JSON.stringify([7, 8, 19, 20, 23, 0].map(h => R.isQuietHour(h, night))), '[true,false,false,true,true,true]');
 
 // 9. the reminder never carries the subject or the content
 const mail = R.buildReminder({ email: 'cherry@twinhomebuyer.com', name: 'Cherry Ann' }, 'Juan Diaz',

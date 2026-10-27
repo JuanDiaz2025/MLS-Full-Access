@@ -14,7 +14,7 @@ When Juan emails someone on the team and they haven't replied, this emails them 
 
 The reminder never includes the email's subject or content. The link opens the email in the person's own Gmail.
 
-It's a Google Apps Script that runs every 15 minutes on Google's servers. It doesn't use Claude or WhatsApp, and it costs nothing.
+It's a Google Apps Script that checks every few minutes (5 by default) on Google's servers. It doesn't use Claude or WhatsApp, and it costs nothing.
 
 ## What it can see
 
@@ -30,8 +30,10 @@ Reading Juan's email headers falls under the same sign-off as the WhatsApp track
 - Only people in **To** at **@twinhomebuyer.com** owe a reply. Cc, outside addresses and anything in `IGNORE` (group lists like team@) don't.
 - Someone has replied when they write in the same email thread after Juan. A reply in a new thread, a call or a WhatsApp message doesn't count. For emails like that, Juan can add a **No reply needed** label in his Gmail and the email is skipped.
 - Subjects starting with **FYI** are skipped.
-- Reminders go out after **4, 24 and 48 hours**, then stop. Each one is sent once. Someone with several emails waiting gets one reminder listing them all.
-- Nothing is sent between **8 PM and 8 AM** in the person's own time zone. Reminders due at night go out in their morning. Everyone is on Manila time unless listed in `PEOPLE_TIME_ZONES` (Bryan is set to California).
+- Reminders go out after **4 hours, 1 day and 2 days** (`REMIND_AFTER_MINUTES: [240, 1440, 2880]`), then stop. Each one is sent once. Someone with several emails waiting gets one reminder listing them all.
+- It checks every **5 minutes** (`CHECK_EVERY_MINUTES`: 1, 5, 10, 15 or 30), so a reminder goes out within that long of being due.
+- Everyone gets the reminder **as soon as it's due, wherever they are**, day or night. Quiet hours are off (`QUIET_FROM_HOUR` and `QUIET_TO_HOUR` both 0). Setting them to, for example, 20 and 8 holds reminders between 8 PM and 8 AM in each person's time zone.
+- The time shown in the email is in the person's time zone: Manila unless they're listed in `PEOPLE_TIME_ZONES` (Bryan is set to California).
 - Emails older than **7 days** are left alone.
 
 All of these are at the top of `Code.gs` under `CONFIG`.
@@ -66,7 +68,7 @@ Done once, in about 20 minutes. It needs a **super admin** of the twinhomebuyer.
 10. **Project Settings → Script properties → Add script property.** Property: `SA_KEY`. Value: the **whole contents** of the JSON key file from step 5. Save, then delete the downloaded file.
 11. In the editor, pick **checkSetup** and press **Run**. Allow the permissions it asks for. The log should say something like `juan@twinhomebuyer.com: 23 threads with sent mail in the last 7 days, 2 replies still owed by: cherry@...`. It sends nothing.
 12. Run **sendSampleToMe** to get one sample reminder in your own inbox.
-13. Run **installTrigger**. It now runs every 15 minutes, but `DRY_RUN` is still `true`, so it only writes "would email ..." to **Executions**. Check that for a day.
+13. Run **installTrigger**. It now checks every `CHECK_EVERY_MINUTES` minutes, but `DRY_RUN` is still `true`, so it only writes "would email ..." to **Executions**. Check that for a day.
 14. When it looks right, change `DRY_RUN: true` to `DRY_RUN: false` at the top of `Code.gs` and save. Reminders go out from the next run.
 
 To stop it, run **removeTrigger**. To watch someone else's sent emails too, add their address to `WATCH`.
