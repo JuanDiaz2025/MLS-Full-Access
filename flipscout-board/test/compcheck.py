@@ -40,7 +40,13 @@ does the lead's own page. Pages read are kept in <out>/compfacts.js and not
 read again (a sale does not change; a lead's page is re-read after 30 days):
 
     window.__COMPFACTS__ = {v, built, by: {MLS: {lat, lng, sold, price, sqft, bd, ba, yr, lot, rem, at}},
-                            miss: {MLS: [tries, day, why]}}
+                            miss: {MLS: [tries, day, why]}, geo: {MLS: {addr, lat, lng, at}}}
+
+A lead with no public page of its own (about 49 sellers keep theirs off the
+public site) has no map pin there, so its address is looked up once with the
+US Census geocoder (geo; lat/lng null when it found no match, tried again
+after LEAD_DAYS or when the address changes), or every comp would read "no
+location".
 
 and the result for each lead goes to <out>/teamcomps.js, which only the Test
 board reads:
@@ -58,11 +64,11 @@ b the kitchen and bath (R remodeled, L light update, '' not said), x why the
 comp fails a rule other than the radius, w the remarks' words that decided the
 condition.
 """
-import datetime, html, json, math, os, re, sys, time
+import datetime, html, json, math, os, re, sys, time, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from thumbs import candidates, street_no, load_data  # noqa: E402
+from thumbs import UA, candidates, street_no, load_data  # noqa: E402
 from listing import page, remarks_of  # noqa: E402
 
 TRIES = 3            # a comp with no public page is tried on this many days, then left
@@ -221,6 +227,24 @@ def fetch(job):
             continue
         return mls, facts(s, title), ''
     return mls, None, why
+
+
+GEOCODER = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=json&address='
+
+
+def geocode(job):
+    """(MLS #, address) -> (MLS #, {addr, lat, lng} or None on a network error):
+    the US Census geocoder's first match; lat/lng None when there is none."""
+    m, addr = job
+    try:
+        req = urllib.request.Request(GEOCODER + urllib.parse.quote(addr), headers={'User-Agent': UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            hits = (json.loads(r.read().decode('utf8')).get('result') or {}).get('addressMatches') or []
+    except Exception:
+        return m, None
+    c = (hits[0].get('coordinates') or {}) if hits else {}
+    ok = isinstance(c.get('x'), (int, float)) and isinstance(c.get('y'), (int, float))
+    return m, {'addr': addr, 'lat': round(c['y'], 6) if ok else None, 'lng': round(c['x'], 6) if ok else None}
 
 
 def miles(a, b):
@@ -470,19 +494,42 @@ def main():
                 ms = CF['miss'].get(m, [0, ''])
                 CF['miss'][m] = [ms[0] + 1, tday, why[:80]]
                 miss += 1
+    # a lead with no map pin of its own: its address, from the Census geocoder
+    CF.setdefault('geo', {})
+    def unplaced(m):
+        f = CF['by'].get(m) or {}
+        if f.get('lat') is not None:
+            return False
+        g = CF['geo'].get(m)
+        return not g or g.get('addr') != leads[m]['addr'] or (
+            g.get('lat') is None and (today - datetime.date.fromisoformat(g.get('at', '2000-01-01'))).days > LEAD_DAYS)
+    gjobs = [(m, leads[m]['addr']) for m in by if leads[m].get('addr') and unplaced(m)]
+    placed = 0
+    with ThreadPoolExecutor(4) as ex:
+        for m, g in ex.map(geocode, gjobs):
+            if g:
+                g['at'] = tday
+                CF['geo'][m] = g
+                placed += g['lat'] is not None
     CF['v'], CF['built'] = 1, time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     with open(cf_path, 'w', encoding='utf8') as fh:
         fh.write('window.__COMPFACTS__ = ' + json.dumps(CF, separators=(',', ':')) + ';\n')
 
     res = {}
     for m, c in by.items():
-        res[m] = judge(leads[m], CF['by'].get(m) or {}, c['list'], CF['by'], today)
+        subj = dict(CF['by'].get(m) or {})
+        g = CF['geo'].get(m) or {}
+        if subj.get('lat') is None and g.get('lat') is not None and g.get('addr') == leads[m]['addr']:
+            subj['lat'], subj['lng'] = g['lat'], g['lng']
+        res[m] = judge(leads[m], subj, c['list'], CF['by'], today)
     T = {'v': 2, 'built': CF['built'], 'today': tday, 'rules': RULES, 'radii': RADII, 'steps': MARKET_STEPS, 'by': res}
     with open(os.path.join(out, 'teamcomps.js'), 'w', encoding='utf8') as fh:
         fh.write('window.__TEAMCOMPS__ = ' + json.dumps(T, separators=(',', ':')) + ';\n')
     n_arv = sum(1 for r in res.values() if r['st'] == 'ARV')
     print('pages read: %d new, %d with no page, %d errors, %d on file · %ds' % (
         got, miss, errs, len(CF['by']), time.time() - t0))
+    if gjobs:
+        print('leads with no map pin of their own, placed by their address: %d of %d' % (placed, len(gjobs)))
     print('teamcomps.js: %d leads · %d with an ARV under the team rules · %d NEED INFO · %d sales from the app\'s Team comps search (%d leads)' % (
         len(res), n_arv, len(res) - n_arv, n_team, len(team)))
     print('NEW FILES: compfacts.js teamcomps.js')

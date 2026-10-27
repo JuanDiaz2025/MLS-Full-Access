@@ -455,6 +455,12 @@ window but is not among them is in another MLS area and is out ("a different
 MLS area"), which stands in for the same side of the freeways. A lead with no
 Lead Area is not area-checked.
 
+A lead with no public MLS page of its own (the seller kept it off the public
+site) has no map pin to measure from, so its address is looked up once with
+the US Census geocoder and kept in compfacts.js's `geo` (27 Oct: 17 of 18
+placed; without it, 2717 Glen Evans Ct's 39 area sales all read "no
+location").
+
 Not checked yet: the county square footage (drop a comp more than 10% off;
 only Matrix's Tax tab has it).
 
