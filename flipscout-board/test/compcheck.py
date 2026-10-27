@@ -229,6 +229,8 @@ def fetch(job):
     return mls, None, why
 
 
+# a catch-all MLS area ("999 - Other Area") is no side of any freeway: not area-checked
+CATCHALL_AREA = re.compile(r'\b(other area|not defined|undefined|unknown|out of area|outside area)\b', re.I)
 GEOCODER = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=json&address='
 
 
@@ -442,6 +444,7 @@ def main():
     by = {m: {'list': list(c['list'])} for m, c in (comps.get('by') or {}).items() if m in leads and c and c.get('list')}
     # the app's Team comps search (v1.75, the prod sheet's "Team Comps" tab), added to the saved comps
     team, areas = load_team(opt('--xlsx', ''))
+    areas = {m: a for m, a in areas.items() if not CATCHALL_AREA.search(a[0])}
     for m, (area, _) in areas.items():
         if m in leads:
             leads[m]['area'] = area

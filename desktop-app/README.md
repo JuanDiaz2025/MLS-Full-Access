@@ -131,7 +131,9 @@ install (creates a desktop shortcut) or run the portable exe directly.
       tab's **Lead Area** column, looked up once and read back from there.
    2. **Every single-family home sold in that area** (v1.75.2) with a Sale Date
       in the last 6 months (a search that finds nothing is tried once more on
-      List Date over 9 months), or in the lead's zip when no area was found.
+      List Date over 9 months), or in the lead's zip when no area was found or
+      the area is the MLS's catch-all (v1.75.4: "999 - Other Area", 1,354
+      sales in 6 months for 4309 Nelson Dr, is no neighbourhood).
       Matrix's own "within … miles of" box measures from **My Location**, a place
       set in a pop-up, so it is not used: the board measures each sale's miles
       from its map pin and widens the radius itself (San Francisco ½ → 1 → 2 mi;

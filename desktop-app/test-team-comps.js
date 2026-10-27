@@ -69,6 +69,8 @@ eq(big['Sales Found'], 400, 'the count says how many were found before trimming'
 
 // ---- v1.75.1: the lead's MLS area, same-area marks, the weekly skip ----
 eq(core.TEAM_HEADERS.slice(-2), ['Lead Area', 'Area Sales'], 'the area columns come last');
+eq(['11504 - Cordelia', '2619 - Oakland Zip Code 94619', '999 - Other Area', '699 - Not Defined', '', null].map(core.teamRealArea),
+  [true, true, false, false, false, false], 'a catch-all area ("999 - Other Area") is no neighbourhood: that lead is searched by its zip');
 eq(core.teamRecord({ mls: 'L', addr: 'a', area: '330 - Dumbarton Etc.' }, 'city', 'MLS area', [], '', '2026-10-27')['Lead Area'], '330 - Dumbarton Etc.', 'the record carries the lead\'s area');
 eq(rec['Lead Area'], '', 'no area found -> blank');
 eq(core.teamFresh('2026-10-27', '2026-10-27'), true, 'searched today: skipped');

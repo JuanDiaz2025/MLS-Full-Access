@@ -799,6 +799,12 @@ function teamFits(rows, lead) {
     && r.dom !== 0);
 }
 
+/** Whether an MLS area is a real neighbourhood. A catch-all such as "999 -
+ *  Other Area" (4309 Nelson Dr, 27 Oct: 1,354 sales in 6 months) is no side of
+ *  any freeway: a lead in one is searched by its zip, and not area-checked. */
+const TEAM_CATCHALL_AREA = /\b(other area|not defined|undefined|unknown|out of area|outside area)\b/i;
+function teamRealArea(area) { return !!String(area || '').trim() && !TEAM_CATCHALL_AREA.test(area); }
+
 /** Whether a lead last searched on `runOn` (YYYY-MM-DD) is still fresh on
  *  `today`: searched in the last TEAM_FRESH_DAYS days. */
 function teamFresh(runOn, today) {
@@ -2185,7 +2191,7 @@ module.exports = {
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   compRows, compBand, classifyComp, compArv, compSummary, compsJson, parseCompReport, JS_SCRAPE_SOLD,
   TEAM_TAB, TEAM_HEADERS, TEAM_SOLD_MONTHS, TEAM_LIST_MONTHS, TEAM_PAGES, TEAM_FRESH_DAYS, teamMarket, teamRows, teamFits, teamRecord,
-  teamFresh, teamFindArea, teamSameArea, teamSettledCount,
+  teamFresh, teamFindArea, teamSameArea, teamSettledCount, teamRealArea,
   COMP_BANDS, COMP_READ, COMP_LIST_MAX,
   boardLead,
   redfinUrlFrom,

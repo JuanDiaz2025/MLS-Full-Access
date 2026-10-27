@@ -3193,11 +3193,14 @@ ipcMain.handle('team-comps', async (_e, opts) => {
     const fresh = new Set(), areaOf = {};
     try {
       const tr = await gsheets.readAll(token, g.sheetId, core.TEAM_TAB);
-      const th = (tr[0] || []).map(h => String(h).trim()), ki = th.indexOf('MLS #'), di = th.indexOf('Team Comps Run On'), ai = th.indexOf('Lead Area');
+      const th = (tr[0] || []).map(h => String(h).trim()), ki = th.indexOf('MLS #'), di = th.indexOf('Team Comps Run On'), ai = th.indexOf('Lead Area'),
+        si = th.indexOf('Searched');
       if (ki >= 0) tr.slice(1).forEach(r => {
-        const m = String(r[ki] || '').trim().toUpperCase();
-        // a lead whose area was not found (searched by zip instead) is tried again next run
-        if (di >= 0 && core.teamFresh(r[di], tday) && ai >= 0 && String(r[ai] || '').trim()) fresh.add(m);
+        const m = String(r[ki] || '').trim().toUpperCase(), area = ai >= 0 ? String(r[ai] || '').trim() : '';
+        // tried again next run: a lead whose area was not found (searched by zip
+        // instead), and one v1.75.3 searched across a catch-all area
+        const redo = !area || (si >= 0 && /^MLS area/.test(String(r[si] || '')) && !core.teamRealArea(area));
+        if (di >= 0 && core.teamFresh(r[di], tday) && !redo) fresh.add(m);
         if (ai >= 0 && String(r[ai] || '').trim()) areaOf[m] = String(r[ai]).trim();
       });
     } catch (_) { /* no tab yet */ }
@@ -3232,16 +3235,19 @@ ipcMain.handle('team-comps', async (_e, opts) => {
         } catch (e) { log('    MLS area not found — ' + e.message + '; searching its zip instead', 'warn'); }
         if (control.stopped) { log('    stopped part-way — not saved; the next run does it whole'); break; }
       } else log(`    MLS area: ${lead.area} (from the tab)`);
+      // a catch-all area ("999 - Other Area") is no neighbourhood: its zip is searched instead
+      const useArea = core.teamRealArea(lead.area);
+      if (lead.area && !useArea) log(`    "${lead.area}" is the MLS's catch-all, not a neighbourhood — searching its zip instead`, 'warn');
       try {
-        if (!lead.area && !zip) throw new Error('no MLS area and no zip in its address');
-        const res = await teamSoldSearch(lead.area ? { area: lead.area } : { zip });
+        if (!useArea && !zip) throw new Error('no MLS area and no zip in its address');
+        const res = await teamSoldSearch(useArea ? { area: lead.area } : { zip });
         if (control.stopped) stoppedMid = true;
         else {
-          searched = lead.area ? 'MLS area' : 'zip ' + zip; applyFails = 0;
+          searched = useArea ? 'MLS area' : 'zip ' + zip; applyFails = 0;
           found = core.teamRows(res.rows, mls);
           // every sale on every page was read: only then can a comp missing from them be called another area's
           complete = res.rows.length >= core.num(res.count);
-          if (lead.area) core.teamSameArea(found, found.map(x => x.mls));
+          if (useArea) core.teamSameArea(found, found.map(x => x.mls));
           fits = core.teamFits(found, lead);
           log(`    ${searched}: ${res.count} ${res.by} · ${found.length} read · ${fits.length} fit on size, beds, age and days on market`, fits.length ? 'good' : 'info');
           if (dry) log(`    columns read: ${['dom', 'age', 'city'].filter(k => res.rows.some(x => x[k])).join(', ') || 'no DOM, Age or City'}`
@@ -3259,7 +3265,7 @@ ipcMain.handle('team-comps', async (_e, opts) => {
       if (dry) { const dir = await saveTeamDebug('check'); log(`  The search page is saved in ${dir} — send it to Claude if anything above looks wrong.`, 'good'); break; }
       if (blocked) break;
       if (stoppedMid) { log('    stopped part-way — not saved; the next run does it whole'); break; }
-      batch.push(core.teamRecord(lead, market, searched, fits, note, note ? '' : tday, lead.area && !note && complete ? found : null));
+      batch.push(core.teamRecord(lead, market, searched, fits, note, note ? '' : tday, useArea && !note && complete ? found : null));
       done++; sales += fits.length;
       if (batch.length >= 5) await flush();
     }
