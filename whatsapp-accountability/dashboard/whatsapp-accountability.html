@@ -231,6 +231,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .setup .card-b { padding: 22px 24px; }
 .setup h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; font-family: var(--f-display); font-weight: 700; font-size: 20px; text-wrap: balance; }
 .setup h2 .ic { color: var(--accent); width: 22px; height: 22px; }
+.setup-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .setup h3 { margin: 22px 0 8px; font-family: var(--f-display); font-weight: 700; font-size: 15px; }
 .setup p { margin: 4px 0; color: var(--ink-2); max-width: 70ch; }
 .setup .dlg-f { margin-top: 18px; }
@@ -1307,7 +1308,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
   const trackedGroups = () => saved.tracking ? (saved.tracking.groups || [])
     : saved.legacySource ? [{ groupId: saved.legacySource.groupId, groupName: saved.legacySource.groupName, bossIds: saved.legacySource.bossIds || [] }] : [];
   const trackingKnown = () => !cap.db || (saved.loaded.tracking && saved.loaded.source);
-  const needsSetup = () => live.on && (!live.status || !live.status.linked || (!trackedGroups().length && trackingKnown()) || state.setup);
+  const needsSetup = () => live.on && (!live.status || !live.status.linked || (!trackedGroups().length && trackingKnown() && !state.skipSetup) || state.setup);
   const looksLikeNumber = n => !n || /^\+?[\d\s()-]+$/.test(n);
   const nameFor = (id, fallback) => saved.names[id] || (looksLikeNumber(fallback) ? (fallback || '+' + id) : fallback);
 
@@ -1387,7 +1388,8 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
 
     const others = untrackedGroups();
     const adding = !state.editGroup;
-    const head = `<h2>${ic('link')}Groups to track</h2>
+    const head = `<div class="setup-top"><h2>${ic('link')}Groups to track</h2>
+        <button class="btn small" type="button" data-action="leave-setup">Back to dashboard</button></div>
       <p>WhatsApp Reader is linked to +${esc(st.phone)}. It only reads; nothing is ever sent.</p>`;
     const msg = `<p class="dlg-msg err" id="setup-msg" role="status">${esc(live.setupError || '')}</p>`;
     if (adding && state.addStep === 'setup' && state.pickGroups.size) {
@@ -1523,7 +1525,7 @@ if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromR
     const pill = document.getElementById('snap');
     const note = document.getElementById('side-note');
     const foot = document.getElementById('foot');
-    document.getElementById('change-group').hidden = !(live.on && live.status && live.status.linked && trackedGroups().length);
+    document.getElementById('change-group').hidden = !(live.on && live.status && live.status.linked);
     // clearing is for the page's owner and editors only
     document.getElementById('open-clear').hidden = !(cap.canEdit === true && src.mode !== 'sample' && trackedGroups().length);
     // only the computer running WhatsApp Reader can read it right away; elsewhere the saved copy updates by itself
@@ -2425,6 +2427,11 @@ RULES
     } else if (action === 'change-group') {
       state.setup = true; state.editGroup = null; state.setupBoss = null; state.setupNames = null; state.confirmRemove = null;
       resetAdding(); render(); loadGroups();
+    } else if (action === 'leave-setup') {
+      // nothing tracked yet: stay off this screen until Groups and names is opened again
+      if (!trackedGroups().length) state.skipSetup = true;
+      state.setup = false; state.editGroup = null; state.setupBoss = null; state.setupNames = null; state.confirmRemove = null;
+      resetAdding(); render(); window.scrollTo(0, 0);
     } else if (action === 'done-setup') {
       state.setup = false; state.editGroup = null; resetAdding(); render();
     } else if (action === 'cancel-edit') {

@@ -335,7 +335,7 @@
   const trackedGroups = () => saved.tracking ? (saved.tracking.groups || [])
     : saved.legacySource ? [{ groupId: saved.legacySource.groupId, groupName: saved.legacySource.groupName, bossIds: saved.legacySource.bossIds || [] }] : [];
   const trackingKnown = () => !cap.db || (saved.loaded.tracking && saved.loaded.source);
-  const needsSetup = () => live.on && (!live.status || !live.status.linked || (!trackedGroups().length && trackingKnown()) || state.setup);
+  const needsSetup = () => live.on && (!live.status || !live.status.linked || (!trackedGroups().length && trackingKnown() && !state.skipSetup) || state.setup);
   const looksLikeNumber = n => !n || /^\+?[\d\s()-]+$/.test(n);
   const nameFor = (id, fallback) => saved.names[id] || (looksLikeNumber(fallback) ? (fallback || '+' + id) : fallback);
 
@@ -415,7 +415,8 @@
 
     const others = untrackedGroups();
     const adding = !state.editGroup;
-    const head = `<h2>${ic('link')}Groups to track</h2>
+    const head = `<div class="setup-top"><h2>${ic('link')}Groups to track</h2>
+        <button class="btn small" type="button" data-action="leave-setup">Back to dashboard</button></div>
       <p>WhatsApp Reader is linked to +${esc(st.phone)}. It only reads; nothing is ever sent.</p>`;
     const msg = `<p class="dlg-msg err" id="setup-msg" role="status">${esc(live.setupError || '')}</p>`;
     if (adding && state.addStep === 'setup' && state.pickGroups.size) {
@@ -551,7 +552,7 @@
     const pill = document.getElementById('snap');
     const note = document.getElementById('side-note');
     const foot = document.getElementById('foot');
-    document.getElementById('change-group').hidden = !(live.on && live.status && live.status.linked && trackedGroups().length);
+    document.getElementById('change-group').hidden = !(live.on && live.status && live.status.linked);
     // clearing is for the page's owner and editors only
     document.getElementById('open-clear').hidden = !(cap.canEdit === true && src.mode !== 'sample' && trackedGroups().length);
     // only the computer running WhatsApp Reader can read it right away; elsewhere the saved copy updates by itself
@@ -1453,6 +1454,11 @@ RULES
     } else if (action === 'change-group') {
       state.setup = true; state.editGroup = null; state.setupBoss = null; state.setupNames = null; state.confirmRemove = null;
       resetAdding(); render(); loadGroups();
+    } else if (action === 'leave-setup') {
+      // nothing tracked yet: stay off this screen until Groups and names is opened again
+      if (!trackedGroups().length) state.skipSetup = true;
+      state.setup = false; state.editGroup = null; state.setupBoss = null; state.setupNames = null; state.confirmRemove = null;
+      resetAdding(); render(); window.scrollTo(0, 0);
     } else if (action === 'done-setup') {
       state.setup = false; state.editGroup = null; resetAdding(); render();
     } else if (action === 'cancel-edit') {

@@ -56,6 +56,7 @@ node dashboard/test/e2e-delete.js  # deleting one message, the deleted list, and
 node dashboard/test/e2e-addmany.js  # searching, ticking several groups, and setting each one up side by side
 node dashboard/test/e2e-sort.js  # sorting the group list: newest groups, recent activity, name
 node dashboard/test/e2e-draft.js  # Draft reply as Juan: what Claude is asked, Copy, Write another, no Claude
+node dashboard/test/e2e-leave.js  # Back to dashboard from Groups to track, with nothing tracked yet (run e2e-addmany.js first)
 ```
 
 ## Why a linked-device reader
