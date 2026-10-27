@@ -148,4 +148,6 @@ A Routine fires every hour in a fresh session and does exactly this:
    stops don't overlap. Delete any tagged event whose house is now RENOVATED,
    DATED, sold, pending or no longer has that slot.
 5. Commit and push `verdicts.json` only if it changed. Touch nothing else on
-   the calendar. If nothing changed, stop quietly.
+   the calendar. If nothing changed, stop quietly — **no reply at all**
+   (Bryan, 27 Oct: "too many messages"). Only report when a calendar event
+   was added or removed, in one line.
