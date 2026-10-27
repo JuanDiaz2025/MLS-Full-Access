@@ -17,6 +17,7 @@ const FIELDS = {
   zip: '#Fm9_Ctrl1780_TextBox',
   mls: '#Fm9_Ctrl75_TextBox',
   area: '#Fm9_Ctrl1740_LB',     // MLS Area (multi): team comps (v1.75.1)
+  saleDate: '#Fm9_Ctrl1164_TB', // range MM/DD/YYYY-MM/DD/YYYY, like List Date (seen 27 Oct)
 };
 
 const SEARCH_URL = 'https://search.mlslistings.com/Matrix/Search/Residential/ResidentialSearch';
@@ -732,21 +733,22 @@ function parseCompReport(text, mls) {
 // ---------- team comps (v1.75, for the Lead Board TEST only) ----------
 // Seth, 26-27 Oct, from Gen's comps; radius and window from Juan, 27 Oct: sold
 // homes within 1 mile in the last 6 months, the radius widened in the market's
-// own steps when too few fit. The app only finds the sales (a radius search,
-// one row per sale with its distance and days on market) and writes them to
-// their own "Team Comps" tab; the Test board's compcheck.py reads each sale's
-// remarks and applies the rest of the rules. Nothing here touches the Leads
-// tab or the ARV the real board shows.
+// own steps when too few fit, and (Seth) in the lead's own MLS area. The app
+// finds the sales (v1.75.2: every single-family home sold in the lead's MLS
+// area in the last 6 months, or its zip when the area is not found) and writes
+// the ones that fit on size, beds, age and days on market to their own "Team
+// Comps" tab; the Test board's compcheck.py measures each one's miles from its
+// map pin, reads its remarks and applies the rest of the rules. Matrix's own
+// radius box measures from "My Location", so it is not used. Nothing here
+// touches the Leads tab or the ARV the real board shows.
 const TEAM_TAB = 'Team Comps';
-// 'Lead Area' (v1.75.1) is last, where a sheet made by v1.75.0 widens to it
-const TEAM_HEADERS = ['MLS #', 'Address', 'Market', 'Radius Searched', 'Sales Found', 'Team Comps', 'Team Comps Run On', 'Note', 'Lead Area'];
-const TEAM_STEPS = { sf: [0.5, 1, 2], city: [1, 2], thin: [1, 2, 3, 5] };
-// a sale closed in the last 6 months was listed up to ~9 months ago; the close
-// date itself is checked by compcheck.py from each sale's page
+// 'Area Sales': every MLS # the area search found, fitting or not, so the board
+// knows a saved comp missing from it is outside the lead's area
+const TEAM_HEADERS = ['MLS #', 'Address', 'Market', 'Searched', 'Sales Found', 'Team Comps', 'Team Comps Run On', 'Note', 'Lead Area', 'Area Sales'];
+const TEAM_SOLD_MONTHS = 6;
+// when a Sale Date search finds nothing: a sale closed in the last 6 months
+// was listed up to ~9 months ago, and compcheck.py checks each close date
 const TEAM_LIST_MONTHS = 9;
-// widen while fewer than this many sales fit on size, beds, baths and age:
-// about half of them turn out light updates or silent on condition
-const TEAM_ENOUGH = 6;
 const TEAM_PAGES = 20;
 // Seth runs it daily: a lead searched in the last week is skipped, so a day's
 // run is the new comped leads plus the ones due again
@@ -832,15 +834,19 @@ function teamSameArea(rows, sameIds) {
   return rows;
 }
 
-/** The Team Comps tab's row for one lead. The sales list is compact JSON,
- *  nearest first, kept well under a cell's 50,000 characters. */
-function teamRecord(lead, market, radius, rows, note, today) {
-  const keep = rows.slice().sort((a, b) => (a.mi === '' ? 99 : a.mi) - (b.mi === '' ? 99 : b.mi));
+/** The Team Comps tab's row for one lead: `searched` says what was searched
+ *  ("MLS area", "zip 94534"), `rows` are the sales kept, as compact JSON kept
+ *  well under a cell's 50,000 characters (nearest first when Matrix gave
+ *  distances), and `areaFound`, when the lead's MLS area was searched, every
+ *  sale found there. */
+function teamRecord(lead, market, searched, rows, note, today, areaFound) {
+  const keep = rows.slice().sort((a, b) => (a.mi === '' || a.mi == null ? 99 : a.mi) - (b.mi === '' || b.mi == null ? 99 : b.mi));
   let l = keep, s = JSON.stringify(l);
   while (s.length > 45000 && l.length) { l = l.slice(0, -1); s = JSON.stringify(l); }
-  return { 'MLS #': lead.mls, 'Address': lead.addr || '', 'Market': market, 'Radius Searched': radius ? radius + ' mi' : '',
-    'Sales Found': rows.length, 'Team Comps': l.length ? s : '', 'Team Comps Run On': today, 'Note': note || '',
-    'Lead Area': lead.area || '' };
+  const ids = areaFound ? areaFound.map(r => r.mls).join(',') : '';
+  return { 'MLS #': lead.mls, 'Address': lead.addr || '', 'Market': market, 'Searched': searched || '',
+    'Sales Found': areaFound ? areaFound.length : rows.length, 'Team Comps': l.length ? s : '', 'Team Comps Run On': today, 'Note': note || '',
+    'Lead Area': lead.area || '', 'Area Sales': ids.length <= 45000 ? ids : '' };
 }
 
 /**
@@ -2158,7 +2164,7 @@ module.exports = {
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   compRows, compBand, classifyComp, compArv, compSummary, compsJson, parseCompReport, JS_SCRAPE_SOLD,
-  TEAM_TAB, TEAM_HEADERS, TEAM_STEPS, TEAM_LIST_MONTHS, TEAM_ENOUGH, TEAM_PAGES, TEAM_FRESH_DAYS, teamMarket, teamRows, teamFits, teamRecord,
+  TEAM_TAB, TEAM_HEADERS, TEAM_SOLD_MONTHS, TEAM_LIST_MONTHS, TEAM_PAGES, TEAM_FRESH_DAYS, teamMarket, teamRows, teamFits, teamRecord,
   teamFresh, teamFindArea, teamSameArea,
   COMP_BANDS, COMP_READ, COMP_LIST_MAX,
   boardLead,

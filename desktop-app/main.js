@@ -886,52 +886,16 @@ async function readSoldPages(maxPages) {
   return all;
 }
 
-// ---------- team comps (v1.75): a radius search, for the Lead Board TEST only ----------
-// The search form's "within ___ miles of ___" boxes. Matrix's control ids are
-// dynamic and this part of the form had not been seen live when this was
-// written, so the boxes are found by the words around them: two text boxes in
-// a block that says radius / within / distance / proximity / "miles of"; the
-// short one (or the one marked mi) takes the miles, the wide one the address.
-// Each gets a data-fs-radius mark so setInput can reach it.
-const JS_TEAM_RADIUS = `(() => {
-  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
-  const txt = e => (e ? (e.innerText || e.textContent || '') : '').replace(/\\s+/g, ' ').trim();
-  const boxes = [...document.querySelectorAll('input')].filter(i => vis(i) && /^(text|search|number|)$/i.test(i.getAttribute('type') || ''));
-  const near = i => {
-    const lab = i.id ? document.querySelector('label[for="' + CSS.escape(i.id) + '"]') : null;
-    const row = i.closest('tr, li, fieldset, div');
-    return [txt(lab), i.placeholder, i.title, i.getAttribute('aria-label'), txt(row).slice(0, 200)].filter(Boolean).join(' ').toLowerCase();
-  };
-  const own = i => [txt(i.nextElementSibling), i.nextSibling && i.nextSibling.textContent, i.placeholder, i.title].filter(Boolean).join(' ').toLowerCase();
-  const hits = boxes.filter(i => /\\bradius\\b|\\bwithin\\b|\\bproximity\\b|\\bdistance\\b|miles? (of|from)/.test(near(i)));
-  // a box in the same small block as one of those counts too (a bare "mi" box beside the address)
-  const cands = [...new Set(hits.flatMap(i => {
-    const c = i.closest('tr, li, fieldset, div'), group = c ? boxes.filter(b => c.contains(b)) : [];
-    return group.length && group.length <= 4 ? group : [i];
-  }))];
-  if (cands.length < 2) return { ok: false, cands: cands.length };
-  const mi = cands.find(i => /\\bmi(les?)?\\b/.test(own(i)) || (i.maxLength > 0 && i.maxLength <= 6) || i.getAttribute('type') === 'number')
-    || cands.slice().sort((a, b) => a.offsetWidth - b.offsetWidth)[0];
-  const addr = cands.filter(i => i !== mi).sort((a, b) => b.offsetWidth - a.offsetWidth)[0];
-  if (!mi || !addr) return { ok: false, cands: cands.length };
-  mi.setAttribute('data-fs-radius', 'mi'); addr.setAttribute('data-fs-radius', 'addr');
-  return { ok: true, mi: '[data-fs-radius="mi"]', addr: '[data-fs-radius="addr"]', miNear: near(mi).slice(0, 90), addrNear: near(addr).slice(0, 90) };
-})()`;
-// A radius part of the form that starts folded: click its heading or tab once.
-const JS_TEAM_RADIUS_OPEN = `(() => {
-  const el = [...document.querySelectorAll('a, button, legend, span, div, td')]
-    .find(e => e.children.length < 3 && /^(radius( search)?|search by radius|proximity( search)?|map search|location)$/i.test((e.textContent || '').trim()));
-  if (el) { el.click(); return (el.textContent || '').trim(); } return '';
-})()`;
-// What the search form holds, for fixing JS_TEAM_RADIUS from the user's
-// machine when it misses: every field with the words around it. Never a value
-// from a password box.
+// ---------- team comps (v1.75): the sold homes in a lead's MLS area, for the Lead Board TEST only ----------
+// What the search form holds, for fixing the team comps search from the
+// user's machine: every field with the words around it and, for a list, its
+// first options. Never a value from a password box.
 const JS_FORM_DUMP = `(() => {
   const txt = e => (e ? (e.innerText || e.textContent || '') : '').replace(/\\s+/g, ' ').trim();
   const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
   const fields = [...document.querySelectorAll('input, select, textarea')].map(e => ({
     tag: e.tagName, type: e.getAttribute('type') || '', id: e.id || '', name: e.name || '', visible: vis(e),
-    value: e.type === 'password' ? '' : String(e.value || '').slice(0, 60), mark: e.getAttribute('data-fs-radius') || '',
+    value: e.type === 'password' ? '' : String(e.value || '').slice(0, 60),
     near: txt(e.closest('tr, li, fieldset, div')).slice(0, 160),
     options: e.tagName === 'SELECT' ? e.options.length : undefined,
     first: e.tagName === 'SELECT' ? [...e.options].slice(0, 8).map(o => o.text.trim()) : undefined }));
@@ -942,7 +906,7 @@ const JS_FORM_DUMP = `(() => {
 })()`;
 
 /** Save the MLS window's page (its fields, and a picture of it) for fixing the
- *  radius search from here. userData/team-comps-debug/<time>-<tag>.json|png */
+ *  team comps search from here. userData/team-comps-debug/<time>-<tag>.json|png */
 async function saveTeamDebug(tag) {
   const dir = path.join(app.getPath('userData'), 'team-comps-debug');
   try {
@@ -999,43 +963,43 @@ async function teamLeadArea(mls) {
   return { area, why: area ? '' : 'the area option had no name', n, counts };
 }
 
-/** Sold single-family homes within `miles` of `addr`, listed in the last
- *  TEAM_LIST_MONTHS, and only in MLS area `area` when one is given. Throws
- *  when the form has no radius boxes or the radius plainly did not apply,
- *  after saving the page. */
-async function teamSoldSearch(addr, miles, area) {
+/** The sold single-family homes a lead's comps are picked from (v1.75.2):
+ *  every one in its MLS area ({area}), or failing that its zip ({zip}), that
+ *  sold in the last TEAM_SOLD_MONTHS. Matrix's own radius box measures from
+ *  "My Location", a place set in a pop-up (seen on Seth's check, 27 Oct), so
+ *  the board measures the miles itself from each sale's map pin; a sale
+ *  outside the lead's MLS area is out under the team's rules anyway. The
+ *  window is on Sale Date; when that finds nothing it is tried once more on
+ *  List Date over TEAM_LIST_MONTHS, and the board checks each sale date.
+ *  Throws when the area or zip plainly did not apply, after saving the page. */
+async function teamSoldSearch(where, onListDate) {
   await nav(core.SEARCH_URL, 2200);
   const st = await js(selectOnly(core.FIELDS.status, ['^sold\\b'])).catch(() => null);
   if (!st || !st.length) throw new Error('the search form has no "Sold" status');
   await sleep(400);
   await js(selectByLabel(core.FIELDS.propType, 'Single Family Home')); await sleep(400);
-  const to = new Date(), from = new Date(to.getFullYear(), to.getMonth() - core.TEAM_LIST_MONTHS, 1);
+  const to = new Date(), from = new Date(to.getFullYear(), to.getMonth() - (onListDate ? core.TEAM_LIST_MONTHS : core.TEAM_SOLD_MONTHS), to.getDate());
   const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
-  await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`)); await sleep(800);
-  if (area) {
-    const ticked = await js(teamTickArea(0, 0, area)).catch(() => 0);
-    if (ticked !== 1) throw new Error(`the Area list has no "${area}"`);
-    await sleep(800);
-  }
-  let f = await js(JS_TEAM_RADIUS).catch(() => null);
-  if (!f || !f.ok) {
-    const opened = await js(JS_TEAM_RADIUS_OPEN).catch(() => '');
-    if (opened) { await sleep(1500); f = await js(JS_TEAM_RADIUS).catch(() => null); }
-  }
-  if (!f || !f.ok) {
-    const dir = await saveTeamDebug('no-radius-boxes');
-    throw new Error(`found no "within … miles of …" boxes on the search form. The page is saved in ${dir} — send those files to Claude`);
-  }
-  await js(setInput(f.addr, addr)); await sleep(1500);
-  await js(setInput(f.mi, String(miles))); await sleep(1800);
-  const count = await js(core.JS_MATCH_COUNT).catch(() => '?');
-  // the whole MLS's sold homes for 9 months runs to thousands: the radius did not take
+  const box = onListDate ? core.FIELDS.listDate : core.FIELDS.saleDate;
+  if (!(await js(setInput(box, `${fmt(from)}-${fmt(to)}`)).catch(() => false))) throw new Error(`the search form has no ${onListDate ? 'List' : 'Sale'} Date box`);
+  await sleep(600);
+  if (where.area) {
+    const ticked = await js(teamTickArea(0, 0, where.area)).catch(() => 0);
+    if (ticked !== 1) throw new Error(`the Area list has no "${where.area}"`);
+  } else await js(setInput(core.FIELDS.zip, where.zip));
+  const count = await teamCount();
+  // a whole MLS's sold homes run to thousands: the area or zip did not take
   if (/\+$/.test(count) || core.num(count) > 2000) {
-    const dir = await saveTeamDebug('radius-not-applied');
-    throw new Error(`the search found ${count} sales, so the radius did not apply. The page is saved in ${dir} — send those files to Claude`);
+    const dir = await saveTeamDebug('area-not-applied');
+    throw new Error(`the search found ${count} sales, so the ${where.area ? 'MLS area' : 'zip'} did not apply. The page is saved in ${dir} — send those files to Claude`);
   }
-  if (count === '0') return { count, rows: [], fields: f };
-  return { count, rows: await readSoldPages(core.TEAM_PAGES), fields: f };
+  const by = onListDate ? `listed in the last ${core.TEAM_LIST_MONTHS} months` : `sold in the last ${core.TEAM_SOLD_MONTHS} months`;
+  if (count === '0' || count === '?') {
+    if (!onListDate) return teamSoldSearch(where, true);
+    if (count === '?') throw new Error('the search form shows no match count');
+    return { count, rows: [], by };
+  }
+  return { count, rows: await readSoldPages(core.TEAM_PAGES), by };
 }
 
 /** One sold home's Client Full report — remarks, year, sold price and date.
@@ -3189,14 +3153,15 @@ ipcMain.handle('refresh-board', async () => {
   }
 });
 
-// ---------- team comps (v1.75): the comped leads' sold homes by radius, for the Lead Board TEST ----------
-// Juan, 27 Oct: 1 mile and 6 months by default, widened on its own where comps
-// are thin, and "re-run the 125 leads". Each comped lead gets a sold search
-// within 1 mile (San Francisco starts at 1/2), widened in its market's steps
-// while fewer than TEAM_ENOUGH sales fit on size, beds and age. The sales go to
-// their own "Team Comps" tab, one row per lead; nothing on the Leads tab
-// changes, so the real board's ARV is untouched. A check run ({dry}) does the
-// first lead's first search only, says what it found, and saves the page.
+// ---------- team comps (v1.75): the comped leads' sold homes, for the Lead Board TEST ----------
+// Juan, 27 Oct: 1 mile and 6 months by default, widened where comps are thin;
+// Seth, 27 Oct: from the lead's own MLS area. Each comped lead gets its MLS
+// area, then every single-family home sold there in the last 6 months; the
+// ones that fit on size, beds, age and days on market go to their own "Team
+// Comps" tab, one row per lead, and the board measures each one's miles and
+// widens the radius from there. Nothing on the Leads tab changes, so the real
+// board's ARV is untouched. A check run ({dry}) does the first lead only, says
+// what it found, and saves the page.
 ipcMain.handle('team-comps', async (_e, opts) => {
   const dry = !!(opts && opts.dry);
   if (control.running) return { ok: false, error: 'already running', message: 'Team comps NOT started — another run is still finishing. Wait for its "Finished" message, then try again.' };
@@ -3236,10 +3201,10 @@ ipcMain.handle('team-comps', async (_e, opts) => {
     const before = todo.length;
     if (dry) todo = todo.slice(0, 1);
     else todo = todo.filter(x => !fresh.has(val(x.r, 'MLS #').toUpperCase()));
-    log(dry ? `Checking the Matrix radius search on ${val((todo[0] || {}).r || [], 'Address') || 'the first comped lead'} — nothing is saved…`
+    log(dry ? `Checking the team comps search on ${val((todo[0] || {}).r || [], 'Address') || 'the first comped lead'} — nothing is saved…`
       : `Team comps for ${todo.length} comped lead(s), A first`
         + (before - todo.length ? ` (skipping ${before - todo.length} searched in the last ${core.TEAM_FRESH_DAYS} days)` : '')
-        + ` — the lead's MLS area, then a sold search by radius, widened while fewer than ${core.TEAM_ENOUGH} sales fit…`, 'good');
+        + ` — each lead's MLS area, then every single-family home sold there in the last ${core.TEAM_SOLD_MONTHS} months…`, 'good');
     let batch = [];
     const flush = async () => {
       if (!batch.length) return;
@@ -3252,57 +3217,50 @@ ipcMain.handle('team-comps', async (_e, opts) => {
       const r = todo[i].r, mls = val(r, 'MLS #'), addr = val(r, 'Address');
       const lead = { mls, addr, sqft: core.num(val(r, 'SqFt')), beds: core.num(val(r, 'Beds')), year: core.num(val(r, 'Year Built')),
         area: areaOf[mls.toUpperCase()] || '' };
-      const market = core.teamMarket(addr), steps = core.TEAM_STEPS[market];
-      log(`  [${i + 1}/${todo.length}] ${addr} · ${market === 'sf' ? 'San Francisco' : market === 'city' ? 'Bay Area city' : 'thin area'}: ${steps.join(' → ')} mi`);
-      let radius = 0, found = [], note = '', stoppedMid = false;
-      // the lead's MLS area: a failed lookup costs only the same-area check
+      const market = core.teamMarket(addr), zip = (addr.match(/\b9[0-6]\d{3}\b/g) || []).pop() || '';
+      log(`  [${i + 1}/${todo.length}] ${addr}`);
+      let found = [], fits = [], searched = '', note = '', stoppedMid = false, complete = false;
+      // the lead's MLS area: looked up once, then read back from the tab
       if (!lead.area) {
         try {
           const a = await teamLeadArea(mls);
           lead.area = a.area;
-          log(a.area ? `    MLS area: ${a.area}` + (dry ? ` (found in ${a.counts} counts over ${a.n} areas)` : '') : `    MLS area not found — ${a.why}; sales are not marked same area or not`, a.area ? 'info' : 'warn');
-        } catch (e) { log('    MLS area not found — ' + e.message, 'warn'); }
+          log(a.area ? `    MLS area: ${a.area}` + (dry ? ` (found in ${a.counts} counts over ${a.n} areas)` : '') : `    MLS area not found — ${a.why}; searching its zip instead`, a.area ? 'info' : 'warn');
+        } catch (e) { log('    MLS area not found — ' + e.message + '; searching its zip instead', 'warn'); }
         if (control.stopped) { log('    stopped part-way — not saved; the next run does it whole'); break; }
       } else log(`    MLS area: ${lead.area} (from the tab)`);
       try {
-        for (const mi of (dry ? steps.slice(0, 1) : steps)) {
-          const res = await teamSoldSearch(addr, mi);
-          if (control.stopped) { stoppedMid = true; break; }
-          radius = mi; found = core.teamRows(res.rows, mls);
-          const fit = core.teamFits(found, lead).length, withDist = found.filter(x => x.mi !== '').length;
-          log(`    ${mi} mi: ${res.count} match(es) · ${found.length} sold read · ${fit} fit on size, beds and age`
-            + (found.length && !withDist ? ' · no Distance column in this display' : ''), fit ? 'good' : 'info');
-          if (dry) {
-            log(`    miles box: "${res.fields.miNear}"`); log(`    address box: "${res.fields.addrNear}"`);
-            log(`    columns read: ${['dist', 'dom', 'area', 'city'].filter(k => res.rows.some(x => x[k])).join(', ') || 'no Distance, DOM or Area'}`);
-          }
-          if (fit >= core.TEAM_ENOUGH || await stopRequested()) break;
-        }
-        // which of them are in the lead's MLS area: the same search, limited to it
-        if (lead.area && found.length && !stoppedMid && !control.stopped) {
-          try {
-            const same = await teamSoldSearch(addr, radius, lead.area);
-            core.teamSameArea(found, core.teamRows(same.rows, mls).map(x => x.mls));
-            log(`    in its MLS area: ${found.filter(x => x.sa).length} of ${found.length} sold`, 'info');
-          } catch (e) { log('    same-area search failed — ' + e.message + '; sales are not marked', 'warn'); }
+        if (!lead.area && !zip) throw new Error('no MLS area and no zip in its address');
+        const res = await teamSoldSearch(lead.area ? { area: lead.area } : { zip });
+        if (control.stopped) stoppedMid = true;
+        else {
+          searched = lead.area ? 'MLS area' : 'zip ' + zip;
+          found = core.teamRows(res.rows, mls);
+          // every sale on every page was read: only then can a comp missing from them be called another area's
+          complete = res.rows.length >= core.num(res.count);
+          if (lead.area) core.teamSameArea(found, found.map(x => x.mls));
+          fits = core.teamFits(found, lead);
+          log(`    ${searched}: ${res.count} ${res.by} · ${found.length} read · ${fits.length} fit on size, beds, age and days on market`, fits.length ? 'good' : 'info');
+          if (dry) log(`    columns read: ${['dom', 'age', 'city'].filter(k => res.rows.some(x => x[k])).join(', ') || 'no DOM, Age or City'}`
+            + (fits.length ? ` · e.g. ${fits.slice(0, 3).map(x => `${x.addr} ${x.sqft} sqft $${x.price}`).join('; ')}` : ''));
         }
       } catch (e) {
         note = 'search failed: ' + e.message; failed++;
         log('    ' + note, 'warn');
         // the form itself is the problem: every lead would fail the same way
-        if (/no "within|did not apply/.test(e.message)) blocked = e.message;
+        if (/did not apply|no "Sold"|Date box/.test(e.message)) blocked = e.message;
       }
       if (dry) { const dir = await saveTeamDebug('check'); log(`  The search page is saved in ${dir} — send it to Claude if anything above looks wrong.`, 'good'); break; }
       if (blocked) break;
       if (stoppedMid) { log('    stopped part-way — not saved; the next run does it whole'); break; }
-      batch.push(core.teamRecord(lead, market, radius, found, note, note ? '' : tday));
-      done++; sales += found.length;
+      batch.push(core.teamRecord(lead, market, searched, fits, note, note ? '' : tday, lead.area && !note && complete ? found : null));
+      done++; sales += fits.length;
       if (batch.length >= 5) await flush();
     }
     await flush();
     if (blocked) {
       log(`Team comps STOPPED — ${blocked}`, 'error');
-      endSummary = 'Team comps stopped: the radius search did not work on this form. Send Claude the saved page.';
+      endSummary = 'Team comps stopped: the search did not work on this form. Send Claude the saved page.';
       return { ok: false, stopped: true, error: blocked };
     }
     if (!dry) log(`Team comps ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} lead(s) saved to the "${core.TEAM_TAB}" tab · ${sales} sold home(s) · ${failed} search(es) failed`
@@ -3317,7 +3275,7 @@ ipcMain.handle('team-comps', async (_e, opts) => {
   } finally {
     if (started) closeMlsWindow();
     send('done', started
-      ? { stopped: control.stopped || !!endSummary, failed: !!endSummary, summary: endSummary || (dry ? 'Matrix radius check finished — see the log.'
+      ? { stopped: control.stopped || !!endSummary, failed: !!endSummary, summary: endSummary || (dry ? 'Team comps check finished — see the log.'
           : `Team comps finished — ${done} lead(s) saved, ${sales} sold homes.`) }
       : { neverStarted: true, summary: 'Team comps NOT started — sign in to the MLS first (section 1), then press it again.' });
     control.running = false;

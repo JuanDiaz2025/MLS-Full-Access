@@ -443,14 +443,17 @@ only. `compcheck.py` applies them to the comps the FlipScout app saved
   shows it as "Team rules" above the app's ARV, with the radius rows, each
   comp that counts and why each other one doesn't.
 
-With `--xlsx`, the sheet's **Team Comps** tab (the FlipScout app's radius
-search, v1.75: the sold homes within the market's radius steps, with Matrix's
-distance and days on market) is added to each lead's saved comps; a sale with
-0 days on market is out. Since app v1.75.1 the tab also has the lead's MLS area
-(**Lead Area**) and marks each sale `"sa":1` (in that area) or `"sa":0`; a sale
-in another MLS area is out ("a different MLS area"), which stands in for the
-same side of the freeways. A lead with no Lead Area, and the app's own zip
-comps (which carry no mark), are not area-checked.
+With `--xlsx`, the sheet's **Team Comps** tab is added to each lead's saved
+comps: the FlipScout app's Team comps search (v1.75.2) finds the lead's MLS area
+(**Lead Area**), reads every single-family home sold there in the last 6 months
+(or in its zip when the area is not found) and keeps the ones that fit on size,
+beds, age and days on market (a sale with 0 days on market is out). The miles
+are measured here from each sale's map pin, since Matrix's radius box measures
+from "My Location". Each kept sale is marked `"sa":1`; **Area Sales** lists every
+MLS # the area search found, so a comp the app saved earlier that sold in the
+window but is not among them is in another MLS area and is out ("a different
+MLS area"), which stands in for the same side of the freeways. A lead with no
+Lead Area is not area-checked.
 
 Not checked yet: the county square footage (drop a comp more than 10% off;
 only Matrix's Tax tab has it).

@@ -116,35 +116,41 @@ install (creates a desktop shortcut) or run the portable exe directly.
    sign-in, but it opens only on the computer that saved it — the boards could
    not use it. A Refresh swaps those for a copy, or empties them when the public
    page has the photo.)
-4f. **Team comps, for the Lead Board Test** (v1.75) — the team's comp rules (Seth,
-   26–27 Oct) need the sold homes **within a radius**, not the zip. **⌖ Team comps
-   (Test board)** runs a Sold single-family search within **1 mile** of every lead
-   that has comps, A first (**½ mile** first in San Francisco), and widens it in
-   the market's steps — San Francisco ½ → 1 → 2 mi; San Mateo, Santa Clara,
-   Alameda, Contra Costa and Marin 1 → 2 mi; everywhere else 1 → 2 → 3 → 5 mi —
-   while fewer than 6 sales fit on size (±20%), beds (±1), age (±20 years) and
-   days on market (never 0). The sales, with Matrix's distance and days on market,
-   go to their own **Team Comps** tab, one row per lead; the Leads tab, its ARV
-   and the real board are untouched. The Test board's `compcheck.py` reads that
-   tab and applies the rest of the rules. **The lead's MLS area** (v1.75.1; Seth,
-   27 Oct: comps from the same side of the freeways): neither the results grid
-   nor the reports show it, so the app reads it off the search form's own Area
-   list — the lead's MLS # alone counts 1 match, ticking a set of areas keeps
-   that 1 only when its area is among them, and halving the list finds it in
-   about a dozen counts. It goes in the tab's **Lead Area** column (looked up
-   once, then read back from there), and the same radius search limited to that
-   area marks each sale in it (`"sa":1`) or not (`"sa":0`); `compcheck.py` leaves
-   out a sale in another area. A lookup that does not narrow to one area is
-   logged and costs only the same-area check, never a guess. **Run it daily**:
-   a lead searched in the last 7 days is skipped, so a day's run is the newly
+4f. **Team comps, for the Lead Board Test** (v1.75) — the team's comp rules (Seth
+   and Juan, 26–27 Oct) need the sold homes of the last **6 months** near each
+   lead (1 mile, widened in the market's steps) and in **its own MLS area** (the
+   same side of the freeways), not a zip over 14 months. **⌖ Team comps (Test
+   board)** does, for every lead that has comps, A first:
+   1. **The lead's MLS area** (v1.75.1). Neither the results grid nor the reports
+      show it, so the app reads it off the search form's own Area list (1,866
+      areas): the lead's MLS # alone counts 1 match, ticking a set of areas keeps
+      that 1 only when its area is among them, and halving the list finds it in
+      about 13 counts (Seth's check, 27 Oct: "11504 - Cordelia" for 4113 Boulder
+      Creek Ct). The last area must count 1 and all the others 0, so a list or
+      count that does not behave gives no area, never a wrong one. It goes in the
+      tab's **Lead Area** column, looked up once and read back from there.
+   2. **Every single-family home sold in that area** (v1.75.2) with a Sale Date
+      in the last 6 months (a search that finds nothing is tried once more on
+      List Date over 9 months), or in the lead's zip when no area was found.
+      Matrix's own "within … miles of" box measures from **My Location**, a place
+      set in a pop-up, so it is not used: the board measures each sale's miles
+      from its map pin and widens the radius itself (San Francisco ½ → 1 → 2 mi;
+      San Mateo, Santa Clara, Alameda, Contra Costa and Marin 1 → 2 mi; elsewhere
+      1 → 2 → 3 → 5 mi). A sale outside the area is out under the rules anyway.
+   3. The sales that fit on size (±20%), beds (±1), age (±20 years) and days on
+      market (never 0) go to the **Team Comps** tab, one row per lead, marked
+      `"sa":1`; **Area Sales** lists every MLS # the area search found (when it
+      read every page), so `compcheck.py` knows that a comp the app saved earlier
+      but the area search did not find is in another area.
+
+   The Leads tab, its ARV and the real board are untouched. **Run it daily**: a
+   lead searched in the last 7 days is skipped, so a day's run is the newly
    comped leads plus the ones due again, and a run stopped part-way picks up
-   where it stopped. **Check the Matrix radius search** first: it does the first
-   lead (its area, one radius search and the same-area search), logs the boxes,
-   columns and area it found, saves nothing to the sheet, and saves the
-   search page under `team-comps-debug` in the app's data folder. The radius
-   boxes are found by the words around them ("within … miles of …"), so if the
-   form lays them out differently the run stops on the first lead, says so, and
-   saves the page there to send to Claude.
+   where it stopped. **Check the Team comps search** first: it does the first
+   lead only, logs its area and what the search found, saves nothing to the
+   sheet, and saves the search page under `team-comps-debug` in the app's data
+   folder. A search that plainly ignored the area (thousands of sales) stops the
+   run on the first lead and saves the page there to send to Claude.
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,
