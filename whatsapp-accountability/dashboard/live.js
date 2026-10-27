@@ -59,7 +59,9 @@ function replyText(m, nameOf) {
   return text;
 }
 
-const ANALYSIS_VERSION = 3; // 2: also spots messages that chase an earlier request. 3: givers can ask each other
+const ANALYSIS_VERSION = 4; // 2: also spots messages that chase an earlier request. 3: givers can ask each other. 4: questions anyone can answer
+
+const ANYONE_RE = /^\s*(who|who's|whos|sino|anyone|anybody|does anyone|did anyone|has anyone|is anyone|can anyone|may nakakaalam)\b/i;
 
 // Used when Claude isn't available to read a message.
 // senderOf: instruction id -> who sent it, for spotting a nudge on your own request.
@@ -72,7 +74,8 @@ function fallbackAnalysis(m, people, senderOf) {
     title: text.split('\n')[0].slice(0, 48) || 'Message',
     type: text.includes('?') ? 'Question' : 'Instruction',
     needs_reply: !chatter && text.length > 0,
-    required: named.length ? named : 'all',
+    // "who is tracking this?" needs one answer, not one from everybody
+    required: named.length ? named : ANYONE_RE.test(text) ? 'any' : 'all',
     priority: /\b(urgent|asap|important|now|today)\b/i.test(text) ? 'High' : 'Normal',
     task: null,
     // quoting your own earlier message is a nudge on it
@@ -97,11 +100,11 @@ Group members who may need to reply (id: name):
 ${members}
 
 For each message under "Messages to read", return JSON in exactly this shape:
-{"results":[{"id":"<message id>","title":"<3 to 6 word summary>","type":"Instruction" or "Question" or "Info","needs_reply":true or false,"required":"all" or ["<member id>"],"priority":"High" or "Normal","task":null or {"title":"<short task name>","owner_id":"<member id>","due":"YYYY-MM-DDTHH:MM" or null},"follow_up_of":null or "<id of an earlier manager message>"}]}
+{"results":[{"id":"<message id>","title":"<3 to 6 word summary>","type":"Instruction" or "Question" or "Info","needs_reply":true or false,"required":"all" or "any" or ["<member id>"],"priority":"High" or "Normal","task":null or {"title":"<short task name>","owner_id":"<member id>","due":"YYYY-MM-DDTHH:MM" or null},"follow_up_of":null or "<id of an earlier manager message>"}]}
 
 Rules:
 - needs_reply is true when the message asks people to do, confirm or answer something. Greetings, thanks and plain announcements are "Info" with needs_reply false.
-- required is "all" when the message is meant for the whole group. Otherwise list the ids of the people it addresses by name or @mention, which can include another manager (for example the COO asking the CEO). Never list the person who sent it ("from"). Use only ids from the member list.
+- required is "all" when every member of the group has to respond, for example "everyone confirm you saw the schedule". It is "any" when one answer from anyone settles it, for example "who is tracking this order?", "who has the key?", "anyone know where the ladder is?", "who can cover Saturday?". Otherwise list the ids of the people it addresses by name or @mention, which can include another manager (for example the COO asking the CEO). Never list the person who sent it ("from"). Use only ids from the member list.
 - task is set only when a specific member is asked to complete a piece of work. owner_id is that member. due is the deadline written in the same local time as "sent", or null when no deadline is given.
 - priority is "High" only when the message says it is urgent or important, or the work is due the same day.
 - follow_up_of is set when the sender is chasing or repeating their OWN earlier request because nobody answered ("can you confirm this???", "hello?", "what's happening?", "can anyone see this?") and the message asks for nothing new. Give the id of that earlier request (same "from"), from either list. If the message also asks for something new, it is a new request: follow_up_of is null. A manager answering or quoting another manager's message is never a follow-up. "replying_to" means the sender quoted that earlier message.
@@ -122,7 +125,7 @@ function cleanAnalysis(a, people, earlier, sender) {
     title: String(a.title || '').slice(0, 60),
     type: ['Instruction', 'Question', 'Info'].includes(a.type) ? a.type : 'Instruction',
     needs_reply: a.needs_reply !== false,
-    required: Array.isArray(a.required) ? a.required.map(String).filter(id => ids.has(id)) : 'all',
+    required: Array.isArray(a.required) ? a.required.map(String).filter(id => ids.has(id)) : a.required === 'any' ? 'any' : 'all',
     priority: a.priority === 'High' ? 'High' : 'Normal',
     task: null,
     follow_up_of: a.follow_up_of && earlier && earlier.get(String(a.follow_up_of)) === sender ? String(a.follow_up_of) : null,
@@ -177,18 +180,21 @@ function buildFromRaw(raw, now) {
       return;
     }
     if (!a.needs_reply) return;
-    let req = a.required === 'all' ? team : a.required.filter(id => pset.has(id));
+    let req = a.required === 'all' || a.required === 'any' ? team : a.required.filter(id => pset.has(id));
     if (a.task && pset.has(a.task.owner_id) && !req.includes(a.task.owner_id)) req = req.concat(a.task.owner_id);
     req = req.filter(id => id !== m.s && inGroup(id, m.t));
     if (!req.length) return;
-    const x = { m, a, req: new Set(req), chases: [], replies: {} };
+    const x = { m, a, req: new Set(req), chases: [], replies: {}, anyone: a.required === 'any' };
     tracked.push(x); trackedById.set(m.i, x); rootOf.set(m.i, x);
   });
   const setReply = (x, pid, at, text, extra) => { if (!x.replies[pid]) x.replies[pid] = { at, text, ...extra }; };
 
   // Who acknowledged what: a quoted reply or a reaction answers that request
   // (a nudge counts as its request); any other message answers everything
-  // still open before it.
+  // still open before it. A question anyone can answer is stricter: a plain
+  // message only answers it while it is still the latest request, since one
+  // answer closes it for everybody.
+  const newerRequest = (x, t) => tracked.some(y => y !== x && y.m.t > x.m.t && y.m.t < t);
   msgs.forEach(msg => {
     const pid = msg.s;
     if (!pset.has(pid) || msg.k === 'joined' || msg.k === 'left') return;
@@ -200,7 +206,7 @@ function buildFromRaw(raw, now) {
     const text = replyText(msg, nameOf);
     const quoted = msg.q && rootOf.get(msg.q);
     if (quoted) { if (quoted.req.has(pid) && msg.t >= quoted.m.t) setReply(quoted, pid, msg.t, text); return; }
-    tracked.forEach(x => { if (x.m.t < msg.t && x.req.has(pid)) setReply(x, pid, msg.t, text); });
+    tracked.forEach(x => { if (x.m.t < msg.t && x.req.has(pid) && !(x.anyone && newerRequest(x, msg.t))) setReply(x, pid, msg.t, text); });
   });
 
   // A reply someone linked by hand: one of the person's own messages that the
@@ -214,8 +220,21 @@ function buildFromRaw(raw, now) {
     if (own && own.s !== pid) return; // only the person's own message can answer for them
     const at = Math.max(f.at, x.m.t);
     const r = x.replies[pid];
-    if (!r || at < r.at) x.replies[pid] = { at, text: f.text || '', linked: { by: f.by || null, on: f.on || null, msg: f.msg, group: f.group || null } };
+    // on a question anyone can answer, a hand-picked answer always wins
+    if (!r || at < r.at || x.anyone) x.replies[pid] = { at, text: f.text || '', linked: { by: f.by || null, on: f.on || null, msg: f.msg, group: f.group || null } };
   }));
+
+  // A question anyone can answer is settled by the first answer, or by the
+  // one someone linked by hand. Only that person counts; nobody else owes a
+  // reply, before or after.
+  tracked.forEach(x => {
+    if (!x.anyone) return;
+    const all = Object.entries(x.replies);
+    const byHand = all.filter(([, r]) => r.linked).sort((a, b) => (b[1].linked.on || 0) - (a[1].linked.on || 0))[0];
+    const first = byHand || all.sort((a, b) => a[1].at - b[1].at)[0];
+    x.replies = first ? { [first[0]]: first[1] } : {};
+    x.req = new Set(first ? [first[0]] : []);
+  });
 
   // Someone who left without answering is no longer waited on; it counts as
   // a late answer at the moment they left.
@@ -263,7 +282,7 @@ function buildFromRaw(raw, now) {
     return {
       id: m.i, at: m.t, title: a.title || (m.x || '').split('\n')[0].slice(0, 48) || 'Message',
       text: readableText(m, nameOf), kind: a.type === 'Question' ? 'Question' : 'Instruction',
-      required: [...x.req], everyone: a.required === 'all', priority: a.priority || 'Normal',
+      required: [...x.req], everyone: a.required === 'all', anyone: x.anyone, priority: a.priority || 'Normal',
       task: taskId, replies: x.replies, senderId: m.s, senderName: nameOf(m.s), by: a.by || 'claude', chases: x.chases,
     };
   }).sort((a, b) => b.at - a.at);

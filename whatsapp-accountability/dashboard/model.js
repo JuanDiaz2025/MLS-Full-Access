@@ -162,7 +162,10 @@ function derive(S, cfg, now) {
       return row;
     });
     const pending = rows.filter(r => !r.replied);
-    return { ...m, req, rows, pending, responded: rows.length - pending.length, resolved: pending.length === 0 };
+    // a question anyone can answer, with no answer yet: open, but no one person is behind on it
+    const waitingAny = !!m.anyone && !rows.length;
+    const stage = waitingAny ? marks.filter(t => elapsed >= t).length : null;
+    return { ...m, req, rows, pending, responded: rows.length - pending.length, resolved: !pending.length && !waitingAny, waitingAny, stage };
   });
 
   const tasks = S.tasks.map(t => {

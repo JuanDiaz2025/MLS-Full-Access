@@ -83,6 +83,11 @@
     if (s === 0) return chip('c-muted', `Waiting until ${fmtClock(m.at + cfg.first * MIN)}`);
     return [null, chip('c-warn', 'Needs 1st reminder'), chip('c-serious', 'Needs 2nd reminder'), chip('c-crit', 'Escalate to manager')][s];
   };
+  // A question anyone can answer is open until the first answer, and then done.
+  const statusChip = (m, icon) => m.waitingAny ? chip('c-warn', 'Waiting for anyone')
+    : m.pending.length ? chip('c-warn', `${m.pending.length} pending`)
+    : chip('c-good', m.anyone ? 'Answered' : 'All replied', icon);
+  const replyCount = m => m.waitingAny ? 'anyone can answer' : m.anyone ? `answered by ${m.rows[0].name}` : `${m.responded}/${m.req.length} replied`;
   const replyNote = s => [`Within ${cfg.first} min`, `After ${cfg.first} min`, `After ${cfg.second} min`, `After ${cfg.escalate} min (missed)`][s];
   const TASK_TONE = { 'Completed': 'c-good', 'Completed late': 'c-warn', 'Overdue': 'c-crit', 'In progress': 'c-info', 'Acknowledged': 'c-muted', 'Not acknowledged': 'c-serious' };
 
@@ -124,8 +129,8 @@
     const unresolvedRows = D.unresolved.map(m => `<tr>
         <td>${msgLink(m)}<span class="sub">${groupTag(m)}${esc(m.kind)}${m.priority === 'High' ? ' · High priority' : ''}${(m.chases || []).length ? ` · followed up ${m.chases.length}×` : ''}</span></td>
         <td class="nowrap">${esc(fmtWhen(m.at))}</td>
-        <td>${meter(m.responded, m.req.length)}</td>
-        <td>${chip('c-warn', `${m.pending.length} pending`)}</td></tr>`).join('');
+        <td>${m.waitingAny ? `<span class="plain">Anyone can answer · ${fmtDur(NOW - m.at)} so far</span>` : meter(m.responded, m.req.length)}</td>
+        <td>${statusChip(m)}</td></tr>`).join('');
     const overdueRows = D.overdue.sort((a, b) => a.due - b.due).map(t => `<tr>
         <td>${msgLink(t.from, t.title)}<span class="sub">Asked ${esc(fmtWhen(t.from.at))}</span></td>
         <td>${who(t.ownerName)}</td>
@@ -170,18 +175,18 @@
       const day = dayLabel(m.at);
       const head = day !== lastDay ? `<div class="mday">${esc(day)}</div>` : '';
       lastDay = day;
-      const open = m.pending.length > 0;
+      const open = m.pending.length > 0 || m.waitingAny;
       return head + `<button class="mitem${open ? ' open' : ''}" type="button" data-sel="${esc(m.id)}" aria-current="${m.id === state.sel}">
         <span class="m-ic">${ic(open ? 'clock' : 'check')}</span>
         <span class="m-t">${esc(m.title)}</span>
-        ${open ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied')}
-        <span class="m-s">${groupTag(m)}${esc(fmtClock(m.at))} · ${m.responded}/${m.req.length} replied${(m.chases || []).length ? ` · followed up ${m.chases.length}×` : ''}</span></button>`;
+        ${statusChip(m)}
+        <span class="m-s">${groupTag(m)}${esc(fmtClock(m.at))} · ${esc(replyCount(m))}${(m.chases || []).length ? ` · followed up ${m.chases.length}×` : ''}</span></button>`;
     }).join('');
 
     const m = D.messages.find(x => x.id === state.sel);
     const task = m.task ? D.tasks.find(t => t.id === m.task) : null;
     const nameById = id => (D.people.find(p => p.id === id) || {}).name || id;
-    const reqLabel = m.required === 'all' || m.everyone ? `Everyone (${m.req.length})` : m.req.map(nameById).join(', ');
+    const reqLabel = m.anyone ? 'Anyone (one answer is enough)' : m.required === 'all' || m.everyone ? `Everyone (${m.req.length})` : m.req.map(nameById).join(', ');
     const chases = m.chases || [];
     const chaseHtml = chases.length ? `<div class="chases"><div class="chases-h">${ic('repeat')}${esc(m.senderName || 'You')} followed up ${chases.length === 1 ? 'once' : chases.length + ' times'}</div>
         ${chases.map(c => `<div class="chase"><span>${esc(c.text)}</span><time>${esc(fmtClock(c.at))}</time></div>`).join('')}</div>` : '';
@@ -205,7 +210,7 @@
         <div class="mlist" id="mlist">${items}</div></div>
       <div class="card"><div class="card-b">
         <div class="mhead"><div><h2>${esc(m.title)}</h2><p>${esc(fmtWhen(m.at))} · ${groupTag(m)}Sent by ${esc(m.senderName || 'Juan')}</p></div>
-          <div class="mhead-a">${m.pending.length ? chip('c-warn', `${m.pending.length} pending`) : chip('c-good', 'All replied', 'check')}${draftButton(m)}${deleteButton(m)}</div></div>
+          <div class="mhead-a">${statusChip(m, 'check')}${draftButton(m)}${deleteButton(m)}</div></div>
         <div class="bubble">${esc(m.text)}<span class="b-time">${esc(fmtClock(m.at))}</span></div>
         ${chaseHtml}
         <div class="read"><div class="read-cap">${ic('spark')}${m.by === 'rules' ? 'Read with simple rules, because Claude wasn’t available' : 'What the AI picked out of this message'}</div><dl class="read-grid">
@@ -214,9 +219,10 @@
           <div><dt>Task</dt><dd>${task ? `${esc(task.title)}<span>Owner ${esc(task.ownerName)} · ${task.due != null ? 'due ' + esc(fmtWhen(task.due)) : 'no deadline given'}</span>` : 'None'}</dd></div>
           <div><dt>Priority</dt><dd>${esc(m.priority)}</dd></div>
         </dl></div>
-        <div class="subh"><h3>Replies (${m.req.length} required)</h3>
-          <span class="tally"><span class="ok">${m.responded} replied</span><span class="no">${m.pending.length} pending</span></span></div>
-        <div class="inset tw"><table class="t"><thead><tr><th>Name</th><th>Status</th><th>Response time</th><th>Reply</th><th>Follow-up</th></tr></thead><tbody>${rows}</tbody></table></div>
+        ${m.anyone ? `<div class="subh"><h3>Answer (one is enough)</h3>${canLink ? `<button class="${m.waitingAny ? 'btn small' : 'link'}" type="button" data-action="open-link" data-msg="${esc(m.id)}" data-pid="*">${m.waitingAny ? 'Mark as answered' : 'Pick a different answer'}</button>` : ''}</div>` : `<div class="subh"><h3>Replies (${m.req.length} required)</h3>
+          <span class="tally"><span class="ok">${m.responded} replied</span><span class="no">${m.pending.length} pending</span></span></div>`}
+        ${m.waitingAny ? `<div class="inset any-wait"><p>Anyone in the group can answer this, and nobody has yet. ${fmtDur(NOW - m.at)} so far.</p>${m.stage ? stageChip(m.stage, m) : ''}</div>`
+          : `<div class="inset tw"><table class="t"><thead><tr><th>Name</th><th>Status</th><th>Response time</th><th>Reply</th><th>Follow-up</th></tr></thead><tbody>${rows}</tbody></table></div>`}
       </div></div>
     </div>`;
   }
@@ -806,6 +812,9 @@ RULES
     const waiting = m.pending.filter(r => !isJuan(r.name));
     const names = waiting.map(r => r.name).join(', ');
     const pushes = (m.chases || []).length;
+    if (m.waitingAny) {
+      return { to: 'the group', ask: `A follow-up from ${isJuan(m.senderName) ? 'Juan' : `Juan, backing up ${sender},`} to the whole group: nobody has answered after ${fmtDur(NOW - m.at)}, and one answer from anyone is enough.` };
+    }
     if (!isJuan(m.senderName) && m.pending.some(r => isJuan(r.name))) {
       return { to: sender, ask: `Juan's answer to ${sender}, who asked him this. Answer what the thread lets him answer, and put anything he has to decide or look up in [brackets].` };
     }
@@ -814,7 +823,8 @@ RULES
       const firmer = pushes ? ` ${sender} already followed up ${pushes === 1 ? 'once' : pushes + ' times'}, so be firmer.` : '';
       return { to: names, ask: `${how} to ${names}, who ${waiting.length === 1 ? 'hasn’t' : 'haven’t'} answered after ${fmtDur(Math.max(...waiting.map(r => r.waiting)))}.${firmer}` };
     }
-    return { to: 'the group', ask: 'Juan’s short reply now that everyone has answered: acknowledge it in a few words and give the next step with who and when, if there is one.' };
+    const answered = m.anyone && m.rows[0] ? `${m.rows[0].name} answered` : 'everyone has answered';
+    return { to: m.anyone && m.rows[0] ? m.rows[0].name : 'the group', ask: `Juan’s short reply now that ${answered}: acknowledge it in a few words and give the next step with who and when, if there is one.` };
   }
 
   function draftPrompt(m, sit) {
@@ -1082,17 +1092,21 @@ RULES
   }
 
   // The person's own messages, in any tracked group, from the half hour after the request.
+  // pid '*': a question anyone can answer, so anyone's messages in that group except the managers'.
   function linkCandidates(m, pid) {
     const out = [];
+    const anyone = pid === '*';
     trackedGroups().forEach(t => {
+      if (anyone && t.groupId !== m.groupId) return;
+      const bosses = new Set(t.bossIds || []);
       const raw = src.mode === 'live' ? live.raws[t.groupId] : rawFromSaved(t.groupId);
       if (!raw) return;
       const nameOf = nameIndex({ ...raw, overrides: saved.names });
       (raw.messages || []).forEach(c => {
-        if (c.s !== pid || c.d || c.k === 'joined' || c.k === 'left' || c.i === m.id) return;
+        if ((anyone ? bosses.has(c.s) || c.s === m.senderId : c.s !== pid) || c.d || c.k === 'joined' || c.k === 'left' || c.i === m.id) return;
         if (c.t < m.at || c.t > m.at + LINK_WINDOW) return;
         const text = c.k === 'reaction' ? `Reacted ${c.x || ''}` : replyText(c, nameOf);
-        out.push({ id: c.i, at: c.t, group: t.groupId, groupName: (raw.group && raw.group.name) || t.groupName, text: (text || 'Message').slice(0, 300) });
+        out.push({ id: c.i, at: c.t, group: t.groupId, groupName: (raw.group && raw.group.name) || t.groupName, text: (text || 'Message').slice(0, 300), sender: c.s, senderName: nameOf(c.s) });
       });
     });
     return out.sort((a, b) => a.at - b.at);
@@ -1107,10 +1121,11 @@ RULES
     const multi = trackedGroups().length > 1;
     const list = L.items.length ? `<div class="pick-list" role="radiogroup" aria-label="${esc(L.name)}\u2019s messages">${L.items.map(c => `
         <label class="choice"><input type="radio" name="link-pick" value="${esc(c.id)}"${L.pick === c.id ? ' checked' : ''}>
-          <span><b>${esc(c.text)}</b><span class="sub">${multi ? esc(c.groupName) + ' \u00B7 ' : ''}${esc(fmtWhen(c.at))} \u00B7 ${fmtDur(c.at - L.at)} after the message</span></span></label>`).join('')}</div>`
+          <span><b>${L.anyone ? esc(c.senderName) + ': ' : ''}${esc(c.text)}</b><span class="sub">${multi && !L.anyone ? esc(c.groupName) + ' \u00B7 ' : ''}${esc(fmtWhen(c.at))} \u00B7 ${fmtDur(c.at - L.at)} after the message</span></span></label>`).join('')}</div>`
+      : L.anyone ? `<p class="plain">Nobody sent anything in the 30 minutes after this message. Whoever answered can swipe-reply to the question in WhatsApp and it will count.</p>`
       : `<p class="plain">${esc(L.name)} didn\u2019t send anything in the 30 minutes after this message. If they answered later or somewhere else, they can react \u{1F44D} to the message in WhatsApp and it will count.</p>`;
-    linkBox.innerHTML = `<div class="dlg-h"><div><h2 id="link-h">Mark ${esc(L.name)} as replied</h2>
-        <p>Pick the message ${esc(L.name)} sent that answers \u201C${esc(L.title)}\u201D. Only their own messages from the 30 minutes after it was sent are listed. Everyone can see who linked it.</p></div>
+    linkBox.innerHTML = `<div class="dlg-h"><div><h2 id="link-h">${L.anyone ? 'Mark as answered' : `Mark ${esc(L.name)} as replied`}</h2>
+        <p>${L.anyone ? `Pick the message that answers \u201C${esc(L.title)}\u201D. Messages from anyone in the group, from the 30 minutes after it was sent, are listed.` : `Pick the message ${esc(L.name)} sent that answers \u201C${esc(L.title)}\u201D. Only their own messages from the 30 minutes after it was sent are listed.`} Everyone can see who linked it.</p></div>
         <button class="x" type="button" data-action="link-cancel" aria-label="Close">${'<svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>'}</button></div>
       <div class="dlg-b">${list}</div>
       <p class="dlg-msg err" role="status">${esc(L.error || '')}</p>
@@ -1122,7 +1137,7 @@ RULES
     const m = src.S.messages.find(x => x.id === msgId);
     if (!m) return;
     const person = src.S.people.find(p => p.id === pid);
-    state.link = { msgId, pid, groupId: m.groupId, at: m.at, title: m.title, name: (person && person.name) || 'this person',
+    state.link = { msgId, pid, anyone: pid === '*', groupId: m.groupId, at: m.at, title: m.title, name: (person && person.name) || 'this person',
       items: linkCandidates(m, pid), pick: null, saving: false, error: '' };
     renderLink();
     const first = linkBox.querySelector('input, button.btn');
@@ -1139,9 +1154,10 @@ RULES
     const c = L && L.items.find(x => x.id === L.pick);
     if (!c || L.saving || !cap.db) return;
     L.saving = true; L.error = ''; renderLink();
-    const doc = { request: L.msgId, person: L.pid, msg: c.id, group: c.group, at: c.at, text: c.text, by: cap.me || null, on: Date.now() };
+    const person = L.anyone ? c.sender : L.pid;
+    const doc = { request: L.msgId, person, msg: c.id, group: c.group, at: c.at, text: c.text, by: cap.me || null, on: Date.now() };
     try {
-      await cap.db.doc(`fixes/${gkey(L.groupId)}/links/${gkey(`${L.msgId}~${L.pid}`)}`).set(doc);
+      await cap.db.doc(`fixes/${gkey(L.groupId)}/links/${gkey(`${L.msgId}~${person}`)}`).set(doc);
       closeLink();
     } catch (e) {
       if (e && e.code === 'invalid_argument') cap.canWrite = false;

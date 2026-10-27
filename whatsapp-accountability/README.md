@@ -26,6 +26,7 @@ WhatsApp group
 - A quoted reply or a reaction answers that one message. Any other message answers everything still open for that person before it.
 - If a reply was missed (a swipe-reply to a different message, or an answer in the wrong group), the person can react 👍 to the instruction in WhatsApp, or anyone in the company can press **Mark as replied** on the dashboard and pick one of that person's own messages from the 30 minutes after the instruction. It counts from when that message was sent and shows who linked it. Links are kept under `fixes/` in the page's storage, which company members can write; `settings/` and `sync/` stay owner-only.
 - **Delete** on a message (owner and editors only, second click confirms) takes that request off the dashboard with its nudges, replies and task; it's kept under `sync/<group>/removed/` and can be restored from the "deleted messages" list.
+- **Questions anyone can answer.** Claude marks each request as needing a reply from everyone, from named people, or from anyone. "Who is tracking this order?" needs one answer: the first answer closes it, and nobody else is counted as behind on it. While nobody has answered it shows as "Waiting for anyone" with the usual reminder flags. A plain message only counts as the answer while the question is still the latest request; a swipe-reply always counts. If the rule picked the wrong message, **Mark as answered** / **Pick a different answer** lets anyone in the company choose the right one.
 - **Draft reply as Juan** on any message: Claude writes a WhatsApp message the way Juan texts (style taken from the team's "Ask Juan" page, built from his voice notes), using the thread for facts. It is a follow-up to whoever hasn't answered, Juan's answer when someone asked him, or a short next step once everyone has replied. Anything Juan has to decide is left in [brackets]. The person edits it, presses Copy and sends it from their own WhatsApp; nothing is sent or saved by the page. It runs on the Claude account of whoever presses the button.
 - **Clear data** (owner and editors only) wipes one group's saved messages, replies, tasks and linked replies, and records a start time in `settings/tracking`; from then on only messages sent after it count, on every device. WhatsApp Reader keeps its own copy, which is why the start time is needed.
 - A task counts as done when its owner sends a photo, video or document, or says done/finished/sent/etc.
@@ -57,6 +58,8 @@ node dashboard/test/e2e-addmany.js  # searching, ticking several groups, and set
 node dashboard/test/e2e-sort.js  # sorting the group list: newest groups, recent activity, name
 node dashboard/test/e2e-draft.js  # Draft reply as Juan: what Claude is asked, Copy, Write another, no Claude
 node dashboard/test/e2e-leave.js  # Back to dashboard from Groups to track, with nothing tracked yet (run e2e-addmany.js first)
+node dashboard/test/anyone.test.js  # questions anyone can answer: first answer closes it, nobody else owes it
+node dashboard/test/e2e-anyone.js  # the same on the page, plus Mark as answered
 ```
 
 ## Why a linked-device reader
