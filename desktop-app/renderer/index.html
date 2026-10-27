@@ -140,6 +140,14 @@
       <button id="refreshBoard" disabled>↻ Refresh leads on the board</button>
       <button id="rebuildBoard" class="ghost">▦ Update Board tab</button>
     </div>
+    <div class="row" style="margin-top:8px">
+      <button id="teamComps" disabled>⌖ Team comps (Test board)</button>
+      <button id="teamCheck" class="ghost" disabled>Check the Matrix radius search</button>
+    </div>
+    <div class="hint"><b>Team comps</b> (v1.75, for the Lead Board <b>Test</b> only) searches the sold homes within
+      1 mile of every lead that has comps (½ mile first in San Francisco), widens the radius while too few fit, and
+      writes them to their own <b>Team Comps</b> tab — the Leads tab and the ARV the real board shows are not touched.
+      Press <b>Check</b> first: it tries one search, says what it found and saves the page for Claude.</div>
     <div class="hint"><b>Refresh</b> re-reads only the leads already on your sheet (reports, no photos) — offer
       dates that were TBD, price cuts, pending status, private remarks — and never touches your Notes.
       Leads you <b>passed</b> that are still on the market are checked too: a price 10%+ under the sheet, or a
@@ -310,6 +318,7 @@
     runActive = running;
     $('start').disabled = running; $('pause').disabled = !running; $('resume').disabled = true; $('stop').disabled = !running;
     $('refreshBoard').disabled = running;
+    $('teamComps').disabled = running; $('teamCheck').disabled = running;
     // One run at a time: the Redfin buttons are off while anything runs (a
     // click mid-scan used to reset Start/Stop while the scan kept going, and
     // "Sign in to Redfin" sent the scan's own window to the login page).
@@ -332,6 +341,7 @@
     if (runActive) return;   // a run owns the buttons; never re-enable Start under it
     $('start').disabled = !r.loggedIn;
     $('refreshBoard').disabled = !r.loggedIn;
+    $('teamComps').disabled = !r.loggedIn; $('teamCheck').disabled = !r.loggedIn;
   };
   // --- which areas to scan ---
   // Checkboxes over the buy box, remembered between runs. Nothing is scanned
@@ -412,6 +422,16 @@
     if (r && !r.ok && r.error && !r.stopped) log('Refresh: ' + r.error, 'warn');
     setScanButtons(false);
   };
+  const runTeam = async (dry) => {
+    setScanButtons(true);
+    $('finished').style.display='none';
+    const r = await window.fs.teamComps({ dry });
+    if (busy(r)) return;
+    if (r && !r.ok && r.error && !r.stopped) log('Team comps: ' + r.error, 'warn');
+    setScanButtons(false);
+  };
+  $('teamComps').onclick = () => runTeam(false);
+  $('teamCheck').onclick = () => runTeam(true);
   $('rebuildBoard').onclick = async () => {
     const r = await window.fs.rebuildBoard();
     if (r && r.unconfigured) log('Connect your Google Sheet in section 8 first.', 'warn');

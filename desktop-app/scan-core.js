@@ -118,6 +118,8 @@ const JS_SCRAPE_SOLD = `(() => {
     mls: find(/^MLS ?#$/i), addr: find(/^(street )?address$/i), price: find(/^(list )?price$/i),
     sold: find(/^(sold|sale|selling|close|closing) ?price$|^SP$/i), date: find(/^(sold|sale|close|closing|coe)( of escrow)? ?date$|^COE$/i),
     sqft: find(/^sq ?ft$/i), bds: find(/^(bds|beds)$/i), baths: find(/^(bths|baths)$/i), age: find(/^age$/i), yr: find(/^(yr|year) ?(blt|built)$/i),
+    // v1.75 team comps: a radius search adds Distance; DOM and Area when the display has them
+    dom: find(/^c?dom$/i), dist: find(/^dist(ance)?$/i), area: find(/^(mls )?area$/i), city: find(/^postal city$/i),
   };
   const out = [];
   rows.forEach(tr => {
@@ -126,7 +128,8 @@ const JS_SCRAPE_SOLD = `(() => {
     const mls = p('mls');
     if (!/^[A-Z]{0,6}\\d{5,}$/.test(mls)) return;
     out.push({ mls, addr: p('addr'), price: p('price'), soldPrice: p('sold'), sold: p('date'),
-      sqft: p('sqft'), bds: p('bds'), baths: p('baths'), age: p('age'), yr: p('yr') });
+      sqft: p('sqft'), bds: p('bds'), baths: p('baths'), age: p('age'), yr: p('yr'),
+      dom: p('dom'), dist: p('dist'), area: p('area'), city: p('city') });
   });
   return out;
 })()`;
@@ -723,6 +726,80 @@ function parseCompReport(text, mls) {
     soldDate: dayKey(grab(new RegExp('\\b(?:Sold|Sale|Close|Closing|COE) ?Date' + gap + date, 'i'))
       || grab(new RegExp('\\b(?:COE|Sale|Sold)' + gap + date, 'i'))),
   };
+}
+
+// ---------- team comps (v1.75, for the Lead Board TEST only) ----------
+// Seth, 26-27 Oct, from Gen's comps; radius and window from Juan, 27 Oct: sold
+// homes within 1 mile in the last 6 months, the radius widened in the market's
+// own steps when too few fit. The app only finds the sales (a radius search,
+// one row per sale with its distance and days on market) and writes them to
+// their own "Team Comps" tab; the Test board's compcheck.py reads each sale's
+// remarks and applies the rest of the rules. Nothing here touches the Leads
+// tab or the ARV the real board shows.
+const TEAM_TAB = 'Team Comps';
+const TEAM_HEADERS = ['MLS #', 'Address', 'Market', 'Radius Searched', 'Sales Found', 'Team Comps', 'Team Comps Run On', 'Note'];
+const TEAM_STEPS = { sf: [0.5, 1, 2], city: [1, 2], thin: [1, 2, 3, 5] };
+// a sale closed in the last 6 months was listed up to ~9 months ago; the close
+// date itself is checked by compcheck.py from each sale's page
+const TEAM_LIST_MONTHS = 9;
+// widen while fewer than this many sales fit on size, beds, baths and age:
+// about half of them turn out light updates or silent on condition
+const TEAM_ENOUGH = 6;
+const TEAM_PAGES = 20;
+// the five Bay counties around San Francisco widen to 2 miles; the rest to 5
+const TEAM_CITY_COUNTY = (() => {
+  const m = {}, add = (county, cities) => cities.split('|').forEach(c => { m[c.toLowerCase()] = county; });
+  add('San Francisco', 'San Francisco');
+  add('San Mateo', 'Daly City|Pacifica|South San Francisco|Redwood City|San Bruno|San Mateo|Menlo Park|East Palo Alto|Belmont|El Granada|San Carlos|Burlingame|Foster City|Millbrae|La Honda|Half Moon Bay|Woodside|Moss Beach|Montara|Atherton|Portola Valley|Brisbane|Colma|Hillsborough|Pescadero|Emerald Hills');
+  add('Santa Clara', 'San Jose|Morgan Hill|Gilroy|Santa Clara|Milpitas|Campbell|Sunnyvale|Los Gatos|San Martin|Mountain View|Palo Alto|Cupertino|Saratoga|Los Altos|Monte Sereno');
+  add('Alameda', 'Oakland|Berkeley|San Leandro|Hayward|Fremont|Livermore|Union City|Castro Valley|Newark|Albany|Alameda|Dublin|Pleasanton|Sunol|San Lorenzo|Emeryville|Piedmont');
+  add('Contra Costa', 'Richmond|Antioch|Pittsburg|Concord|Martinez|Pleasant Hill|Oakley|Walnut Creek|Orinda|Brentwood|Lafayette|Clayton|Discovery Bay|San Pablo|El Sobrante|El Cerrito|Pacheco|San Ramon|North Richmond|Moraga|Danville|Pinole|Bay Point|Kensington|Hercules|Rodeo|Crockett|Byron|Knightsen|Alamo');
+  add('Marin', 'San Rafael|Mill Valley|Novato|San Anselmo|Fairfax|Bolinas|Larkspur|Corte Madera|Woodacre|Sausalito|Tiburon|Greenbrae|Kentfield|Point Reyes Station|Inverness|Stinson Beach|Forest Knolls|Lagunitas');
+  return m;
+})();
+
+/** 'sf', 'city' or 'thin', from the city in "…, City, CA 94xxx". */
+function teamMarket(addr) {
+  const m = String(addr || '').match(/,\s*([^,]+?),\s*CA\b/i);
+  const county = m ? TEAM_CITY_COUNTY[m[1].trim().toLowerCase()] : '';
+  return county === 'San Francisco' ? 'sf' : county ? 'city' : 'thin';
+}
+
+/** Results-grid rows (JS_SCRAPE_SOLD) -> the sales kept on the Team Comps tab. */
+function teamRows(rows, subjectMls) {
+  const self = String(subjectMls || '').trim().toUpperCase(), seen = new Set(), year = new Date().getFullYear();
+  const lead = s => { const m = String(s || '').match(/\d+(?:\.\d+)?/); return m ? Number(m[0]) : ''; };
+  return (rows || []).map(r => {
+    const price = num(r.soldPrice) || num(r.price), sqft = num(r.sqft), age = num(r.age);
+    const dist = String(r.dist || '').match(/(\d+(?:\.\d+)?)/);
+    return {
+      mls: String(r.mls || '').trim().toUpperCase(), addr: String(r.addr || '').replace(/\s+/g, ' ').trim(),
+      price, sqft, bd: lead(r.bds), ba: lead(r.baths),
+      yr: num(r.yr) || (age > 0 && age < 200 ? year - age : ''),
+      sold: dayKey(r.sold), dom: r.dom === '' || r.dom == null ? '' : num(r.dom),
+      mi: dist ? Number(dist[1]) : '', area: String(r.area || '').trim(), city: String(r.city || '').trim(),
+    };
+  }).filter(c => c.mls && c.mls !== self && c.sqft >= 300 && c.price >= 50000 && !seen.has(c.mls) && seen.add(c.mls));
+}
+
+/** Sales that fit the lead on what the grid shows: within 20% of its size,
+ *  beds within 1, built within 20 years, and not a 0-days-on-market sale. */
+function teamFits(rows, lead) {
+  const sq = num(lead.sqft), bd = num(lead.beds), yr = num(lead.year);
+  return (rows || []).filter(r => (!sq || (r.sqft && Math.abs(r.sqft - sq) / sq <= 0.20))
+    && (!bd || r.bd === '' || Math.abs(r.bd - bd) <= 1)
+    && (!yr || !r.yr || Math.abs(r.yr - yr) <= 20)
+    && r.dom !== 0);
+}
+
+/** The Team Comps tab's row for one lead. The sales list is compact JSON,
+ *  nearest first, kept well under a cell's 50,000 characters. */
+function teamRecord(lead, market, radius, rows, note, today) {
+  const keep = rows.slice().sort((a, b) => (a.mi === '' ? 99 : a.mi) - (b.mi === '' ? 99 : b.mi));
+  let l = keep, s = JSON.stringify(l);
+  while (s.length > 45000 && l.length) { l = l.slice(0, -1); s = JSON.stringify(l); }
+  return { 'MLS #': lead.mls, 'Address': lead.addr || '', 'Market': market, 'Radius Searched': radius ? radius + ' mi' : '',
+    'Sales Found': rows.length, 'Team Comps': l.length ? s : '', 'Team Comps Run On': today, 'Note': note || '' };
 }
 
 /**
@@ -2040,6 +2117,7 @@ module.exports = {
   isPersonRejection, dayKey, rereviewPlan,
   saysNeedsWork, aiVerdict, COSMETIC_KW, DISTRESSED_SALE_KW,
   compRows, compBand, classifyComp, compArv, compSummary, compsJson, parseCompReport, JS_SCRAPE_SOLD,
+  TEAM_TAB, TEAM_HEADERS, TEAM_STEPS, TEAM_LIST_MONTHS, TEAM_ENOUGH, TEAM_PAGES, teamMarket, teamRows, teamFits, teamRecord,
   COMP_BANDS, COMP_READ, COMP_LIST_MAX,
   boardLead,
   redfinUrlFrom,

@@ -418,7 +418,7 @@ Foerster, 1408 Royal and 549 6th Ave, and asked for them on the Test board
 only. `compcheck.py` applies them to the comps the FlipScout app saved
 (`comps.js`):
 
-    python3 -I compcheck.py <new data.js> <out>/shared/comps.js <out>/testonly
+    python3 -I compcheck.py <new data.js> <out>/shared/comps.js <out>/testonly --xlsx <prod sheet .xlsx>
 
 - Each saved comp's public MLS page gives its location, sale date, sale
   price, size, beds, baths, year and remarks; the lead's own page gives its
@@ -442,6 +442,11 @@ only. `compcheck.py` applies them to the comps the FlipScout app saved
 - `teamcomps.js` holds the result per lead. The Test board's Comps agent
   shows it as "Team rules" above the app's ARV, with the radius rows, each
   comp that counts and why each other one doesn't.
+
+With `--xlsx`, the sheet's **Team Comps** tab (the FlipScout app's radius
+search, v1.75: the sold homes within the market's radius steps, with Matrix's
+distance and days on market) is added to each lead's saved comps; a sale with
+0 days on market is out.
 
 Not checked yet: the county square footage (drop a comp more than 10% off;
 only Matrix's Tax tab has it), the same side of the freeways, and sales

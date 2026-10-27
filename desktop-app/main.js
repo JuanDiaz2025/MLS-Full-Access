@@ -860,9 +860,15 @@ async function soldSearch(zip) {
   await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`)); await sleep(1600);
   const count = await js(core.JS_MATCH_COUNT).catch(() => '?');
   if (count === '0') return { count, rows: [] };
+  return { count, rows: await readSoldPages(8) };   // a zip's year of sales is a few pages
+}
+
+/** Open the results of the search on screen and read up to `maxPages` pages of
+ *  the sold grid. */
+async function readSoldPages(maxPages) {
   await js(`(() => { const a=[...document.querySelectorAll('a')].find(x=>/Results/i.test(x.textContent)); if(a) a.click(); })()`);
   let all = [], prev = '';
-  for (let pg = 1; pg <= 8; pg++) {   // a zip's year of sales is a few pages
+  for (let pg = 1; pg <= maxPages; pg++) {
     if (control.stopped) break;
     const until = Date.now() + (pg === 1 ? 20000 : 15000);
     let rows = [];
@@ -877,7 +883,108 @@ async function soldSearch(zip) {
     if (!moved) break;
     await sleep(1500);
   }
-  return { count, rows: all };
+  return all;
+}
+
+// ---------- team comps (v1.75): a radius search, for the Lead Board TEST only ----------
+// The search form's "within ___ miles of ___" boxes. Matrix's control ids are
+// dynamic and this part of the form had not been seen live when this was
+// written, so the boxes are found by the words around them: two text boxes in
+// a block that says radius / within / distance / proximity / "miles of"; the
+// short one (or the one marked mi) takes the miles, the wide one the address.
+// Each gets a data-fs-radius mark so setInput can reach it.
+const JS_TEAM_RADIUS = `(() => {
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const txt = e => (e ? (e.innerText || e.textContent || '') : '').replace(/\\s+/g, ' ').trim();
+  const boxes = [...document.querySelectorAll('input')].filter(i => vis(i) && /^(text|search|number|)$/i.test(i.getAttribute('type') || ''));
+  const near = i => {
+    const lab = i.id ? document.querySelector('label[for="' + CSS.escape(i.id) + '"]') : null;
+    const row = i.closest('tr, li, fieldset, div');
+    return [txt(lab), i.placeholder, i.title, i.getAttribute('aria-label'), txt(row).slice(0, 200)].filter(Boolean).join(' ').toLowerCase();
+  };
+  const own = i => [txt(i.nextElementSibling), i.nextSibling && i.nextSibling.textContent, i.placeholder, i.title].filter(Boolean).join(' ').toLowerCase();
+  const hits = boxes.filter(i => /\\bradius\\b|\\bwithin\\b|\\bproximity\\b|\\bdistance\\b|miles? (of|from)/.test(near(i)));
+  // a box in the same small block as one of those counts too (a bare "mi" box beside the address)
+  const cands = [...new Set(hits.flatMap(i => {
+    const c = i.closest('tr, li, fieldset, div'), group = c ? boxes.filter(b => c.contains(b)) : [];
+    return group.length && group.length <= 4 ? group : [i];
+  }))];
+  if (cands.length < 2) return { ok: false, cands: cands.length };
+  const mi = cands.find(i => /\\bmi(les?)?\\b/.test(own(i)) || (i.maxLength > 0 && i.maxLength <= 6) || i.getAttribute('type') === 'number')
+    || cands.slice().sort((a, b) => a.offsetWidth - b.offsetWidth)[0];
+  const addr = cands.filter(i => i !== mi).sort((a, b) => b.offsetWidth - a.offsetWidth)[0];
+  if (!mi || !addr) return { ok: false, cands: cands.length };
+  mi.setAttribute('data-fs-radius', 'mi'); addr.setAttribute('data-fs-radius', 'addr');
+  return { ok: true, mi: '[data-fs-radius="mi"]', addr: '[data-fs-radius="addr"]', miNear: near(mi).slice(0, 90), addrNear: near(addr).slice(0, 90) };
+})()`;
+// A radius part of the form that starts folded: click its heading or tab once.
+const JS_TEAM_RADIUS_OPEN = `(() => {
+  const el = [...document.querySelectorAll('a, button, legend, span, div, td')]
+    .find(e => e.children.length < 3 && /^(radius( search)?|search by radius|proximity( search)?|map search|location)$/i.test((e.textContent || '').trim()));
+  if (el) { el.click(); return (el.textContent || '').trim(); } return '';
+})()`;
+// What the search form holds, for fixing JS_TEAM_RADIUS from the user's
+// machine when it misses: every field with the words around it. Never a value
+// from a password box.
+const JS_FORM_DUMP = `(() => {
+  const txt = e => (e ? (e.innerText || e.textContent || '') : '').replace(/\\s+/g, ' ').trim();
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const fields = [...document.querySelectorAll('input, select, textarea')].map(e => ({
+    tag: e.tagName, type: e.getAttribute('type') || '', id: e.id || '', name: e.name || '', visible: vis(e),
+    value: e.type === 'password' ? '' : String(e.value || '').slice(0, 60), mark: e.getAttribute('data-fs-radius') || '',
+    near: txt(e.closest('tr, li, fieldset, div')).slice(0, 160) }));
+  const words = [...document.querySelectorAll('a, button, label, legend, h1, h2, h3, h4, span, td, th')].map(txt)
+    .filter(t => t && t.length < 60 && /radius|map|distance|within|mile|proximity|location|lat|long/i.test(t));
+  return { url: location.href, title: document.title, matches: (document.body.innerText.match(/([\\d,]+\\+?)\\s*match/i) || [])[1] || '',
+    fields, words: [...new Set(words)].slice(0, 100) };
+})()`;
+
+/** Save the MLS window's page (its fields, and a picture of it) for fixing the
+ *  radius search from here. userData/team-comps-debug/<time>-<tag>.json|png */
+async function saveTeamDebug(tag) {
+  const dir = path.join(app.getPath('userData'), 'team-comps-debug');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const dump = await js(JS_FORM_DUMP).catch(e => ({ error: e.message }));
+    fs.writeFileSync(path.join(dir, `${stamp}-${tag}.json`), JSON.stringify(dump, null, 1));
+    const img = await ensureMlsWindow().webContents.capturePage().catch(() => null);
+    if (img) fs.writeFileSync(path.join(dir, `${stamp}-${tag}.png`), img.toPNG());
+  } catch (_) {}
+  return dir;
+}
+
+/** Sold single-family homes within `miles` of `addr`, listed in the last
+ *  TEAM_LIST_MONTHS. Throws when the form has no radius boxes or the radius
+ *  plainly did not apply, after saving the page. */
+async function teamSoldSearch(addr, miles) {
+  await nav(core.SEARCH_URL, 2200);
+  const st = await js(selectOnly(core.FIELDS.status, ['^sold\\b'])).catch(() => null);
+  if (!st || !st.length) throw new Error('the search form has no "Sold" status');
+  await sleep(400);
+  await js(selectByLabel(core.FIELDS.propType, 'Single Family Home')); await sleep(400);
+  const to = new Date(), from = new Date(to.getFullYear(), to.getMonth() - core.TEAM_LIST_MONTHS, 1);
+  const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+  await js(setInput(core.FIELDS.listDate, `${fmt(from)}-${fmt(to)}`)); await sleep(800);
+  let f = await js(JS_TEAM_RADIUS).catch(() => null);
+  if (!f || !f.ok) {
+    const opened = await js(JS_TEAM_RADIUS_OPEN).catch(() => '');
+    if (opened) { await sleep(1500); f = await js(JS_TEAM_RADIUS).catch(() => null); }
+  }
+  if (!f || !f.ok) {
+    const dir = await saveTeamDebug('no-radius-boxes');
+    throw new Error(`found no "within … miles of …" boxes on the search form. The page is saved in ${dir} — send those files to Claude`);
+  }
+  await js(setInput(f.addr, addr)); await sleep(1500);
+  await js(setInput(f.mi, String(miles))); await sleep(1800);
+  const count = await js(core.JS_MATCH_COUNT).catch(() => '?');
+  // the whole MLS's sold homes for 9 months runs to thousands: the radius did not take
+  if (/\+$/.test(count) || core.num(count) > 2000) {
+    const dir = await saveTeamDebug('radius-not-applied');
+    throw new Error(`the search found ${count} sales, so the radius did not apply. The page is saved in ${dir} — send those files to Claude`);
+  }
+  if (count === '0') return { count, rows: [], fields: f };
+  return { count, rows: await readSoldPages(core.TEAM_PAGES), fields: f };
 }
 
 /** One sold home's Client Full report — remarks, year, sold price and date.
@@ -3027,6 +3134,117 @@ ipcMain.handle('refresh-board', async () => {
           + (reopenedN ? `, ${reopenedN} passed lead(s) cut or back on the market — look again (see the log).` : '.')
           + (control.stopped ? ' Press ↻ Refresh again today to pick up where it stopped.' : '')) }
       : { neverStarted: true, summary: 'Refresh NOT started — sign in to the MLS first (section 1), then press ↻ Refresh again.' });
+    control.running = false;
+  }
+});
+
+// ---------- team comps (v1.75): the comped leads' sold homes by radius, for the Lead Board TEST ----------
+// Juan, 27 Oct: 1 mile and 6 months by default, widened on its own where comps
+// are thin, and "re-run the 125 leads". Each comped lead gets a sold search
+// within 1 mile (San Francisco starts at 1/2), widened in its market's steps
+// while fewer than TEAM_ENOUGH sales fit on size, beds and age. The sales go to
+// their own "Team Comps" tab, one row per lead; nothing on the Leads tab
+// changes, so the real board's ARV is untouched. A check run ({dry}) does the
+// first lead's first search only, says what it found, and saves the page.
+ipcMain.handle('team-comps', async (_e, opts) => {
+  const dry = !!(opts && opts.dry);
+  if (control.running) return { ok: false, error: 'already running', message: 'Team comps NOT started — another run is still finishing. Wait for its "Finished" message, then try again.' };
+  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 8 first' };
+  control.running = true; control.stopped = false; control.paused = false;
+  let started = false, done = 0, sales = 0, failed = 0, endSummary = '';
+  try {
+    if (!mlsWin || mlsWin.isDestroyed()) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
+    const title = await js(core.JS_TITLE).catch(() => '');
+    if (!/Dashboard|Matrix/i.test(title)) { log('Not logged in — sign in first.', 'error'); return { ok: false, error: 'not signed in' }; }
+    started = true;
+    const g = googleCfg();
+    const token = await googleToken();
+    const rows = await gsheets.readAll(token, g.sheetId, g.leadTab);
+    const head = (rows[0] || []).map(h => String(h).trim());
+    const val = (r, h) => { const i = head.indexOf(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); };
+    const isMlsId = m => /^[A-Z]{2,6}\d{5,}$/.test(String(m || '').trim().toUpperCase());
+    const rankOf = r => ({ A: 0, B: 1 })[(val(r, 'Bucket').match(/^[ABC]/) || ['?'])[0]] ?? 2;
+    const tday = todayKey();
+    // the leads the app has comped, A first, newest row first within a bucket
+    let todo = rows.slice(1).map((r, i) => ({ r, i }))
+      .filter(x => isMlsId(val(x.r, 'MLS #')) && (val(x.r, 'Comps Run On') || val(x.r, 'ARV')) && val(x.r, 'Address'))
+      .sort((a, b) => rankOf(a.r) - rankOf(b.r) || b.i - a.i);
+    // a run stopped earlier today picks up where it stopped
+    let doneToday = new Set();
+    try {
+      const tr = await gsheets.readAll(token, g.sheetId, core.TEAM_TAB);
+      const th = (tr[0] || []).map(h => String(h).trim()), ki = th.indexOf('MLS #'), di = th.indexOf('Team Comps Run On');
+      if (ki >= 0 && di >= 0) tr.slice(1).forEach(r => { if (String(r[di] || '').trim() === tday) doneToday.add(String(r[ki] || '').trim().toUpperCase()); });
+    } catch (_) { /* no tab yet */ }
+    const before = todo.length;
+    if (dry) todo = todo.slice(0, 1);
+    else todo = todo.filter(x => !doneToday.has(val(x.r, 'MLS #').toUpperCase()));
+    log(dry ? `Checking the Matrix radius search on ${val((todo[0] || {}).r || [], 'Address') || 'the first comped lead'} — nothing is saved…`
+      : `Team comps for ${todo.length} comped lead(s), A first`
+        + (before - todo.length ? ` (skipping ${before - todo.length} already done today)` : '')
+        + ` — a sold search by radius each, widened while fewer than ${core.TEAM_ENOUGH} sales fit…`, 'good');
+    let batch = [];
+    const flush = async () => {
+      if (!batch.length) return;
+      await gsheets.syncRows(await googleToken(), g.sheetId, core.TEAM_TAB, core.TEAM_HEADERS, 'MLS #', batch, { overwrite: core.TEAM_HEADERS });
+      batch = [];
+    };
+    let blocked = '';
+    for (let i = 0; i < todo.length; i++) {
+      if (await stopRequested()) break;
+      const r = todo[i].r, mls = val(r, 'MLS #'), addr = val(r, 'Address');
+      const lead = { mls, addr, sqft: core.num(val(r, 'SqFt')), beds: core.num(val(r, 'Beds')), year: core.num(val(r, 'Year Built')) };
+      const market = core.teamMarket(addr), steps = core.TEAM_STEPS[market];
+      log(`  [${i + 1}/${todo.length}] ${addr} · ${market === 'sf' ? 'San Francisco' : market === 'city' ? 'Bay Area city' : 'thin area'}: ${steps.join(' → ')} mi`);
+      let radius = 0, found = [], note = '', stoppedMid = false;
+      try {
+        for (const mi of (dry ? steps.slice(0, 1) : steps)) {
+          const res = await teamSoldSearch(addr, mi);
+          if (control.stopped) { stoppedMid = true; break; }
+          radius = mi; found = core.teamRows(res.rows, mls);
+          const fit = core.teamFits(found, lead).length, withDist = found.filter(x => x.mi !== '').length;
+          log(`    ${mi} mi: ${res.count} match(es) · ${found.length} sold read · ${fit} fit on size, beds and age`
+            + (found.length && !withDist ? ' · no Distance column in this display' : ''), fit ? 'good' : 'info');
+          if (dry) {
+            log(`    miles box: "${res.fields.miNear}"`); log(`    address box: "${res.fields.addrNear}"`);
+            log(`    columns read: ${['dist', 'dom', 'area', 'city'].filter(k => res.rows.some(x => x[k])).join(', ') || 'no Distance, DOM or Area'}`);
+          }
+          if (fit >= core.TEAM_ENOUGH || await stopRequested()) break;
+        }
+      } catch (e) {
+        note = 'search failed: ' + e.message; failed++;
+        log('    ' + note, 'warn');
+        // the form itself is the problem: every lead would fail the same way
+        if (/no "within|did not apply/.test(e.message)) blocked = e.message;
+      }
+      if (dry) { const dir = await saveTeamDebug('check'); log(`  The search page is saved in ${dir} — send it to Claude if anything above looks wrong.`, 'good'); break; }
+      if (blocked) break;
+      if (stoppedMid) { log('    stopped part-way — not saved; the next run does it whole'); break; }
+      batch.push(core.teamRecord(lead, market, radius, found, note, note ? '' : tday));
+      done++; sales += found.length;
+      if (batch.length >= 5) await flush();
+    }
+    await flush();
+    if (blocked) {
+      log(`Team comps STOPPED — ${blocked}`, 'error');
+      endSummary = 'Team comps stopped: the radius search did not work on this form. Send Claude the saved page.';
+      return { ok: false, stopped: true, error: blocked };
+    }
+    if (!dry) log(`Team comps ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${done} lead(s) saved to the "${core.TEAM_TAB}" tab · ${sales} sold home(s) · ${failed} search(es) failed`
+      + (control.stopped ? '. Press it again today to pick up where it stopped.' : '.'), 'good');
+    return { ok: true, done, sales, failed };
+  } catch (e) {
+    if (e.message === 'stopped') { log('Team comps stopped.', 'warn'); return { ok: false, stopped: true }; }
+    const why = /^fetch failed$/i.test(e.message) ? 'no answer over the internet — ' + gsheets.netReason(e) : e.message;
+    log('Team comps error: ' + why, 'error');
+    if (started) endSummary = 'Team comps stopped by an error — press it again; it picks up where it stopped.';
+    return { ok: false, stopped: started, error: why };
+  } finally {
+    if (started) closeMlsWindow();
+    send('done', started
+      ? { stopped: control.stopped || !!endSummary, failed: !!endSummary, summary: endSummary || (dry ? 'Matrix radius check finished — see the log.'
+          : `Team comps finished — ${done} lead(s) saved, ${sales} sold homes.`) }
+      : { neverStarted: true, summary: 'Team comps NOT started — sign in to the MLS first (section 1), then press it again.' });
     control.running = false;
   }
 });

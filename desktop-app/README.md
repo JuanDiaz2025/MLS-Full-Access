@@ -116,6 +116,23 @@ install (creates a desktop shortcut) or run the portable exe directly.
    sign-in, but it opens only on the computer that saved it — the boards could
    not use it. A Refresh swaps those for a copy, or empties them when the public
    page has the photo.)
+4f. **Team comps, for the Lead Board Test** (v1.75) — the team's comp rules (Seth,
+   26–27 Oct) need the sold homes **within a radius**, not the zip. **⌖ Team comps
+   (Test board)** runs a Sold single-family search within **1 mile** of every lead
+   that has comps, A first (**½ mile** first in San Francisco), and widens it in
+   the market's steps — San Francisco ½ → 1 → 2 mi; San Mateo, Santa Clara,
+   Alameda, Contra Costa and Marin 1 → 2 mi; everywhere else 1 → 2 → 3 → 5 mi —
+   while fewer than 6 sales fit on size (±20%), beds (±1), age (±20 years) and
+   days on market (never 0). The sales, with Matrix's distance and days on market,
+   go to their own **Team Comps** tab, one row per lead; the Leads tab, its ARV
+   and the real board are untouched. The Test board's `compcheck.py` reads that
+   tab and applies the rest of the rules. A run stopped part-way picks up where it
+   stopped the same day. **Check the Matrix radius search** first: it runs one
+   search, logs the boxes and columns it found, saves nothing, and saves the
+   search page under `team-comps-debug` in the app's data folder. The radius
+   boxes are found by the words around them ("within … miles of …"), so if the
+   form lays them out differently the run stops on the first lead, says so, and
+   saves the page there to send to Claude.
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,

@@ -2,7 +2,11 @@
 """The team's comp rules (Gen's way) applied to the FlipScout app's saved comps,
 for the FlipScout Board TEST only (Seth, 26 Oct: "for test page, only ok? go!").
 
-    python3 -I compcheck.py <data.js> <comps.js> <out dir> [--today YYYY-MM-DD] [--workers 6]
+    python3 -I compcheck.py <data.js> <comps.js> <out dir> [--xlsx <prod sheet .xlsx>] [--today YYYY-MM-DD] [--workers 6]
+
+With --xlsx, the sheet's "Team Comps" tab (the FlipScout app's radius search,
+v1.75) is added to each lead's saved comps, with Matrix's days on market
+(0 = out) and distance.
 
 The rules (Seth, 26 Oct, from Gen's three comp write-ups):
   1. Condition: the kitchen AND a bath remodeled. Luxury remodels count. Light
@@ -242,9 +246,14 @@ def judge(lead, subj, comps, F, today):
         cbd = f.get('bd') if f.get('bd') is not None else c.get('bd')
         cba = f.get('ba') if f.get('ba') is not None else c.get('ba')
         cond, lux, k, b, w = condition(f.get('rem', ''), cyr, today.year) if f else ('unknown', 0, '', '', 'public page not read')
+        mi = miles(subj, f) if f else None
+        if mi is None and isinstance(c.get('gmi'), (int, float)):
+            mi = c['gmi']               # Matrix's own distance, from the radius search
         r = {'mls': c['mls'], 'addr': c.get('addr', ''), 'price': price, 'sqft': csq,
              'ppsf': round(price / csq) if price and csq else 0, 'sold': sold, 'bd': cbd, 'ba': cba, 'yr': cyr,
-             'mi': miles(subj, f) if f else None, 'c': cond, 'lux': lux, 'k': k, 'b': b, 'w': w}
+             'mi': mi, 'c': cond, 'lux': lux, 'k': k, 'b': b, 'w': w}
+        if c.get('src'):
+            r['src'] = c['src']
         age = (today - datetime.date.fromisoformat(sold)).days if re.match(r'\d{4}-\d\d-\d\d$', sold) else None
         r['days'] = age
         x = ''
@@ -254,6 +263,8 @@ def judge(lead, subj, comps, F, today):
             x = 'no sale date'
         elif age > RULES['months'] * 30.5:
             x = 'sold over %d months ago' % max(RULES['months'], int(age / 30.4))
+        elif c.get('dom') == 0:
+            x = 'sold with 0 days on market'
         elif r['mi'] is None:
             x = 'no location'
         elif r['mi'] > RADII[-1]:
@@ -324,6 +335,46 @@ def judge(lead, subj, comps, F, today):
     return out
 
 
+def load_team(xlsx):
+    """The prod sheet's "Team Comps" tab (FlipScout app v1.75): lead MLS # ->
+    the sold homes its radius search found, in the shape of comps.js's list
+    plus dom, gmi (Matrix's distance in miles) and area. {} with no tab."""
+    if not xlsx or not os.path.exists(xlsx):
+        return {}
+    import openpyxl
+    wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
+    if 'Team Comps' not in wb.sheetnames:
+        return {}
+    rows = wb['Team Comps'].iter_rows(values_only=True)
+    head = [str(h or '').strip() for h in next(rows, [])]
+    if 'MLS #' not in head or 'Team Comps' not in head:
+        return {}
+    ki, ci = head.index('MLS #'), head.index('Team Comps')
+    out = {}
+    for r in rows:
+        m = str(r[ki] or '').strip().upper() if ki < len(r) else ''
+        try:
+            sales = json.loads(r[ci]) if ci < len(r) and r[ci] else []
+        except (ValueError, TypeError):
+            continue
+        keep = []
+        for s in sales if isinstance(sales, list) else []:
+            if not isinstance(s, dict) or not re.match(r'^[A-Z]{1,6}\d{5,}$', str(s.get('mls', ''))):
+                continue
+            c = {'mls': s['mls'], 'addr': s.get('addr', ''), 'price': s.get('price') or 0, 'sqft': s.get('sqft') or 0,
+                 'sold': s.get('sold') or '', 'bd': s.get('bd'), 'ba': s.get('ba'), 'yr': s.get('yr') or 0, 'src': 'radius'}
+            if isinstance(s.get('dom'), (int, float)):
+                c['dom'] = s['dom']
+            if isinstance(s.get('mi'), (int, float)):
+                c['gmi'] = s['mi']
+            if s.get('area'):
+                c['area'] = s['area']
+            keep.append(c)
+        if m and keep:
+            out[m] = keep
+    return out
+
+
 def load_js(path, empty):
     if not os.path.exists(path):
         return empty
@@ -345,7 +396,22 @@ def main():
     CF.setdefault('by', {}), CF.setdefault('miss', {})
     ix = {k: i for i, k in enumerate(data['cols'])}
     leads = {r[ix['mls']]: {k: r[ix[k]] for k in ('mls', 'addr', 'sqft', 'beds', 'year')} for r in data['rows']}
-    by = {m: c for m, c in (comps.get('by') or {}).items() if m in leads and c and c.get('list')}
+    by = {m: {'list': list(c['list'])} for m, c in (comps.get('by') or {}).items() if m in leads and c and c.get('list')}
+    # the app's radius search (v1.75, the prod sheet's "Team Comps" tab), added to the saved comps
+    team = load_team(opt('--xlsx', ''))
+    n_team = 0
+    for m, sales in team.items():
+        if m not in leads:
+            continue
+        have = by.setdefault(m, {'list': []})['list']
+        seen = {c['mls']: c for c in have}
+        for s in sales:
+            c = seen.get(s['mls'])
+            if c:                       # in both: keep the app's row, take the radius search's DOM and distance
+                c.update({k: s[k] for k in ('dom', 'gmi', 'area') if k in s})
+                continue
+            have.append(s)
+            n_team += 1
     tday = today.isoformat()
 
     def stale(m, lead):
@@ -388,7 +454,8 @@ def main():
     n_arv = sum(1 for r in res.values() if r['st'] == 'ARV')
     print('pages read: %d new, %d with no page, %d errors, %d on file · %ds' % (
         got, miss, errs, len(CF['by']), time.time() - t0))
-    print('teamcomps.js: %d leads · %d with an ARV under the team rules · %d NEED INFO' % (len(res), n_arv, len(res) - n_arv))
+    print('teamcomps.js: %d leads · %d with an ARV under the team rules · %d NEED INFO · %d sales from the radius search (%d leads)' % (
+        len(res), n_arv, len(res) - n_arv, n_team, len(team)))
     print('NEW FILES: compfacts.js teamcomps.js')
 
 
