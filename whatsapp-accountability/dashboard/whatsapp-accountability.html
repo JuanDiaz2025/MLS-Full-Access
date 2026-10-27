@@ -323,7 +323,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .addmain { min-width: 0; }
 .addmain h3:first-child { margin-top: 0; }
 .apply-all { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
-.add-foot { padding: 0; margin-top: 18px; align-items: center; flex-wrap: wrap; }
+.add-foot { position: sticky; bottom: 0; z-index: 2; background: var(--surface); border-top: 1px solid var(--line); padding: 12px 0 14px; margin-top: 18px; align-items: center; flex-wrap: wrap; }
 .add-foot .plain { margin-right: auto; }
 @media (max-width: 760px) { .addflow { grid-template-columns: minmax(0, 1fr); } .addside { position: static; max-height: 40vh; } }
 .mhead-a { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
