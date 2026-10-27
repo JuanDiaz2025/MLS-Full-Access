@@ -436,6 +436,9 @@ only. `compcheck.py` applies them to the comps the FlipScout app saved
   Alameda, Contra Costa and Marin 1 -> 2 mi; everywhere else 1 -> 2 -> 3 -> 5
   mi. Every radius (1/2, 1, 2, 3, 5 mi) gets a row, so the board shows them
   side by side and "Use" picks another one for that viewer.
+- Bad data (Seth, 27 Oct): a comp whose $/sqft is more than 35% off the
+  group's median is left out while 3 others remain, and flagged on the board
+  when it can't be (only 3 comps).
 - `teamcomps.js` holds the result per lead. The Test board's Comps agent
   shows it as "Team rules" above the app's ARV, with the radius rows, each
   comp that counts and why each other one doesn't.

@@ -37,12 +37,13 @@ board reads:
 
     window.__TEAMCOMPS__ = {v, built, today, rules, radii, by: {MLS: {mk, steps, win, pick, st: 'ARV'|'NEED',
         arv, ppsf, n, mi, cap, capped, why, subj: {lat, lng, ba},
-        rows: [{mi, n, used: [MLS], step, st, arv, ppsf, cap, capped, floor}],
+        rows: [{mi, n, used: [MLS], step, st, arv, ppsf, cap, capped, floor, odd: [{mls, addr, ppsf, off}], out: [MLS]}],
         list: [{mls, addr, price, sqft, ppsf, sold, bd, ba, yr, mi, c, lux, k, b, x, w}]}}}
 
 rows has one entry per radius in radii; step is its place in this market's
 steps (0: wider than the market goes, the user's pick only) and pick the
-default row. c is the condition (remodel / light / asis / new / unknown), k and
+default row. odd lists comps whose $/sqft is more than 35% off the others'
+(off, in %); out the ones left out for it, which happens only while 3 remain. c is the condition (remodel / light / asis / new / unknown), k and
 b the kitchen and bath (R remodeled, L light update, '' not said), x why the
 comp fails a rule other than the radius, w the remarks' words that decided the
 condition.
@@ -56,7 +57,7 @@ from listing import page, remarks_of  # noqa: E402
 
 TRIES = 3            # a comp with no public page is tried on this many days, then left
 LEAD_DAYS = 30       # a lead's own page (location, baths) is read again after this many days
-RULES = {'size': 0.20, 'beds': 1, 'baths': 1, 'years': 20, 'months': 6, 'need': 3}
+RULES = {'size': 0.20, 'beds': 1, 'baths': 1, 'years': 20, 'months': 6, 'need': 3, 'odd': 0.35}
 # Juan, 27 Oct: 1 mile and 6 months by default; widen the radius on its own
 # where comps are thin; let the user pick a wider one; show which was used.
 # Each market widens in its own steps, and stops at its last one (Seth, 27 Oct).
@@ -278,7 +279,23 @@ def judge(lead, subj, comps, F, today):
     for R in RADII:
         used = [r for r in rows if not r['x'] and r['mi'] is not None and r['mi'] <= R]
         light = [r for r in rows if r['x'] == 'light update: floor only' and r['mi'] is not None and r['mi'] <= R]
+        # bad data (Seth, 27 Oct): a sale whose $/sqft is far off the group's
+        # median is likely a wrong size or an off-market sale. Left out when
+        # enough remain; with only 3 it stays, and the board says to check it.
+        # The median of all of them, not of "the others": with 3 comps one bad
+        # sale would drag the other two's middle and flag a good one too.
+        odd = []
+        if len(used) >= RULES['need']:
+            m = median([o['ppsf'] for o in used if o['ppsf']])
+            for r in used:
+                if m and r['ppsf'] and abs(r['ppsf'] - m) / m > RULES['odd']:
+                    odd.append({'mls': r['mls'], 'addr': r['addr'], 'ppsf': r['ppsf'], 'off': round((r['ppsf'] - m) / m * 100)})
+        out_ = [o['mls'] for o in odd] if odd and len(used) - len(odd) >= RULES['need'] else []
+        used = [r for r in used if r['mls'] not in out_]
         row = {'mi': R, 'n': len(used), 'used': [r['mls'] for r in used], 'step': steps.index(R) + 1 if R in steps else 0}
+        if odd:
+            row['odd'] = odd
+            row['out'] = out_
         if len(used) >= RULES['need'] and sq:
             ppsf = median([r['ppsf'] for r in used])
             cap = max(r['price'] for r in used)
