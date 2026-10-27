@@ -740,12 +740,19 @@ function nameIndex(raw) {
 }
 
 // "@15551234567" in WhatsApp text becomes "@Name" when we know who it is.
+// When WhatsApp tags someone by their hidden id, the text holds that hidden
+// number instead of the phone number the reader saved; the tags are listed in
+// the order they appear, so the @numbers left over are those people, in order.
 function readableText(m, nameOf) {
   let x = m.x || '';
+  const left = [];
   (m.m || []).forEach(id => {
     const digits = String(id).replace('@lid', '');
-    x = x.split('@' + digits).join('@' + nameOf(id));
+    if (x.includes('@' + digits)) x = x.split('@' + digits).join('@' + nameOf(id));
+    else left.push(id);
   });
+  let k = 0;
+  if (left.length) x = x.replace(/@\d{6,}/g, tag => k < left.length ? '@' + nameOf(left[k++]) : tag);
   return x;
 }
 
@@ -757,7 +764,15 @@ function replyText(m, nameOf) {
   return text;
 }
 
-const ANALYSIS_VERSION = 5; // 2: also spots messages that chase an earlier request. 3: givers can ask each other. 4: questions anyone can answer. 5: sees what everyone said around it
+const ANALYSIS_VERSION = 6; // 2: also spots messages that chase an earlier request. 3: givers can ask each other. 4: questions anyone can answer. 5: sees what everyone said around it. 6: told who was tagged
+
+// Whether Claude should read an instruction again. Version 6 only changed
+// messages that tag someone, so the others read at version 5 are kept.
+function needsReading(a, m) {
+  if (!a || a.by === 'rules') return true;
+  if ((a.v || 0) < 5) return true;
+  return (a.v || 0) < ANALYSIS_VERSION && !!(m.m && m.m.length);
+}
 
 const ANYONE_RE = /^\s*(who|who's|whos|sino|anyone|anybody|does anyone|did anyone|has anyone|is anyone|can anyone|may nakakaalam)\b/i;
 
@@ -791,6 +806,8 @@ function analysisPrompt(batch, context, people, bossNames, nameOf, around, byId)
   const members = people.map(p => `${p.id}: ${p.name}${p.giver ? ' (manager)' : ''}`).join('\n');
   const show = m => {
     const o = { id: m.i, from: nameOf(m.s), sent: localStamp(m.t), text: readableText(m, nameOf) };
+    // who was tagged, by member id
+    if (m.m && m.m.length) o.tagged = m.m.map(String);
     if (m.q) {
       o.replying_to = m.q;
       const q = byId && byId.get(m.q);
@@ -810,6 +827,7 @@ For each message under "Messages to read", return JSON in exactly this shape:
 
 Rules:
 - needs_reply is true when the message asks people to do, confirm or answer something. Greetings, thanks and plain announcements are "Info" with needs_reply false.
+- "tagged" lists the member ids the message @mentions. A message that tags people is for them: list those ids, unless it plainly asks the whole group.
 - Read each message in its place in the conversation. When it reacts to something a member just said or sent ("what is this?", "what does that mean?", "send it again", "which one?"), or quotes a member's message, it is for that member: list their id, even with no name or @mention.
 - required is "all" when every member of the group has to respond, for example "everyone confirm you saw the schedule". It is "any" when one answer from anyone settles it, for example "who is tracking this order?", "who has the key?", "anyone know where the ladder is?", "who can cover Saturday?". Otherwise list the ids of the people it addresses by name or @mention, which can include another manager (for example the COO asking the CEO). Never list the person who sent it ("from"). Use only ids from the member list.
 - task is set only when a specific member is asked to complete a piece of work. owner_id is that member. due is the deadline written in the same local time as "sent", or null when no deadline is given.
@@ -1088,7 +1106,7 @@ function updateMembers(prev, participants, lastRead, now) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromRaw, fallbackAnalysis, cleanAnalysis, analysisPrompt, replyPrompt, cleanReply, parseLocal, dayKey, nameIndex, updateMembers, localStamp, readableText, replyText, ANALYSIS_VERSION, REPLY_VERSION };
+if (typeof module !== 'undefined') module.exports = { compactMessage, buildFromRaw, fallbackAnalysis, cleanAnalysis, analysisPrompt, needsReading, replyPrompt, cleanReply, parseLocal, dayKey, nameIndex, updateMembers, localStamp, readableText, replyText, ANALYSIS_VERSION, REPLY_VERSION };
 
 </script>
 <script>
@@ -2897,7 +2915,7 @@ RULES
     const fallback = m => fallbackAnalysis(m, people, senderOf);
     const todo = S0.bossMessages.filter(m => {
       const a = raw.analysis[m.i];
-      return !a || (canAsk && (a.by === 'rules' || a.v !== ANALYSIS_VERSION));
+      return !a || (canAsk && needsReading(a, m));
     });
     const bosses = (raw.bossIds || []).map(nameOf);
     if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); }); return; }

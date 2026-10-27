@@ -1803,7 +1803,7 @@ RULES
     const fallback = m => fallbackAnalysis(m, people, senderOf);
     const todo = S0.bossMessages.filter(m => {
       const a = raw.analysis[m.i];
-      return !a || (canAsk && (a.by === 'rules' || a.v !== ANALYSIS_VERSION));
+      return !a || (canAsk && needsReading(a, m));
     });
     const bosses = (raw.bossIds || []).map(nameOf);
     if (!canAsk) { todo.forEach(m => { if (!raw.analysis[m.i]) raw.analysis[m.i] = fallback(m); }); return; }
