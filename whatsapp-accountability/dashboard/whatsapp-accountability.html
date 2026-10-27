@@ -2058,7 +2058,41 @@ RULES
     });
     if (!parts.length) { if (!trackedGroups().length) showSample(); return; }
     show(parts, 'live', Math.max(...parts.map(p => p.raw.syncedAt || 0)));
+    checkAlerts();
   }
+
+  // ---------------- Google Chat alerts ----------------
+  // When a new instruction lands (or a reminder/escalation stage is reached),
+  // fire the "WhatsApp → Google Chat alert relay" scheduled task, which posts
+  // an @all message to the team's Google Chat space. Each alert is recorded in
+  // db "alerts/" so it is sent once, whichever computer sees it first.
+  const ALERT_SERVER = 'Claude Code Remote', ALERT_TRIGGER = 'trig_01WNupfiAPiLBBWCmFesgasF', ALERT_SINCE = 0;
+  const ALERT_STAGE = ['🔔 NEW message', '⏰ 1st reminder', '⏰ 2nd reminder', '🚨 ESCALATION'];
+  const alertSent = new Set();
+  let alertBusy = false;
+  async function checkAlerts() {
+    if (alertBusy || src.mode !== 'live' || !cap.db) return;
+    alertBusy = true;
+    try {
+      const Dx = derive(src.S, cfg, Date.now());
+      for (const m of Dx.messages) {
+        // everything still pending on "Sent to the group"
+        if (m.at < ALERT_SINCE || m.resolved) continue;
+        if (!m.waitingAny && !m.pending.length) continue;
+        const lvl = m.waitingAny ? (m.stage || 0) : Math.max(0, ...m.pending.map(r => r.stage));
+        const key = `a_${String(m.id).replace(/[^A-Za-z0-9_\-]/g, '_')}_${lvl}`;
+        if (alertSent.has(key)) continue;
+        alertSent.add(key);
+        const ref = cap.db.doc(`alerts/${key}`);
+        const who = m.pending.length ? m.pending.map(r => r.name).join(', ') : 'anyone in the group';
+        const text = `${ALERT_STAGE[Math.min(lvl, 3)]} from ${m.senderName || 'Juan'} in "${m.groupName || 'WhatsApp group'}" (${fmtWhen(m.at)}):\n"${String(m.text || '').slice(0, 600)}"\n\nNo reply yet: ${who}. Please reply in WhatsApp now.`;
+        // queue it; Claude's watcher posts queued alerts to Google Chat (no prompt on this page)
+        try { if ((await ref.get()).exists) continue; await ref.set({ msg: String(m.id), lvl, at: Date.now(), st: 'queued', text }); }
+        catch (_) { alertSent.delete(key); }
+      }
+    } finally { alertBusy = false; }
+  }
+  setInterval(checkAlerts, 60000);
 
   function refreshShown() { if (src.mode === 'live') applyLive(); else applySaved(); }
 
