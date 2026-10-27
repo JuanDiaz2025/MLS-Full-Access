@@ -33,10 +33,16 @@ const CONFIG = {
   ONLY_THREADS_STARTED: true,
   // emails whose subject starts with one of these need no reply
   SKIP_SUBJECT_PREFIXES: ['fyi'],
-  // no reminders are sent between these hours (they wait until morning)
+  // no reminders are sent between these hours where the person is (they
+  // wait until morning there)
   QUIET_FROM_HOUR: 20,
   QUIET_TO_HOUR: 8,
+  // everyone's time zone, unless listed below
   TIME_ZONE: 'Asia/Manila',
+  // people somewhere else, for example the US team
+  PEOPLE_TIME_ZONES: {
+    'bryan@twinhomebuyer.com': 'America/Los_Angeles',
+  },
   // true: write who would be reminded to the log, send nothing
   DRY_RUN: true,
 };
@@ -118,6 +124,10 @@ function pendingInThread(thread, watch, cfg, now, skipLabelId) {
 // How many reminders are due after waiting this long.
 function stageFor(waitMs, cfg) {
   return cfg.REMIND_AFTER_HOURS.filter(h => waitMs >= h * HOUR).length;
+}
+
+function timeZoneFor(email, cfg) {
+  return (cfg.PEOPLE_TIME_ZONES || {})[String(email).toLowerCase()] || cfg.TIME_ZONE;
 }
 
 function isQuietHour(hour, cfg) {
@@ -277,8 +287,12 @@ function pruneSent(now) {
   });
 }
 
-function formatTime(t) {
-  return Utilities.formatDate(new Date(t), CONFIG.TIME_ZONE, "EEE, MMM d 'at' h:mm a");
+function formatTime(t, tz) {
+  return Utilities.formatDate(new Date(t), tz || CONFIG.TIME_ZONE, "EEE, MMM d 'at' h:mm a");
+}
+
+function hourIn(tz, now) {
+  return Number(Utilities.formatDate(new Date(now), tz, 'H'));
 }
 
 // ---------------- what the trigger runs ----------------
@@ -288,7 +302,6 @@ function run() {
   if (!lock.tryLock(5000)) return;
   try {
     const now = Date.now();
-    const hour = Number(Utilities.formatDate(new Date(now), CONFIG.TIME_ZONE, 'H'));
     const sent = sentRecord();
     let pending = [];
     CONFIG.WATCH.forEach(user => {
@@ -297,11 +310,16 @@ function run() {
       recentThreads(user, now).forEach(t => { pending = pending.concat(pendingInThread(t, watch, CONFIG, now, skip)); });
     });
     const due = dueReminders(pending, sent, CONFIG, now);
-    console.log(pending.length + ' replies still owed; ' + due.length + ' people due a reminder' + (isQuietHour(hour, CONFIG) ? ' (quiet hours: sending later)' : ''));
-    if (isQuietHour(hour, CONFIG)) return;
+    console.log(pending.length + ' replies still owed; ' + due.length + ' people due a reminder');
     const store = PropertiesService.getScriptProperties();
     due.forEach(d => {
-      const mail = buildReminder(d.person, d.senderName, d.items, CONFIG, formatTime);
+      // night where the person is: it goes out in their morning
+      const tz = timeZoneFor(d.person.email, CONFIG);
+      if (isQuietHour(hourIn(tz, now), CONFIG)) {
+        console.log((CONFIG.DRY_RUN ? '[dry run] ' : '') + d.person.email + ': waiting until ' + CONFIG.QUIET_TO_HOUR + ' AM their time (' + tz + ')');
+        return;
+      }
+      const mail = buildReminder(d.person, d.senderName, d.items, CONFIG, t => formatTime(t, tz));
       if (CONFIG.DRY_RUN) {
         console.log('[dry run] would email ' + d.person.email + ': ' + mail.subject);
         return;
@@ -344,5 +362,5 @@ function removeTrigger() {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { CONFIG, parseAddresses, toMessage, pendingInThread, stageFor, isQuietHour, gmailLink, buildReminder, dueReminders, reminderKey, HOUR, DAY };
+  module.exports = { CONFIG, parseAddresses, toMessage, pendingInThread, stageFor, isQuietHour, timeZoneFor, gmailLink, buildReminder, dueReminders, reminderKey, HOUR, DAY };
 }

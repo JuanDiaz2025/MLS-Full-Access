@@ -21,9 +21,10 @@ const threads = {
   t2: [juanMsg('m3', 'seller@gmail.com', 7)],
   t3: [juanMsg('m4', 'mike@twinhomebuyer.com', 2)],
   t4: [juanMsg('m5', 'cherry@twinhomebuyer.com', 30)],
+  t6: [juanMsg('m7', 'Bryan <bryan@twinhomebuyer.com>', 6)], // Bryan is in California
   t5: [juanMsg('m6', 'old@twinhomebuyer.com', 10 * 24)],
 };
-const order = ['t3', 't1', 't2', 't4', 't5'];
+const order = ['t3', 't1', 't2', 't4', 't6', 't5'];
 const ctx = {
   module: undefined, console: { log: (...a) => ctx.__log.push(a.join(' ')) }, __log: [],
   Date: class extends Date { constructor(...a) { a.length ? super(...a) : super(now); } static now() { return now; } },
@@ -73,6 +74,7 @@ const check = (label, ok, got) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${label
 ctx.run();
 check('dry run sends nothing', sent.length === 0 && !Object.keys(props).some(k => k.startsWith('sent:')), ctx.__log.join(' / '));
 check('dry run says who it would remind', ctx.__log.some(l => /would email cherry@twinhomebuyer.com: Juan Diaz is waiting for your reply to 2 emails/.test(l)));
+check('8 PM in California: Bryan waits for his morning', ctx.__log.some(l => /bryan@twinhomebuyer.com: waiting until 8 AM their time \(America\/Los_Angeles\)/.test(l)), ctx.__log.filter(l => /bryan/.test(l)).join(' / '));
 
 // for real
 ctx.CONFIG.DRY_RUN = false;
@@ -88,11 +90,14 @@ now += 15 * 60e3; ctx.run();
 check('nothing sent twice', sent.length === 1);
 check('unchanged threads not read again', calls.filter(c => /\/threads\/\w+/.test(c)).length === before, before);
 
-// Mike reaches 4 hours at 1 AM Manila: quiet hours, then sent in the morning
-now = Date.UTC(2026, 9, 28, 17, 0); // 1 AM Manila
+// 1 AM in Manila is 10 AM in California: Bryan gets his, Mike waits for the Manila morning
+now = Date.UTC(2026, 9, 28, 17, 0);
 ctx.run();
-check('nothing sent at night', sent.length === 1, ctx.__log.slice(-1)[0]);
-now = Date.UTC(2026, 9, 29, 0, 30); // 8:30 AM Manila
+const night = sent.slice(1).map(s => s.to);
+check('Manila night: only Bryan (10 AM his time)', night.join(',') === 'bryan@twinhomebuyer.com', night.join(','));
+check('his email shows California time', /10\/27\/2026, 2:00:00 PM/.test(sent[1].body), sent[1].body.split('\n')[4]);
+now = Date.UTC(2026, 9, 29, 0, 30); // 8:30 AM Manila, 5:30 PM California
 ctx.run();
-check('sent in the morning, Mike and Cherry again', sent.length === 3 && sent.slice(1).map(s => s.to).sort().join(',') === 'cherry@twinhomebuyer.com,mike@twinhomebuyer.com', sent.slice(1).map(s => s.to + ' ' + s.subject).join(' / '));
+const morning = sent.slice(2).map(s => s.to).sort().join(',');
+check('Manila morning: Mike, Cherry again, and Bryan\'s 24-hour one', morning === 'bryan@twinhomebuyer.com,cherry@twinhomebuyer.com,mike@twinhomebuyer.com', morning);
 console.log(process.exitCode ? 'FAILED' : 'all checks passed');

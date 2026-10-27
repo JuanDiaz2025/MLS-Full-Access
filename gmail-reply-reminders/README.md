@@ -31,7 +31,7 @@ Reading Juan's email headers falls under the same sign-off as the WhatsApp track
 - Someone has replied when they write in the same email thread after Juan. A reply in a new thread, a call or a WhatsApp message doesn't count. For emails like that, Juan can add a **No reply needed** label in his Gmail and the email is skipped.
 - Subjects starting with **FYI** are skipped.
 - Reminders go out after **4, 24 and 48 hours**, then stop. Each one is sent once. Someone with several emails waiting gets one reminder listing them all.
-- Nothing is sent between **8 PM and 8 AM** Manila time. Reminders due at night go out in the morning.
+- Nothing is sent between **8 PM and 8 AM** in the person's own time zone. Reminders due at night go out in their morning. Everyone is on Manila time unless listed in `PEOPLE_TIME_ZONES` (Bryan is set to California).
 - Emails older than **7 days** are left alone.
 
 All of these are at the top of `Code.gs` under `CONFIG`.
