@@ -428,12 +428,17 @@ only. `compcheck.py` applies them to the comps the FlipScout app saved
   whole-house remodel) counts, luxury included; a light update is a floor
   marker only; as-is, new construction and rebuilds are out. "Updated" is a
   light update until the photos say otherwise.
-- Then: within 1 mile, within 20% of the size, beds and baths within 1,
-  built within 20 years, sold in the last 3 months (6 when fewer than 3
-  pass), 3 needed. ARV = median $/sqft x our size, never above their top sale.
+- Then: within 20% of the size, beds and baths within 1, built within 20
+  years, sold in the last 6 months (Juan, 27 Oct), 3 needed. ARV = median
+  $/sqft x our size, never above their top sale.
+- Radius (Juan, 27 Oct): 1 mile by default, widened in the market's own steps
+  until 3 comps pass: San Francisco 1/2 -> 1 -> 2 mi; San Mateo, Santa Clara,
+  Alameda, Contra Costa and Marin 1 -> 2 mi; everywhere else 1 -> 2 -> 3 -> 5
+  mi. Every radius (1/2, 1, 2, 3, 5 mi) gets a row, so the board shows them
+  side by side and "Use" picks another one for that viewer.
 - `teamcomps.js` holds the result per lead. The Test board's Comps agent
-  shows it as "Team rules" above the app's ARV, with each comp that counts
-  and why each other one doesn't.
+  shows it as "Team rules" above the app's ARV, with the radius rows, each
+  comp that counts and why each other one doesn't.
 
 Not checked yet: the county square footage (drop a comp more than 10% off;
 only Matrix's Tax tab has it), the same side of the freeways, and sales

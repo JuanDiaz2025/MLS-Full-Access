@@ -9,13 +9,17 @@ The rules (Seth, 26 Oct, from Gen's three comp write-ups):
      updates are floor markers only. As-is / original homes, new construction
      and full rebuilds are out.
   2. Match: within 20% of our size, beds and baths within 1, built within 20
-     years, within 1 mile (and on the same side of the freeways, not checked here).
+     years (and on the same side of the freeways, not checked here).
   3. Square footage: the county's, and a comp is dropped when the listing and the
      county differ by more than 10% (NOT checked here: the public pages carry
      only the listing's size. Matrix's Tax tab has the county's).
-  4. Window: sold in the last 3 months; 6 months when fewer than 3 pass.
-  5. Need 3. Fewer after 6 months = NEED INFO, no ARV.
-  6. ARV = median $/sqft of those comps x our size, never above the highest of
+  4. Window: sold in the last 6 months (Juan, 27 Oct; it was 3, then 6).
+  5. Radius (Juan, 27 Oct): 1 mile by default, widened in the market's own steps
+     until 3 comps pass: San Francisco 1/2 -> 1 -> 2 mi, the five Bay counties
+     around it 1 -> 2 mi, everywhere else 1 -> 2 -> 3 -> 5 mi. Every radius gets a
+     row, so the board can show them side by side and the user can pick one.
+  6. Need 3. Fewer at the market's last step = NEED INFO, no ARV.
+  7. ARV = median $/sqft of those comps x our size, never above the highest of
      their sale prices.
 
 The pool is what the app saved per lead (comps.js: the sold homes in the lead's
@@ -31,13 +35,17 @@ read again (a sale does not change; a lead's page is re-read after 30 days):
 and the result for each lead goes to <out>/teamcomps.js, which only the Test
 board reads:
 
-    window.__TEAMCOMPS__ = {v, built, today, rules, by: {MLS: {st: 'ARV'|'NEED', arv, ppsf, n, win, cap,
-        capped, floor, why, subj: {lat, lng, ba}, list: [{mls, addr, price, sqft, ppsf, sold, bd, ba, yr,
-        mi, c, lux, k, b, ok, x, w}]}}}
+    window.__TEAMCOMPS__ = {v, built, today, rules, radii, by: {MLS: {mk, steps, win, pick, st: 'ARV'|'NEED',
+        arv, ppsf, n, mi, cap, capped, why, subj: {lat, lng, ba},
+        rows: [{mi, n, used: [MLS], step, st, arv, ppsf, cap, capped, floor}],
+        list: [{mls, addr, price, sqft, ppsf, sold, bd, ba, yr, mi, c, lux, k, b, x, w}]}}}
 
-c is the condition (remodel / light / asis / new / unknown), k and b the kitchen
-and bath (R remodeled, L light update, '' not said), ok 1 when the comp counts,
-x why it does not, w the remarks' words that decided the condition.
+rows has one entry per radius in radii; step is its place in this market's
+steps (0: wider than the market goes, the user's pick only) and pick the
+default row. c is the condition (remodel / light / asis / new / unknown), k and
+b the kitchen and bath (R remodeled, L light update, '' not said), x why the
+comp fails a rule other than the radius, w the remarks' words that decided the
+condition.
 """
 import datetime, html, json, math, os, re, sys, time
 from concurrent.futures import ThreadPoolExecutor
@@ -48,7 +56,29 @@ from listing import page, remarks_of  # noqa: E402
 
 TRIES = 3            # a comp with no public page is tried on this many days, then left
 LEAD_DAYS = 30       # a lead's own page (location, baths) is read again after this many days
-RULES = {'size': 0.20, 'beds': 1, 'baths': 1, 'years': 20, 'miles': 1.0, 'months': [3, 6], 'need': 3}
+RULES = {'size': 0.20, 'beds': 1, 'baths': 1, 'years': 20, 'months': 6, 'need': 3}
+# Juan, 27 Oct: 1 mile and 6 months by default; widen the radius on its own
+# where comps are thin; let the user pick a wider one; show which was used.
+# Each market widens in its own steps, and stops at its last one (Seth, 27 Oct).
+RADII = [0.5, 1, 2, 3, 5]                      # a row each on the board; the user can pick any
+MARKET_STEPS = {'sf': [0.5, 1, 2], 'city': [1, 2], 'thin': [1, 2, 3, 5]}
+# the board's county list (COUNTIES in the page), city -> county
+COUNTIES = {
+    'San Francisco': 'San Francisco',
+    'San Mateo': 'Daly City|Pacifica|South San Francisco|Redwood City|San Bruno|San Mateo|Menlo Park|East Palo Alto|Belmont|El Granada|San Carlos|Burlingame|Foster City|Millbrae|La Honda|Half Moon Bay|Woodside|Moss Beach|Montara|Atherton|Portola Valley|Brisbane|Colma|Hillsborough|Pescadero|Emerald Hills',
+    'Santa Clara': 'San Jose|Morgan Hill|Gilroy|Santa Clara|Milpitas|Campbell|Sunnyvale|Los Gatos|San Martin|Mountain View|Palo Alto|Cupertino|Saratoga|Los Altos|Monte Sereno',
+    'Alameda': 'Oakland|Berkeley|San Leandro|Hayward|Fremont|Livermore|Union City|Castro Valley|Newark|Albany|Alameda|Dublin|Pleasanton|Sunol|San Lorenzo|Emeryville|Piedmont',
+    'Contra Costa': 'Richmond|Antioch|Pittsburg|Concord|Martinez|Pleasant Hill|Oakley|Walnut Creek|Orinda|Brentwood|Lafayette|Clayton|Discovery Bay|San Pablo|El Sobrante|El Cerrito|Pacheco|San Ramon|North Richmond|Moraga|Danville|Pinole|Bay Point|Kensington|Hercules|Rodeo|Crockett|Byron|Knightsen|Alamo',
+    'Marin': 'San Rafael|Mill Valley|Novato|San Anselmo|Fairfax|Bolinas|Larkspur|Corte Madera|Woodacre|Sausalito|Tiburon|Greenbrae|Kentfield|Point Reyes Station|Inverness|Stinson Beach|Forest Knolls|Lagunitas',
+}
+CITY_COUNTY = {c.lower(): k for k, v in COUNTIES.items() for c in v.split('|')}
+
+
+def market(addr):
+    """'sf', 'city' (the five Bay counties around it) or 'thin' (Sonoma, Napa, Solano and the rest)."""
+    m = re.search(r',\s*([^,]+?),\s*CA\b', addr or '', re.I)
+    county = CITY_COUNTY.get(m.group(1).strip().lower(), '') if m else ''
+    return 'sf' if county == 'San Francisco' else 'city' if county else 'thin'
 
 # ---------- what a sold home's remarks say was done ----------
 # Read against the team's line (Seth, 26 Oct): "kitchen AND a bath remodeled".
@@ -221,11 +251,11 @@ def judge(lead, subj, comps, F, today):
             x = 'public page not read'
         elif age is None:
             x = 'no sale date'
-        elif age > 183:
-            x = 'sold over %d months ago' % max(6, int(age / 30.4))
+        elif age > RULES['months'] * 30.5:
+            x = 'sold over %d months ago' % max(RULES['months'], int(age / 30.4))
         elif r['mi'] is None:
             x = 'no location'
-        elif r['mi'] > RULES['miles']:
+        elif r['mi'] > RADII[-1]:
             x = '%.1f mi away' % r['mi']
         elif not (sq and csq) or abs(csq - sq) / sq > RULES['size']:
             x = '%+d%% size' % round((csq - sq) / sq * 100) if sq and csq else 'no size'
@@ -240,31 +270,39 @@ def judge(lead, subj, comps, F, today):
                  'unknown': 'condition not said: check photos in Matrix'}[cond]
         r['x'] = x
         rows.append(r)
-    passing = [r for r in rows if not r['x']]
-    win = 3
-    used = [r for r in passing if r['days'] <= 92]
-    if len(used) < RULES['need']:
-        win, used = 6, passing
-    for r in rows:
-        r['ok'] = 1 if r in used else 0
-        if not r['x'] and not r['ok']:
-            r['x'] = 'outside %d months' % win
-    floor_rows = [r for r in rows if r['x'] == 'light update: floor only']
-    out = {'n': len(used), 'win': win, 'subj': {k: subj[k] for k in ('lat', 'lng', 'ba') if k in subj}}
-    if floor_rows:
-        lo = min(floor_rows, key=lambda r: r['ppsf'] or 1e9)
-        out['floor'] = {'mls': lo['mls'], 'addr': lo['addr'], 'price': lo['price'], 'ppsf': lo['ppsf']}
-    if len(used) >= RULES['need'] and sq:
-        ppsf = median([r['ppsf'] for r in used])
-        cap = max(r['price'] for r in used)
-        arv = round(ppsf * sq)
-        out.update(st='ARV', ppsf=round(ppsf), cap=cap, capped=1 if arv > cap else 0, arv=min(arv, cap),
-                   why='%d comps, %d months, median $%s/sqft x %s sqft%s' % (
-                       len(used), win, f'{round(ppsf):,}', f'{sq:,}', ', capped at the top sale' if arv > cap else ''))
+    # one row per radius: the comps that pass every other rule and lie within it
+    mk = market(lead.get('addr', ''))
+    steps = MARKET_STEPS[mk]
+    out = {'mk': mk, 'steps': steps, 'win': RULES['months'], 'subj': {k: subj[k] for k in ('lat', 'lng', 'ba') if k in subj}}
+    radii = []
+    for R in RADII:
+        used = [r for r in rows if not r['x'] and r['mi'] is not None and r['mi'] <= R]
+        light = [r for r in rows if r['x'] == 'light update: floor only' and r['mi'] is not None and r['mi'] <= R]
+        row = {'mi': R, 'n': len(used), 'used': [r['mls'] for r in used], 'step': steps.index(R) + 1 if R in steps else 0}
+        if len(used) >= RULES['need'] and sq:
+            ppsf = median([r['ppsf'] for r in used])
+            cap = max(r['price'] for r in used)
+            arv = round(ppsf * sq)
+            row.update(st='ARV', ppsf=round(ppsf), cap=cap, capped=1 if arv > cap else 0, arv=min(arv, cap))
+        else:
+            row.update(st='NEED', arv=0)
+        if light:
+            lo = min(light, key=lambda r: r['ppsf'] or 1e9)
+            row['floor'] = {'mls': lo['mls'], 'addr': lo['addr'], 'price': lo['price'], 'ppsf': lo['ppsf']}
+        radii.append(row)
+    # the default: the first of this market's steps with 3 comps, else its last step (NEED INFO)
+    mine = [i for i, row in enumerate(radii) if row['step']]
+    pick = next((i for i in mine if radii[i]['st'] == 'ARV'), mine[-1])
+    p = radii[pick]
+    out.update(rows=radii, pick=pick, st=p['st'], arv=p['arv'], n=p['n'], mi=p['mi'])
+    if p['st'] == 'ARV':
+        out.update(ppsf=p['ppsf'], cap=p['cap'], capped=p['capped'],
+                   why='%d comps within %g mi, last %d months, median $%s/sqft x %s sqft%s' % (
+                       p['n'], p['mi'], RULES['months'], f"{p['ppsf']:,}", f'{sq:,}', ', capped at the top sale' if p['capped'] else ''))
     else:
-        out.update(st='NEED', arv=0, why='%d of %d saved comps pass in 6 months; 3 needed' % (len(used), len(rows))
-                   if sq else 'no square feet on the lead')
-    order = lambda r: (-r['ok'], 0 if not r['x'] else 1, r['mi'] if r['mi'] is not None else 99)
+        out['why'] = ('%d of %d saved comps pass within %g mi in %d months; 3 needed' % (p['n'], len(rows), p['mi'], RULES['months'])
+                      if sq else 'no square feet on the lead')
+    order = lambda r: (0 if not r['x'] else 1, r['mi'] if r['mi'] is not None else 99)
     out['list'] = [{k: v for k, v in r.items() if k != 'days' and v not in (None, '')} for r in sorted(rows, key=order)]
     return out
 
@@ -327,7 +365,7 @@ def main():
     res = {}
     for m, c in by.items():
         res[m] = judge(leads[m], CF['by'].get(m) or {}, c['list'], CF['by'], today)
-    T = {'v': 1, 'built': CF['built'], 'today': tday, 'rules': RULES, 'by': res}
+    T = {'v': 2, 'built': CF['built'], 'today': tday, 'rules': RULES, 'radii': RADII, 'steps': MARKET_STEPS, 'by': res}
     with open(os.path.join(out, 'teamcomps.js'), 'w', encoding='utf8') as fh:
         fh.write('window.__TEAMCOMPS__ = ' + json.dumps(T, separators=(',', ':')) + ';\n')
     n_arv = sum(1 for r in res.values() if r['st'] == 'ARV')
