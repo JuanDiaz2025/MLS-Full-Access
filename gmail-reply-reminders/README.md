@@ -41,6 +41,8 @@ Reading Juan's email headers falls under the same sign-off as the WhatsApp track
 
 All of these are at the top of `Code.gs` under `CONFIG`.
 
+**Current settings (testing):** `WATCH` is Seth's own address, reminders after **1, 5 and 10 minutes**, checking **every minute**, and `DRY_RUN: false`, so test reminders are really sent. Before using it for Juan, change `WATCH` to his address and `REMIND_AFTER_MINUTES` to the real waits, then run **installTrigger** again if `CHECK_EVERY_MINUTES` changed.
+
 ## Setup
 
 Done once, in about 20 minutes. It needs a **super admin** of the twinhomebuyer.com Google Workspace for part B, and the **sender account** for parts A and C. The sender is the account the reminders come from: a new account such as reminders@twinhomebuyer.com is best, or an existing one.

@@ -9,7 +9,7 @@ vm.runInNewContext(src, ctx);
 const R = ctx.module.exports;
 const { MINUTE, HOUR, DAY } = R;
 const same = (a, b, msg) => assert.strictEqual(JSON.stringify(a), JSON.stringify(b), msg);
-const cfg = { ...R.CONFIG, WATCH: ['juan@twinhomebuyer.com'] };
+const cfg = { ...R.CONFIG, WATCH: ['juan@twinhomebuyer.com'], REMIND_AFTER_MINUTES: [240, 1440, 2880], QUIET_FROM_HOUR: 0, QUIET_TO_HOUR: 0 };
 const now = Date.UTC(2026, 9, 28, 3, 0);
 const JUAN = { email: 'juan@twinhomebuyer.com', name: 'Juan Diaz' };
 const team = e => ({ email: e + '@twinhomebuyer.com', name: '' });

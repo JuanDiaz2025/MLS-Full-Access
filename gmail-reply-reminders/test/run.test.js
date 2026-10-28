@@ -89,6 +89,8 @@ const ctx = {
   LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
 };
 vm.runInNewContext(src + '\n;this.CONFIG = CONFIG; this.run = run;', ctx);
+// the test's own settings, whatever Code.gs is set to
+Object.assign(ctx.CONFIG, { WATCH: ['juan@twinhomebuyer.com'], REMIND_AFTER_MINUTES: [240, 1440, 2880], CHECK_EVERY_MINUTES: 5, QUIET_FROM_HOUR: 0, QUIET_TO_HOUR: 0, DRY_RUN: true });
 const check = (label, ok, got) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${got !== undefined ? ' | ' + got : ''}`); if (!ok) process.exitCode = 1; };
 const to = m => m.To.split(', ').map(e => e.split('@')[0]).sort().join(',');
 

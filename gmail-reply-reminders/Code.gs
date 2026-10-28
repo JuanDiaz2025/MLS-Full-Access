@@ -20,18 +20,20 @@
  */
 
 const CONFIG = {
-  // whose sent emails are watched
-  WATCH: ['juan@twinhomebuyer.com'],
+  // whose sent emails are watched. Testing on Seth's own emails for now;
+  // change to 'juan@twinhomebuyer.com' when ready.
+  WATCH: ['seth@twinhomebuyer.com'],
   // only people at this domain are reminded
   TEAM_DOMAIN: 'twinhomebuyer.com',
   // addresses never reminded, such as group lists
   IGNORE: [],
   // a reminder once each of these waits has passed, in minutes, then no more.
-  // 240 = 4 hours, 1440 = 1 day, 2880 = 2 days. For a quick test: [1, 5, 10].
-  REMIND_AFTER_MINUTES: [240, 1440, 2880],
+  // [1, 5, 10] is the quick test setting. For real use, for example
+  // [240, 1440, 2880]: 4 hours, 1 day, 2 days.
+  REMIND_AFTER_MINUTES: [1, 5, 10],
   // how often it checks, in minutes: 1, 5, 10, 15 or 30. A reminder goes out
   // within this long of being due. Run installTrigger again after changing it.
-  CHECK_EVERY_MINUTES: 5,
+  CHECK_EVERY_MINUTES: 1,
   // emails older than this are left alone
   LOOKBACK_DAYS: 7,
   // Juan can put this Gmail label on an email that needs no reply
@@ -52,8 +54,9 @@ const CONFIG = {
   PEOPLE_TIME_ZONES: {
     'bryan@twinhomebuyer.com': 'America/Los_Angeles',
   },
-  // true: write who would be reminded to the log, send nothing
-  DRY_RUN: true,
+  // true: write who would be reminded to the log, send nothing.
+  // false: reminders are really sent.
+  DRY_RUN: false,
 };
 
 const MINUTE = 60 * 1000;
