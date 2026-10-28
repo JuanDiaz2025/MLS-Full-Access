@@ -11,9 +11,15 @@ const HOUR = 3600e3;
 let now = Date.UTC(2026, 9, 28, 3, 0); // 11 AM Manila, 8 PM California
 
 const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-const props = { SA_KEY: JSON.stringify({ client_email: 'reader@proj.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) }) };
+const props = { LOG_SHEET_ID: 'log1', SA_KEY: JSON.stringify({ client_email: 'reader@proj.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) }) };
 const cache = {};
 const calls = [], sent = [];
+// the log sheet: tab name -> rows, and how often each tab was written
+const tabs = {}, tabWrites = {};
+let logBroken = false;
+const sheet = n => ({ clearContents: () => { tabs[n] = []; },
+  getRange: (r, c, h, w) => ({ setNumberFormat() { return this; },
+    setValues(v) { assert.ok(v.length === h && v.every(x => x.length === w), 'range fits the values'); tabs[n] = v; tabWrites[n] = (tabWrites[n] || 0) + 1; return this; } }) });
 const H = (n, v) => ({ name: n, value: v });
 let seq = 0;
 let owner = 'seth@twinhomebuyer.com'; // the account running the script
@@ -50,7 +56,14 @@ const ctx = {
     formatDate: (d, tz, f) => String(Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' }).format(d))),
     getUuid: () => '0000-' + (++seq),
     sleep: () => {},
+    DigestAlgorithm: { MD5: 'md5' },
+    computeDigest: (alg, s) => [...crypto.createHash(alg).update(s).digest()],
   },
+  SpreadsheetApp: { openById(id) {
+    if (logBroken) throw new Error('sheet unavailable');
+    assert.strictEqual(id, 'log1');
+    return { getSheetByName: n => (n in tabs ? sheet(n) : null), insertSheet: n => { tabs[n] = []; return sheet(n); } };
+  } },
   Session: { getEffectiveUser: () => ({ getEmail: () => owner }) },
   ScriptApp: { getOAuthToken: () => 'owner-token' },
   UrlFetchApp: {
@@ -116,17 +129,32 @@ const accent = sent.find(m => /Señora/.test(m.Subject));
 check('a subject with accents arrives intact', accent && accent.Subject === 'Re: Señora – permit', accent && accent.Subject);
 check('remembered what was sent', props['sent:cherry@twinhomebuyer.com|m1@mail.gmail.com'] && props['sent:leo@twinhomebuyer.com|m1@mail.gmail.com'] && props['sent:cherry@twinhomebuyer.com|m5@mail.gmail.com'].startsWith('2|'));
 
+// the log the dashboard reads
+const LOG = vm.runInNewContext('LOG_HEADERS', ctx);
+const head = tabs.Emails && tabs.Emails[0];
+check('log: Emails tab has the headers', JSON.stringify(head) === JSON.stringify(LOG));
+const rowOf = (person, msgId) => tabs.Emails.slice(1).find(r => r[5] === person + '@twinhomebuyer.com' && r[12] === msgId + '@mail.gmail.com');
+const col = n => LOG.indexOf(n);
+const v = rowOf('vannessa', 'm1'), c1 = rowOf('cherry', 'm1');
+check('log: Vannessa replied after 1 hour', v && v[col('Status')] === 'Replied' && Date.parse(v[col('Replied')]) - Date.parse(v[col('Sent')]) === HOUR, v && v.join(' '));
+check('log: Cherry waiting, 1 reminder, on To', c1 && c1[col('Status')] === 'Waiting' && c1[col('Reminders')] === '1' && c1[col('On')] === 'To' && c1[col('Group')] === 'yes', c1 && c1.join(' '));
+check('log: outside and old emails left out', !tabs.Emails.some(r => /seller@|old@/.test(r[5])), tabs.Emails.length - 1 + ' rows');
+check('log: Status says when', tabs.Status && tabs.Status[0][0] === 'Updated' && tabs.Status[0][1] === new Date(now).toISOString());
+const emailWrites = tabWrites.Emails;
+
 // 15 minutes later: nothing new, and unchanged threads aren't read again
 const reads = calls.filter(c => /\/threads\/\w+/.test(c)).length;
 now += 15 * 60e3; ctx.run();
 check('nothing sent twice', sent.length === 3, sent.length);
 check('unchanged threads not read again', calls.filter(c => /\/threads\/\w+/.test(c)).length === reads);
+check('log: Emails tab not rewritten when nothing changed, Status is', tabWrites.Emails === emailWrites && tabs.Status[0][1] === new Date(now).toISOString());
 
 // Leo replies; 20 hours on, the group reminder goes to Cherry only
 threads.t1.push(reply('m8', 'Leo <leo@twinhomebuyer.com>', 1));
 now += 20 * HOUR;
 ctx.run();
 const g2 = sent.slice(3).find(m => m['In-Reply-To'] === '<m1@mail.gmail.com>');
+check('log: Leo shows as replied', rowOf('leo', 'm1')[col('Status')] === 'Replied' && tabWrites.Emails > emailWrites);
 check('after Leo replied, only Cherry is reminded in that thread', g2 && to(g2) === 'cherry' && /reminder 2 of 3/.test(g2.body), g2 && g2.To);
 check('2nd reminders for Cherry\'s and Bryan\'s private ones, 1st for Mike', sent.slice(3).filter(m => m !== g2).map(m => to(m) + ':' + /reminder (\d)/.exec(m.body)[1]).sort().join(',') === 'bryan:2,cherry:3,mike:1',
   sent.slice(3).filter(m => m !== g2).map(m => to(m) + ':' + /reminder (\d)/.exec(m.body)[1]).sort().join(','));
@@ -139,6 +167,14 @@ const before = sent.length;
 ctx.run();
 const q = sent.slice(before).find(m => m['In-Reply-To'] === '<m9@mail.gmail.com>');
 check('quiet hours on: Cherry gets the group reminder, Bryan waits for his morning', q && to(q) === 'cherry' && ctx.__log.some(l => /bryan@twinhomebuyer.com: waiting until 8 AM their time/.test(l)), q && q.To);
+
+// a broken log never stops the reminders
+logBroken = true;
+threads.t9 = [juanMsg('m11', 'Mike <mike@twinhomebuyer.com>', 5)]; order.unshift('t9');
+const before9 = sent.length;
+ctx.run();
+check('log broken: reminder still sent, and the log says why', sent.slice(before9).some(m => m['In-Reply-To'] === '<m11@mail.gmail.com>') && ctx.__log.some(l => /Couldn’t update the email log: sheet unavailable/.test(l)));
+logBroken = false;
 
 // a test from the watched account itself: the reminder also lands in that thread there
 ctx.CONFIG.QUIET_FROM_HOUR = 0; ctx.CONFIG.QUIET_TO_HOUR = 0;

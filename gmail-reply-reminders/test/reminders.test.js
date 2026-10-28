@@ -117,4 +117,20 @@ assert.ok(raw.split('\r\n').every(l => l.length <= 998) && textPart.split('\r\n'
 // a subject with accents or dashes is encoded so it arrives intact
 assert.ok(R.mimeMessage({ from: 'a@x', to: ['b@x'], replyTo: 'c@x', subject: 'Señora – update', references: [], text: 'x', html: 'x', boundary: 'y' }, b64).includes('Subject: =?UTF-8?B?' + b64('Re: Señora – update') + '?='));
 console.log('10 headers:', H.Subject, '| to:', H.To, '| reply-to:', H['Reply-To']);
+
+// 11. the log: every wait, answered or not, and it agrees with the reminders
+t = { id: 'w1', messages: [msg(JUAN, ['cherry'], 6, cc(['leo', 'tin'])), msg(team('leo'), ['juan@twinhomebuyer.com'], 5),
+  msg(JUAN, ['leo'], 3, { messageId: 'f@m' }), msg(team('tin'), ['juan@twinhomebuyer.com'], 2)] };
+const w = R.threadWaits(t, 'juan@twinhomebuyer.com', cfg, now);
+same(w.map(x => x.email.split('@')[0] + ':' + (x.repliedAt ? (x.repliedAt - x.askedAt) / HOUR + 'h' : 'waiting') + ':' + x.on + ':' + (x.group ? 'group' : 'alone')),
+  ['cherry:waiting:To:group', 'leo:1h:CC:group', 'tin:4h:CC:group', 'leo:waiting:To:alone']);
+same(w.filter(x => !x.repliedAt).map(x => x.email + '@' + x.askedAt).sort(), pend(t).map(x => x.email + '@' + x.since).sort(), 'open waits = who the reminders chase');
+assert.strictEqual(R.threadWaits({ id: 'f', messages: [msg(JUAN, ['cherry'], 6, { subject: 'FYI: x' })] }, 'juan@twinhomebuyer.com', cfg, now).length, 0);
+assert.strictEqual(R.threadWaits({ id: 'o', messages: [msg(JUAN, ['cherry'], 8 * 24)] }, 'juan@twinhomebuyer.com', cfg, now).length, 0);
+const rows = R.logRows(w, 'juan@twinhomebuyer.com', { 'cherry@twinhomebuyer.com|id-6@mail': 2 });
+assert.ok(rows.every(r => r.length === R.LOG_HEADERS.length && r.every(c => typeof c === 'string')), 'every cell is text');
+same(rows[0], ['w1', 'Fence quote', 'juan@twinhomebuyer.com', 'Juan Diaz', new Date(now - 6 * HOUR).toISOString(), 'cherry@twinhomebuyer.com', '', 'To', 'yes', '', 'Waiting', '2', 'id-6@mail']);
+assert.strictEqual(rows[1][9], new Date(now - 5 * HOUR).toISOString()); assert.strictEqual(rows[1][10], 'Replied');
+same(R.statusRows({ ...cfg, DRY_RUN: false }, now).map(r => r[0] + '=' + r[1]).slice(0, 2), ['Updated=' + new Date(now).toISOString(), 'Watching=juan@twinhomebuyer.com']);
+console.log('11 log rows:', rows.length, '| first:', rows[0].slice(4, 12).join(' '));
 console.log('all checks passed');

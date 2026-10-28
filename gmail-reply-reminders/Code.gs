@@ -16,6 +16,10 @@
  * bodies or attachments, and Juan installs nothing. The reminders are sent
  * from the account that runs this script. Setup steps are in README.md.
  *
+ * Each check also writes a log (who was emailed, who replied and when, the
+ * subject, never the content) to a Google Sheet that the WhatsApp
+ * Accountability dashboard's Email tab reads. Run makeLogSheet once to start it.
+ *
  * It runs every few minutes on Google's servers. No Claude, no WhatsApp.
  */
 
@@ -106,6 +110,28 @@ function toMessage(msg) {
   };
 }
 
+// The parts of a thread both the reminders and the log use, or null when the
+// thread doesn't count: nothing from the watched person, someone else started
+// it, it has the skip label, or its subject starts with FYI.
+// people: everyone on the team the watched person emailed in it -> name.
+function threadContext(thread, watch, cfg, skipLabelId) {
+  const msgs = thread.messages.filter(m => !m.reminder).sort((a, b) => a.at - b.at);
+  const mine = m => m.from.email === watch;
+  if (!msgs.some(mine)) return null;
+  if (cfg.ONLY_THREADS_STARTED && !mine(msgs[0])) return null;
+  if (skipLabelId && msgs.some(m => m.labelIds.indexOf(skipLabelId) >= 0)) return null;
+  const first = msgs.find(mine);
+  const subject = (first.subject || '').trim().toLowerCase();
+  if (cfg.SKIP_SUBJECT_PREFIXES.some(p => subject.indexOf(p.toLowerCase()) === 0)) return null;
+  const domain = '@' + cfg.TEAM_DOMAIN.toLowerCase();
+  const ignore = cfg.IGNORE.map(x => x.toLowerCase());
+  const team = r => r.email !== watch && r.email.endsWith(domain) && ignore.indexOf(r.email) < 0;
+  const recipients = m => m.to.concat(m.cc).filter(team);
+  const people = {};
+  msgs.filter(mine).forEach(m => recipients(m).forEach(r => { if (!(r.email in people)) people[r.email] = r.name; }));
+  return { msgs, mine, recipients, first, people };
+}
+
 // Who still owes the watched person a reply in one thread.
 // thread: { id, messages: [toMessage(...)] }. A person owes a reply when the
 // watched person emailed them (To or Cc) and they haven't written in the
@@ -114,21 +140,10 @@ function toMessage(msg) {
 // references, group, watch, senderName }]. group: that email went to more
 // than one person on the team, so the reminder goes to everyone still owing.
 function pendingInThread(thread, watch, cfg, now, skipLabelId) {
-  const msgs = thread.messages.filter(m => !m.reminder).sort((a, b) => a.at - b.at);
-  const mine = m => m.from.email === watch;
-  if (!msgs.some(mine)) return [];
-  if (cfg.ONLY_THREADS_STARTED && !mine(msgs[0])) return [];
-  if (skipLabelId && msgs.some(m => m.labelIds.indexOf(skipLabelId) >= 0)) return [];
-  const first = msgs.find(mine);
-  const subject = (first.subject || '').trim().toLowerCase();
-  if (cfg.SKIP_SUBJECT_PREFIXES.some(p => subject.indexOf(p.toLowerCase()) === 0)) return [];
-  const domain = '@' + cfg.TEAM_DOMAIN.toLowerCase();
-  const ignore = cfg.IGNORE.map(x => x.toLowerCase());
-  const team = r => r.email !== watch && r.email.endsWith(domain) && ignore.indexOf(r.email) < 0;
-  const recipients = m => m.to.concat(m.cc).filter(team);
+  const c = threadContext(thread, watch, cfg, skipLabelId);
+  if (!c) return [];
+  const { msgs, mine, recipients, first, people } = c;
   const oldest = now - cfg.LOOKBACK_DAYS * DAY;
-  const people = {};
-  msgs.filter(mine).forEach(m => recipients(m).forEach(r => { if (!(r.email in people)) people[r.email] = r.name; }));
   const lastMine = msgs.filter(mine).pop();
   const references = msgs.map(m => m.messageId).filter(Boolean);
   const out = [];
@@ -144,6 +159,38 @@ function pendingInThread(thread, watch, cfg, now, skipLabelId) {
     });
   });
   return out;
+}
+
+// For the log: each time the watched person asked someone in this thread, and
+// whether and when they answered. A wait starts at the first email to them
+// they haven't answered and ends at their next message in the thread.
+// Returns [{ thread, subject, senderName, email, name, askedAt, messageId,
+// on: 'To' | 'CC', group, repliedAt (null while waiting) }].
+function threadWaits(thread, watch, cfg, now, skipLabelId) {
+  const c = threadContext(thread, watch, cfg, skipLabelId);
+  if (!c) return [];
+  const oldest = now - cfg.LOOKBACK_DAYS * DAY;
+  const out = [];
+  Object.keys(c.people).forEach(email => {
+    let open = null;
+    c.msgs.forEach(m => {
+      if (c.mine(m)) {
+        const to = c.recipients(m);
+        if (open || !to.some(r => r.email === email)) return;
+        open = {
+          thread: thread.id, subject: c.first.subject || '', senderName: c.first.from.name || watch,
+          email, name: c.people[email], askedAt: m.at, messageId: m.messageId,
+          on: m.to.some(r => r.email === email) ? 'To' : 'CC', group: new Set(to.map(r => r.email)).size > 1, repliedAt: null,
+        };
+      } else if (open && m.from.email === email) {
+        open.repliedAt = m.at;
+        out.push(open);
+        open = null;
+      }
+    });
+    if (open) out.push(open);
+  });
+  return out.filter(w => w.askedAt >= oldest).sort((a, b) => a.askedAt - b.askedAt || (a.email < b.email ? -1 : 1));
 }
 
 // How many reminders are due after waiting this long.
@@ -264,6 +311,30 @@ function mimeMessage(o, b64) {
     '--' + boundary + '--',
     '',
   ].filter((line, i, all) => line !== '' || i >= all.indexOf('MIME-Version: 1.0')).join('\r\n');
+}
+
+// ---------------- the log the dashboard reads (pure, tested in test/) ----------------
+
+// The "Emails" tab: one row per wait. Times are UTC, like 2026-10-28T03:25:00.000Z.
+const LOG_HEADERS = ['Thread', 'Subject', 'From', 'From name', 'Sent', 'Person', 'Name', 'On', 'Group', 'Replied', 'Status', 'Reminders', 'Message ID'];
+
+function logRows(waits, watch, sent) {
+  const iso = t => new Date(t).toISOString();
+  return waits.map(w => [
+    w.thread, w.subject, watch, w.senderName, iso(w.askedAt), w.email, w.name || '', w.on, w.group ? 'yes' : 'no',
+    w.repliedAt ? iso(w.repliedAt) : '', w.repliedAt ? 'Replied' : 'Waiting', String(sent[w.email + '|' + w.messageId] || 0), w.messageId,
+  ]);
+}
+
+// The "Status" tab: when the log was last written and the settings behind it.
+function statusRows(cfg, now) {
+  return [
+    ['Updated', new Date(now).toISOString()],
+    ['Watching', cfg.WATCH.map(x => x.toLowerCase()).join(', ')],
+    ['Look-back days', String(cfg.LOOKBACK_DAYS)],
+    ['Reminders after (minutes)', cfg.REMIND_AFTER_MINUTES.join(', ')],
+    ['Reminders', cfg.DRY_RUN ? 'dry run: nothing is sent' : 'on'],
+  ];
 }
 
 // ---------------- Google: sign-in, Gmail API, sending ----------------
@@ -396,6 +467,53 @@ function hourIn(tz, now) {
   return Number(Utilities.formatDate(new Date(now), tz, 'H'));
 }
 
+// Writes the log into the sheet made by makeLogSheet. Nothing to do until then.
+// The Emails tab is rewritten only when a row changed; Status every time.
+function writeLog(rows, now) {
+  const id = PropertiesService.getScriptProperties().getProperty('LOG_SHEET_ID');
+  if (!id) return false;
+  const ss = SpreadsheetApp.openById(id);
+  const tab = name => ss.getSheetByName(name) || ss.insertSheet(name);
+  const put = (sheet, values, width) => {
+    sheet.clearContents();
+    sheet.getRange(1, 1, values.length, width).setNumberFormat('@').setValues(values);
+  };
+  const cache = CacheService.getScriptCache();
+  const sig = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(rows)));
+  if (cache.get('logsig:' + id) !== sig || !ss.getSheetByName('Emails')) {
+    put(tab('Emails'), [LOG_HEADERS].concat(rows), LOG_HEADERS.length);
+    cache.put('logsig:' + id, sig, 21600);
+  }
+  put(tab('Status'), statusRows(CONFIG, now), 2);
+  return true;
+}
+
+// Every watched mailbox's threads, read once: who owes a reply (for the
+// reminders) and every wait (for the log).
+function collect(now) {
+  let pending = [], waits = [];
+  CONFIG.WATCH.forEach(user => {
+    const watch = user.toLowerCase();
+    const skip = skipLabelId(user);
+    recentThreads(user, now).forEach(t => {
+      pending = pending.concat(pendingInThread(t, watch, CONFIG, now, skip));
+      waits = waits.concat(threadWaits(t, watch, CONFIG, now, skip).map(w => Object.assign(w, { watch })));
+    });
+  });
+  return { pending, waits };
+}
+
+function writeLogFrom(waits, sent, now) {
+  try {
+    const rows = [].concat.apply([], CONFIG.WATCH.map(u => logRows(waits.filter(w => w.watch === u.toLowerCase()), u.toLowerCase(), sent)));
+    return writeLog(rows, now);
+  } catch (e) {
+    // the reminders matter more than the log: say so and carry on
+    console.log('Couldn’t update the email log: ' + (e && e.message || e));
+    return false;
+  }
+}
+
 // ---------------- what the trigger runs ----------------
 
 function run() {
@@ -404,12 +522,7 @@ function run() {
   try {
     const now = Date.now();
     const sent = sentRecord();
-    let pending = [];
-    CONFIG.WATCH.forEach(user => {
-      const watch = user.toLowerCase();
-      const skip = skipLabelId(user);
-      recentThreads(user, now).forEach(t => { pending = pending.concat(pendingInThread(t, watch, CONFIG, now, skip)); });
-    });
+    const { pending, waits } = collect(now);
     const due = dueReminders(pending, sent, CONFIG, now);
     console.log(pending.length + ' replies still owed; ' + due.length + ' reminder' + (due.length === 1 ? '' : 's') + ' due');
     const store = PropertiesService.getScriptProperties();
@@ -431,9 +544,10 @@ function run() {
       }
       sendInThread(r2, mail);
       console.log('Reminded ' + who + ' in "' + replySubject(r.subject) + '"');
-      awake.forEach(p => store.setProperty('sent:' + p.key, p.stage + '|' + p.since));
+      awake.forEach(p => { store.setProperty('sent:' + p.key, p.stage + '|' + p.since); sent[p.key] = p.stage; });
     });
     pruneSent(now);
+    writeLogFrom(waits, sent, now);
   } finally {
     lock.releaseLock();
   }
@@ -458,6 +572,25 @@ function sendSampleToMe() {
   MailApp.sendEmail({ to: me, subject: '[sample] Re: (the subject of Juan’s email)', body: mail.text, htmlBody: mail.html, name: 'Reply reminders' });
 }
 
+// Run once: makes the "Reply reminders log" sheet the dashboard's Email tab
+// reads, fills it, and logs its link. Running it again reuses the same sheet.
+// Sends nothing. Share the sheet only with people who should see it.
+function makeLogSheet() {
+  const store = PropertiesService.getScriptProperties();
+  let id = store.getProperty('LOG_SHEET_ID');
+  if (!id) {
+    const ss = SpreadsheetApp.create('Reply reminders log');
+    ss.getSheets()[0].setName('Emails');
+    id = ss.getId();
+    store.setProperty('LOG_SHEET_ID', id);
+  }
+  const now = Date.now();
+  const { waits } = collect(now);
+  writeLogFrom(waits, sentRecord(), now);
+  console.log('Email log: https://docs.google.com/spreadsheets/d/' + id + '/edit (' + waits.length + ' rows). '
+    + 'It updates on every check from now on. Paste this link into the dashboard’s Email tab.');
+}
+
 function installTrigger() {
   const every = CONFIG.CHECK_EVERY_MINUTES;
   if ([1, 5, 10, 15, 30].indexOf(every) < 0) throw new Error('CHECK_EVERY_MINUTES must be 1, 5, 10, 15 or 30.');
@@ -472,5 +605,6 @@ function removeTrigger() {
 
 if (typeof module !== 'undefined') {
   module.exports = { CONFIG, MINUTE, HOUR, DAY, REMINDER_HEADER, parseAddresses, toMessage, pendingInThread, stageFor, timeZoneFor, isQuietHour,
-    reminderKey, dueReminders, firstName, listNames, ago, buildReminder, replySubject, encodeHeader, mimeMessage };
+    reminderKey, dueReminders, firstName, listNames, ago, buildReminder, replySubject, encodeHeader, mimeMessage,
+    threadContext, threadWaits, LOG_HEADERS, logRows, statusRows };
 }

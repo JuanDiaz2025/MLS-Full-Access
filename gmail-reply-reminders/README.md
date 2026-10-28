@@ -17,6 +17,8 @@ The reminder shows the email's subject ("Re: ...") because Gmail only keeps a me
 
 It's a Google Apps Script that checks every few minutes (5 by default) on Google's servers. It doesn't use Claude or WhatsApp, and it costs nothing.
 
+Each check also writes a log to a Google Sheet (**Reply reminders log**) that the WhatsApp Accountability dashboard's **Email** tab reads: see [The email log](#the-email-log-for-the-dashboard) below.
+
 ## What it can see
 
 A Google Workspace admin gives a service account permission to read **email headers only** (the `gmail.metadata` scope): who sent an email, to whom, when, the subject and the message id. It can't open bodies or attachments. Juan installs nothing. The script only reads the mailboxes listed in `WATCH`.
@@ -24,6 +26,8 @@ A Google Workspace admin gives a service account permission to read **email head
 The reminders are sent from the account that runs the script, using that account's own permission to send email (`gmail.send`). The service account can only read headers; it never sends.
 
 The permission is company-wide: the key can read the headers of any mailbox at twinhomebuyer.com, even though the script only reads Juan's. Keep the script project and its key private, because anyone who can edit the script can read the key.
+
+The log sheet holds the same header data: subjects, who was emailed, and when they replied. It never holds what an email says. Share it only with people who should see it.
 
 Reading Juan's email headers falls under the same sign-off as the WhatsApp tracker (Greg's written OK, and counsel). Juan should know it's running.
 
@@ -76,8 +80,18 @@ Done once, in about 20 minutes. It needs a **super admin** of the twinhomebuyer.
 13. Run **sendSampleToMe** to get one sample reminder in your own inbox.
 14. Run **installTrigger**. It now checks every `CHECK_EVERY_MINUTES` minutes, but `DRY_RUN` is still `true`, so it only writes "would email ..." to **Executions**. Check that for a day.
 15. When it looks right, change `DRY_RUN: true` to `DRY_RUN: false` at the top of `Code.gs` and save. Reminders go out from the next run.
+16. For the dashboard's Email tab, run **makeLogSheet** once and allow the spreadsheet permission it asks for. It creates **Reply reminders log** in the sender account's Drive, fills it, and writes its link to the log. Share the sheet with the people who should see the Email tab, then paste the link into the Email tab (someone who can edit the dashboard does this once).
 
 To stop it, run **removeTrigger**. To watch someone else's sent emails too, add their address to `WATCH`.
+
+## The email log (for the dashboard)
+
+Every check rewrites two tabs in **Reply reminders log**:
+
+- **Emails**: one row each time Juan emailed someone on the team and waited for an answer. Columns: `Thread · Subject · From · From name · Sent · Person · Name · On (To/CC) · Group · Replied · Status · Reminders · Message ID`. A wait starts at the first email the person hasn't answered and ends at their next message in the thread, so a follow-up after they answered starts a new row. Times are UTC. Only the last `LOOKBACK_DAYS` are kept. The tab is rewritten only when a row changed.
+- **Status**: when the log last updated, whose emails it watches, the reminder waits, and whether reminders are on or in dry run.
+
+The dashboard reads it through each viewer's own Google Sheets connection, so only people the sheet is shared with see the team view. If the sheet can't be written (deleted, no access), the reminders still go out and **Executions** says "Couldn't update the email log".
 
 ## Tests
 
@@ -85,7 +99,7 @@ The rules and the run against a stand-in for Google are tested with Node:
 
 ```
 node gmail-reply-reminders/test/reminders.test.js  # who owes a reply, stages, quiet hours, what the email says
-node gmail-reply-reminders/test/run.test.js        # sign-in, reading headers, sending once, quiet hours, dry run
+node gmail-reply-reminders/test/run.test.js        # sign-in, reading headers, sending once, quiet hours, dry run, the log sheet
 ```
 
 Reading headers from a real Workspace mailbox was checked on Oct 27 (`checkSetup` read 16 sent threads). Sending into a thread was checked live on Oct 28 from Seth's account: a private email to Bryan got a reminder to Bryan alone, and an email to Bryan and Lawrence got one reminder to both, each inside the original thread. Later tests the same day: with four people on an email, each one who replied (including one who replied only to Seth) was left off the next reminder, and an outside address on the email never got one. The first runs failed until the Gmail API was added under **Services** (step 10).

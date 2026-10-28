@@ -17,7 +17,7 @@
   try { if (localStorage.getItem('wa-hide-empty') === '0') state.hideEmpty = false; } catch (_) {}
   // where the numbers come from: 'sample', 'live' (WhatsApp Reader on this computer) or 'saved' (last copy kept in the page)
   const src = { mode: 'sample', S: SAMPLE, now: SAMPLE_NOW, updatedAt: null, groups: [] };
-  const cap = { db: null, mcp: null, sample: null, user: null, canEdit: null, isOwner: null, canWrite: null, me: null };
+  const cap = { db: null, mcp: null, sample: null, user: null, perms: null, canEdit: null, isOwner: null, canWrite: null, me: null };
   // tracking: the groups being tracked, each with whose messages are instructions
   // givers: the default instruction-givers, ticked in every group they're in
   const saved = { tracking: null, legacySource: null, names: {}, givers: [], groups: {}, legacy: { meta: null, analysis: {}, days: {} },
@@ -32,6 +32,7 @@
     messages: { label: 'Messages', icon: 'chat', title: 'Messages', sub: 'Every instruction and question sent to the group, with who replied and how fast.' },
     tasks: { label: 'Tasks', icon: 'tasks', title: 'Tasks', sub: 'Work the AI found in messages: who owns it, when it’s due, and whether it got done.' },
     reports: { label: 'Reports', icon: 'chart', title: 'Reports', sub: 'Patterns over the last 30 days, so accountability decisions rest on the record.' },
+    email: { label: 'Email', icon: 'mail', title: 'Email', sub: 'Emails to the team: who answered, who hasn’t, and how fast. Nothing is sent from here.' },
   };
 
   const ICON = {
@@ -50,6 +51,7 @@
     repeat: '<path d="M4 10a8 8 0 0 1 14-4l2 2M20 14a8 8 0 0 1-14 4l-2-2"/><path d="M20 4v4h-4M4 20v-4h4"/>',
     gauge: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
     link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>',
   };
   const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -344,7 +346,7 @@
     </div>
     <div class="card" style="margin-top:20px"><div class="card-h"><h2>Task follow-through</h2><span class="hint">By owner, last 30 days</span></div>
         ${ownerRows ? `<div class="tw"><table class="t"><thead><tr><th>Owner</th><th>Tasks</th><th>On time</th><th>Late</th><th>Overdue</th><th>Open</th></tr></thead><tbody>${ownerRows}</tbody></table></div>`
-          : '<div class="empty">No tasks yet.</div>'}</div>`;
+          : '<div class="empty">No tasks yet.</div>'}</div>` + emailReportCard();
   }
 
   // ---------------- choosing groups (owner, on the computer running WhatsApp Reader) ----------------
@@ -585,7 +587,7 @@
 
   // ---------------- frame ----------------
   function renderNav() {
-    const badge = { dashboard: D.pendingPeople.length, messages: D.unresolved.length, tasks: D.overdue.length, reports: null };
+    const badge = { dashboard: D.pendingPeople.length, messages: D.unresolved.length, tasks: D.overdue.length, reports: null, email: ED ? ED.waitingPeople : null };
     document.getElementById('nav').innerHTML = Object.entries(VIEWS).map(([k, v]) =>
       `<a href="#${k}"${state.view === k ? ' aria-current="page"' : ''}>${ic(v.icon)}${v.label}${badge[k] ? `<span class="count" aria-label="${badge[k]} need attention">${badge[k]}</span>` : ''}</a>`).join('');
     document.getElementById('timing-sum').textContent = `Flags at ${cfg.first} and ${cfg.second} min, escalate at ${cfg.escalate}`;
@@ -696,11 +698,13 @@
     S = filtered(src.S);
     NOW = src.mode === 'live' ? Date.now() : src.now;
     D = derive(S, cfg, NOW);
+    ED = (email.status === 'ok' || email.status === 'loading') && email.loadedAt ? deriveEmail(email.rows, Date.now()) : null;
     // instruction-givers count only when someone asked them for something
     N = D.people.filter(p => !p.former && (!p.giver || p.required)).length;
     renderNav();
     renderFilters();
     renderFrame();
+    emailFrame();
     const setup = needsSetup();
     const v = VIEWS[state.view];
     document.getElementById('v-title').textContent = setup ? 'Groups to track' : v.title;
@@ -720,12 +724,17 @@
     }
     const list = document.getElementById('mlist');
     const keepScroll = list ? list.scrollTop : 0;
-    const builders = { dashboard: viewDashboard, messages: viewMessages, tasks: viewTasks, reports: viewReports };
+    const builders = { dashboard: viewDashboard, messages: viewMessages, tasks: viewTasks, reports: viewReports, email: viewEmail };
     for (const k of Object.keys(VIEWS)) {
       const el = document.getElementById('v-' + k);
       el.hidden = setup || k !== state.view;
-      if (!el.hidden) el.innerHTML = src.mode === 'sample' ? noDataCard() : builders[k]();
+      if (el.hidden) continue;
+      // don't redraw under someone typing the sheet link
+      if (k === 'email' && el.contains(document.activeElement) && document.activeElement.matches('input')) continue;
+      // the email log doesn't depend on WhatsApp data
+      el.innerHTML = src.mode === 'sample' && k !== 'email' ? noDataCard() : builders[k]();
     }
+    if (state.view === 'email' && !setup) maybeLoadEmail(true);
     const list2 = document.getElementById('mlist');
     if (list2 && keepScroll) list2.scrollTop = keepScroll;
   }
@@ -1005,6 +1014,291 @@ RULES
   draftDlg.addEventListener('click', e => { if (e.target === draftDlg) closeDraft(); });
   document.addEventListener('input', e => { if (e.target.id === 'draft-text' && state.draft) { state.draft.text = e.target.value; state.draft.copied = false; } });
 
+
+  // ---------------- Email (the reply-reminder log, and the viewer's own inbox) ----------------
+  // The team view reads the Google Sheet the reply-reminder script writes,
+  // through the viewer's own Google Sheets connection. "Your inbox" reads the
+  // viewer's own Gmail. Nothing is sent from here, and no email's content is shown.
+  const SHEETS = 'Google Sheets', GMAIL = 'Gmail';
+  const EMAIL_EVERY = 5 * MIN;
+  const email = { conf: null, confLoaded: false, status: 'idle', code: null, message: '', rows: [], info: null, loadedAt: null,
+    editing: false, linkError: '', saving: false,
+    mine: { status: 'idle', items: [], done: 0, total: 0, code: null, message: '', at: null } };
+  let ED = null;
+
+  const sheetUrl = id => `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/edit`;
+  const gmailLink = msgId => `https://mail.google.com/mail/#search/rfc822msgid%3A${encodeURIComponent(msgId)}`;
+  const cleanSubject = s => String(s || '').replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, '').trim() || '(no subject)';
+  const emailWatching = () => (email.info && email.info.watching.length ? email.info.watching : (email.conf && email.conf.watch) || []);
+  // "Juan" for juan@…, from the names in the log when there are any
+  const watchedName = () => {
+    const w = emailWatching();
+    if (!w.length) return 'Juan';
+    const r = email.rows.find(x => x.from === w[0]);
+    return r && r.fromName ? r.fromName.split(/\s+/)[0] : nameFromEmail(w[0]);
+  };
+  const remindTotal = () => (email.info && email.info.remindAfter.length) || 3;
+
+  function subscribeEmail(db) {
+    db.doc('settings/email').onSnapshot(snap => {
+      email.conf = snap.exists ? snap.data() : null;
+      email.confLoaded = true;
+      maybeLoadEmail(false);
+      render();
+    }, () => { email.confLoaded = true; render(); });
+  }
+
+  // Loads by itself only once the viewer has allowed Google Sheets for this
+  // page, or when the Email tab is open; otherwise the first read would ask
+  // everyone who opens the dashboard.
+  async function maybeLoadEmail(onTab) {
+    if (!cap.mcp || !email.conf || !email.conf.sheetId || email.status !== 'idle') return;
+    if (onTab) { loadEmail(); return; }
+    let s = 'prompt';
+    try { s = cap.perms ? await cap.perms.state('mcp:' + SHEETS) : 'prompt'; } catch (_) { s = 'prompt'; }
+    if (s === 'granted' && email.status === 'idle') loadEmail();
+  }
+
+  const DENIED = ['needs_reauth', 'server_not_connected', 'selection_required', 'blocked_by_policy', 'approval_required', 'not_in_manifest', 'consent_required', 'not_granted', 'capability_disabled', 'capability_removed'];
+  async function sheetRead(range, retried) {
+    try {
+      return (await cap.mcp.callTool(SHEETS, 'get_values', { spreadsheetId: email.conf.sheetId, range }, { cache: false })).payload || {};
+    } catch (e) {
+      // a busy connector gets one more try, a little later
+      if (!retried && e && e.retryable) {
+        await new Promise(r => setTimeout(r, Math.min(e.retryAfterMs || 0, 20000) + 1500 + Math.random() * 1500));
+        return sheetRead(range, true);
+      }
+      throw e;
+    }
+  }
+
+  async function loadEmail() {
+    if (!cap.mcp || !email.conf || !email.conf.sheetId || email.status === 'loading') return;
+    const was = email.status;
+    email.status = 'loading';
+    if (was !== 'ok') render();
+    try {
+      const log = await sheetRead('Emails!A1:M5000');
+      let info = null;
+      try { info = parseEmailStatus((await sheetRead('Status!A1:B20')).values); } catch (_) { /* an older sheet without a Status tab still shows its rows */ }
+      email.rows = parseEmailLog(log.values);
+      email.info = info;
+      email.status = 'ok'; email.code = null; email.message = ''; email.loadedAt = Date.now();
+      keepWatchCurrent();
+    } catch (e) {
+      email.status = 'error';
+      email.code = (e && e.code) || 'upstream_error';
+      email.message = (e && e.message) || String(e || '');
+      // no access any more: take down what was shown
+      if (DENIED.includes(email.code)) { email.rows = []; email.info = null; }
+    }
+    render();
+  }
+
+  // The dashboard remembers whose emails the log watches, so "Your inbox"
+  // works for people who can't open the sheet.
+  function keepWatchCurrent() {
+    const w = email.info && email.info.watching;
+    if (!w || !w.length || cap.canEdit !== true || !cap.db || !email.conf) return;
+    if (JSON.stringify(w) === JSON.stringify(email.conf.watch || [])) return;
+    cap.db.doc('settings/email').set({ ...email.conf, watch: w, savedAt: Date.now() }).catch(() => {});
+  }
+
+  async function saveEmailLink() {
+    const input = document.getElementById('email-link');
+    const id = sheetIdFrom(input && input.value);
+    if (!id) { email.linkError = 'That isn’t a Google Sheets link. Copy it from the sheet’s address bar, starting with https://docs.google.com/spreadsheets/'; render(); return; }
+    email.saving = true; email.linkError = ''; render();
+    try {
+      await cap.db.doc('settings/email').set({ sheetId: id, watch: (email.conf && email.conf.sheetId === id && email.conf.watch) || [], savedAt: Date.now() });
+      email.editing = false;
+      email.status = 'idle'; email.rows = []; email.info = null;
+    } catch (e) {
+      email.linkError = `Couldn’t save the link: ${(e && e.message) || e}`;
+    }
+    email.saving = false;
+    render();
+  }
+
+  // ---- the viewer's own inbox ----
+  async function checkMine() {
+    const M = email.mine;
+    if (M.status === 'busy' || !cap.mcp) return;
+    const watch = emailWatching();
+    if (!watch.length) { M.status = 'error'; M.code = 'no-watch'; render(); return; }
+    Object.assign(M, { status: 'busy', items: [], done: 0, total: 0, code: null, message: '' });
+    render();
+    try {
+      const days = (email.info && email.info.lookbackDays) || 7;
+      const from = watch.length === 1 ? `from:${watch[0]}` : `{${watch.map(w => 'from:' + w).join(' ')}}`;
+      const found = (await cap.mcp.callTool(GMAIL, 'search_threads', { query: `${from} newer_than:${days}d`, pageSize: 25, view: 'THREAD_VIEW_MINIMAL' }, { cache: false })).payload || {};
+      const list = (found.threads || []).slice(0, 25);
+      M.total = list.length;
+      render();
+      const threads = [];
+      for (const t of list) {
+        const full = (await cap.mcp.callTool(GMAIL, 'get_thread', { threadId: t.id, messageFormat: 'METADATA_ONLY' }, { cache: false })).payload || {};
+        const withSubject = (t.messages || []).find(m => m.subject);
+        threads.push({ id: t.id, subject: cleanSubject(withSubject && withSubject.subject), url: full.viewUrl || t.viewUrl || '', messages: full.messages || [] });
+        M.done++;
+        const p = document.getElementById('mine-progress');
+        if (p) p.textContent = `Checking ${M.done} of ${M.total}…`;
+      }
+      M.items = myEmailWaits(threads, watch);
+      M.status = 'ok'; M.at = Date.now();
+    } catch (e) {
+      M.status = 'error'; M.code = (e && e.code) || 'upstream_error'; M.message = (e && e.message) || String(e || '');
+      M.items = [];
+    }
+    render();
+  }
+
+  // What went wrong with a connector, and what to do about it.
+  function connectorTrouble(code, message, server) {
+    switch (code) {
+      case 'server_not_connected': return [`${server} isn’t connected to your Claude account.`, 'Add it in claude.ai under Settings → Connectors, then press Try again.'];
+      case 'selection_required': return [`You have more than one ${server} connection.`, 'Choose which one this page should use when Claude asks, then press Try again.'];
+      case 'needs_reauth': return [`${server} needs you to sign in again.`, 'Reconnect it in claude.ai under Settings → Connectors, then press Try again.'];
+      case 'not_in_manifest': case 'approval_required': case 'consent_required': return [`${server} wasn’t allowed for this page.`, 'Press Try again and choose Allow when Claude asks.'];
+      case 'blocked_by_policy': return [`Your organization doesn’t allow ${server} here.`, ''];
+      case 'not_granted': case 'capability_disabled': case 'capability_removed': return ['This view can’t use your connectors.', 'Open the page on claude.ai or in the Claude app.'];
+      case 'tool_error': return [`${server} answered with an error.`, message || ''];
+      default: return [`Couldn’t reach ${server}.`, message || 'Try again in a moment.'];
+    }
+  }
+
+  // ---- the view ----
+  function viewEmail() {
+    if (!email.confLoaded) return emptyCard(cap.db ? 'Loading…' : 'Open this page in Claude', cap.db ? 'Getting the email settings.' : 'The email log shows when this page is open on claude.ai or in the Claude app.');
+    if (!email.conf || !email.conf.sheetId || email.editing) return emailSetupCard();
+    const mineCard = emailMineCard();
+    if (email.status === 'idle' || (email.status === 'loading' && !email.loadedAt)) return emptyCard('Loading the email log…', 'Reading the reply-reminder sheet through your Google Sheets connection.') + mineCard;
+    if (email.status === 'error') {
+      const [t, b] = connectorTrouble(email.code, email.message, SHEETS);
+      const noAccess = email.code === 'tool_error' ? ' If the sheet isn’t shared with you, ask whoever set this up to share it, or use Your inbox below.' : '';
+      return `<div class="card"><div class="empty"><b>${esc(t)}</b><br>${esc(b + noAccess)}
+        <div class="em-actions"><button class="btn small" type="button" data-action="email-retry">Try again</button>${cap.canEdit === true ? '<button class="btn small" type="button" data-action="email-edit">Change the sheet link</button>' : ''}</div></div></div>` + mineCard;
+    }
+    const E = ED || deriveEmail(email.rows, Date.now());
+    const now = Date.now();
+    const info = email.info;
+    const stale = info && info.updated && now - info.updated > EMAIL_STALE
+      ? `<p class="em-note">The email log last updated ${esc(fmtWhen(info.updated))}. The reply-reminder script may have stopped, so these numbers may be out of date.</p>` : '';
+    const dry = info && /dry run/i.test(info.reminders) ? '<p class="em-note">The reminder script is in dry-run mode: it logs who would be reminded but sends nothing.</p>' : '';
+    const total = remindTotal();
+    const waitChip = p => chip(p.reminders >= total ? 'c-crit' : p.reminders ? 'c-serious' : 'c-warn',
+      `${p.name} · ${fmtDur(p.waiting)}${p.reminders ? ` · reminder ${p.reminders} of ${total}` : ''}`);
+    const replyChip = p => chip('c-good', `${p.name} · answered in ${fmtDur(p.delay)}`, 'check');
+    const sentLine = t => `${esc(t.fromName)} · ${esc(fmtWhen(t.first))}${t.msgId ? ` · <a class="link" href="${esc(gmailLink(t.msgId))}" target="_blank" rel="noopener">Open in Gmail</a>` : ''}`;
+    const openRows = E.open.map(t => `<div class="em-row"><div class="em-h"><b>${esc(cleanSubject(t.subject))}</b><span class="sub">${sentLine(t)}</span></div>
+      <div class="em-people">${t.waiting.map(waitChip).join('')}${t.replied.map(replyChip).join('')}</div></div>`).join('');
+    const doneRows = E.done.slice(0, 8).map(t => `<div class="em-row"><div class="em-h"><b>${esc(cleanSubject(t.subject))}</b><span class="sub">${sentLine(t)}</span></div>
+      <div class="em-people">${t.replied.map(replyChip).join('')}</div></div>`).join('');
+    const days = (info && info.lookbackDays) || 7;
+    const peopleRows = E.people.map(p => `<tr><td title="${esc(p.email)}">${who(p.name)}</td><td class="num">${p.asked}</td><td class="num">${p.answered}</td>
+      <td class="num">${p.waiting ? chip(p.longest >= DAY_MS ? 'c-crit' : 'c-warn', `${p.waiting} · longest ${fmtDur(p.longest)}`) : '0'}</td>
+      <td class="num">${p.avg != null ? esc(fmtDur(p.avg)) : '–'}</td><td class="num">${p.reminders}</td></tr>`).join('');
+    return stale + dry + tiles([
+      { tone: 'crit', icon: 'users', value: E.waitingPeople, label: 'People who owe a reply', sub: `To ${watchedName()}’s emails` },
+      { tone: 'warn', icon: 'clock', value: E.open.length, label: 'Emails waiting', sub: `Out of ${plural(E.threads, 'email')} in ${days} days` },
+      { tone: 'info', icon: 'gauge', value: E.avg != null ? esc(fmtDur(E.avg)) : '–', label: 'Average reply time', sub: 'From the email to the reply' },
+      { tone: 'good', icon: 'mail', value: E.reminders, label: 'Reminders sent', sub: 'In the email thread, by the script' },
+    ]) + `
+    <div class="grid2" style="margin-top:20px">
+      <div class="card"><div class="card-h"><h2>Waiting on a reply</h2><span class="hint">Longest wait first</span></div>
+        ${openRows ? `<div class="em-list">${openRows}</div>` : '<div class="empty">Everyone has answered.</div>'}</div>
+      <div class="card"><div class="card-h"><h2>Answered</h2><span class="hint">Most recent first</span></div>
+        ${doneRows ? `<div class="em-list">${doneRows}</div>` : '<div class="empty">No email has been fully answered yet.</div>'}</div>
+    </div>
+    <div class="card" style="margin-top:20px"><div class="card-h"><h2>Reply times by person</h2><span class="hint">Last ${days} days</span></div>
+      ${peopleRows ? `<div class="tw"><table class="t"><thead><tr><th>Person</th><th>Emails</th><th>Answered</th><th>Waiting now</th><th>Avg. reply</th><th>Reminders received</th></tr></thead><tbody>${peopleRows}</tbody></table></div>`
+        : '<div class="empty">No emails in the log yet.</div>'}</div>` + mineCard + emailSourceLine();
+  }
+
+  function emailSourceLine() {
+    const info = email.info;
+    const when = info && info.updated ? `updated ${fmtWhen(info.updated)}` : 'not updated yet';
+    return `<p class="hint-line">From the reply-reminder log (${esc(when)}). <a class="link" href="${esc(sheetUrl(email.conf.sheetId))}" target="_blank" rel="noopener">Open the sheet</a>
+      · <button class="link" type="button" data-action="email-retry">Reload</button>${cap.canEdit === true ? ' · <button class="link" type="button" data-action="email-edit">Change the sheet link</button>' : ''}</p>`;
+  }
+
+  function emailSetupCard() {
+    const canSet = cap.canEdit === true && !!cap.db;
+    const cur = email.conf && email.conf.sheetId ? sheetUrl(email.conf.sheetId) : '';
+    const body = canSet ? `
+      <p>The reply-reminder script writes who Juan emailed, who answered and when to a Google Sheet. Run <b>makeLogSheet</b> once in the script, then paste the link it logs here.</p>
+      <p class="plain">The sheet holds subjects and addresses, never what the emails say. Share it only with people who should see it. Each viewer reads it through their own Google Sheets connection.</p>
+      <div class="em-link-row"><input class="name-in" id="email-link" type="url" value="${esc(cur)}" placeholder="https://docs.google.com/spreadsheets/d/…" aria-label="Link to the reply-reminder sheet">
+        <button class="btn primary small" type="button" data-action="email-save-link"${email.saving ? ' disabled' : ''}>${email.saving ? 'Saving…' : 'Save link'}</button>
+        ${email.editing ? '<button class="btn small" type="button" data-action="email-cancel">Cancel</button>' : ''}</div>
+      ${email.linkError ? `<p class="dlg-msg err" role="status">${esc(email.linkError)}</p>` : ''}`
+      : '<p>Not set up yet. Someone who can edit this page adds the link to the reply-reminder sheet here.</p>';
+    return `<div class="card setup"><div class="card-b"><h2>${ic('mail')}Connect the email log</h2>${body}</div></div>` + (email.editing ? '' : emailMineCard());
+  }
+
+  function emailMineCard() {
+    const M = email.mine;
+    const name = watchedName();
+    const can = !!cap.mcp && emailWatching().length > 0;
+    let body;
+    if (M.status === 'busy') body = `<p class="plain" id="mine-progress" role="status">${M.total ? `Checking ${M.done} of ${M.total}…` : 'Searching your Gmail…'}</p>`;
+    else if (M.status === 'error') {
+      const [t, b] = M.code === 'no-watch' ? ['The dashboard doesn’t know whose emails to look for yet.', 'It learns that from the reply-reminder sheet once someone who can edit this page opens the Email tab.'] : connectorTrouble(M.code, M.message, GMAIL);
+      body = `<p><b>${esc(t)}</b> ${esc(b)}</p>`;
+    } else if (M.status === 'ok') {
+      body = M.items.length ? `<div class="em-list flush">${M.items.map(x => `<div class="em-row"><div class="em-h"><b>${esc(cleanSubject(x.subject))}</b>
+          <span class="sub">${esc(nameFromEmail(x.from) === name ? name : nameFromEmail(x.from))} emailed you ${esc(fmtDur(Date.now() - x.since))} ago${x.url ? ` · <a class="link" href="${esc(x.url)}" target="_blank" rel="noopener">Open</a>` : ''}</span></div></div>`).join('')}</div>`
+        : `<p><b>You’re all caught up.</b> Nothing from ${esc(name)} in the last ${(email.info && email.info.lookbackDays) || 7} days is waiting on you.</p>`;
+    } else body = `<p>See which emails from ${esc(name)} you haven’t answered yet, from your own Gmail. Only you see this. It shows subjects and times, never what the emails say.</p>`;
+    const label = M.status === 'busy' ? 'Checking…' : M.status === 'idle' ? 'Check my Gmail' : 'Check again';
+    return `<div class="card" style="margin-top:20px"><div class="card-h"><h2>Your inbox</h2><span class="hint">Only you see this</span></div>
+      <div class="card-b">${body}<div class="em-actions"><button class="btn small" type="button" data-action="email-mine"${!can || M.status === 'busy' ? ' disabled' : ''}>${label}</button></div></div></div>`;
+  }
+
+  // On Reports: email reply time next to the WhatsApp numbers.
+  function emailReportCard() {
+    if (!email.conf || !email.conf.sheetId) return '';
+    const head = '<div class="card-h"><h2>Email reply time by person</h2><span class="hint">From the reply-reminder log</span></div>';
+    if (!ED) {
+      return `<div class="card em-report" style="margin-top:20px">${head}<div class="empty">${email.status === 'loading' ? 'Loading…' : 'Open the <a class="link" href="#email">Email tab</a> to load email reply times.'}</div></div>`;
+    }
+    const after = (email.info && email.info.remindAfter.length ? email.info.remindAfter : [240, 1440, 2880]).map(m => m * MIN);
+    const speed = ED.people.filter(p => p.avg != null).sort((a, b) => b.avg - a.avg);
+    if (!speed.length) return `<div class="card em-report" style="margin-top:20px">${head}<div class="empty">No email replies yet.</div></div>`;
+    const top = Math.max(after[0], ...speed.map(p => p.avg)) * 1.06;
+    const tone = ms => ms < after[0] ? 'var(--good)' : ms < after[after.length - 1] ? 'var(--warn)' : 'var(--crit)';
+    const bars = speed.map(p => `<div class="bar-row" tabindex="0" data-tip-t="${esc(p.name)}" data-tip="${esc(`Average ${fmtDur(p.avg)} to answer ${plural(p.answered, 'email')}. ${p.waiting ? `Owes ${plural(p.waiting, 'reply', 'replies')} right now.` : 'Nothing waiting.'}`)}">
+        ${who(p.name)}<div class="bar-track"><span class="mark" style="left:${(after[0] / top * 100).toFixed(1)}%"></span>
+        <div class="bar" style="width:${(p.avg / top * 100).toFixed(1)}%;background:${tone(p.avg)}"></div></div>
+        <div class="bar-val">${esc(fmtDur(p.avg))}</div></div>`).join('');
+    return `<div class="card em-report" style="margin-top:20px">${head}<div class="card-b"><div class="bars">${bars}</div>
+      <div class="legend"><span><i style="background:var(--good)"></i>Before the 1st reminder (${esc(fmtDur(after[0]))})</span><span><i style="background:var(--warn)"></i>After it</span><span><i style="background:var(--crit)"></i>After the last reminder</span></div></div></div>`;
+  }
+
+  // The top of the page on the Email tab: no WhatsApp group filters.
+  function emailFrame() {
+    if (state.view !== 'email') return;
+    ['group-filter', 'sender-filter', 'group-pill', 'refresh'].forEach(id => { document.getElementById(id).hidden = true; });
+    const pill = document.getElementById('snap');
+    const info = email.info;
+    if (email.status === 'ok' && info && info.updated) {
+      const stale = Date.now() - info.updated > EMAIL_STALE;
+      pill.className = stale ? 'pill sample' : 'pill live';
+      pill.innerHTML = `${stale ? ic('clock') : '<i class="dot"></i>'}Email log · updated ${esc(fmtClock(info.updated))}`;
+    } else {
+      pill.className = 'pill';
+      pill.innerHTML = `${ic('mail')}${email.status === 'loading' ? 'Loading the email log…' : 'Email log'}`;
+    }
+    document.getElementById('foot').textContent = 'The email numbers come from the reply-reminder script, which reads only who sent what to whom and when. Each viewer opens the log through their own Google Sheets connection, and Your inbox through their own Gmail. Nothing is sent from this page.';
+  }
+
+  // keep it current while the Email tab or Reports is open
+  setInterval(() => {
+    if (document.visibilityState !== 'visible' || (state.view !== 'email' && state.view !== 'reports')) return;
+    if (email.status === 'ok' && Date.now() - email.loadedAt > EMAIL_EVERY) loadEmail();
+    else if (state.view === 'email' && email.status === 'ok') render();
+  }, 60000);
   // ---------------- saved copy (any device) ----------------
   // where a group's copy is kept in the page's storage
   const gkey = gid => String(gid).replace(/[^A-Za-z0-9_.@+:~-]/g, '_');
@@ -1623,6 +1917,11 @@ RULES
     else if (action === 'link-save') saveLink();
     else if (action === 'unlink') unlink(data.msg, data.pid);
     else if (action === 'refresh') refreshNow();
+    else if (action === 'email-retry') { if (email.status !== 'loading') { email.status = 'idle'; loadEmail(); } }
+    else if (action === 'email-edit') { email.editing = true; email.linkError = ''; render(); const i = document.getElementById('email-link'); if (i) i.focus(); }
+    else if (action === 'email-cancel') { email.editing = false; email.linkError = ''; render(); }
+    else if (action === 'email-save-link') saveEmailLink();
+    else if (action === 'email-mine') checkMine();
     else if (action === 'connect') {
       startLive();
     } else if (action === 'recheck') {
@@ -1994,15 +2293,15 @@ RULES
     const claude = window.claude;
     if (!claude || typeof claude.use !== 'function') return;
     const use = name => claude.use(name).catch(() => null);
-    const [db, mcp, sample, user] = await Promise.all([use('db'), use('mcp'), use('sample'), use('user')]);
-    cap.db = db; cap.mcp = mcp; cap.sample = sample; cap.user = user;
+    const [db, mcp, sample, user, perms] = await Promise.all([use('db'), use('mcp'), use('sample'), use('user'), use('permissions')]);
+    cap.db = db; cap.mcp = mcp; cap.sample = sample; cap.user = user; cap.perms = perms;
     if (user) {
       try { cap.canEdit = await user.canEdit(); } catch (_) { cap.canEdit = null; }
       try { cap.isOwner = await user.isOwner(); } catch (_) { cap.isOwner = null; }
       try { cap.canWrite = await user.can('data.write'); } catch (_) { cap.canWrite = null; }
       try { cap.me = await user.id(); } catch (_) { cap.me = null; }
     }
-    if (db) subscribeSaved(db);
+    if (db) { subscribeSaved(db); subscribeEmail(db); } else { email.confLoaded = true; }
     if (mcp) startLive(); else { live.diag = { code: 'no-mcp' }; render(); }
   }
 

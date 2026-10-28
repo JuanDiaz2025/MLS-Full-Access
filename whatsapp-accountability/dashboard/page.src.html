@@ -355,6 +355,23 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .pick-list .choice b { font-weight: 500; white-space: pre-wrap; }
 .t td .sub .link { font-size: 12px; font-weight: 600; }
 
+.em-list { display: flex; flex-direction: column; }
+.em-list.flush { margin: -4px 0 4px; }
+.em-row { padding: 12px 18px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.em-list.flush .em-row { padding-inline: 0; }
+.em-row:last-child { border-bottom: 0; }
+.em-h { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+.em-h b { overflow-wrap: anywhere; }
+.em-h .sub { font-size: 12.5px; color: var(--ink-3); }
+.em-people { display: flex; flex-wrap: wrap; gap: 6px; }
+.em-people .chip { white-space: normal; }
+.em-link-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.em-link-row .name-in { flex: 1 1 280px; max-width: 560px; width: auto; }
+.em-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.card-b .em-actions { justify-content: flex-start; }
+.em-note { margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); color: var(--warn-ink); font-weight: 500; }
+.t td .sub { overflow-wrap: anywhere; }
+
 /* ---------- narrow screens ---------- */
 @media (max-width: 1040px) { .msgs { grid-template-columns: minmax(0, 1fr); } .mlist { max-height: 340px; } }
 @media (max-width: 860px) {
@@ -435,6 +452,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
       <section class="view" id="v-messages" hidden></section>
       <section class="view" id="v-tasks" hidden></section>
       <section class="view" id="v-reports" hidden></section>
+      <section class="view" id="v-email" hidden></section>
       <p class="foot" id="foot"></p>
     </div>
   </main>
