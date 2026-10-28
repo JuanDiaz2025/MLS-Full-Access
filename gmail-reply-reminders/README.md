@@ -70,11 +70,12 @@ Done once, in about 20 minutes. It needs a **super admin** of the twinhomebuyer.
 
 8. Signed in as the sender account, go to [script.google.com](https://script.google.com) → **New project**, and name it **Reply reminders**.
 9. Replace everything in `Code.gs` with this folder's `Code.gs`. In **Project Settings**, tick **Show "appsscript.json" manifest file in editor**, then replace that file with this folder's `appsscript.json`. Save.
-10. **Project Settings → Script properties → Add script property.** Property: `SA_KEY`. Value: the **whole contents** of the JSON key file from step 5. Save, then delete the downloaded file.
-11. In the editor, pick **checkSetup** and press **Run**. Allow the permissions it asks for, including **Send email on your behalf** (that's how the reminders go into the threads). The log should say something like `juan@twinhomebuyer.com: 23 threads with sent mail in the last 7 days, 2 replies still owed by: cherry@..., leo@... (group)`. It sends nothing.
-12. Run **sendSampleToMe** to get one sample reminder in your own inbox.
-13. Run **installTrigger**. It now checks every `CHECK_EVERY_MINUTES` minutes, but `DRY_RUN` is still `true`, so it only writes "would email ..." to **Executions**. Check that for a day.
-14. When it looks right, change `DRY_RUN: true` to `DRY_RUN: false` at the top of `Code.gs` and save. Reminders go out from the next run.
+10. In the editor's left panel, press **+** next to **Services**, pick **Gmail API**, and press **Add**. This switches the Gmail API on for the script itself; without it every reminder fails with "Gmail API has not been used in project … or it is disabled". (The `appsscript.json` above already lists it, so it may already show under Services.)
+11. **Project Settings → Script properties → Add script property.** Property: `SA_KEY`. Value: the **whole contents** of the JSON key file from step 5. Save, then delete the downloaded file.
+12. In the editor, pick **checkSetup** and press **Run**. Allow the permissions it asks for, including **Send email on your behalf** (that's how the reminders go into the threads). The log should say something like `juan@twinhomebuyer.com: 23 threads with sent mail in the last 7 days, 2 replies still owed by: cherry@..., leo@... (group)`. It sends nothing.
+13. Run **sendSampleToMe** to get one sample reminder in your own inbox.
+14. Run **installTrigger**. It now checks every `CHECK_EVERY_MINUTES` minutes, but `DRY_RUN` is still `true`, so it only writes "would email ..." to **Executions**. Check that for a day.
+15. When it looks right, change `DRY_RUN: true` to `DRY_RUN: false` at the top of `Code.gs` and save. Reminders go out from the next run.
 
 To stop it, run **removeTrigger**. To watch someone else's sent emails too, add their address to `WATCH`.
 
