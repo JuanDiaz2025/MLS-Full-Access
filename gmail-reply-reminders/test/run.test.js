@@ -18,8 +18,13 @@ const calls = [], sent = [];
 const tabs = {}, tabWrites = {};
 let logBroken = false;
 const sheet = n => ({ clearContents: () => { tabs[n] = []; },
+  getDataRange: () => ({ getValues: () => tabs[n].map(r => r.slice()) }),
   getRange: (r, c, h, w) => ({ setNumberFormat() { return this; },
-    setValues(v) { assert.ok(v.length === h && v.every(x => x.length === w), 'range fits the values'); tabs[n] = v; tabWrites[n] = (tabWrites[n] || 0) + 1; return this; } }) });
+    setValues(v) {
+      assert.ok(v.length === h && v.every(x => x.length === w), 'range fits the values');
+      v.forEach((row, i) => { tabs[n][r - 1 + i] = row.slice(); });
+      tabWrites[n] = (tabWrites[n] || 0) + 1; return this;
+    } }) });
 const H = (n, v) => ({ name: n, value: v });
 let seq = 0;
 let owner = 'seth@twinhomebuyer.com'; // the account running the script
@@ -184,4 +189,34 @@ const before8 = sent.length;
 ctx.run();
 const own = sent.slice(before8).find(m => m['In-Reply-To'] === '<m10@mail.gmail.com>');
 check('run from the watched account: filed in the same thread', own && own.threadId === 't8', own && own.threadId);
+
+// stopped and paused from the dashboard, through the Stopped and Pause tabs
+check('control tabs made once, as the dashboard expects', JSON.stringify(tabs.Stopped) === JSON.stringify([vm.runInNewContext('STOP_HEADERS', ctx)]) && JSON.stringify(tabs.Pause) === '[["Paused","By","At"],["no","",""]]');
+threads.t10 = [juanMsg('m12', 'Bryan <bryan@twinhomebuyer.com>, cherry@twinhomebuyer.com', 5)]; order.unshift('t10');
+tabs.Stopped.push(['t10', 'bryan@twinhomebuyer.com', 'Fence quote', 'Seth Concepcion', new Date(now).toISOString()]);
+let b4 = sent.length;
+ctx.run();
+const s10 = sent.slice(b4).filter(m => m['In-Reply-To'] === '<m12@mail.gmail.com>');
+check('stopped for Bryan: the group reminder goes to Cherry only', s10.length === 1 && to(s10[0]) === 'cherry', s10.map(to).join(' | '));
+check('log: Bryan shows as stopped, Cherry still waiting', rowOf('bryan', 'm12')[col('Status')] === 'Stopped' && rowOf('cherry', 'm12')[col('Status')] === 'Waiting');
+tabs.Stopped[tabs.Stopped.length - 1] = ['', '', '', '', ''];
+tabs.Stopped.push(['t10', '', 'Fence quote', 'Seth Concepcion', new Date(now).toISOString()]);
+now += 20 * HOUR; b4 = sent.length;
+ctx.run();
+check('stopped for everyone: nothing more on that email', !sent.slice(b4).some(m => m['In-Reply-To'] === '<m12@mail.gmail.com>') && rowOf('cherry', 'm12')[col('Status')] === 'Stopped');
+// once Bryan answers, a new email from Juan in that thread is tracked and reminded again
+threads.t10.push(reply('m13', 'Bryan <bryan@twinhomebuyer.com>', 6), juanMsg('m14', 'Bryan <bryan@twinhomebuyer.com>', 5));
+b4 = sent.length;
+ctx.run();
+check('after Bryan replies, a new email in that thread is reminded again', sent.slice(b4).some(m => m['In-Reply-To'] === '<m14@mail.gmail.com>' && to(m) === 'bryan'));
+// pause all
+tabs.Pause[1] = ['yes', 'Seth Concepcion', new Date(now).toISOString()];
+threads.t11 = [juanMsg('m15', 'Mike <mike@twinhomebuyer.com>', 5)]; order.unshift('t11');
+b4 = sent.length; ctx.__log.length = 0;
+ctx.run();
+check('paused: nothing is sent, and the log says who paused it', sent.length === b4 && ctx.__log.some(l => /reminders are paused by Seth Concepcion/.test(l)), ctx.__log.join(' / '));
+check('Status says paused', tabs.Status.some(r => r[0] === 'Paused' && r[1] === 'yes, by Seth Concepcion'));
+tabs.Pause[1] = ['no', 'Seth Concepcion', new Date(now).toISOString()];
+ctx.run();
+check('back on: the held reminder goes out', sent.slice(b4).some(m => m['In-Reply-To'] === '<m15@mail.gmail.com>'));
 console.log(process.exitCode ? 'FAILED' : 'all checks passed');

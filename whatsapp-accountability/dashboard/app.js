@@ -53,6 +53,9 @@
     link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>',
     out: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+    bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+    bellOff: '<path d="M8.5 5.3A6 6 0 0 1 18 11v4M6 11v5l-1.5 2H17"/><path d="M10 20.5a2 2 0 0 0 4 0M3.5 3.5l17 17"/>',
+    pause: '<rect x="6.5" y="5" width="3.5" height="14" rx="1"/><rect x="14" y="5" width="3.5" height="14" rx="1"/>',
   };
   const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -699,7 +702,7 @@
     S = filtered(src.S);
     NOW = src.mode === 'live' ? Date.now() : src.now;
     D = derive(S, cfg, NOW);
-    ED = (email.status === 'ok' || email.status === 'loading') && email.loadedAt ? deriveEmail(email.rows, Date.now()) : null;
+    ED = (email.status === 'ok' || email.status === 'loading') && email.loadedAt ? deriveEmail(email.rows, Date.now(), email.stops) : null;
     // instruction-givers count only when someone asked them for something
     N = D.people.filter(p => !p.former && (!p.giver || p.required)).length;
     renderNav();
@@ -1024,6 +1027,8 @@ RULES
   const EMAIL_EVERY = 5 * MIN;
   const email = { conf: null, confLoaded: false, status: 'idle', code: null, message: '', rows: [], info: null, loadedAt: null,
     editing: false, linkError: '', saving: false,
+    // stopping reminders: what the Stopped and Pause tabs say; 'missing' when the script hasn't made them yet
+    stops: [], pause: { paused: false, by: '', at: null }, controls: 'unknown', busy: false, ctlError: '',
     mine: { status: 'idle', items: [], done: 0, total: 0, code: null, message: '', at: null } };
   let ED = null;
 
@@ -1085,6 +1090,7 @@ RULES
       try { info = parseEmailStatus((await sheetRead('Status!A1:B20')).values); } catch (_) { /* an older sheet without a Status tab still shows its rows */ }
       email.rows = parseEmailLog(log.values);
       email.info = info;
+      await loadControls(false);
       email.status = 'ok'; email.code = null; email.message = ''; email.loadedAt = Date.now();
       keepWatchCurrent();
     } catch (e) {
@@ -1096,6 +1102,94 @@ RULES
     }
     render();
   }
+
+  // The Stopped and Pause tabs. An older script didn't make them: then the
+  // controls stay hidden and editors are told to update the script.
+  async function loadControls(andRender) {
+    try {
+      email.stops = parseEmailStops((await sheetRead('Stopped!A1:E1000')).values);
+      email.pause = parseEmailPause((await sheetRead('Pause!A1:C2')).values);
+      email.controls = 'ok';
+    } catch (e) {
+      email.controls = e && e.code === 'tool_error' ? 'missing' : 'error';
+      email.stops = []; email.pause = { paused: false, by: '', at: null };
+    }
+    if (andRender) render();
+  }
+  const canControl = () => cap.canEdit === true && !!cap.mcp && email.controls === 'ok';
+  const sheetWrite = (tool, input) => cap.mcp.callTool(SHEETS, tool, { spreadsheetId: email.conf.sheetId, ...input }, { cache: false });
+  async function myName() {
+    try { const me = cap.user && await cap.user.me(); return (me && me.name) || 'Someone on the dashboard'; } catch (_) { return 'Someone on the dashboard'; }
+  }
+  // A write to the sheet, then a fresh read so every number agrees with it.
+  async function controlWrite(fn) {
+    if (email.busy) return;
+    email.busy = true; email.ctlError = '';
+    render(); renderStop();
+    try { await fn(); await loadControls(false); if (state.stop) state.stop.done = true; }
+    catch (e) {
+      const [t, b] = e && e.code === 'moved' ? ['The sheet changed since it was read.', 'It has been reloaded; try again.'] : connectorTrouble((e && e.code) || 'upstream_error', (e && e.message) || '', SHEETS);
+      email.ctlError = `${t} ${b}${e && e.code === 'tool_error' ? ' To stop reminders you need edit access to the log sheet.' : ''}`.trim();
+      if (e && e.code === 'moved') await loadControls(false);
+    }
+    email.busy = false;
+    render(); renderStop();
+  }
+  const stopReminders = (thread, person, subject) => controlWrite(async () => {
+    await sheetWrite('append_values', { range: 'Stopped!A1', values: [[thread, person, subject, await myName(), new Date().toISOString()]] });
+  });
+  const resumeStop = row => controlWrite(async () => {
+    const s = email.stops.find(x => x.row === row);
+    if (!s) throw { code: 'moved' };
+    // make sure that row is still this stop before clearing it
+    const range = `Stopped!A${row}:E${row}`;
+    const cur = ((await sheetRead(range)).values || [])[0] || [];
+    if (String(cur[0] || '').trim() !== s.thread || (String(cur[1] || '').trim().toLowerCase() || 'everyone') !== s.person) throw { code: 'moved' };
+    await sheetWrite('update_values', { range, values: [['', '', '', '', '']] });
+  });
+  const setPause = on => controlWrite(async () => {
+    await sheetWrite('update_values', { range: 'Pause!A2:C2', values: [[on ? 'yes' : 'no', await myName(), new Date().toISOString()]] });
+  });
+
+  // ---- the stop dialog: who to stop, and the stops already on this email ----
+  const stopDlg = document.getElementById('stop-dlg');
+  const stopBox = document.getElementById('stop-box');
+  function openStop(thread) { state.stop = { thread, done: false }; email.ctlError = ''; renderStop(); const b = stopBox.querySelector('input, button.primary, button'); if (b) b.focus(); }
+  function closeStop() { state.stop = null; email.ctlError = ''; renderStop(); }
+  function renderStop() {
+    const S = state.stop;
+    const E = S && ED;
+    const t = E && E.open.concat(E.halted, E.done).find(x => x.id === S.thread);
+    stopDlg.hidden = !t;
+    if (!t) { if (S) state.stop = null; return; }
+    const subject = cleanSubject(t.subject);
+    const people = new Map(E.people.map(p => [p.email, p.name]));
+    const current = email.stops.filter(s => s.thread === t.id);
+    const curRows = current.map(s => `<div class="clear-row"><div><b>${esc(s.person === 'everyone' ? 'Everyone on this email' : people.get(s.person) || s.person)}</b>
+        <span class="sub">Stopped${s.by ? ` by ${esc(s.by)}` : ''}${Number.isFinite(s.at) ? `, ${esc(fmtWhen(s.at))}` : ''}</span></div>
+        <button class="btn small" type="button" data-action="email-resume" data-row="${s.row}"${email.busy ? ' disabled' : ''}>Resume</button></div>`).join('');
+    const w = t.waiting;
+    const choices = w.length ? `<p class="note">Stop reminders for:</p><div class="pick-list">
+        <label class="choice"><input type="radio" name="stop-who" value="everyone" checked><span><b>Everyone on this email</b><span class="sub">${esc(w.map(p => p.name).join(', '))}</span></span></label>
+        ${w.length > 1 ? w.map(p => `<label class="choice"><input type="radio" name="stop-who" value="${esc(p.person)}"><span><b>${esc(p.name)} only</b><span class="sub">Waiting ${esc(fmtDur(p.waiting))}</span></span></label>`).join('') : ''}</div>`
+      : '<p class="plain">Nobody on this email is waiting for a reminder.</p>';
+    const msg = email.ctlError || (email.busy ? 'Saving to the log sheet…' : S.done ? 'Saved. The reminder script picks it up at its next check.' : '');
+    stopBox.innerHTML = `<div class="dlg-h"><div><h2 id="stop-h">Reminders for “${esc(subject)}”</h2>
+        <p>A stopped person isn’t counted as owing a reply. If they answer and a new email comes, it’s tracked again.</p></div>
+        <button class="x" type="button" data-action="stop-close" aria-label="Close"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="dlg-b">${curRows ? `<div class="stop-cur">${curRows}</div>` : ''}${choices}</div>
+      <p class="dlg-msg ${email.ctlError ? 'err' : 'ok'}" role="status">${esc(msg)}</p>
+      <div class="dlg-f"><button class="btn" type="button" data-action="stop-close">Close</button>
+        ${w.length ? `<button class="btn primary" type="button" data-action="email-stop-save"${email.busy ? ' disabled' : ''}>Stop reminders</button>` : ''}</div>`;
+  }
+  function saveStop() {
+    const S = state.stop, t = S && ED && ED.open.concat(ED.halted, ED.done).find(x => x.id === S.thread);
+    if (!t) return;
+    const pick = stopBox.querySelector('input[name="stop-who"]:checked');
+    stopReminders(t.id, pick && pick.value !== 'everyone' ? pick.value : '', cleanSubject(t.subject));
+  }
+  stopDlg.addEventListener('click', e => { if (e.target === stopDlg) closeStop(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.stop) closeStop(); });
 
   // The dashboard remembers whose emails the log watches, so "Your inbox"
   // works for people who can't open the sheet.
@@ -1195,13 +1289,13 @@ RULES
       return `<div class="card"><div class="empty"><b>${esc(t)}</b><br>${esc(b + noAccess)}
         <div class="em-actions"><button class="btn small" type="button" data-action="email-retry">Try again</button>${cap.canEdit === true ? '<button class="btn small" type="button" data-action="email-edit">Change the sheet link</button>' : ''}</div></div></div>` + emailMineCard();
     }
-    const E = ED || deriveEmail(email.rows, Date.now());
+    const E = ED || deriveEmail(email.rows, Date.now(), email.stops);
     const info = email.info;
     const stale = info && info.updated && Date.now() - info.updated > EMAIL_STALE
       ? `<p class="em-note">The email log last updated ${esc(fmtWhen(info.updated))}. The reply-reminder script may have stopped, so these numbers may be out of date.</p>` : '';
     const dry = info && /dry run/i.test(info.reminders) ? '<p class="em-note">The reminder script is in dry-run mode: it logs who would be reminded but sends nothing.</p>' : '';
     const days = (info && info.lookbackDays) || 7;
-    return stale + dry + tiles([
+    return stale + dry + emailPauseBar() + tiles([
       { tone: 'crit', icon: 'users', value: E.waitingPeople, label: 'People who owe a reply', sub: `To ${watchedName()}’s emails` },
       { tone: 'warn', icon: 'clock', value: E.open.length, label: 'Emails waiting', sub: `Out of ${plural(E.threads, 'email')} in ${days} days` },
       { tone: 'info', icon: 'gauge', value: E.avg != null ? esc(fmtDur(E.avg)) : '–', label: 'Average reply time', sub: 'From the email to the reply' },
@@ -1209,11 +1303,27 @@ RULES
     ]) + `<div class="em-top">${emailPeopleCard(E, days)}${emailMineCard(true)}</div>` + emailListCard(E) + emailSourceLine();
   }
 
+  // Reminders on or paused, with the switch for people who can change the sheet.
+  function emailPauseBar() {
+    const P = email.pause || {};
+    const can = canControl();
+    const after = email.info && email.info.remindAfter.length ? email.info.remindAfter.map(m => fmtDur(m * MIN)) : [];
+    const when = after.length > 1 ? `${after.slice(0, -1).join(', ')} and ${after[after.length - 1]}` : after.join('');
+    const err = email.ctlError && !state.stop ? `<span class="em-bar-err" role="status">${esc(email.ctlError)}</span>` : '';
+    if (P.paused) {
+      return `<div class="em-bar paused" role="status">${ic('pause')}<span><b>All reminders are paused</b>${P.by ? ` by ${esc(P.by)}` : ''}${P.at ? `, ${esc(fmtWhen(P.at))}` : ''}. Nothing is sent until they’re turned back on.</span>
+        ${can ? `<button class="btn small" type="button" data-action="email-pause" data-on="0"${email.busy ? ' disabled' : ''}>Turn reminders back on</button>` : ''}${err}</div>`;
+    }
+    const note = email.controls === 'missing' && cap.canEdit === true ? ' To stop or pause them from here, paste the latest Code.gs into the reminder script.' : '';
+    return `<div class="em-bar">${ic('bell')}<span>Reminders are on${when ? `: they go out ${esc(when)} after an email, in its thread` : ''}.${esc(note)}</span>
+      ${can ? `<button class="btn small" type="button" data-action="email-pause" data-on="1"${email.busy ? ' disabled' : ''}>Pause all reminders</button>` : ''}${err}</div>`;
+  }
+
   // One row per person: what they owe now, and their record over the look-back.
   function emailPeopleCard(E, days) {
     const sel = state.emailPerson;
     const rows = E.people.map(p => {
-      const summary = [p.waiting ? `longest wait ${fmtDur(p.longest)}` : 'nothing waiting', `${p.answered} of ${p.asked} answered`,
+      const summary = [p.waiting ? `longest wait ${fmtDur(p.longest)}` : 'nothing waiting', `${p.answered} of ${p.asked} answered`, p.stopped ? `${p.stopped} stopped` : '',
         p.avg != null ? `avg. ${fmtDur(p.avg)}` : '', plural(p.reminders, 'reminder')].filter(Boolean).join(' · ');
       return `<button class="em-gr" type="button" data-action="email-person" data-email="${esc(p.email)}" aria-pressed="${sel === p.email}" title="${esc(p.email)}" aria-label="${esc(`${p.name}: owes ${p.waiting}, ${summary}`)}">
         <span>${who(p.name)}</span>
@@ -1234,15 +1344,17 @@ RULES
     const f = state.emailFilter || 'waiting';
     const person = state.emailPerson && E.people.find(p => p.email === state.emailPerson);
     const mine = t => !person || t.waiting.some(p => p.person === person.email) || t.replied.some(p => p.person === person.email);
-    const sets = { waiting: E.open.filter(mine), answered: E.done.filter(mine), all: E.open.concat(E.done).filter(mine) };
+    const sets = { waiting: E.open.filter(mine), stopped: E.halted.filter(mine), answered: E.done.filter(mine), all: E.open.concat(E.halted, E.done).filter(mine) };
     const list = sets[f] || sets.waiting;
+    const can = canControl();
     const short = shortNames(E.people);
     const nm = p => short[p.person] || p.name;
     const limit = state.emailAll ? list.length : 12;
     const total = remindTotal();
     const rows = list.slice(0, limit).map(t => {
       const subject = cleanSubject(t.subject);
-      const waiting = t.waiting.map(p => chip(waitTone(p.waiting), `${nm(p)} ${fmtDur(p.waiting)}`)).join('');
+      const waiting = t.waiting.map(p => chip(waitTone(p.waiting), `${nm(p)} ${fmtDur(p.waiting)}`)).join('')
+        + t.stopped.map(p => chip('c-muted', `${nm(p)} stopped`, 'bellOff')).join('');
       const answered = t.replied.map(p => `${esc(nm(p))} ${esc(fmtDur(p.delay))}`).join(', ');
       return `<div class="em-gr">
         <span class="em-c-subj" title="${esc(subject)}">${esc(subject)}</span>
@@ -1250,13 +1362,14 @@ RULES
         <span class="em-c-wait em-chips">${waiting || '<span class="plain">Nobody</span>'}</span>
         <span class="em-d em-ans">${answered ? `${ic('check')}<span>${answered}</span>` : '<span class="plain">–</span>'}</span>
         <span class="num em-c-rem">${t.waiting.length && t.reminders ? `${t.reminders} of ${total}` : '<span class="plain">–</span>'}</span>
-        <span>${t.msgId ? `<a class="em-go" href="${esc(gmailLink(t.msgId))}" target="_blank" rel="noopener" title="Open in Gmail" aria-label="${esc(`Open “${subject}” in Gmail`)}">${ic('out')}</a>` : ''}</span>
+        <span class="em-acts">${can && (t.waiting.length || t.stopped.length) ? `<button class="em-go" type="button" data-action="email-stop-open" data-thread="${esc(t.id)}" title="${t.waiting.length ? 'Stop reminders' : 'Resume reminders'}" aria-label="${esc(`${t.waiting.length ? 'Stop' : 'Resume'} reminders for “${subject}”`)}">${ic(t.waiting.length ? 'bellOff' : 'bell')}</button>` : ''}${t.msgId ? `<a class="em-go" href="${esc(gmailLink(t.msgId))}" target="_blank" rel="noopener" title="Open in Gmail" aria-label="${esc(`Open “${subject}” in Gmail`)}">${ic('out')}</a>` : ''}</span>
         <span class="em-m">Sent ${esc(fmtWhen(t.first))}${answered ? ` · <span class="em-ok">answered: ${answered}</span>` : ''}</span></div>`;
     }).join('');
-    const label = { waiting: 'Waiting', answered: 'Answered', all: 'All' };
-    const seg = Object.keys(label).map(k => `<button type="button" data-action="email-filter" data-f="${k}" aria-pressed="${f === k}">${label[k]} <b>${sets[k].length}</b></button>`).join('');
+    const label = { waiting: 'Waiting', stopped: 'Stopped', answered: 'Answered', all: 'All' };
+    // Stopped shows only when something is stopped
+    const seg = Object.keys(label).filter(k => k !== 'stopped' || sets.stopped.length || f === 'stopped').map(k => `<button type="button" data-action="email-filter" data-f="${k}" aria-pressed="${f === k}">${label[k]} <b>${sets[k].length}</b></button>`).join('');
     const empty = f === 'waiting' ? (person ? `${person.name} doesn’t owe a reply right now.` : 'Everyone has answered.')
-      : f === 'answered' ? 'No email has been fully answered yet.' : 'No emails yet.';
+      : f === 'answered' ? 'No email has been fully answered yet.' : f === 'stopped' ? 'No reminders are stopped.' : 'No emails yet.';
     return `<div class="card" style="margin-top:20px"><div class="card-h"><h2>Emails</h2>
         <div class="em-tools">${person ? `<span class="gchip">${esc(person.name)}<button type="button" data-action="email-person" data-email="${esc(person.email)}" aria-label="Show everyone’s emails">×</button></span>` : ''}
           <span class="seg" role="group" aria-label="Which emails">${seg}</span></div></div>
@@ -1973,6 +2086,11 @@ RULES
     else if (action === 'email-mine') checkMine();
     else if (action === 'email-filter') { state.emailFilter = data.f; state.emailAll = false; render(); }
     else if (action === 'email-all') { state.emailAll = true; render(); }
+    else if (action === 'email-stop-open') openStop(data.thread);
+    else if (action === 'stop-close') closeStop();
+    else if (action === 'email-stop-save') saveStop();
+    else if (action === 'email-resume') resumeStop(Number(data.row));
+    else if (action === 'email-pause') setPause(data.on === '1');
     else if (action === 'email-person') {
       state.emailPerson = state.emailPerson === data.email ? null : data.email;
       // someone who owes nothing: show what they did answer

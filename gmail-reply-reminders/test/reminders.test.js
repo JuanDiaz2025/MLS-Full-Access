@@ -136,4 +136,19 @@ same(rows[0], ['w1', 'Fence quote', 'juan@twinhomebuyer.com', 'Juan Diaz', new D
 assert.strictEqual(rows[1][9], new Date(now - 5 * HOUR).toISOString()); assert.strictEqual(rows[1][10], 'Replied');
 same(R.statusRows({ ...cfg, DRY_RUN: false }, now).map(r => r[0] + '=' + r[1]).slice(0, 2), ['Updated=' + new Date(now).toISOString(), 'Watching=juan@twinhomebuyer.com']);
 console.log('11 log rows:', rows.length, '| first:', rows[0].slice(4, 12).join(' '));
+// 12. stops and the pause switch written by the dashboard
+const st = R.parseStops([R.STOP_HEADERS, ['t1', '', 'x', 'Seth', new Date(now).toISOString()], ['', '', '', '', ''],
+  ['t2', 'Bryan@TwinHomeBuyer.com', 'y', 'Seth', "'" + new Date(now - HOUR).toISOString()], ['t3', 'leo@twinhomebuyer.com', 'z', 'Seth', new Date(now)]]);
+same(Object.keys(st), ['t1', 't2', 't3'], 'cleared rows skipped');
+assert.ok(R.isStopped(st, 't1', 'anyone@twinhomebuyer.com', now - HOUR), 'everyone on t1');
+assert.ok(!R.isStopped(st, 't1', 'anyone@twinhomebuyer.com', now + MINUTE), 'an email after the stop is not stopped');
+assert.ok(R.isStopped(st, 't2', 'bryan@twinhomebuyer.com', now - 2 * HOUR) && !R.isStopped(st, 't2', 'cherry@twinhomebuyer.com', now - 2 * HOUR), 'one person only');
+assert.ok(R.isStopped(st, 't3', 'leo@twinhomebuyer.com', now - HOUR), 'a date cell from the sheet');
+assert.ok(!R.isStopped(st, 't9', 'leo@twinhomebuyer.com', 0));
+same([R.parsePause([R.PAUSE_HEADERS, ['yes', 'Seth', 'x']]), R.parsePause([R.PAUSE_HEADERS, ['no', '', '']]), R.parsePause([])],
+  [{ paused: true, by: 'Seth' }, { paused: false, by: '' }, { paused: false, by: '' }]);
+const sr = R.logRows([{ thread: 't2', subject: 's', senderName: 'J', askedAt: now - 2 * HOUR, email: 'bryan@twinhomebuyer.com', on: 'To', group: false, repliedAt: null, messageId: 'm' }], 'juan@twinhomebuyer.com', {}, st);
+assert.strictEqual(sr[0][10], 'Stopped');
+assert.strictEqual(R.statusRows(cfg, now, { paused: true, by: 'Seth' })[5][1], 'yes, by Seth');
+console.log('12 stops and pause');
 console.log('all checks passed');

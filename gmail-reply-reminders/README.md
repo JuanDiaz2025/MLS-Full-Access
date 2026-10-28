@@ -89,9 +89,10 @@ To stop it, run **removeTrigger**. To watch someone else's sent emails too, add 
 Every check rewrites two tabs in **Reply reminders log**:
 
 - **Emails**: one row each time Juan emailed someone on the team and waited for an answer. Columns: `Thread · Subject · From · From name · Sent · Person · Name · On (To/CC) · Group · Replied · Status · Reminders · Message ID`. A wait starts at the first email the person hasn't answered and ends at their next message in the thread, so a follow-up after they answered starts a new row. Times are UTC. Only the last `LOOKBACK_DAYS` are kept. The tab is rewritten only when a row changed.
-- **Status**: when the log last updated, whose emails it watches, the reminder waits, and whether reminders are on or in dry run.
+- **Status**: when the log last updated, whose emails it watches, the reminder waits, whether reminders are on or in dry run, and whether they're paused.
+- **Stopped** and **Pause**: written by the dashboard's Email tab, read by the script on every check. A row in **Stopped** (`Thread · Person · Subject · Stopped by · Stopped at`) stops reminders on that email, for one person or, with Person blank, everyone; it covers waits that started before it, so once the person answers, a new email is tracked again. Resume on the dashboard clears the row. **Pause** row 2 (`yes`/`no · By · At`) holds every reminder while it says yes. The script makes both tabs (as plain text) the first time it writes the log. If they can't be read, reminders carry on as normal.
 
-The dashboard reads it through each viewer's own Google Sheets connection, so only people the sheet is shared with see the team view. If the sheet can't be written (deleted, no access), the reminders still go out and **Executions** says "Couldn't update the email log".
+The dashboard reads it through each viewer's own Google Sheets connection, so only people the sheet is shared with see the team view, and only people with edit access can stop or pause reminders from it. If the sheet can't be written (deleted, no access), the reminders still go out and **Executions** says "Couldn't update the email log".
 
 ## Tests
 
@@ -99,7 +100,7 @@ The rules and the run against a stand-in for Google are tested with Node:
 
 ```
 node gmail-reply-reminders/test/reminders.test.js  # who owes a reply, stages, quiet hours, what the email says
-node gmail-reply-reminders/test/run.test.js        # sign-in, reading headers, sending once, quiet hours, dry run, the log sheet
+node gmail-reply-reminders/test/run.test.js        # sign-in, reading headers, sending once, quiet hours, dry run, the log sheet, stop and pause
 ```
 
 Reading headers from a real Workspace mailbox was checked on Oct 27 (`checkSetup` read 16 sent threads). Sending into a thread was checked live on Oct 28 from Seth's account: a private email to Bryan got a reminder to Bryan alone, and an email to Bryan and Lawrence got one reminder to both, each inside the original thread. Later tests the same day: with four people on an email, each one who replied (including one who replied only to Seth) was left off the next reminder, and an outside address on the email never got one. The first runs failed until the Gmail API was added under **Services** (step 10).

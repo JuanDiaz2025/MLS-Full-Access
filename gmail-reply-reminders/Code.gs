@@ -320,23 +320,57 @@ function mimeMessage(o, b64) {
 // The "Emails" tab: one row per wait. Times are UTC, like 2026-10-28T03:25:00.000Z.
 const LOG_HEADERS = ['Thread', 'Subject', 'From', 'From name', 'Sent', 'Person', 'Name', 'On', 'Group', 'Replied', 'Status', 'Reminders', 'Message ID'];
 
-function logRows(waits, watch, sent) {
+function logRows(waits, watch, sent, stops) {
   const iso = t => new Date(t).toISOString();
   return waits.map(w => [
     w.thread, w.subject, watch, w.senderName, iso(w.askedAt), w.email, w.name || '', w.on, w.group ? 'yes' : 'no',
-    w.repliedAt ? iso(w.repliedAt) : '', w.repliedAt ? 'Replied' : 'Waiting', String(sent[w.email + '|' + w.messageId] || 0), w.messageId,
+    w.repliedAt ? iso(w.repliedAt) : '', w.repliedAt ? 'Replied' : isStopped(stops || {}, w.thread, w.email, w.askedAt) ? 'Stopped' : 'Waiting',
+    String(sent[w.email + '|' + w.messageId] || 0), w.messageId,
   ]);
 }
 
 // The "Status" tab: when the log was last written and the settings behind it.
-function statusRows(cfg, now) {
+function statusRows(cfg, now, pause) {
   return [
     ['Updated', new Date(now).toISOString()],
     ['Watching', cfg.WATCH.map(x => x.toLowerCase()).join(', ')],
     ['Look-back days', String(cfg.LOOKBACK_DAYS)],
     ['Reminders after (minutes)', cfg.REMIND_AFTER_MINUTES.join(', ')],
     ['Reminders', cfg.DRY_RUN ? 'dry run: nothing is sent' : 'on'],
+    ['Paused', pause && pause.paused ? 'yes' + (pause.by ? ', by ' + pause.by : '') : 'no'],
   ];
+}
+
+// ---------------- stopping reminders from the dashboard (pure, tested in test/) ----------------
+// The dashboard's Email tab writes these two tabs of the log sheet; the
+// script reads them on every check.
+const STOP_HEADERS = ['Thread', 'Person', 'Subject', 'Stopped by', 'Stopped at'];
+const PAUSE_HEADERS = ['Paused', 'By', 'At'];
+
+const cellTime = v => Object.prototype.toString.call(v) === '[object Date]' ? v.getTime() : Date.parse(String(v == null ? '' : v).replace(/^'/, ''));
+
+// The Stopped tab as { thread: [{ person: 'everyone' or an address, at }] }.
+// Cleared rows (Resume on the dashboard) are blank and skipped.
+function parseStops(values) {
+  const out = {};
+  (values || []).slice(1).forEach(r => {
+    const thread = String(r[0] == null ? '' : r[0]).trim();
+    if (!thread) return;
+    const at = cellTime(r[4]);
+    (out[thread] = out[thread] || []).push({ person: String(r[1] || '').trim().toLowerCase() || 'everyone', at: Number.isFinite(at) ? at : Infinity });
+  });
+  return out;
+}
+
+// A stop covers a wait in that thread, for that person or everyone, that
+// started before the stop. A new email after it starts reminders again.
+function isStopped(stops, thread, email, since) {
+  return (stops[thread] || []).some(s => (s.person === 'everyone' || s.person === email) && since <= s.at);
+}
+
+function parsePause(values) {
+  const r = (values || [])[1] || [];
+  return { paused: /^(yes|true|on)$/i.test(String(r[0] == null ? '' : r[0]).trim()), by: String(r[1] || '').trim() };
 }
 
 // ---------------- Google: sign-in, Gmail API, sending ----------------
@@ -471,10 +505,11 @@ function hourIn(tz, now) {
 
 // Writes the log into the sheet made by makeLogSheet. Nothing to do until then.
 // The Emails tab is rewritten only when a row changed; Status every time.
-function writeLog(rows, now) {
+function writeLog(rows, now, pause) {
   const id = PropertiesService.getScriptProperties().getProperty('LOG_SHEET_ID');
   if (!id) return false;
   const ss = SpreadsheetApp.openById(id);
+  ensureControlTabs(ss);
   const tab = name => ss.getSheetByName(name) || ss.insertSheet(name);
   const put = (sheet, values, width) => {
     sheet.clearContents();
@@ -486,8 +521,38 @@ function writeLog(rows, now) {
     put(tab('Emails'), [LOG_HEADERS].concat(rows), LOG_HEADERS.length);
     cache.put('logsig:' + id, sig, 21600);
   }
-  put(tab('Status'), statusRows(CONFIG, now), 2);
+  put(tab('Status'), statusRows(CONFIG, now, pause), 2);
   return true;
+}
+
+// The Stopped and Pause tabs, made once, as plain text so times stay as written.
+function ensureControlTabs(ss) {
+  [['Stopped', STOP_HEADERS], ['Pause', PAUSE_HEADERS]].forEach(([name, head]) => {
+    if (ss.getSheetByName(name)) return;
+    const sheet = ss.insertSheet(name);
+    sheet.getRange(1, 1, 1000, head.length).setNumberFormat('@');
+    sheet.getRange(1, 1, 1, head.length).setValues([head]);
+    if (name === 'Pause') sheet.getRange(2, 1, 1, head.length).setValues([['no', '', '']]);
+  });
+}
+
+// What the dashboard asked for: stopped emails and the pause switch. If the
+// sheet can't be read, reminders carry on as normal and the log says why.
+function readControls() {
+  const none = { stops: {}, pause: { paused: false, by: '' } };
+  const id = PropertiesService.getScriptProperties().getProperty('LOG_SHEET_ID');
+  if (!id) return none;
+  try {
+    const ss = SpreadsheetApp.openById(id);
+    const stopped = ss.getSheetByName('Stopped'), pause = ss.getSheetByName('Pause');
+    return {
+      stops: stopped ? parseStops(stopped.getDataRange().getValues()) : {},
+      pause: pause ? parsePause(pause.getDataRange().getValues()) : none.pause,
+    };
+  } catch (e) {
+    console.log('Couldn’t read Stopped / Pause from the email log: ' + (e && e.message || e));
+    return none;
+  }
 }
 
 // Every watched mailbox's threads, read once: who owes a reply (for the
@@ -505,10 +570,11 @@ function collect(now) {
   return { pending, waits };
 }
 
-function writeLogFrom(waits, sent, now) {
+function writeLogFrom(waits, sent, now, controls) {
   try {
-    const rows = [].concat.apply([], CONFIG.WATCH.map(u => logRows(waits.filter(w => w.watch === u.toLowerCase()), u.toLowerCase(), sent)));
-    return writeLog(rows, now);
+    const c = controls || { stops: {}, pause: null };
+    const rows = [].concat.apply([], CONFIG.WATCH.map(u => logRows(waits.filter(w => w.watch === u.toLowerCase()), u.toLowerCase(), sent, c.stops)));
+    return writeLog(rows, now, c.pause);
   } catch (e) {
     // the reminders matter more than the log: say so and carry on
     console.log('Couldn’t update the email log: ' + (e && e.message || e));
@@ -524,9 +590,13 @@ function run() {
   try {
     const now = Date.now();
     const sent = sentRecord();
+    const controls = readControls();
     const { pending, waits } = collect(now);
-    const due = dueReminders(pending, sent, CONFIG, now);
-    console.log(pending.length + ' replies still owed; ' + due.length + ' reminder' + (due.length === 1 ? '' : 's') + ' due');
+    // stopped on the dashboard: no more reminders for that email (or that person on it)
+    const live = pending.filter(p => !isStopped(controls.stops, p.thread, p.email, p.since));
+    const due = controls.pause.paused ? [] : dueReminders(live, sent, CONFIG, now);
+    console.log(pending.length + ' replies still owed' + (pending.length > live.length ? ' (' + (pending.length - live.length) + ' stopped)' : '') + '; '
+      + (controls.pause.paused ? 'reminders are paused' + (controls.pause.by ? ' by ' + controls.pause.by : '') : due.length + ' reminder' + (due.length === 1 ? '' : 's') + ' due'));
     const store = PropertiesService.getScriptProperties();
     due.forEach(r => {
       // night where someone is: their reminder goes out in their morning
@@ -549,7 +619,7 @@ function run() {
       awake.forEach(p => { store.setProperty('sent:' + p.key, p.stage + '|' + p.since); sent[p.key] = p.stage; });
     });
     pruneSent(now);
-    writeLogFrom(waits, sent, now);
+    writeLogFrom(waits, sent, now, controls);
   } finally {
     lock.releaseLock();
   }
@@ -588,7 +658,7 @@ function makeLogSheet() {
   }
   const now = Date.now();
   const { waits } = collect(now);
-  writeLogFrom(waits, sentRecord(), now);
+  writeLogFrom(waits, sentRecord(), now, readControls());
   console.log('Email log: https://docs.google.com/spreadsheets/d/' + id + '/edit (' + waits.length + ' rows). '
     + 'It updates on every check from now on. Paste this link into the dashboard’s Email tab.');
 }
@@ -608,5 +678,5 @@ function removeTrigger() {
 if (typeof module !== 'undefined') {
   module.exports = { CONFIG, MINUTE, HOUR, DAY, REMINDER_HEADER, parseAddresses, toMessage, pendingInThread, stageFor, timeZoneFor, isQuietHour,
     reminderKey, dueReminders, firstName, listNames, ago, buildReminder, replySubject, encodeHeader, mimeMessage,
-    threadContext, threadWaits, LOG_HEADERS, logRows, statusRows };
+    threadContext, threadWaits, LOG_HEADERS, logRows, statusRows, STOP_HEADERS, PAUSE_HEADERS, parseStops, isStopped, parsePause };
 }

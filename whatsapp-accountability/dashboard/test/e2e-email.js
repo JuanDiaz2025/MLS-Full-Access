@@ -51,6 +51,8 @@ const mock = `<script>
   const STATUS = [['Updated', iso(STALE ? 2 : 0.05)], ['Watching', 'juan@twinhomebuyer.com'], ['Look-back days', '7'], ['Reminders after (minutes)', '240, 1440, 2880'], ['Reminders', 'on']];
   const fail = (code, message) => Promise.reject({ code, message, retryable: false });
   window.__calls = [];
+  const TABS = window.__tabs = { Stopped: [['Thread', 'Person', 'Subject', 'Stopped by', 'Stopped at']], Pause: [['Paused', 'By', 'At'], ['no', '', '']] };
+  const rowsOf = range => { const m = /!A(\\d+):[A-Z](\\d+)/.exec(range); return m ? [Number(m[1]), Number(m[2])] : [1, 1]; };
   const mcp = { async callTool(server, tool, input) {
     window.__calls.push({ server, tool, input });
     if (server === 'host:whatsapp-reader') return { content: [], payload: reader[tool](input || {}) };
@@ -60,7 +62,17 @@ const mock = `<script>
       if (SHEETS === 'toolerror') return fail('tool_error', 'The caller does not have permission');
       if (input.spreadsheetId !== '${SHEET}') return fail('tool_error', 'Requested entity was not found.');
       const tab = input.range.split('!')[0];
-      return { content: [], payload: { range: input.range, values: tab === 'Emails' ? LOG : STATUS } };
+      if ((tab === 'Stopped' || tab === 'Pause') && Q.get('controls') === 'missing') return fail('tool_error', 'Unable to parse range: ' + input.range);
+      if (tool === 'get_values') {
+        if (tab === 'Emails') return { content: [], payload: { range: input.range, values: LOG } };
+        if (tab === 'Status') return { content: [], payload: { range: input.range, values: STATUS } };
+        const [a, b] = rowsOf(input.range);
+        return { content: [], payload: { range: input.range, values: TABS[tab].slice(a - 1, b) } };
+      }
+      if (Q.get('write') === 'denied') return fail('tool_error', 'The caller does not have permission');
+      if (tool === 'append_values') { TABS[tab].push(input.values[0]); return { content: [], payload: { updates: { updatedRows: 1 } } }; }
+      if (tool === 'update_values') { const [a] = rowsOf(input.range); TABS[tab][a - 1] = input.values[0]; return { content: [], payload: { updatedRows: 1 } }; }
+      return fail('not_in_manifest', 'tool');
     }
     if (server === 'Gmail') {
       if (GMAIL === 'notconnected') return fail('server_not_connected', 'not connected');
@@ -74,7 +86,7 @@ const mock = `<script>
     return fail('not_in_manifest', 'unknown server');
   } };
   const caps = { db, mcp, sample: null, permissions: { state: async n => n === 'mcp:Google Sheets' ? PERM : 'prompt' },
-    user: { canEdit: async () => EDIT, isOwner: async () => EDIT, can: async () => true, id: async () => 'u1', profiles: async () => ({}) } };
+    user: { canEdit: async () => EDIT, isOwner: async () => EDIT, can: async () => true, id: async () => 'u1', me: async () => ({ id: 'u1', name: 'Seth Concepcion' }), profiles: async () => ({}) } };
   window.claude = { use: async n => { await new Promise(r => setTimeout(r, 30)); return caps[n] ?? null; } };
 })();
 </script>`;
@@ -120,7 +132,7 @@ const check = (label, ok, got) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${label
   check('A: Fence quote: Cherry and Leo waiting, Tin answered', /Cherry 6h/.test(rows[1]) && /Leo 3h/.test(rows[1]) && /Tin 4h/.test(rows[1]) && /2 of 3/.test(rows[1]), rows[1]);
   check('A: old-style reminder emails left out', !(await text(p, '#v-email')).includes('is waiting for your reply'));
   check('A: subjects shown as text, never run', !errs.some(e => e.startsWith('dialog')));
-  check('A: Open in Gmail finds the email by its id', (await p.$eval('#v-email .em-lg .em-go', a => a.href)).includes('rfc822msgid%3Ab%40mail.gmail.com'));
+  check('A: Open in Gmail finds the email by its id', (await p.$eval('#v-email .em-lg a.em-go', a => a.href)).includes('rfc822msgid%3Ab%40mail.gmail.com'));
   const people = await p.$$eval('#v-email .em-pg .em-gr', r => r.map(x => x.innerText.replace(/\s+/g, ' ').trim()));
   check('A: who owes a reply, longest wait first', people.length === 4 && /^B Bryan 1 1 day 0 of 1 – 3/.test(people[0]) && /^T Tin 0 – 1 of 1 4h 1/.test(people[3]), people.join(' || '));
   // filters
@@ -209,6 +221,69 @@ const check = (label, ok, got) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${label
   // WhatsApp views still fine
   await p.evaluate(() => { location.hash = 'dashboard'; }); await p.waitForTimeout(300);
   check('H: back on the Dashboard the group pill returns', !(await p.$eval('#group-pill', e => e.hidden)));
+  await p.close();
+
+  // I. stopping, resuming and pausing reminders
+  const C = { sheetId: SHEET, watch: ['juan@twinhomebuyer.com'] };
+  p = await open('perm=granted', C, 'email');
+  const lr = () => p.$$eval('#v-email .em-lg .em-gr', r => r.map(x => x.innerText.replace(/\s+/g, ' ').trim()));
+  t = await text(p, '.em-bar');
+  check('I: bar says reminders are on, and when', t.includes('Reminders are on: they go out 4h, 1 day and 2 days after an email') && await p.isVisible('[data-action="email-pause"]'), t);
+  check('I: a stop button on each waiting email', (await p.$$('.em-lg [data-action="email-stop-open"]')).length === 2);
+  await p.click('.em-lg [data-action="email-stop-open"][data-thread="t1"]'); await p.waitForTimeout(150);
+  const opts = await p.$$eval('#stop-box input[name="stop-who"]', i => i.map(x => x.value));
+  check('I: dialog offers everyone or one person', JSON.stringify(opts) === '["everyone","cherry@twinhomebuyer.com","leo@twinhomebuyer.com"]', JSON.stringify(opts));
+  await p.check('#stop-box input[value="cherry@twinhomebuyer.com"]');
+  await p.click('[data-action="email-stop-save"]'); await p.waitForTimeout(400);
+  let tabs = await p.evaluate(() => window.__tabs);
+  check('I: one row added to Stopped, for Cherry, with who and when', tabs.Stopped.length === 2 && tabs.Stopped[1][0] === 't1' && tabs.Stopped[1][1] === 'cherry@twinhomebuyer.com' && tabs.Stopped[1][3] === 'Seth Concepcion' && !isNaN(Date.parse(tabs.Stopped[1][4])), JSON.stringify(tabs.Stopped[1]));
+  check('I: dialog says it’s saved and lists the stop', (await text(p, '#stop-box')).includes('Saved. The reminder script picks it up at its next check.') && (await text(p, '#stop-box .stop-cur')).includes('Cherry Ann'));
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150);
+  check('I: Escape closes', await p.$eval('#stop-dlg', e => e.hidden));
+  let rs = await lr();
+  check('I: Fence quote: Leo still waiting, Cherry shown as stopped', /Leo 3h/.test(rs[1]) && /Cherry stopped/.test(rs[1]) && !/Cherry 6h/.test(rs[1]), rs[1]);
+  check('I: Cherry no longer counts as owing', (await p.$$eval('#v-email .tile .t-num', n => n.map(x => x.textContent)))[0] === '2');
+  // the whole of Permit
+  await p.click('.em-lg [data-action="email-stop-open"][data-thread="t2"]'); await p.waitForTimeout(150);
+  check('I: one person waiting: just “everyone”', (await p.$$('#stop-box input[name="stop-who"]')).length === 1);
+  await p.click('[data-action="email-stop-save"]'); await p.waitForTimeout(400); await p.click('#stop-box [data-action="stop-close"]'); await p.waitForTimeout(150);
+  rs = await lr();
+  check('I: Permit leaves Waiting', rs.length === 1 && rs[0].startsWith('Fence quote'), rs.join(' || '));
+  await p.click('[data-action="email-filter"][data-f="stopped"]'); await p.waitForTimeout(150);
+  rs = await lr();
+  check('I: and shows under Stopped', rs.length === 1 && rs[0].startsWith('Permit') && /Bryan stopped/.test(rs[0]), rs.join(' || '));
+  // resume it
+  await p.click('.em-lg [data-action="email-stop-open"][data-thread="t2"]'); await p.waitForTimeout(150);
+  check('I: a stopped email’s dialog has Resume', await p.isVisible('#stop-box [data-action="email-resume"]') && !(await p.$('#stop-box [data-action="email-stop-save"]')));
+  await p.click('#stop-box [data-action="email-resume"]'); await p.waitForTimeout(400);
+  tabs = await p.evaluate(() => window.__tabs);
+  check('I: Resume clears that row only', JSON.stringify(tabs.Stopped[2]) === '["","","","",""]' && tabs.Stopped[1][1] === 'cherry@twinhomebuyer.com');
+  await p.keyboard.press('Escape'); await p.click('[data-action="email-filter"][data-f="waiting"]'); await p.waitForTimeout(150);
+  check('I: Permit is waiting again', (await lr()).length === 2);
+  // pause all
+  await p.click('[data-action="email-pause"][data-on="1"]'); await p.waitForTimeout(400);
+  tabs = await p.evaluate(() => window.__tabs);
+  t = await text(p, '.em-bar');
+  check('I: Pause all writes the switch and says who', tabs.Pause[1][0] === 'yes' && tabs.Pause[1][1] === 'Seth Concepcion' && t.includes('All reminders are paused by Seth Concepcion'), t);
+  await p.screenshot({ path: 'shots/email-paused.png' });
+  await p.click('[data-action="email-pause"][data-on="0"]'); await p.waitForTimeout(400);
+  check('I: and back on', (await p.evaluate(() => window.__tabs.Pause[1][0])) === 'no' && (await text(p, '.em-bar')).includes('Reminders are on'));
+  await p.close();
+
+  // J. a viewer sees the state, no switches
+  p = await open('perm=granted&edit=0', C, 'email');
+  check('J: viewer: no stop or pause buttons', !(await p.$('[data-action="email-stop-open"]')) && !(await p.$('[data-action="email-pause"]')) && (await text(p, '.em-bar')).includes('Reminders are on'));
+  await p.close();
+  // K. the script hasn't made the tabs yet
+  p = await open('perm=granted&controls=missing', C, 'email');
+  check('K: older script: controls hidden, editor told to update', !(await p.$('[data-action="email-stop-open"]')) && (await text(p, '.em-bar')).includes('paste the latest Code.gs') && (await p.$$('#v-email .em-lg .em-gr')).length === 2);
+  await p.close();
+  // L. no edit access to the sheet
+  p = await open('perm=granted&write=denied', C, 'email');
+  await p.click('.em-lg [data-action="email-stop-open"][data-thread="t2"]'); await p.waitForTimeout(150);
+  await p.click('[data-action="email-stop-save"]'); await p.waitForTimeout(400);
+  t = await text(p, '#stop-box');
+  check('L: no edit access: says so, nothing changes', t.includes('you need edit access to the log sheet') && (await p.$$('#v-email .em-lg .em-gr')).length === 2, t.slice(-160));
   await p.close();
 
   check('no page errors', !errs.length, errs.join(' || '));

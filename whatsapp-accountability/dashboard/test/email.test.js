@@ -59,4 +59,18 @@ same(mine.map(x => x.subject + ' ' + (now - x.since) / H + 'h'), ['Fence quote 6
 
 same([E.sheetIdFrom('https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit#gid=0'), E.sheetIdFrom('1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'), E.sheetIdFrom('hello'), E.sheetIdFrom('')],
   ['1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', null, null]);
+// stopped from the dashboard: the Stopped tab, as the sheet returns it
+const stops = E.parseEmailStops([['Thread', 'Person', 'Subject', 'Stopped by', 'Stopped at'],
+  ['t2', '', 'Permit', 'Seth Concepcion', iso(1)], ['', '', '', '', ''], ['t1', 'Cherry@twinhomebuyer.com', 'Fence quote', 'Seth Concepcion', iso(1)]]);
+same(stops.map(x => x.row + ':' + x.thread + ':' + x.person), ['2:t2:everyone', '4:t1:cherry@twinhomebuyer.com'], 'rows kept for Resume, cleared rows skipped');
+const S2 = E.deriveEmail(rows, now, stops);
+same(S2.open.map(t => t.subject + ':' + t.waiting.map(p => p.name) + ':' + t.stopped.map(p => p.name)), ['Fence quote:Leo:Cherry Ann'], 'Cherry stopped on Fence quote, Leo still waiting');
+same(S2.halted.map(t => t.subject), ['Permit'], 'Permit stopped for everyone');
+const bryan = S2.people.find(p => p.name === 'Bryan');
+same([bryan.waiting, bryan.stopped, S2.waitingPeople], [0, 1, 1], 'stopped is handled: not owed');
+// a later email (after the stop) is not covered
+assert.strictEqual(E.stopFor({ thread: 't2', person: 'bryan@twinhomebuyer.com', sent: now, replied: null }, stops), null);
+// the log's own Status column says Stopped even when the tab can't be read
+assert.ok(E.stopFor(E.parseEmailLog([HEAD, row('t5', 'x', 1, 'mike', '', 'To', false, null, 0, 'm@m').map((c, i) => i === 10 ? 'Stopped' : c)])[0], []));
+same([E.parseEmailPause([['Paused', 'By', 'At'], ['yes', 'Seth', iso(2)]]), E.parseEmailPause([['Paused', 'By', 'At'], ['no', '', '']]), E.parseEmailPause(undefined)].map(p => p.paused + ':' + p.by), ['true:Seth', 'false:', 'false:']);
 console.log('all checks passed');
