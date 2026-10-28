@@ -2,14 +2,19 @@
  * Gmail reply reminders
  *
  * Watches the emails Juan sends to the team and, when someone hasn't replied,
- * emails them a short reminder: "Juan sent you an email and is waiting for
- * your reply", with a link that opens it in their own Gmail. The reminder
- * never includes the email's subject or content.
+ * reminds them inside that same email thread:
+ *  - an email to one person: a private reminder to that person only;
+ *  - an email to several people, or with anyone in CC: one reminder to
+ *    everyone who still hasn't replied, together. Juan isn't copied.
+ * The reminder says "Re: <subject>" so Gmail keeps it in the thread, but its
+ * text never says what the email says. Replying to it goes to Juan, in the
+ * same thread, and counts as their reply.
  *
  * It reads Juan's mailbox through a service account that a Google Workspace
  * admin allowed to read message headers only (the gmail.metadata scope):
- * who sent it, to whom, when, and the message id. It cannot open bodies or
- * attachments, and Juan installs nothing. Setup steps are in README.md.
+ * who sent it, to whom, when, the subject and the message id. It cannot open
+ * bodies or attachments, and Juan installs nothing. The reminders are sent
+ * from the account that runs this script. Setup steps are in README.md.
  *
  * It runs every few minutes on Google's servers. No Claude, no WhatsApp.
  */
@@ -42,8 +47,7 @@ const CONFIG = {
   // example 20 and 8: nothing between 8 PM and 8 AM in the person's time zone.
   QUIET_FROM_HOUR: 0,
   QUIET_TO_HOUR: 0,
-  // the time zone used for the time shown in the email (and for quiet hours,
-  // if they're on), unless the person is listed below
+  // time zones for quiet hours, if they're on: everyone not listed below is here
   TIME_ZONE: 'Asia/Manila',
   PEOPLE_TIME_ZONES: {
     'bryan@twinhomebuyer.com': 'America/Los_Angeles',
@@ -55,6 +59,8 @@ const CONFIG = {
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
+// marks the reminders this script sends, so they are never counted as emails
+const REMINDER_HEADER = 'X-Reply-Reminder';
 
 // ---------------- reading the headers (pure, tested in test/) ----------------
 
@@ -88,8 +94,10 @@ function toMessage(msg) {
   return {
     from: parseAddresses(headerOf(msg, 'From'))[0] || { email: '', name: '' },
     to: parseAddresses(headerOf(msg, 'To')),
+    cc: parseAddresses(headerOf(msg, 'Cc')),
     subject: headerOf(msg, 'Subject'),
     messageId: headerOf(msg, 'Message-ID').replace(/^<|>$/g, ''),
+    reminder: !!headerOf(msg, REMINDER_HEADER),
     at: Number(msg.internalDate),
     labelIds: msg.labelIds || [],
   };
@@ -97,11 +105,13 @@ function toMessage(msg) {
 
 // Who still owes the watched person a reply in one thread.
 // thread: { id, messages: [toMessage(...)] }. A person owes a reply when the
-// watched person emailed them directly (To, not Cc) and they haven't written
-// in the thread since. The wait counts from the first email they haven't
-// answered. Returns [{ email, name, since, messageId, senderName }].
+// watched person emailed them (To or Cc) and they haven't written in the
+// thread since. The wait counts from the first email they haven't answered.
+// Returns [{ email, name, since, messageId, thread, subject, inReplyTo,
+// references, group, watch, senderName }]. group: that email went to more
+// than one person on the team, so the reminder goes to everyone still owing.
 function pendingInThread(thread, watch, cfg, now, skipLabelId) {
-  const msgs = thread.messages.slice().sort((a, b) => a.at - b.at);
+  const msgs = thread.messages.filter(m => !m.reminder).sort((a, b) => a.at - b.at);
   const mine = m => m.from.email === watch;
   if (!msgs.some(mine)) return [];
   if (cfg.ONLY_THREADS_STARTED && !mine(msgs[0])) return [];
@@ -111,18 +121,24 @@ function pendingInThread(thread, watch, cfg, now, skipLabelId) {
   if (cfg.SKIP_SUBJECT_PREFIXES.some(p => subject.indexOf(p.toLowerCase()) === 0)) return [];
   const domain = '@' + cfg.TEAM_DOMAIN.toLowerCase();
   const ignore = cfg.IGNORE.map(x => x.toLowerCase());
+  const team = r => r.email !== watch && r.email.endsWith(domain) && ignore.indexOf(r.email) < 0;
+  const recipients = m => m.to.concat(m.cc).filter(team);
   const oldest = now - cfg.LOOKBACK_DAYS * DAY;
   const people = {};
-  msgs.filter(mine).forEach(m => m.to.forEach(r => {
-    if (r.email === watch || !r.email.endsWith(domain) || ignore.indexOf(r.email) >= 0) return;
-    if (!people[r.email]) people[r.email] = r.name;
-  }));
+  msgs.filter(mine).forEach(m => recipients(m).forEach(r => { if (!(r.email in people)) people[r.email] = r.name; }));
+  const lastMine = msgs.filter(mine).pop();
+  const references = msgs.map(m => m.messageId).filter(Boolean);
   const out = [];
   Object.keys(people).forEach(email => {
     const lastFromThem = msgs.filter(m => m.from.email === email).reduce((t, m) => Math.max(t, m.at), -Infinity);
-    const waiting = msgs.filter(m => mine(m) && m.at > lastFromThem && m.to.some(r => r.email === email));
+    const waiting = msgs.filter(m => mine(m) && m.at > lastFromThem && recipients(m).some(r => r.email === email));
     if (!waiting.length || waiting[0].at < oldest) return;
-    out.push({ email, name: people[email], since: waiting[0].at, messageId: waiting[0].messageId, senderName: first.from.name || watch });
+    const group = new Set(recipients(waiting[0]).map(r => r.email)).size > 1;
+    out.push({
+      email, name: people[email], since: waiting[0].at, messageId: waiting[0].messageId,
+      thread: thread.id, subject: first.subject || '', inReplyTo: lastMine.messageId, references,
+      group, watch, senderName: first.from.name || watch,
+    });
   });
   return out;
 }
@@ -142,54 +158,109 @@ function isQuietHour(hour, cfg) {
   return a > b ? hour >= a || hour < b : hour >= a && hour < b;
 }
 
-// A link that opens the email in the recipient's own Gmail.
-function gmailLink(email, messageId) {
-  return 'https://mail.google.com/mail/?authuser=' + encodeURIComponent(email) + '#search/rfc822msgid%3A' + encodeURIComponent(messageId);
+function reminderKey(p) {
+  return p.email + '|' + p.messageId;
+}
+
+// Which reminders are due, one per thread: for a private email the one
+// person, for a group email everyone in it whose next reminder is due.
+// sent: key -> stage already sent. Returns [{ thread, subject, inReplyTo,
+// references, group, watch, senderName, since, people: [{ email, name, stage, key }] }].
+function dueReminders(pending, sent, cfg, now) {
+  const byThread = {};
+  pending.forEach(p => {
+    const stage = stageFor(now - p.since, cfg);
+    const key = reminderKey(p);
+    if (!stage || stage <= (sent[key] || 0)) return;
+    const id = p.watch + '|' + p.thread + (p.group ? '' : '|' + p.email);
+    const box = byThread[id] || (byThread[id] = {
+      thread: p.thread, subject: p.subject, inReplyTo: p.inReplyTo, references: p.references,
+      group: p.group, watch: p.watch, senderName: p.senderName, since: p.since, people: [],
+    });
+    box.since = Math.min(box.since, p.since);
+    box.people.push({ email: p.email, name: p.name, stage, key, since: p.since });
+  });
+  return Object.keys(byThread).map(k => byThread[k]);
 }
 
 function firstName(person) {
   const n = (person.name || '').trim();
   if (n && n.indexOf('@') < 0) return n.split(/\s+/)[0];
-  return person.email.split('@')[0];
+  const local = person.email.split('@')[0];
+  return local.charAt(0).toUpperCase() + local.slice(1);
 }
 
-// The reminder: who is waiting and since when, with links. Never the subject
-// or content of the email. items: [{ since, messageId, stage }]
-function buildReminder(person, senderName, items, cfg, formatTime) {
-  const n = items.length;
-  const subject = n === 1 ? senderName + ' is waiting for your reply' : senderName + ' is waiting for your reply to ' + n + ' emails';
-  const lines = items.map(it => senderName + ' emailed you on ' + formatTime(it.since) + '. Open it: ' + gmailLink(person.email, it.messageId));
+// "Cherry", "Cherry and Leo", "Cherry, Kristine and Leo"
+function listNames(names) {
+  return names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+// "5 minutes ago", "4 hours ago", "2 days ago"
+function ago(ms) {
+  const unit = (n, w) => n + ' ' + w + (n === 1 ? '' : 's') + ' ago';
+  if (ms < HOUR) return unit(Math.max(1, Math.round(ms / MINUTE)), 'minute');
+  if (ms < 2 * DAY) return unit(Math.round(ms / HOUR), 'hour');
+  return unit(Math.round(ms / DAY), 'day');
+}
+
+// The reminder text: who is waiting and since when. Never what the email says.
+function buildReminder(r, cfg, now) {
+  const names = listNames(r.people.map(firstName));
+  const stage = Math.max.apply(null, r.people.map(p => p.stage));
   const total = cfg.REMIND_AFTER_MINUTES.length;
-  const stage = Math.max.apply(null, items.map(it => it.stage));
-  const body = 'Hi ' + firstName(person) + ',\n\n'
-    + (n === 1 ? senderName + ' sent you an email and is still waiting for your reply.\n\n' : senderName + ' sent you ' + n + ' emails that are still waiting for your reply.\n\n')
-    + lines.join('\n') + '\n\n'
-    + 'Please reply to ' + senderName + ' in Gmail. This is reminder ' + stage + ' of ' + total + '. It was sent automatically and doesn’t include what the email says.';
+  const sentAgo = ago(now - r.since);
+  const ask = r.people.length === 1
+    ? r.senderName + ' is still waiting for your reply to this email (sent ' + sentAgo + ').'
+    : r.senderName + ' is still waiting for a reply from each of you on this email (sent ' + sentAgo + ').';
+  const footer = 'This is reminder ' + stage + ' of ' + total + '. It was sent automatically and doesn’t include what the email says.';
+  const text = 'Hi ' + names + ',\n\n' + ask + ' Please reply in this thread.\n\n' + footer;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const html = '<p>Hi ' + esc(firstName(person)) + ',</p>'
-    + '<p>' + esc(n === 1 ? senderName + ' sent you an email and is still waiting for your reply.' : senderName + ' sent you ' + n + ' emails that are still waiting for your reply.') + '</p><ul>'
-    + items.map(it => '<li>' + esc(senderName) + ' emailed you on ' + esc(formatTime(it.since)) + '. <a href="' + esc(gmailLink(person.email, it.messageId)) + '">Open the email</a></li>').join('')
-    + '</ul><p style="color:#666">Please reply to ' + esc(senderName) + ' in Gmail. This is reminder ' + stage + ' of ' + total
-    + '. It was sent automatically and doesn’t include what the email says.</p>';
-  return { subject, body, html };
+  const html = '<p>Hi ' + esc(names) + ',</p><p>' + esc(ask) + ' Please reply in this thread.</p><p style="color:#666">' + esc(footer) + '</p>';
+  return { text, html, stage };
 }
 
-// Which reminders are due: pending replies, grouped by person, that have
-// reached a stage not yet sent. sent: key -> stage already sent.
-function dueReminders(pending, sent, cfg, now) {
-  const byPerson = {};
-  pending.forEach(p => {
-    const stage = stageFor(now - p.since, cfg);
-    const key = reminderKey(p);
-    if (!stage || stage <= (sent[key] || 0)) return;
-    const box = byPerson[p.email] || (byPerson[p.email] = { person: { email: p.email, name: p.name }, senderName: p.senderName, items: [] });
-    box.items.push({ since: p.since, messageId: p.messageId, stage, key });
-  });
-  return Object.keys(byPerson).map(k => byPerson[k]);
+// "Re: Fence quote", keeping one "Re:" if it already has one.
+function replySubject(subject) {
+  const s = String(subject || '').trim();
+  return /^re:/i.test(s) ? s : 'Re: ' + s;
 }
 
-function reminderKey(p) {
-  return p.email + '|' + p.messageId;
+// A header value safe for an email: words outside plain ASCII are encoded.
+function encodeHeader(s, b64) {
+  return /[^\x20-\x7e]/.test(s) ? '=?UTF-8?B?' + b64(s) + '?=' : s;
+}
+
+// The reminder as an email in Juan's thread. b64: UTF-8 text to base64.
+// to: addresses; replyTo: Juan, so a reply goes to him in the same thread.
+function mimeMessage(o, b64) {
+  const boundary = 'rr' + o.boundary;
+  const n = String(o.replyToName || '').replace(/"/g, '');
+  const name = !n ? '' : (/[^\x20-\x7e]/.test(n) ? encodeHeader(n, b64) : '"' + n + '"') + ' ';
+  const body = s => b64(s).replace(/(.{76})/g, '$1\r\n');
+  return [
+    'From: Reply reminders <' + o.from + '>',
+    'To: ' + o.to.join(', '),
+    'Reply-To: ' + name + '<' + o.replyTo + '>',
+    'Subject: ' + encodeHeader(replySubject(o.subject), b64),
+    o.inReplyTo ? 'In-Reply-To: <' + o.inReplyTo + '>' : '',
+    o.references.length ? 'References: ' + o.references.map(id => '<' + id + '>').join(' ') : '',
+    REMINDER_HEADER + ': 1',
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/alternative; boundary="' + boundary + '"',
+    '',
+    '--' + boundary,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    body(o.text),
+    '--' + boundary,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    body(o.html),
+    '--' + boundary + '--',
+    '',
+  ].filter((line, i, all) => line !== '' || i >= all.indexOf('MIME-Version: 1.0')).join('\r\n');
 }
 
 // ---------------- Google: sign-in, Gmail API, sending ----------------
@@ -250,6 +321,7 @@ function skipLabelId(user) {
 function recentThreads(user, now) {
   const cache = CacheService.getScriptCache();
   const oldest = now - CONFIG.LOOKBACK_DAYS * DAY;
+  const headers = ['From', 'To', 'Cc', 'Subject', 'Message-ID', REMINDER_HEADER].map(h => '&metadataHeaders=' + h).join('');
   const out = [];
   let pageToken = '';
   for (let page = 0; page < 20; page++) {
@@ -257,12 +329,12 @@ function recentThreads(user, now) {
     let tooOld = false;
     (list.threads || []).forEach(t => {
       if (tooOld) return;
-      const ck = 'th:' + user + ':' + t.id + ':' + t.historyId;
+      const ck = 'th2:' + user + ':' + t.id + ':' + t.historyId;
       let thread = null;
       const hit = cache.get(ck);
       if (hit) thread = JSON.parse(hit);
       else {
-        const raw = gmailGet(user, '/threads/' + t.id + '?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Message-ID');
+        const raw = gmailGet(user, '/threads/' + t.id + '?format=metadata' + headers);
         thread = { id: t.id, messages: (raw.messages || []).map(toMessage) };
         try { cache.put(ck, JSON.stringify(thread), 21600); } catch (e) { /* too big to cache: read it again next time */ }
       }
@@ -274,6 +346,23 @@ function recentThreads(user, now) {
     pageToken = list.nextPageToken;
   }
   return out;
+}
+
+// Sends the reminder into the thread, from the account running this script.
+function sendInThread(r, mail) {
+  const b64 = s => Utilities.base64Encode(s, Utilities.Charset.UTF_8);
+  const raw = mimeMessage({
+    from: Session.getEffectiveUser().getEmail(), to: r.people.map(p => p.email),
+    replyTo: r.watch, replyToName: r.senderName, subject: r.subject,
+    inReplyTo: r.inReplyTo, references: r.references, text: mail.text, html: mail.html,
+    boundary: Utilities.getUuid().replace(/-/g, ''),
+  }, b64);
+  const res = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    payload: JSON.stringify({ raw: Utilities.base64EncodeWebSafe(raw, Utilities.Charset.UTF_8) }),
+  });
+  if (res.getResponseCode() !== 200) throw new Error('Sending the reminder failed: ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 300));
 }
 
 function sentRecord() {
@@ -292,10 +381,6 @@ function pruneSent(now) {
     const since = Number(props[k].split('|')[1] || 0);
     if (since < now - (CONFIG.LOOKBACK_DAYS + 3) * DAY) store.deleteProperty(k);
   });
-}
-
-function formatTime(t, tz) {
-  return Utilities.formatDate(new Date(t), tz || CONFIG.TIME_ZONE, "EEE, MMM d 'at' h:mm a");
 }
 
 function hourIn(tz, now) {
@@ -317,22 +402,27 @@ function run() {
       recentThreads(user, now).forEach(t => { pending = pending.concat(pendingInThread(t, watch, CONFIG, now, skip)); });
     });
     const due = dueReminders(pending, sent, CONFIG, now);
-    console.log(pending.length + ' replies still owed; ' + due.length + ' people due a reminder');
+    console.log(pending.length + ' replies still owed; ' + due.length + ' reminder' + (due.length === 1 ? '' : 's') + ' due');
     const store = PropertiesService.getScriptProperties();
-    due.forEach(d => {
-      // night where the person is: it goes out in their morning
-      const tz = timeZoneFor(d.person.email, CONFIG);
-      if (isQuietHour(hourIn(tz, now), CONFIG)) {
-        console.log((CONFIG.DRY_RUN ? '[dry run] ' : '') + d.person.email + ': waiting until ' + CONFIG.QUIET_TO_HOUR + ' AM their time (' + tz + ')');
-        return;
-      }
-      const mail = buildReminder(d.person, d.senderName, d.items, CONFIG, t => formatTime(t, tz));
+    due.forEach(r => {
+      // night where someone is: their reminder goes out in their morning
+      const awake = r.people.filter(p => {
+        const tz = timeZoneFor(p.email, CONFIG);
+        if (!isQuietHour(hourIn(tz, now), CONFIG)) return true;
+        console.log(p.email + ': waiting until ' + CONFIG.QUIET_TO_HOUR + ' AM their time (' + tz + ')');
+        return false;
+      });
+      if (!awake.length) return;
+      const r2 = Object.assign({}, r, { people: awake });
+      const mail = buildReminder(r2, CONFIG, now);
+      const who = awake.map(p => p.email).join(', ');
       if (CONFIG.DRY_RUN) {
-        console.log('[dry run] would email ' + d.person.email + ': ' + mail.subject);
+        console.log('[dry run] would reply in "' + replySubject(r.subject) + '" to ' + who + ' (' + (r.group ? 'group' : 'private') + ', reminder ' + mail.stage + ')');
         return;
       }
-      MailApp.sendEmail({ to: d.person.email, subject: mail.subject, body: mail.body, htmlBody: mail.html, name: 'Reply reminders' });
-      d.items.forEach(it => store.setProperty('sent:' + it.key, it.stage + '|' + it.since));
+      sendInThread(r2, mail);
+      console.log('Reminded ' + who + ' in "' + replySubject(r.subject) + '"');
+      awake.forEach(p => store.setProperty('sent:' + p.key, p.stage + '|' + p.since));
     });
     pruneSent(now);
   } finally {
@@ -347,15 +437,16 @@ function checkSetup() {
     const threads = recentThreads(user, now);
     const pending = [].concat.apply([], threads.map(t => pendingInThread(t, user.toLowerCase(), CONFIG, now, skipLabelId(user))));
     console.log(user + ': ' + threads.length + ' threads with sent mail in the last ' + CONFIG.LOOKBACK_DAYS + ' days, '
-      + pending.length + ' replies still owed by: ' + (pending.map(p => p.email).join(', ') || 'nobody'));
+      + pending.length + ' replies still owed by: ' + (pending.map(p => p.email + (p.group ? ' (group)' : '')).join(', ') || 'nobody'));
   });
 }
 
 // Sends one sample reminder to you (the account running this script), to see what people get.
 function sendSampleToMe() {
   const me = Session.getEffectiveUser().getEmail();
-  const mail = buildReminder({ email: me, name: '' }, 'Juan Diaz', [{ since: Date.now() - 5 * HOUR, messageId: 'sample', stage: 1 }], CONFIG, formatTime);
-  MailApp.sendEmail({ to: me, subject: '[sample] ' + mail.subject, body: mail.body, htmlBody: mail.html, name: 'Reply reminders' });
+  const now = Date.now();
+  const mail = buildReminder({ senderName: 'Juan Diaz', since: now - 4 * HOUR, people: [{ email: me, name: '', stage: 1 }] }, CONFIG, now);
+  MailApp.sendEmail({ to: me, subject: '[sample] Re: (the subject of Juan’s email)', body: mail.text, htmlBody: mail.html, name: 'Reply reminders' });
 }
 
 function installTrigger() {
@@ -371,5 +462,6 @@ function removeTrigger() {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { CONFIG, MINUTE, parseAddresses, toMessage, pendingInThread, stageFor, isQuietHour, timeZoneFor, gmailLink, buildReminder, dueReminders, reminderKey, HOUR, DAY };
+  module.exports = { CONFIG, MINUTE, HOUR, DAY, REMINDER_HEADER, parseAddresses, toMessage, pendingInThread, stageFor, timeZoneFor, isQuietHour,
+    reminderKey, dueReminders, firstName, listNames, ago, buildReminder, replySubject, encodeHeader, mimeMessage };
 }
