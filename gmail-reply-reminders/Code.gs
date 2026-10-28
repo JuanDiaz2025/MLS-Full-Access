@@ -315,7 +315,8 @@ function skipLabelId(user) {
   if (hit !== null) return hit || null;
   const labels = gmailGet(user, '/labels').labels || [];
   const found = labels.find(l => l.name.toLowerCase() === CONFIG.SKIP_LABEL.toLowerCase());
-  cache.put('lbl:' + user, found ? found.id : '', 21600);
+  // a label made later is picked up within 10 minutes
+  cache.put('lbl:' + user, found ? found.id : '', found ? 21600 : 600);
   return found ? found.id : null;
 }
 
