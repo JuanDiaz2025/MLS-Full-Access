@@ -16,6 +16,7 @@ const cache = {};
 const calls = [], sent = [];
 const H = (n, v) => ({ name: n, value: v });
 let seq = 0;
+let owner = 'seth@twinhomebuyer.com'; // the account running the script
 const juanMsg = (id, to, hoursAgo, extra = {}) => ({ id, internalDate: String(now - hoursAgo * HOUR), labelIds: ['SENT'], payload: { headers: [
   H('From', 'Juan Diaz <juan@twinhomebuyer.com>'), H('To', to), H('Cc', extra.cc || ''), H('Subject', extra.subject || 'Fence quote'), H('Message-ID', `<${id}@mail.gmail.com>`)] } });
 const reply = (id, from, hoursAgo) => ({ id, internalDate: String(now - hoursAgo * HOUR), labelIds: ['INBOX'], payload: { headers: [
@@ -50,7 +51,7 @@ const ctx = {
     getUuid: () => '0000-' + (++seq),
     sleep: () => {},
   },
-  Session: { getEffectiveUser: () => ({ getEmail: () => 'seth@twinhomebuyer.com' }) },
+  Session: { getEffectiveUser: () => ({ getEmail: () => owner }) },
   ScriptApp: { getOAuthToken: () => 'owner-token' },
   UrlFetchApp: {
     fetch(url, opt) {
@@ -65,7 +66,8 @@ const ctx = {
       }
       if (url === 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send') {
         assert.strictEqual(opt.headers.Authorization, 'Bearer owner-token', 'sent from the script owner, not through the read-only key');
-        sent.push(parseMail(JSON.parse(opt.payload).raw));
+        const body = JSON.parse(opt.payload);
+        sent.push({ ...parseMail(body.raw), threadId: body.threadId });
         return res(200, { id: 'x' });
       }
       assert.strictEqual(opt.headers.Authorization, 'Bearer tok');
@@ -105,6 +107,7 @@ ctx.run();
 const g = sent.find(m => /leo/.test(m.To));
 check('group email: one reminder to Cherry and Leo together (Vannessa replied)', g && to(g) === 'cherry,leo', g && g.To);
 check('in Juan\'s thread', g['In-Reply-To'] === '<m1@mail.gmail.com>' && g.References === '<m1@mail.gmail.com> <m2@mail.gmail.com>' && g.Subject === 'Re: Fence quote', g.Subject);
+check('sent from another account: no thread id from Juan\'s mailbox', sent.every(m => m.threadId === undefined));
 check('replies go to Juan; Juan not copied', g['Reply-To'] === '"Juan Diaz" <juan@twinhomebuyer.com>' && !/juan/.test(g.To) && !g.Cc, g['Reply-To']);
 check('says nothing about the email', !/fence|quote|permit/i.test(g.body) && g.body.startsWith('Hi Cherry and Leo,'), JSON.stringify(g.body.split('\n\n')[1]));
 const privates = sent.filter(m => m !== g).map(to).sort();
@@ -136,4 +139,13 @@ const before = sent.length;
 ctx.run();
 const q = sent.slice(before).find(m => m['In-Reply-To'] === '<m9@mail.gmail.com>');
 check('quiet hours on: Cherry gets the group reminder, Bryan waits for his morning', q && to(q) === 'cherry' && ctx.__log.some(l => /bryan@twinhomebuyer.com: waiting until 8 AM their time/.test(l)), q && q.To);
+
+// a test from the watched account itself: the reminder also lands in that thread there
+ctx.CONFIG.QUIET_FROM_HOUR = 0; ctx.CONFIG.QUIET_TO_HOUR = 0;
+owner = 'juan@twinhomebuyer.com';
+threads.t8 = [juanMsg('m10', 'Bryan <bryan@twinhomebuyer.com>', 5)]; order.unshift('t8');
+const before8 = sent.length;
+ctx.run();
+const own = sent.slice(before8).find(m => m['In-Reply-To'] === '<m10@mail.gmail.com>');
+check('run from the watched account: filed in the same thread', own && own.threadId === 't8', own && own.threadId);
 console.log(process.exitCode ? 'FAILED' : 'all checks passed');

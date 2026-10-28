@@ -354,16 +354,21 @@ function recentThreads(user, now) {
 // Sends the reminder into the thread, from the account running this script.
 function sendInThread(r, mail) {
   const b64 = s => Utilities.base64Encode(s, Utilities.Charset.UTF_8);
+  const from = Session.getEffectiveUser().getEmail();
   const raw = mimeMessage({
-    from: Session.getEffectiveUser().getEmail(), to: r.people.map(p => p.email),
+    from, to: r.people.map(p => p.email),
     replyTo: r.watch, replyToName: r.senderName, subject: r.subject,
     inReplyTo: r.inReplyTo, references: r.references, text: mail.text, html: mail.html,
     boundary: Utilities.getUuid().replace(/-/g, ''),
   }, b64);
+  const body = { raw: Utilities.base64EncodeWebSafe(raw, Utilities.Charset.UTF_8) };
+  // When the script runs as the watched mailbox (a test from your own
+  // account), the reminder also shows in that thread in your own Gmail.
+  if (from.toLowerCase() === r.watch) body.threadId = r.thread;
   const res = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-    payload: JSON.stringify({ raw: Utilities.base64EncodeWebSafe(raw, Utilities.Charset.UTF_8) }),
+    payload: JSON.stringify(body),
   });
   if (res.getResponseCode() !== 200) throw new Error('Sending the reminder failed: ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 300));
 }

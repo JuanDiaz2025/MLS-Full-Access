@@ -41,7 +41,7 @@ Reading Juan's email headers falls under the same sign-off as the WhatsApp track
 
 All of these are at the top of `Code.gs` under `CONFIG`.
 
-**Current settings (testing):** `WATCH` is Seth's own address, reminders after **1, 5 and 10 minutes**, checking **every minute**, and `DRY_RUN: false`, so test reminders are really sent. Before using it for Juan, change `WATCH` to his address and `REMIND_AFTER_MINUTES` to the real waits, then run **installTrigger** again if `CHECK_EVERY_MINUTES` changed.
+**Current settings (testing):** `WATCH` is Seth's own address, reminders after **1, 5 and 10 minutes**, checking **every minute**, and `DRY_RUN: false`, so test reminders are really sent. To test, email a teammate from Seth's account (the watched person never owes himself a reply, so an email to yourself gets no reminder). Because the script also runs as Seth, the reminder shows up in that same thread in Seth's Gmail as well as the teammate's. Before using it for Juan, change `WATCH` to his address and `REMIND_AFTER_MINUTES` to the real waits, then run **installTrigger** again if `CHECK_EVERY_MINUTES` changed.
 
 ## Setup
 
