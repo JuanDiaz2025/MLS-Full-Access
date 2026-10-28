@@ -46,7 +46,8 @@ const mock = `<script>
     row('t1', 'Fence quote', 6, 'tin', 'Tin', 'CC', true, 2, 1, 'a@mail.gmail.com'),
     row('t1', 'Fence quote', 3, 'leo', '', 'To', false, null, 0, 'f@mail.gmail.com'),
     row('t2', 'Permit <img src=x onerror=alert(1)>', 30, 'bryan', 'Bryan', 'To', false, null, 3, 'b@mail.gmail.com'),
-    row('t3', 'Lockbox code', 4, 'cherry', '', 'To', false, 3.5, 0, 'c@mail.gmail.com')];
+    row('t3', 'Lockbox code', 4, 'cherry', '', 'To', false, 3.5, 0, 'c@mail.gmail.com'),
+    ['t9', 'Seth Concepcion is waiting for your reply', 'juan@twinhomebuyer.com', 'Reply reminders', iso(20), 'bryan@twinhomebuyer.com', '', 'To', 'no', '', 'Waiting', '3', 'r@m']];
   const STATUS = [['Updated', iso(STALE ? 2 : 0.05)], ['Watching', 'juan@twinhomebuyer.com'], ['Look-back days', '7'], ['Reminders after (minutes)', '240, 1440, 2880'], ['Reminders', 'on']];
   const fail = (code, message) => Promise.reject({ code, message, retryable: false });
   window.__calls = [];
@@ -113,13 +114,32 @@ const check = (label, ok, got) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${label
   check('A: whose emails remembered from the Status tab', conf && JSON.stringify(conf.watch) === '["juan@twinhomebuyer.com"]');
   const tilesT = await p.$$eval('#v-email .tile', t => t.map(x => x.innerText.replace(/\s+/g, ' ')));
   check('A: tiles', tilesT[0].startsWith('3 People who owe a reply') && tilesT[1].startsWith('2 Emails waiting') && /Out of 3 emails/.test(tilesT[1]) && tilesT[3].startsWith('6 Reminders'), tilesT.join(' | '));
-  const rows = await p.$$eval('#v-email .grid2 > .card:first-child .em-row', r => r.map(x => x.innerText.replace(/\s+/g, ' ')));
-  check('A: longest wait first', rows[0].startsWith('Permit <img src=x') && rows[1].startsWith('Fence quote'), rows.join(' || '));
-  check('A: Fence quote: Cherry and Leo waiting, Tin answered', /Cherry Ann · 6h · reminder 2 of 3/.test(rows[1]) && /Leo · 3h/.test(rows[1]) && /Tin · answered in 4h/.test(rows[1]), rows[1]);
+  const lrows = () => p.$$eval('#v-email .em-lg .em-gr', r => r.map(x => x.innerText.replace(/\s+/g, ' ').trim()));
+  let rows = await lrows();
+  check('A: one line per waiting email, longest wait first', rows.length === 2 && rows[0].startsWith('Permit <img src=x') && rows[1].startsWith('Fence quote'), rows.join(' || '));
+  check('A: Fence quote: Cherry and Leo waiting, Tin answered', /Cherry 6h/.test(rows[1]) && /Leo 3h/.test(rows[1]) && /Tin 4h/.test(rows[1]) && /2 of 3/.test(rows[1]), rows[1]);
+  check('A: old-style reminder emails left out', !(await text(p, '#v-email')).includes('is waiting for your reply'));
   check('A: subjects shown as text, never run', !errs.some(e => e.startsWith('dialog')));
-  check('A: Open in Gmail finds the email by its id', (await p.$eval('#v-email .em-row a', a => a.href)).includes('rfc822msgid%3Ab%40mail.gmail.com'));
-  const people = await p.$$eval('#v-email table.t tbody tr', r => r.map(x => x.innerText.replace(/\s+/g, ' ')));
-  check('A: per-person table, longest waiting first', people[0].startsWith('B Bryan 1 0 1 · longest 1 day') && people.length === 4, people.join(' || '));
+  check('A: Open in Gmail finds the email by its id', (await p.$eval('#v-email .em-lg .em-go', a => a.href)).includes('rfc822msgid%3Ab%40mail.gmail.com'));
+  const people = await p.$$eval('#v-email .em-pg .em-gr', r => r.map(x => x.innerText.replace(/\s+/g, ' ').trim()));
+  check('A: who owes a reply, longest wait first', people.length === 4 && /^B Bryan 1 1 day 0 of 1 – 3/.test(people[0]) && /^T Tin 0 – 1 of 1 4h 1/.test(people[3]), people.join(' || '));
+  // filters
+  await p.click('[data-action="email-filter"][data-f="answered"]'); await p.waitForTimeout(150);
+  rows = await lrows();
+  check('A: Answered shows the fully answered email', rows.length === 1 && rows[0].startsWith('Lockbox code') && /Cherry 30 min/.test(rows[0]), rows.join(' || '));
+  await p.click('[data-action="email-filter"][data-f="all"]'); await p.waitForTimeout(150);
+  check('A: All shows all three', (await lrows()).length === 3);
+  await p.click('[data-action="email-filter"][data-f="waiting"]'); await p.waitForTimeout(150);
+  await p.click('.em-pg .em-gr[data-email="leo@twinhomebuyer.com"]'); await p.waitForTimeout(150);
+  rows = await lrows();
+  check('A: picking Leo shows only his emails', rows.length === 1 && rows[0].startsWith('Fence quote') && await p.isVisible('.em-tools .gchip'), rows.join(' || '));
+  check('A: his row is marked', (await p.$eval('.em-pg .em-gr[data-email="leo@twinhomebuyer.com"]', b => b.getAttribute('aria-pressed'))) === 'true');
+  await p.click('.em-pg .em-gr[data-email="tin@twinhomebuyer.com"]'); await p.waitForTimeout(150);
+  rows = await lrows();
+  check('A: someone who owes nothing: their answered emails', rows.length === 1 && rows[0].startsWith('Fence quote') && (await p.$eval('[data-action="email-filter"][aria-pressed="true"]', b => b.dataset.f)) === 'all', rows.join(' || '));
+  await p.click('.em-tools .gchip button'); await p.waitForTimeout(150);
+  check('A: × shows everyone again', (await lrows()).length === 3 && !(await p.$('.em-tools .gchip')));
+  await p.click('[data-action="email-filter"][data-f="waiting"]'); await p.waitForTimeout(150);
   check('A: nav badge counts people who owe a reply', (await p.$eval('#nav a[href="#email"] .count', e => e.textContent)) === '3');
   check('A: header says when the log updated', /Email log · updated/.test(await text(p, '#snap')));
   await p.screenshot({ path: 'shots/email-desktop.png', fullPage: true });

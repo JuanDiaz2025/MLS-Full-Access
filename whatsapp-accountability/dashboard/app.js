@@ -52,6 +52,7 @@
     gauge: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
     link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>',
+    out: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   };
   const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1169,51 +1170,99 @@ RULES
   }
 
   // ---- the view ----
+  // First names keep the list short, unless two people share one.
+  function shortNames(people) {
+    const first = n => String(n).split(/\s+/)[0];
+    const count = {};
+    people.forEach(p => { count[first(p.name)] = (count[first(p.name)] || 0) + 1; });
+    const out = {};
+    people.forEach(p => { out[p.email] = count[first(p.name)] > 1 ? p.name : first(p.name); });
+    return out;
+  }
+  // How long a wait is, against the reminder times: before the 1st, after it, after the last.
+  function waitTone(ms) {
+    const after = (email.info && email.info.remindAfter.length ? email.info.remindAfter : [240, 1440, 2880]).map(m => m * MIN);
+    return ms >= after[after.length - 1] ? 'c-crit' : ms >= after[0] ? 'c-serious' : 'c-warn';
+  }
+
   function viewEmail() {
     if (!email.confLoaded) return emptyCard(cap.db ? 'Loading…' : 'Open this page in Claude', cap.db ? 'Getting the email settings.' : 'The email log shows when this page is open on claude.ai or in the Claude app.');
     if (!email.conf || !email.conf.sheetId || email.editing) return emailSetupCard();
-    const mineCard = emailMineCard();
-    if (email.status === 'idle' || (email.status === 'loading' && !email.loadedAt)) return emptyCard('Loading the email log…', 'Reading the reply-reminder sheet through your Google Sheets connection.') + mineCard;
+    if (email.status === 'idle' || (email.status === 'loading' && !email.loadedAt)) return emptyCard('Loading the email log…', 'Reading the reply-reminder sheet through your Google Sheets connection.') + emailMineCard();
     if (email.status === 'error') {
       const [t, b] = connectorTrouble(email.code, email.message, SHEETS);
       const noAccess = email.code === 'tool_error' ? ' If the sheet isn’t shared with you, ask whoever set this up to share it, or use Your inbox below.' : '';
       return `<div class="card"><div class="empty"><b>${esc(t)}</b><br>${esc(b + noAccess)}
-        <div class="em-actions"><button class="btn small" type="button" data-action="email-retry">Try again</button>${cap.canEdit === true ? '<button class="btn small" type="button" data-action="email-edit">Change the sheet link</button>' : ''}</div></div></div>` + mineCard;
+        <div class="em-actions"><button class="btn small" type="button" data-action="email-retry">Try again</button>${cap.canEdit === true ? '<button class="btn small" type="button" data-action="email-edit">Change the sheet link</button>' : ''}</div></div></div>` + emailMineCard();
     }
     const E = ED || deriveEmail(email.rows, Date.now());
-    const now = Date.now();
     const info = email.info;
-    const stale = info && info.updated && now - info.updated > EMAIL_STALE
+    const stale = info && info.updated && Date.now() - info.updated > EMAIL_STALE
       ? `<p class="em-note">The email log last updated ${esc(fmtWhen(info.updated))}. The reply-reminder script may have stopped, so these numbers may be out of date.</p>` : '';
     const dry = info && /dry run/i.test(info.reminders) ? '<p class="em-note">The reminder script is in dry-run mode: it logs who would be reminded but sends nothing.</p>' : '';
-    const total = remindTotal();
-    const waitChip = p => chip(p.reminders >= total ? 'c-crit' : p.reminders ? 'c-serious' : 'c-warn',
-      `${p.name} · ${fmtDur(p.waiting)}${p.reminders ? ` · reminder ${p.reminders} of ${total}` : ''}`);
-    const replyChip = p => chip('c-good', `${p.name} · answered in ${fmtDur(p.delay)}`, 'check');
-    const sentLine = t => `${esc(t.fromName)} · ${esc(fmtWhen(t.first))}${t.msgId ? ` · <a class="link" href="${esc(gmailLink(t.msgId))}" target="_blank" rel="noopener">Open in Gmail</a>` : ''}`;
-    const openRows = E.open.map(t => `<div class="em-row"><div class="em-h"><b>${esc(cleanSubject(t.subject))}</b><span class="sub">${sentLine(t)}</span></div>
-      <div class="em-people">${t.waiting.map(waitChip).join('')}${t.replied.map(replyChip).join('')}</div></div>`).join('');
-    const doneRows = E.done.slice(0, 8).map(t => `<div class="em-row"><div class="em-h"><b>${esc(cleanSubject(t.subject))}</b><span class="sub">${sentLine(t)}</span></div>
-      <div class="em-people">${t.replied.map(replyChip).join('')}</div></div>`).join('');
     const days = (info && info.lookbackDays) || 7;
-    const peopleRows = E.people.map(p => `<tr><td title="${esc(p.email)}">${who(p.name)}</td><td class="num">${p.asked}</td><td class="num">${p.answered}</td>
-      <td class="num">${p.waiting ? chip(p.longest >= DAY_MS ? 'c-crit' : 'c-warn', `${p.waiting} · longest ${fmtDur(p.longest)}`) : '0'}</td>
-      <td class="num">${p.avg != null ? esc(fmtDur(p.avg)) : '–'}</td><td class="num">${p.reminders}</td></tr>`).join('');
     return stale + dry + tiles([
       { tone: 'crit', icon: 'users', value: E.waitingPeople, label: 'People who owe a reply', sub: `To ${watchedName()}’s emails` },
       { tone: 'warn', icon: 'clock', value: E.open.length, label: 'Emails waiting', sub: `Out of ${plural(E.threads, 'email')} in ${days} days` },
       { tone: 'info', icon: 'gauge', value: E.avg != null ? esc(fmtDur(E.avg)) : '–', label: 'Average reply time', sub: 'From the email to the reply' },
       { tone: 'good', icon: 'mail', value: E.reminders, label: 'Reminders sent', sub: 'In the email thread, by the script' },
-    ]) + `
-    <div class="grid2" style="margin-top:20px">
-      <div class="card"><div class="card-h"><h2>Waiting on a reply</h2><span class="hint">Longest wait first</span></div>
-        ${openRows ? `<div class="em-list">${openRows}</div>` : '<div class="empty">Everyone has answered.</div>'}</div>
-      <div class="card"><div class="card-h"><h2>Answered</h2><span class="hint">Most recent first</span></div>
-        ${doneRows ? `<div class="em-list">${doneRows}</div>` : '<div class="empty">No email has been fully answered yet.</div>'}</div>
-    </div>
-    <div class="card" style="margin-top:20px"><div class="card-h"><h2>Reply times by person</h2><span class="hint">Last ${days} days</span></div>
-      ${peopleRows ? `<div class="tw"><table class="t"><thead><tr><th>Person</th><th>Emails</th><th>Answered</th><th>Waiting now</th><th>Avg. reply</th><th>Reminders received</th></tr></thead><tbody>${peopleRows}</tbody></table></div>`
-        : '<div class="empty">No emails in the log yet.</div>'}</div>` + mineCard + emailSourceLine();
+    ]) + `<div class="em-top">${emailPeopleCard(E, days)}${emailMineCard(true)}</div>` + emailListCard(E) + emailSourceLine();
+  }
+
+  // One row per person: what they owe now, and their record over the look-back.
+  function emailPeopleCard(E, days) {
+    const sel = state.emailPerson;
+    const rows = E.people.map(p => {
+      const summary = [p.waiting ? `longest wait ${fmtDur(p.longest)}` : 'nothing waiting', `${p.answered} of ${p.asked} answered`,
+        p.avg != null ? `avg. ${fmtDur(p.avg)}` : '', plural(p.reminders, 'reminder')].filter(Boolean).join(' · ');
+      return `<button class="em-gr" type="button" data-action="email-person" data-email="${esc(p.email)}" aria-pressed="${sel === p.email}" title="${esc(p.email)}" aria-label="${esc(`${p.name}: owes ${p.waiting}, ${summary}`)}">
+        <span>${who(p.name)}</span>
+        <span>${p.waiting ? chip(waitTone(p.longest), String(p.waiting)) : '<span class="plain">0</span>'}</span>
+        <span class="em-d num">${p.waiting ? esc(fmtDur(p.longest)) : '<span class="plain">–</span>'}</span>
+        <span class="em-d num">${p.answered} of ${p.asked}</span>
+        <span class="em-d num">${p.avg != null ? esc(fmtDur(p.avg)) : '<span class="plain">–</span>'}</span>
+        <span class="em-d num">${p.reminders}</span>
+        <span class="em-m">${esc(summary)}</span></button>`;
+    }).join('');
+    return `<div class="card"><div class="card-h"><h2>Who owes a reply</h2><span class="hint">Last ${days} days · pick a name to see their emails</span></div>
+      ${rows ? `<div class="em-grid em-pg"><div class="em-gh" aria-hidden="true"><span>Person</span><span>Owes</span><span class="em-d">Longest wait</span><span class="em-d">Answered</span><span class="em-d">Avg. reply</span><span class="em-d">Reminders</span></div>${rows}</div>`
+        : '<div class="empty">No emails in the log yet.</div>'}</div>`;
+  }
+
+  // One line per email, waiting ones first; Waiting / Answered / All, and one person's.
+  function emailListCard(E) {
+    const f = state.emailFilter || 'waiting';
+    const person = state.emailPerson && E.people.find(p => p.email === state.emailPerson);
+    const mine = t => !person || t.waiting.some(p => p.person === person.email) || t.replied.some(p => p.person === person.email);
+    const sets = { waiting: E.open.filter(mine), answered: E.done.filter(mine), all: E.open.concat(E.done).filter(mine) };
+    const list = sets[f] || sets.waiting;
+    const short = shortNames(E.people);
+    const nm = p => short[p.person] || p.name;
+    const limit = state.emailAll ? list.length : 12;
+    const total = remindTotal();
+    const rows = list.slice(0, limit).map(t => {
+      const subject = cleanSubject(t.subject);
+      const waiting = t.waiting.map(p => chip(waitTone(p.waiting), `${nm(p)} ${fmtDur(p.waiting)}`)).join('');
+      const answered = t.replied.map(p => `${esc(nm(p))} ${esc(fmtDur(p.delay))}`).join(', ');
+      return `<div class="em-gr">
+        <span class="em-c-subj" title="${esc(subject)}">${esc(subject)}</span>
+        <span class="em-d em-sent">${esc(fmtWhen(t.first))}</span>
+        <span class="em-c-wait em-chips">${waiting || '<span class="plain">Nobody</span>'}</span>
+        <span class="em-d em-ans">${answered ? `${ic('check')}<span>${answered}</span>` : '<span class="plain">–</span>'}</span>
+        <span class="num em-c-rem">${t.waiting.length && t.reminders ? `${t.reminders} of ${total}` : '<span class="plain">–</span>'}</span>
+        <span>${t.msgId ? `<a class="em-go" href="${esc(gmailLink(t.msgId))}" target="_blank" rel="noopener" title="Open in Gmail" aria-label="${esc(`Open “${subject}” in Gmail`)}">${ic('out')}</a>` : ''}</span>
+        <span class="em-m">Sent ${esc(fmtWhen(t.first))}${answered ? ` · <span class="em-ok">answered: ${answered}</span>` : ''}</span></div>`;
+    }).join('');
+    const label = { waiting: 'Waiting', answered: 'Answered', all: 'All' };
+    const seg = Object.keys(label).map(k => `<button type="button" data-action="email-filter" data-f="${k}" aria-pressed="${f === k}">${label[k]} <b>${sets[k].length}</b></button>`).join('');
+    const empty = f === 'waiting' ? (person ? `${person.name} doesn’t owe a reply right now.` : 'Everyone has answered.')
+      : f === 'answered' ? 'No email has been fully answered yet.' : 'No emails yet.';
+    return `<div class="card" style="margin-top:20px"><div class="card-h"><h2>Emails</h2>
+        <div class="em-tools">${person ? `<span class="gchip">${esc(person.name)}<button type="button" data-action="email-person" data-email="${esc(person.email)}" aria-label="Show everyone’s emails">×</button></span>` : ''}
+          <span class="seg" role="group" aria-label="Which emails">${seg}</span></div></div>
+      ${rows ? `<div class="em-grid em-lg"><div class="em-gh" aria-hidden="true"><span>Subject</span><span class="em-d">Sent</span><span>Waiting on</span><span class="em-d">Answered</span><span>Reminder</span><span></span></div>${rows}</div>`
+        : `<div class="empty">${esc(empty)}</div>`}
+      ${list.length > limit ? `<div class="em-more"><button class="link" type="button" data-action="email-all">Show all ${list.length}</button></div>` : ''}</div>`;
   }
 
   function emailSourceLine() {
@@ -1237,7 +1286,7 @@ RULES
     return `<div class="card setup"><div class="card-b"><h2>${ic('mail')}Connect the email log</h2>${body}</div></div>` + (email.editing ? '' : emailMineCard());
   }
 
-  function emailMineCard() {
+  function emailMineCard(inGrid) {
     const M = email.mine;
     const name = watchedName();
     const can = !!cap.mcp && emailWatching().length > 0;
@@ -1250,9 +1299,9 @@ RULES
       body = M.items.length ? `<div class="em-list flush">${M.items.map(x => `<div class="em-row"><div class="em-h"><b>${esc(cleanSubject(x.subject))}</b>
           <span class="sub">${esc(nameFromEmail(x.from) === name ? name : nameFromEmail(x.from))} emailed you ${esc(fmtDur(Date.now() - x.since))} ago${x.url ? ` · <a class="link" href="${esc(x.url)}" target="_blank" rel="noopener">Open</a>` : ''}</span></div></div>`).join('')}</div>`
         : `<p><b>You’re all caught up.</b> Nothing from ${esc(name)} in the last ${(email.info && email.info.lookbackDays) || 7} days is waiting on you.</p>`;
-    } else body = `<p>See which emails from ${esc(name)} you haven’t answered yet, from your own Gmail. Only you see this. It shows subjects and times, never what the emails say.</p>`;
+    } else body = `<p class="em-intro">Emails from ${esc(name)} you haven’t answered yet, checked in your own Gmail. Subjects and times only, never what the emails say.</p>`;
     const label = M.status === 'busy' ? 'Checking…' : M.status === 'idle' ? 'Check my Gmail' : 'Check again';
-    return `<div class="card" style="margin-top:20px"><div class="card-h"><h2>Your inbox</h2><span class="hint">Only you see this</span></div>
+    return `<div class="card"${inGrid ? '' : ' style="margin-top:20px"'}><div class="card-h"><h2>Your inbox</h2><span class="hint">Only you see this</span></div>
       <div class="card-b">${body}<div class="em-actions"><button class="btn small" type="button" data-action="email-mine"${!can || M.status === 'busy' ? ' disabled' : ''}>${label}</button></div></div></div>`;
   }
 
@@ -1922,6 +1971,15 @@ RULES
     else if (action === 'email-cancel') { email.editing = false; email.linkError = ''; render(); }
     else if (action === 'email-save-link') saveEmailLink();
     else if (action === 'email-mine') checkMine();
+    else if (action === 'email-filter') { state.emailFilter = data.f; state.emailAll = false; render(); }
+    else if (action === 'email-all') { state.emailAll = true; render(); }
+    else if (action === 'email-person') {
+      state.emailPerson = state.emailPerson === data.email ? null : data.email;
+      // someone who owes nothing: show what they did answer
+      const p = state.emailPerson && ED && ED.people.find(x => x.email === state.emailPerson);
+      if (p && !p.waiting && (state.emailFilter || 'waiting') === 'waiting') state.emailFilter = 'all';
+      state.emailAll = false; render();
+    }
     else if (action === 'connect') {
       startLive();
     } else if (action === 'recheck') {

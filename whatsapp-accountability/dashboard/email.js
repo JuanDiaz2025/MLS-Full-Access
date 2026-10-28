@@ -20,6 +20,8 @@ function parseEmailLog(values) {
     const person = get(r, 'person').toLowerCase();
     const sent = Date.parse(get(r, 'sent'));
     if (!person || !Number.isFinite(sent)) return null;
+    // the first version of the reminder script sent separate emails like these; they aren't requests
+    if (/^reply reminders$/i.test(get(r, 'fromName')) || /\bis waiting for your reply\b/i.test(get(r, 'subject'))) return null;
     const replied = get(r, 'replied') ? Date.parse(get(r, 'replied')) : NaN;
     const name = get(r, 'name');
     return {

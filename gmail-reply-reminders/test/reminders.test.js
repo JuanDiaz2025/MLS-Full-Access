@@ -28,6 +28,9 @@ const m = R.toMessage({ internalDate: '1793124024000', labelIds: ['SENT'], paylo
   { name: 'Message-ID', value: '<CAB123@mail.gmail.com>' }, { name: 'Subject', value: 'x' }] } });
 assert.strictEqual(m.messageId, 'CAB123@mail.gmail.com'); assert.strictEqual(m.cc.length, 2); assert.strictEqual(m.reminder, false);
 assert.strictEqual(R.toMessage({ internalDate: '1', payload: { headers: [{ name: 'X-Reply-Reminder', value: '1' }] } }).reminder, true);
+// the first version's reminders had no header, only the sender name
+assert.strictEqual(R.toMessage({ internalDate: '1', payload: { headers: [{ name: 'From', value: 'Reply reminders <seth@twinhomebuyer.com>' }] } }).reminder, true);
+assert.strictEqual(R.toMessage({ internalDate: '1', payload: { headers: [{ name: 'From', value: 'Seth Concepcion <seth@twinhomebuyer.com>' }] } }).reminder, false);
 
 // 1. Juan emails Cherry alone: private
 let p = pend({ id: 't1', messages: [msg(JUAN, ['cherry'], 6)] });

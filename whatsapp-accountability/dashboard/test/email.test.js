@@ -19,9 +19,12 @@ const values = [HEAD,
   row('t2', 'Permit', 30, 'bryan', 'Bryan', 'To', false, null, 3, 'b@m'),
   row('t3', 'Lockbox code', 4, 'cherry', '', 'To', false, 3.5, 0, 'c@m'),
   ['', '', '', '', 'not a date', 'x@twinhomebuyer.com'],
+  // reminders sent by the first version of the script, as separate emails
+  ['t9', 'Juan Diaz is waiting for your reply', 'juan@twinhomebuyer.com', 'Reply reminders', iso(5), 'bryan@twinhomebuyer.com', '', 'To', 'no', '', 'Waiting', '3', 'r@m'],
+  ['t8', 'Re: x', 'juan@twinhomebuyer.com', 'Reply reminders', iso(5), 'bryan@twinhomebuyer.com', '', 'To', 'no', '', 'Waiting', '3', 's@m'],
 ];
 const rows = E.parseEmailLog(values);
-assert.strictEqual(rows.length, 6, 'bad rows skipped');
+assert.strictEqual(rows.length, 6, 'bad rows and old-style reminder emails skipped');
 same(rows.map(r => r.name), ['Cherry Ann', 'Leo', 'Tin', 'Leo', 'Bryan', 'Cherry'], 'names, from the address when blank');
 // columns found by name, wherever they are
 const moved = values.map(r => [r[5], r[4], ...r.filter((_, i) => i !== 4 && i !== 5)]);

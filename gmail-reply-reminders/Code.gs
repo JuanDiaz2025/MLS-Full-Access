@@ -68,6 +68,8 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 // marks the reminders this script sends, so they are never counted as emails
 const REMINDER_HEADER = 'X-Reply-Reminder';
+// the name reminders are sent under; the first version sent them without the header
+const REMINDER_NAME = 'Reply reminders';
 
 // ---------------- reading the headers (pure, tested in test/) ----------------
 
@@ -104,7 +106,7 @@ function toMessage(msg) {
     cc: parseAddresses(headerOf(msg, 'Cc')),
     subject: headerOf(msg, 'Subject'),
     messageId: headerOf(msg, 'Message-ID').replace(/^<|>$/g, ''),
-    reminder: !!headerOf(msg, REMINDER_HEADER),
+    reminder: !!headerOf(msg, REMINDER_HEADER) || (parseAddresses(headerOf(msg, 'From'))[0] || {}).name === REMINDER_NAME,
     at: Number(msg.internalDate),
     labelIds: msg.labelIds || [],
   };
@@ -288,7 +290,7 @@ function mimeMessage(o, b64) {
   const name = !n ? '' : (/[^\x20-\x7e]/.test(n) ? encodeHeader(n, b64) : '"' + n + '"') + ' ';
   const body = s => b64(s).replace(/(.{76})/g, '$1\r\n');
   return [
-    'From: Reply reminders <' + o.from + '>',
+    'From: ' + REMINDER_NAME + ' <' + o.from + '>',
     'To: ' + o.to.join(', '),
     'Reply-To: ' + name + '<' + o.replyTo + '>',
     'Subject: ' + encodeHeader(replySubject(o.subject), b64),
@@ -569,7 +571,7 @@ function sendSampleToMe() {
   const me = Session.getEffectiveUser().getEmail();
   const now = Date.now();
   const mail = buildReminder({ senderName: 'Juan Diaz', since: now - 4 * HOUR, people: [{ email: me, name: '', stage: 1 }] }, CONFIG, now);
-  MailApp.sendEmail({ to: me, subject: '[sample] Re: (the subject of Juan’s email)', body: mail.text, htmlBody: mail.html, name: 'Reply reminders' });
+  MailApp.sendEmail({ to: me, subject: '[sample] Re: (the subject of Juan’s email)', body: mail.text, htmlBody: mail.html, name: REMINDER_NAME });
 }
 
 // Run once: makes the "Reply reminders log" sheet the dashboard's Email tab
