@@ -88,4 +88,4 @@ node gmail-reply-reminders/test/reminders.test.js  # who owes a reply, stages, q
 node gmail-reply-reminders/test/run.test.js        # sign-in, reading headers, sending once, quiet hours, dry run
 ```
 
-Reading headers from a real Workspace mailbox was checked on Oct 27 (`checkSetup` read 16 sent threads). Sending into a thread is tested against the stand-in only so far; the first real check is a test email to a teammate with short waits.
+Reading headers from a real Workspace mailbox was checked on Oct 27 (`checkSetup` read 16 sent threads). Sending into a thread was checked live on Oct 28 from Seth's account: a private email to Bryan got a reminder to Bryan alone, and an email to Bryan and Lawrence got one reminder to both, each inside the original thread. The first runs failed until the Gmail API was added under **Services** (step 10).
