@@ -83,6 +83,16 @@ const card = D.scorecardText([
 ], [{ ownerName: 'Leo', subject: 'TEST Fence quote', deadline: T }], dayStart, dayEnd, cfg);
 assert.strictEqual(card, ['DELIVERED TODAY\n- Cherry Ann: TEST Fence quote (on time)', 'MISSED TODAY\n- Leo: TEST Fence quote (due Oct 29, 3:00 PM PT)',
   'STILL OPEN\n- Leo: TEST Fence quote (overdue since Oct 29, 3:00 PM PT)\n- Mike: TEST Permit (BLOCKED)', 'NOT READ (fix the OWNER or DUE line)\n- TEST Lockbox: not on the email: Bob'].join('\n\n'));
+same(D.scorecardTable([
+  { ownerName: 'Cherry Ann', subject: 'TEST Fence quote', status: 'delivered', due: T, deliveredAt: T - H, late: false },
+  { ownerName: 'Leo', subject: 'TEST Fence quote', status: 'missed', due: T, deliveredAt: null },
+  { ownerName: 'Mike', subject: 'TEST Permit', status: 'blocked', due: T2, deliveredAt: null },
+  { ownerName: 'Tin', subject: 'TEST Lockbox', status: 'delivered', due: T, deliveredAt: T + H, late: true },
+  { ownerName: 'Old', subject: 'TEST Yesterday', status: 'delivered', due: T - 30 * H, deliveredAt: T - 30 * H, late: false },
+  { ownerName: 'Bob', subject: 'TEST Lockbox', status: 'unclear', due: null, deliveredAt: null, note: 'x' },
+], dayStart, dayEnd).map(t => t.person + ' | ' + t.task + ' | ' + t.result), ['Leo | TEST Fence quote | Missed', 'Mike | TEST Permit | Blocked', 'Tin | TEST Lockbox | Delivered late', 'Cherry Ann | TEST Fence quote | Delivered'], 'table: misses first, today only, unreadable ones left out');
+const html = D.scorecardHtml([{ ownerName: 'Leo <b>', subject: 'TEST Fence & quote', status: 'missed', due: T, deliveredAt: null }, { ownerName: 'Bob', subject: 'TEST Lockbox', status: 'unclear', note: 'not on the email: Bob' }], dayStart, dayEnd, cfg);
+assert.ok(html.includes('<th') && html.includes('Leo &lt;b&gt;') && html.includes('TEST Fence &amp; quote') && html.includes('Oct 29, 3:00 PM PT') && html.includes('>Missed</td>') && html.includes('Missed: <b>1</b>') && html.includes('not on the email: Bob'), 'html table, escaped');
 console.log('6 scorecard');
 
 // 7. Juan's own style

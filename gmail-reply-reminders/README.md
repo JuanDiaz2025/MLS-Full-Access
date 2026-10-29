@@ -102,7 +102,7 @@ An explicit line like `OWNER: Cherry · DUE: Oct 30, 5 PM PT` always wins (OWNER
 - **BLOCKED** before the deadline: not chased; shown as blocked.
 - **Missed:** the deadline passed with none of these. Within 15 minutes it emails the owner only, in the assignment's thread, as the assigner: "The deadline was Oct 29, 3:00 PM PT. Send it now, plus one line on why you missed it." Once per deadline. A late DONE still counts as a miss.
 
-**Log**: the log sheet's **Assignments** tab (rewritten each pass) and **Misses** tab (one row per miss, by name and date, never rewritten). **Scorecard**: on the first pass after 5:00 PM Pacific, an email to the assigner with DELIVERED TODAY, MISSED TODAY, STILL OPEN, and NOT READ. The dashboard's **Pause** switch holds every chase (misses are still logged).
+**Log**: the log sheet's **Assignments** tab (rewritten each pass) and **Misses** tab (one row per miss, by name and date, never rewritten). **Scorecard**: on the first pass after 5:00 PM Pacific, an email to the assigner: a table of Person · Task · Due · Result (Missed, Blocked, Open, Delivered late, Delivered; misses first) with the counts above it, and anything it couldn't read listed below. The same results as plain text (DELIVERED TODAY, MISSED TODAY, STILL OPEN, NOT READ) for mail apps that don't show HTML. The dashboard's **Pause** switch holds every chase (misses are still logged).
 
 **Setup** (after the reply reminders are set up):
 1. Paste the latest `Code.gs`. Then **Files → + → Script**, name it `Deadlines`, and paste `Deadlines.gs`. Save.

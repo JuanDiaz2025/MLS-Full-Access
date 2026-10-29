@@ -292,6 +292,37 @@ function scorecardText(rows, missesToday, dayStart, dayEnd, cfg) {
     .concat(unclear.length ? [block('NOT READ (fix the OWNER or DUE line)', unclear)] : []).join('\n\n');
 }
 
+// The same scorecard as a table: Person · Task · Due · Result, one row per
+// person per task, misses first. Rows: everything delivered today and
+// everything not delivered yet. Assignments it couldn't read are listed below.
+const RESULT_ORDER = ['Missed', 'Blocked', 'Open', 'Delivered late', 'Delivered'];
+const RESULT_COLOR = { 'Missed': '#b42318', 'Blocked': '#b54708', 'Open': '#475467', 'Delivered late': '#b54708', 'Delivered': '#067647' };
+function scorecardTable(rows, dayStart, dayEnd) {
+  return rows.filter(r => r.status !== 'unclear' && (r.deliveredAt == null || (r.deliveredAt >= dayStart && r.deliveredAt < dayEnd)))
+    .map(r => ({
+      person: r.ownerName || r.owner, task: r.subject, due: r.due,
+      result: r.deliveredAt != null ? (r.late ? 'Delivered late' : 'Delivered') : r.status === 'missed' ? 'Missed' : r.status === 'blocked' ? 'Blocked' : 'Open',
+    }))
+    .sort((a, b) => RESULT_ORDER.indexOf(a.result) - RESULT_ORDER.indexOf(b.result) || a.person.localeCompare(b.person) || a.due - b.due);
+}
+
+function scorecardHtml(rows, dayStart, dayEnd, cfg) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const table = scorecardTable(rows, dayStart, dayEnd);
+  const count = k => table.filter(t => t.result === k).length;
+  const cell = 'padding:6px 10px;border:1px solid #d0d5dd;text-align:left;vertical-align:top;';
+  const head = ['Person', 'Task', 'Due', 'Result'].map(h => '<th style="' + cell + 'background:#f2f4f7;font-weight:600">' + h + '</th>').join('');
+  const body = table.map(t => '<tr><td style="' + cell + '">' + esc(t.person) + '</td><td style="' + cell + '">' + esc(t.task) + '</td><td style="' + cell + 'white-space:nowrap">'
+    + esc(fmtDeadline(t.due, cfg)) + '</td><td style="' + cell + 'font-weight:600;color:' + RESULT_COLOR[t.result] + '">' + t.result + '</td></tr>').join('');
+  const unclear = rows.filter(r => r.status === 'unclear');
+  return '<div style="font-family:Arial,sans-serif;font-size:14px;color:#101828">'
+    + '<p style="margin:0 0 10px">' + ['Delivered', 'Delivered late', 'Missed', 'Blocked', 'Open'].map(k => k + ': <b>' + count(k) + '</b>').join(' &middot; ') + '</p>'
+    + (table.length ? '<table style="border-collapse:collapse;font-size:14px">' + '<tr>' + head + '</tr>' + body + '</table>' : '<p>No assignments today.</p>')
+    + (unclear.length ? '<p style="margin:14px 0 4px;font-weight:600">Not read (fix the deadline or the name)</p><ul style="margin:0;padding-left:18px">'
+      + unclear.map(r => '<li>' + esc(r.subject) + ': ' + esc(r.note) + '</li>').join('') + '</ul>' : '')
+    + '</div>';
+}
+
 // ---------------- Gmail with the wider permissions ----------------
 
 function b64text(data) {
@@ -548,7 +579,7 @@ function scorecardFrom(rows, cfg, now) {
   const to = cfg.SCORECARD_TO || cfg.ASSIGNER;
   const subject = 'Scorecard: ' + Utilities.formatDate(new Date(now), cfg.TIME_ZONE, 'EEE, MMM d');
   if (cfg.DRY_RUN) console.log('[dry run] would email ' + to + ' "' + subject + '":\n' + text);
-  else MailApp.sendEmail({ to, subject, body: text, name: 'Deadline agent' });
+  else MailApp.sendEmail({ to, subject, body: text, htmlBody: scorecardHtml(rows, dayStart, dayEnd, cfg), name: 'Deadline agent' });
   PropertiesService.getScriptProperties().setProperty('scorecard:' + today, String(now));
 }
 
@@ -578,5 +609,5 @@ function removeDeadlineTrigger() {
 
 if (typeof module !== 'undefined') {
   module.exports = Object.assign(module.exports || {}, { DEADLINES, parseAssignmentLines, resolveOwners, parseDue, deadlinePhrases, namedItems, assignmentsIn, newText, readStatus, hasWork,
-    subjectKey, assess, scorecardText, fmtDeadline, zonedTime, readFull, ASSIGNMENT_HEADERS, MISS_HEADERS });
+    subjectKey, assess, scorecardText, scorecardTable, scorecardHtml, fmtDeadline, zonedTime, readFull, ASSIGNMENT_HEADERS, MISS_HEADERS });
 }

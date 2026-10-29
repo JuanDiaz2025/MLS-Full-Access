@@ -167,6 +167,7 @@ check('delivered today: Leo, late', /DELIVERED TODAY\n- Leo: TEST Fence quote \(
 check('missed today: Tin', /MISSED TODAY\n- Tin: TEST Lockbox codes \(due Oct 30, 10:00 AM PT\)/.test(body));
 check('still open: Tin overdue, Mike blocked', /STILL OPEN\n- Mike: TEST Photos \(BLOCKED\)\n- Tin: TEST Lockbox codes \(overdue since Oct 30, 10:00 AM PT\)/.test(body) || /STILL OPEN\n- Tin: TEST Lockbox codes \(overdue since Oct 30, 10:00 AM PT\)\n- Mike: TEST Photos \(BLOCKED\)/.test(body));
 now += 15 * MIN; run();
+check('scorecard as a table: Person, Task, Due, Result', /<th[^>]*>Person<\/th><th[^>]*>Task<\/th><th[^>]*>Due<\/th><th[^>]*>Result<\/th>/.test(mails[0].htmlBody) && /Leo<\/td><td[^>]*>TEST Fence quote<\/td>.*Delivered late/.test(mails[0].htmlBody));
 check('only one scorecard a day', mails.length === 1);
 
 // 6. a day of emails written Juan's way: subject deadlines, named items, Thea, a correction, an announcement
