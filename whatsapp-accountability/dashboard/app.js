@@ -24,7 +24,7 @@
     loaded: { tracking: false, source: false, legacyMeta: false, legacyAnalysis: false } };
   const subs = {};
   const live = { on: false, status: null, groups: null, groupInfo: null, groupInfos: {}, busy: false, again: false, lastSig: '', lastSync: 0,
-    unwatch: null, diag: null, raws: {}, written: {}, writtenAnalysis: {}, writtenMeta: {}, lastMetaWrite: {}, lastMembersRead: {},
+    unwatch: null, diag: null, raws: {}, written: {}, writtenAnalysis: {}, writtenMeta: {}, lastMetaWrite: {}, lastMembersRead: {}, groupSig: {}, retryTimer: null,
     legacyCleared: false, sampleDenied: false, analyzing: 0, error: null, offCode: null };
 
   const VIEWS = {
@@ -666,9 +666,12 @@
       document.getElementById('conn-btn').disabled = d.code === 'connecting';
     }
     const err = document.getElementById('live-error');
-    const msg = live.on && live.error ? `WhatsApp Reader couldn\u2019t read a group: ${live.error.message || String(live.error)}` : (state.notice || '');
+    const held = live.on && live.held ? `The Claude app is limiting how fast this page can ask WhatsApp Reader, so ${live.held === 1 ? '1 group is' : live.held + ' groups are'} still to be read. They\u2019ll be read automatically in a minute; nothing needs doing.` : '';
+    const msg = [live.on && live.error ? `WhatsApp Reader couldn\u2019t read a group: ${live.error.message || String(live.error)}` : (state.notice || ''), held].filter(Boolean).join(' ');
     err.hidden = !msg;
     err.textContent = msg;
+    // only "still to be read": a heads-up, not an error
+    err.classList.toggle('calm', !!held && !(live.on && live.error) && !state.notice);
   }
 
   // Why this window isn't reading WhatsApp Reader, in words that say what to do.
@@ -1532,11 +1535,13 @@ RULES
     show(parts, 'saved', Math.max(...parts.map(p => p.raw.syncedAt || 0)));
   }
 
+  // Groups read live, and the saved copy of any not read yet on this computer
+  // (still waiting their turn), so no group drops off the screen meanwhile.
   function applyLive() {
-    const parts = trackedGroups().filter(t => live.raws[t.groupId]).map(t => {
-      const raw = { ...live.raws[t.groupId], overrides: saved.names, fixes: fixesFor(t.groupId) };
-      return { id: t.groupId, name: raw.group.name || t.groupName, raw };
-    });
+    const parts = trackedGroups().map(t => {
+      const raw = live.raws[t.groupId] ? { ...live.raws[t.groupId], overrides: saved.names, fixes: fixesFor(t.groupId) } : rawFromSaved(t.groupId);
+      return raw ? { id: t.groupId, name: (raw.group && raw.group.name) || t.groupName, raw } : null;
+    }).filter(Boolean);
     if (!parts.length) { if (!trackedGroups().length) showSample(); return; }
     show(parts, 'live', Math.max(...parts.map(p => p.raw.syncedAt || 0)));
     checkAlerts();
@@ -1886,7 +1891,37 @@ RULES
   document.addEventListener('change', e => { if (e.target.name === 'link-pick' && state.link) { state.link.pick = e.target.value; renderLink(); } });
 
   // ---------------- live reading (Claude desktop app on the computer running WhatsApp Reader) ----------------
-  const callReader = async (tool, input) => (await cap.mcp.callTool(READER, tool, input || {}, { cache: false })).payload;
+  // The Claude app limits how fast a page may call programs on the computer
+  // ("Host tool rate limit exceeded"). Calls go one at a time, spaced out; a
+  // refused call waits and tries again, and the spacing widens until calls
+  // stop being refused, then narrows again.
+  const pace = { gap: 150, last: 0, ok: 0, chain: Promise.resolve() };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const isRateLimit = e => !!e && (e.code === 'rate_limited' || /rate limit/i.test(String(e.message || '')));
+  function readerSlot() {
+    const turn = pace.chain.then(async () => {
+      const wait = pace.last + pace.gap - Date.now();
+      if (wait > 0) await sleep(wait);
+      pace.last = Date.now();
+    });
+    pace.chain = turn.catch(() => {});
+    return turn;
+  }
+  async function callReader(tool, input) {
+    for (let attempt = 0; ; attempt++) {
+      await readerSlot();
+      try {
+        const out = (await cap.mcp.callTool(READER, tool, input || {}, { cache: false })).payload;
+        if (++pace.ok >= 20 && pace.gap > 150) { pace.gap = Math.max(150, Math.round(pace.gap * 0.8)); pace.ok = 0; }
+        return out;
+      } catch (e) {
+        if (!isRateLimit(e) || attempt >= 2) throw e;
+        pace.ok = 0;
+        pace.gap = Math.min(4000, pace.gap * 2);
+        await sleep(Math.min(e.retryAfterMs > 0 ? e.retryAfterMs : 15000, 60000) + Math.random() * 1000);
+      }
+    }
+  }
 
   async function startLive() {
     if (!cap.mcp) { live.diag = { code: 'no-mcp' }; render(); return; }
@@ -2274,6 +2309,31 @@ RULES
     return live.groups ? live.groups.some(x => x.id === gid) : null;
   }
 
+  // Which tracked groups to read on this pass. One list_groups call says,
+  // for every group, how many messages it has, when the last one came and how
+  // many members it has; only groups where that changed are read, plus a few
+  // not read for a while (edits and deletions don't change those numbers).
+  // Reading all of them every time is what ran into the Claude app's limit.
+  const FULL_EVERY = 30 * MIN, STALE_PER_PASS = 8;
+  const groupSig = g => `${g.message_count}|${g.last_message_at}|${g.members}`;
+  async function groupsToRead() {
+    let list = null;
+    try { list = ((await callReader('list_groups')) || {}).groups || null; if (list) live.groups = list; } catch (_) { list = null; }
+    const by = new Map((list || []).map(g => [g.id, g]));
+    const now = Date.now();
+    const out = [], stale = [];
+    trackedGroups().forEach(t => {
+      const raw = live.raws[t.groupId], g = by.get(t.groupId);
+      const sig = g ? groupSig(g) : null;
+      if (!raw) out.push({ t, sig });
+      else if (!list) return; // couldn't ask: keep what's on screen, try again next pass
+      else if (sig && sig !== live.groupSig[t.groupId]) out.push({ t, sig });
+      else if (now - raw.syncedAt > FULL_EVERY) stale.push({ t, sig, at: raw.syncedAt });
+    });
+    stale.sort((a, b) => a.at - b.at);
+    return out.concat(stale.slice(0, STALE_PER_PASS));
+  }
+
   async function syncNow() {
     if (live.busy) { live.again = true; return; }
     if (!live.on || !trackedGroups().length) return;
@@ -2283,13 +2343,22 @@ RULES
         await waitFor(() => saved.loaded.tracking && saved.loaded.source && saved.loaded.legacyMeta && saved.loaded.legacyAnalysis
           && trackedGroups().every(t => saved.groups[t.groupId] && saved.groups[t.groupId].loaded.meta && saved.groups[t.groupId].loaded.analysis), 6000);
       }
-      const errors = [];
-      for (const t of trackedGroups()) {
+      const errors = [], held = [], read = [];
+      const queue = await groupsToRead();
+      for (let i = 0; i < queue.length; i++) {
+        const { t, sig } = queue[i];
         try {
           const raw = await readGroup(t);
           await analyze(raw);
           live.raws[t.groupId] = raw;
+          if (sig) live.groupSig[t.groupId] = sig;
+          read.push(t.groupId);
+          // a long first pass shows its progress every 10 groups
+          if (read.length % 10 === 0) applyLive();
         } catch (e) {
+          // the Claude app still says slow down after waiting: stop this pass
+          // and read this group and the rest on the next one
+          if (isRateLimit(e)) { held.push(...queue.slice(i).map(q => q.t)); break; }
           const inPhone = await phoneHasGroup(t.groupId);
           errors.push(`${t.groupName || 'a group'}: ${inPhone === false
             ? 'the linked phone isn\u2019t in this group, so it can\u2019t be read. Add that phone to the group, or stop tracking it in Groups and names'
@@ -2297,9 +2366,11 @@ RULES
         }
       }
       live.error = errors.length ? { message: errors.join('; ') } : null;
+      live.held = held.length;
+      if (held.length && !live.retryTimer) live.retryTimer = setTimeout(() => { live.retryTimer = null; syncNow(); }, 60000);
       live.lastSync = Date.now();
       applyLive();
-      for (const t of trackedGroups()) if (live.raws[t.groupId]) await persist(live.raws[t.groupId]);
+      for (const gid of read) if (live.raws[gid]) await persist(live.raws[gid]);
       await clearLegacy();
     } catch (e) {
       live.error = e; render();

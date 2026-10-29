@@ -75,7 +75,7 @@ const text = async (p, sel) => ((await p.textContent(sel)) || '').replace(/\s+/g
   const p = watch(await ctx.newPage());
   await p.goto(url + '?mode=laptop&v=1.0.3'); await p.evaluate(() => localStorage.clear()); await p.reload(); await p.waitForTimeout(1500);
   await p.click('#pick-all'); await p.waitForTimeout(150); await p.click('#pick-all'); await p.waitForTimeout(200);
-  await p.click('#pick-next'); await p.waitForTimeout(2500);
+  await p.click('#pick-next'); await p.waitForTimeout(6000);
   const side = () => p.$$eval('.addg', xs => xs.map(x => (x.classList.contains('done') ? '+' : '-') + x.innerText.split('\n')[0].trim()));
   check('without defaults, this phone is ticked as before', (await side()).filter(x => x.startsWith('+')).length === 24, (await side()).length);
   check('the group whose members fail shows a retry', (await text(p, '.add-foot')).includes('Try the 1 group that failed again'));
@@ -123,7 +123,7 @@ const text = async (p, sel) => ((await p.textContent(sel)) || '').replace(/\s+/g
   await p.reload(); await p.waitForTimeout(1500);
   await p.fill('#group-q', 'site 3'); await p.waitForTimeout(100);
   await p.click('#pick-all'); await p.waitForTimeout(150);
-  await p.click('#pick-next'); await p.waitForTimeout(1500);
+  await p.click('#pick-next'); await p.waitForTimeout(3000);
   check('remembered after reload', (await text(p, '.gchips')).replace(/×/g, '').trim() === 'Cherry' && st(await side(), 3).startsWith('+'), (await side()).join(' '));
 
   // an older WhatsApp Reader: member reads are spaced out
@@ -137,7 +137,7 @@ const text = async (p, sel) => ((await p.textContent(sel)) || '').replace(/\s+/g
   check('older reader: member reads at least 1.5 s apart', times.length === 3 && gaps.every(g => g >= 1400), gaps.join(', '));
 
   // tracking: members are read once, not on every update
-  await p.click('[data-action="add-groups"]'); await p.waitForTimeout(2500);
+  await p.click('[data-action="add-groups"]'); await p.waitForTimeout(6000);
   const n1 = (await p.evaluate(() => window.__calls)).filter(c => c.startsWith('get_group')).length;
   await p.click('#refresh'); await p.waitForTimeout(1500); await p.click('#refresh'); await p.waitForTimeout(1500);
   const n2 = (await p.evaluate(() => window.__calls)).filter(c => c.startsWith('get_group')).length;
