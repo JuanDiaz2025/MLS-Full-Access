@@ -38,12 +38,14 @@ const DEADLINES = {
   TEST_ONLY: true,
   // true: write to the log what it would send, send nothing
   DRY_RUN: true,
+  // names Juan uses that aren't on the address: nickname -> address
+  NICKNAMES: { thea: 'marie@twinhomebuyer.com' },
   // deadlines without a time zone are read in this one
   TIME_ZONE: 'America/Los_Angeles',
   // a DUE with a date but no time means this hour (17 = 5:00 PM)
   DEFAULT_DUE_HOUR: 17,
   // assignments older than this are left alone
-  LOOKBACK_DAYS: 14,
+  LOOKBACK_DAYS: 7,
   // the scorecard goes out at this hour, in TIME_ZONE, to SCORECARD_TO (blank: the assigner)
   SCORECARD_HOUR: 17,
   SCORECARD_TO: '',
@@ -75,12 +77,14 @@ function parseAssignmentLines(text) {
 // Owners named in an assignment, matched to the people the email went to.
 // "Cherry", "Cherry Ann", "cherry@x.com", "Cherry and Leo". Returns
 // { people: [{ email, name }], unknown: ['name not on the email'] }.
-function resolveOwners(ownerText, recipients) {
+function resolveOwners(ownerText, recipients, nicknames) {
   const people = [], unknown = [];
+  const nick = nicknames || {};
   String(ownerText).split(/\s*(?:,|&|\/|\band\b)\s*/i).map(s => s.trim()).filter(Boolean).forEach(word => {
     const w = word.toLowerCase().replace(/^@/, '');
     let hits;
-    if (w.indexOf('@') > 0) hits = recipients.filter(r => r.email === w);
+    if (nick[w]) hits = recipients.filter(r => r.email === String(nick[w]).toLowerCase());
+    else if (w.indexOf('@') > 0) hits = recipients.filter(r => r.email === w);
     else {
       const full = recipients.filter(r => (r.name || '').toLowerCase() === w);
       hits = full.length ? full : recipients.filter(r => {
@@ -89,10 +93,71 @@ function resolveOwners(ownerText, recipients) {
       });
     }
     if (hits.length === 1) { if (!people.some(p => p.email === hits[0].email)) people.push(hits[0]); }
-    else if (w.indexOf('@') > 0 && !hits.length) people.push({ email: w, name: '' });
+    else if (w.indexOf('@') > 0 && !hits.length && !nick[w]) people.push({ email: w, name: '' });
     else unknown.push(word);
   });
   return { people, unknown };
+}
+
+// ---- Juan's own style ----
+// Deadline phrases in some text: "due 3:30 PM today", "by 12:40 PM", "by Tue
+// Nov 3, 5:00 PM", "due today at 5:00 PM Pacific", "Reply DONE by 3:30 PM".
+// Not "send BLOCKED by 4:30 PM" (the cut-off for saying BLOCKED), not "by
+// then", and not "what's done by noon". -> [ms], in order.
+function deadlinePhrases(text, sentAt, cfg) {
+  const s = String(text || '').replace(/\b([ap])\.m\./gi, '$1m');
+  const re = /\b(due|by)\b\s+((?:(?!\b(?:by|due|blocked)\b)[^\n.;!?]){1,45})/gi;
+  const out = [];
+  let m;
+  while ((m = re.exec(s))) {
+    const before = s.slice(Math.max(0, m.index - 40), m.index).toLowerCase();
+    if (/blocked\W*(\w+\W*){0,2}$/.test(before)) continue;
+    if (/(what'?s|what is|be|been|get it|have it|got it)\s+done\s*$/.test(before)) continue;
+    const t = parseDue(m[2], sentAt, cfg);
+    if (t != null) out.push(t);
+  }
+  return out;
+}
+
+// Items that open with the people they're for: "1. Genesis: …", "2. Seth and
+// Thea: …", "Leo: …". An item runs to the next numbered line.
+function namedItems(text) {
+  const items = [];
+  let cur = null;
+  String(text || '').split(/\r?\n/).forEach(line => {
+    const m = /^\s*(?:\d+[.)]\s*)?([A-Za-z][A-Za-z .,&'-]{0,50}?)\s*:\s+(\S.*)$/.exec(line);
+    if (m) { cur = { who: m[1].trim(), text: m[2] }; items.push(cur); }
+    else if (/^\s*\d+[.)]\s/.test(line)) cur = null;
+    else if (cur) cur.text += '\n' + line;
+  });
+  return items;
+}
+
+const firstOf = a => (a.length ? a[0] : null);
+const stripTest = s => String(s || '').replace(/^\s*((re|fw|fwd)\s*:\s*)*test\b\s*:?\s*/i, '');
+
+// The assignments in one email from the assigner. In order of preference:
+// OWNER/DUE lines; items that open with names (each with its own "by"/"Due",
+// else the subject's); the subject's deadline for the people in To (only on
+// the email that starts the thread). -> [{ people, unknown, due, dueText, explicit }]
+function assignmentsIn(msg, starts, recipients, cfg) {
+  const text = newText(msg.text);
+  const explicit = parseAssignmentLines(text);
+  if (explicit.length) {
+    return explicit.map(l => Object.assign(resolveOwners(l.owner, recipients, cfg.NICKNAMES), { due: parseDue(l.due, msg.at, cfg), dueText: l.due, ownerText: l.owner, explicit: true }));
+  }
+  const subjectDue = starts ? firstOf(deadlinePhrases(stripTest(msg.subject), msg.at, cfg)) : null;
+  const items = namedItems(text).map(it => ({ it, r: resolveOwners(it.who, recipients, cfg.NICKNAMES) }))
+    .filter(x => x.r.people.length && !x.r.unknown.length);
+  if (items.length) {
+    return items.map(x => ({ people: x.r.people, unknown: [], due: firstOf(deadlinePhrases(x.it.text, msg.at, cfg)) || subjectDue }))
+      .filter(a => a.due != null);
+  }
+  if (subjectDue != null) {
+    const to = msg.to.filter(r => recipients.some(p => p.email === r.email));
+    if (to.length) return [{ people: to, unknown: [], due: subjectDue }];
+  }
+  return [];
 }
 
 // Minutes the time zone is ahead of UTC at that moment (Manila +480, California -420 or -480).
@@ -261,7 +326,7 @@ function dlGet(user, path) {
 // full. A thread is read again only when it changed.
 function assignmentThreads(user, cfg) {
   const cache = CacheService.getScriptCache();
-  const q = 'in:sent OWNER DUE newer_than:' + cfg.LOOKBACK_DAYS + 'd' + (cfg.TEST_ONLY ? ' subject:TEST' : '');
+  const q = 'in:sent newer_than:' + cfg.LOOKBACK_DAYS + 'd' + (cfg.TEST_ONLY ? ' subject:TEST' : '');
   const list = dlGet(user, '/threads?maxResults=100&q=' + encodeURIComponent(q)).threads || [];
   return list.map(t => {
     const ck = 'dl:' + user + ':' + t.id + ':' + t.historyId;
@@ -321,24 +386,39 @@ function deadlineState(cfg, now) {
   assignmentThreads(user, cfg).forEach(thread => {
     const msgs = thread.messages.filter(m => !m.chase && !m.reminder).sort((a, b) => a.at - b.at);
     const references = thread.messages.map(m => m.messageId).filter(Boolean);
+    // in this thread: owner -> their current assignment (a newer one replaces it)
+    const current = {};
     msgs.filter(m => m.from.email === user).forEach(am => {
       if (cfg.TEST_ONLY && !/^\s*((re|fw|fwd)\s*:\s*)*test\b/i.test(am.subject)) return;
       if (now - am.at > cfg.LOOKBACK_DAYS * DAY) return;
       const recipients = am.to.concat(am.cc).filter(r => r.email !== user && r.email.endsWith(domain));
-      parseAssignmentLines(newText(am.text)).forEach(line => {
-        const due = parseDue(line.due, am.at, cfg);
-        const owners = resolveOwners(line.owner, recipients);
-        const base = { assignedAt: am.at, subject: am.subject, thread: thread.id, messageId: am.messageId, references, fromName: am.from.name };
-        if (due == null || owners.unknown.length) {
-          rows.push(Object.assign({}, base, { owner: '', ownerName: line.owner, status: 'unclear', due: null, deliveredAt: null, late: false,
-            note: due == null ? 'couldn’t read the deadline “' + line.due + '”' : 'not on the email: ' + owners.unknown.join(', ') }));
-        }
+      const starts = am === msgs[0];
+      const found = assignmentsIn(am, starts, recipients, cfg);
+      const base = { assignedAt: am.at, subject: (msgs[0] || am).subject, thread: thread.id, messageId: am.messageId, references, fromName: am.from.name };
+      if (!found.length) {
+        // a later email from the assigner that names a new deadline changes it for the people it's to
+        if (starts) return;
+        const due = firstOf(deadlinePhrases(newText(am.text), am.at, cfg));
         if (due == null) return;
-        owners.people.forEach(owner => {
-          // their messages after the assignment: in the thread, and elsewhere with this subject
-          const inThread = msgs.filter(m => m.from.email === owner.email && m.at > am.at);
-          const chases = thread.messages.filter(m => m.chase && m.to.some(r => r.email === owner.email)).map(m => m.at);
-          rows.push(Object.assign({}, base, { owner: owner.email, ownerName: owner.name || nameFromAddress(owner.email), dueAsked: due, inThread, chases }));
+        am.to.forEach(r => (current[r.email] || []).forEach(x => { x.dueAsked = due; x.note = 'deadline changed ' + fmtDeadline(am.at, cfg); }));
+        return;
+      }
+      found.forEach(a => {
+        if (a.explicit && (a.due == null || a.unknown.length)) {
+          rows.push(Object.assign({}, base, { owner: '', ownerName: a.ownerText, status: 'unclear', due: null, deliveredAt: null, late: false,
+            note: a.due == null ? 'couldn’t read the deadline “' + a.dueText + '”' : 'not on the email: ' + a.unknown.join(', ') }));
+        }
+        if (a.due == null) return;
+        a.people.forEach(owner => {
+          const row = Object.assign({}, base, { owner: owner.email, ownerName: owner.name || nameFromAddress(owner.email), dueAsked: a.due, note: '',
+            // their messages after the assignment: in the thread, and elsewhere with this subject
+            inThread: msgs.filter(m => m.from.email === owner.email && m.at > am.at),
+            chases: thread.messages.filter(m => m.chase && m.to.some(r => r.email === owner.email)).map(m => m.at) });
+          // an assignment from a later email replaces the earlier ones; items in one email all stand
+          const prev = current[owner.email];
+          if (prev && prev[0].messageId !== am.messageId) prev.forEach(x => rows.splice(rows.indexOf(x), 1));
+          current[owner.email] = prev && prev[0].messageId === am.messageId ? prev.concat([row]) : [row];
+          rows.push(row);
         });
       });
     });
@@ -497,6 +577,6 @@ function removeDeadlineTrigger() {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = Object.assign(module.exports || {}, { DEADLINES, parseAssignmentLines, resolveOwners, parseDue, newText, readStatus, hasWork,
+  module.exports = Object.assign(module.exports || {}, { DEADLINES, parseAssignmentLines, resolveOwners, parseDue, deadlinePhrases, namedItems, assignmentsIn, newText, readStatus, hasWork,
     subjectKey, assess, scorecardText, fmtDeadline, zonedTime, readFull, ASSIGNMENT_HEADERS, MISS_HEADERS });
 }

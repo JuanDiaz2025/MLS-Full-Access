@@ -168,4 +168,26 @@ check('missed today: Tin', /MISSED TODAY\n- Tin: TEST Lockbox codes \(due Oct 30
 check('still open: Tin overdue, Mike blocked', /STILL OPEN\n- Mike: TEST Photos \(BLOCKED\)\n- Tin: TEST Lockbox codes \(overdue since Oct 30, 10:00 AM PT\)/.test(body) || /STILL OPEN\n- Tin: TEST Lockbox codes \(overdue since Oct 30, 10:00 AM PT\)\n- Mike: TEST Photos \(BLOCKED\)/.test(body));
 now += 15 * MIN; run();
 check('only one scorecard a day', mails.length === 1);
+
+// 6. a day of emails written Juan's way: subject deadlines, named items, Thea, a correction, an announcement
+const MARIE = 'marie@twinhomebuyer.com';
+now = Date.UTC(2026, 9, 31, 16, 0); // Sat Oct 31, 9:00 AM Pacific
+add('t6', { from: 'Seth Concepcion <' + SETH + '>', to: 'Leo <' + LEO + '>', subject: 'TEST Load the rules, due 10:00 AM today', at: now, sent: true,
+  text: "Leo,\n\nLoad these:\n1. Core values: We tell the truth.\n2. Probation rule: 3 misses in 30 days.\n\nReply DONE by 10:00 AM. If you can't, send BLOCKED by 9:30 AM.\n\nSeth" });
+add('t7', { from: 'Seth Concepcion <' + SETH + '>', to: 'Cherry Ann <' + CHERRY + '>, Mike <' + MIKE + '>, Marie <' + MARIE + '>', subject: 'TEST Madison: verdict by 11:40 AM', at: now, sent: true,
+  text: "Team,\n\n1. Cherry: send the disclosures by 10:15 AM. If you can't get them by then, send BLOCKED by 10:05 AM.\n\n2. Mike and Thea: run comps.\n- the ARV\nDue 11:40 AM.\n\nSeth" });
+add('t8', { from: 'Seth Concepcion <' + SETH + '>', to: 'Tin <' + TIN + '>', subject: 'TEST New build, working test by Tue Nov 3, 5:00 PM', at: now, sent: true, text: 'Tin,\n\nBuild it.\n\nSeth' });
+add('t8', { from: 'Seth Concepcion <' + SETH + '>', to: 'Tin <' + TIN + '>', subject: 'Re: TEST New build, working test by Tue Nov 3, 5:00 PM', at: now + 30 * MIN, sent: true,
+  text: "Tin,\n\nCorrection: the working test is due today at 10:30 AM Pacific. Send BLOCKED by 10:00 AM if you can't make it.\n\nSeth\n\nOn Sat, Oct 31, 2026 at 9:00 AM Seth Concepcion <seth@twinhomebuyer.com> wrote:\n> Build it." });
+add('t10', { from: 'Seth Concepcion <' + SETH + '>', to: 'Leo <' + LEO + '>, Tin <' + TIN + '>', subject: 'TEST Out 4:00-5:00 PM today', at: now, sent: true, text: "Team,\n\nI'll be out. For anything urgent, go to Cherry.\n\nSeth" });
+now = Date.UTC(2026, 9, 31, 18, 45); // 11:45 AM Pacific
+const b6 = sentMail.length;
+run();
+const chased6 = sentMail.slice(b6).map(m => m.To + ' ' + /The deadline was (.*?)\./.exec(m.text)[1]).sort();
+check('Juan’s way: everyone who missed is chased, at their own deadline', JSON.stringify(chased6) === JSON.stringify([
+  'cherry@twinhomebuyer.com Oct 31, 10:15 AM PT', 'leo@twinhomebuyer.com Oct 31, 10:00 AM PT', 'marie@twinhomebuyer.com Oct 31, 11:40 AM PT',
+  'mike@twinhomebuyer.com Oct 31, 11:40 AM PT', 'tin@twinhomebuyer.com Oct 31, 10:30 AM PT']), chased6.join(' | '));
+check('Thea is Marie', tabs.Assignments.some(r => r[2] === MARIE && r[1] === 'TEST Madison: verdict by 11:40 AM'));
+check('the correction moved Tin’s deadline', rowOf(TIN, 'TEST New build, working test by Tue Nov 3, 5:00 PM')[4] === new Date(Date.UTC(2026, 9, 31, 17, 30)).toISOString());
+check('the announcement is not an assignment', !tabs.Assignments.some(r => /Out 4:00/.test(r[1])));
 console.log(process.exitCode ? 'FAILED' : 'all checks passed');

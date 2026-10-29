@@ -88,7 +88,13 @@ To stop it, run **removeTrigger**. To watch someone else's sent emails too, add 
 
 A second file in the same Apps Script project. Every 15 minutes it reads the assignments the assigner sends and every reply to them, chases missed deadlines, logs every miss, and emails a 5:00 PM Pacific scorecard. It uses the same service account, with two more permissions the admin added on Oct 29: `gmail.readonly` (to read what replies say and see attachments) and `gmail.send` (to send the chase as the assigner).
 
-**An assignment** is an email from the assigner with a line like `OWNER: Cherry · DUE: Oct 30, 5 PM PT` (OWNER and DUE in either order; one line per assignment; several owners as `Cherry and Leo`). Owners are matched to the people on the email by name or address; a name that isn't on the email, or a DUE it can't read, is listed in the scorecard under "NOT READ" and never chased. DUE understands `Oct 30, 5 PM PT`, `10/30 17:00`, `tomorrow noon`, `Friday EOD`, `3 PM` (today, or tomorrow if that time had passed), `Manila`; with no time it means 5:00 PM.
+**An assignment** is read the way Juan writes (checked against his emails of Oct 26 to 29):
+- a deadline in the **subject** of the email that starts the thread ("…, due 3:30 PM today", "… by 12:40 PM", "…, working test by Tue Nov 3, 5:00 PM"), for the people in **To** (CC is not an owner);
+- **items that open with names**, numbered or not ("1. Genesis: … by 12:15 PM", "2. Seth and Thea: … Due 12:40 PM"), each with its own "by"/"Due", else the subject's; names come from the people on the email, plus `NICKNAMES` (Thea is Marie);
+- a **later email from the assigner** in the thread that names a deadline ("Correction: … due today at 5:00 PM") changes it for the people it's to;
+- not deadlines: "send BLOCKED by 4:30 PM" (the cut-off for BLOCKED), "by then", "what's done by noon", and emails with no "due"/"by" time (announcements, praise, rules).
+
+An explicit line like `OWNER: Cherry · DUE: Oct 30, 5 PM PT` always wins (OWNER and DUE in either order; one line per assignment; several owners as `Cherry and Leo`). Owners are matched to the people on the email by name or address; a name that isn't on the email, or a DUE it can't read, is listed in the scorecard under "NOT READ" and never chased. DUE understands `Oct 30, 5 PM PT`, `10/30 17:00`, `tomorrow noon`, `Friday EOD`, `3 PM` (today, or tomorrow if that time had passed), `Manila`; with no time it means 5:00 PM.
 
 **Where it stands**, from the owner's messages after the assignment:
 - **Delivered:** a reply that says DONE (at the start of a line), or has an attachment, or a link to Docs / Drive / Dropbox / OneDrive / Box / Loom / Canva / Figma / WeTransfer. A signature's logo and website don't count. An email the owner sent elsewhere counts too, when its subject contains the assignment's subject (Re:/Fwd:/TEST ignored).

@@ -84,4 +84,30 @@ const card = D.scorecardText([
 assert.strictEqual(card, ['DELIVERED TODAY\n- Cherry Ann: TEST Fence quote (on time)', 'MISSED TODAY\n- Leo: TEST Fence quote (due Oct 29, 3:00 PM PT)',
   'STILL OPEN\n- Leo: TEST Fence quote (overdue since Oct 29, 3:00 PM PT)\n- Mike: TEST Permit (BLOCKED)', 'NOT READ (fix the OWNER or DUE line)\n- TEST Lockbox: not on the email: Bob'].join('\n\n'));
 console.log('6 scorecard');
+
+// 7. Juan's own style
+const sent3 = PT(2026, 10, 29, 11, 46);
+const dp = t => D.deadlinePhrases(t, sent3, cfg).map(iso);
+same(dp('URGENT: Load core values + SOPs into the Team Hub, due 3:30 PM today'), [iso(PT(2026, 10, 29, 15, 30))]);
+same(dp('364 Madison: disclosures, 3R and value verdict by 12:40 PM'), [iso(PT(2026, 10, 29, 12, 40))]);
+same(dp('New build: automatic deadline watcher, working test by Tue Nov 3, 5:00 PM'), [iso(PT(2026, 11, 3, 17))]);
+same(dp("Today: what are you working on, and what's done by noon?"), [], 'what’s done by noon is not a deadline');
+same(dp("Forward them by 12:15 PM. If you can't get them by then, send BLOCKED by 12:05 PM."), [iso(PT(2026, 10, 29, 12, 15))], 'BLOCKED cut-off and "by then" skipped');
+same(dp("Reply DONE by 3:30 PM Pacific with a typed list. If you can't, send BLOCKED by 3:00 PM with the reason."), [iso(PT(2026, 10, 29, 15, 30))]);
+same(dp("A working test is due today at 5:00 PM Pacific. Send BLOCKED by 4:30 PM if you can't make it."), [iso(PT(2026, 10, 29, 17))]);
+same(dp('Out 4:00-5:00 PM today'), [], 'an announcement has no deadline');
+const RJ = [{ email: 'genesis@twinhomebuyer.com', name: 'Genesis' }, { email: 'seth@twinhomebuyer.com', name: 'Seth Concepcion' }, { email: 'marie@twinhomebuyer.com', name: 'Marie' }, { email: 'cherry@twinhomebuyer.com', name: 'Cherry' }];
+const madison = { at: sent3, subject: '364 Madison: disclosures, 3R and value verdict by 12:40 PM', to: RJ.slice(0, 3), text: [
+  'Team,', '', 'He needs three things within the hour (Pacific Time).', '',
+  "1. Genesis: get the full disclosure package and the 3R report. Forward them by 12:15 PM. If you can't get them by then, send BLOCKED by 12:05 PM.", '',
+  '2. Seth and Thea: run comps using the 7-step method. Bring:', '- the ARV', '- a THUMBS UP or THUMBS DOWN', 'Due 12:40 PM.', '',
+  '3. Genesis: compare the 3R report against the house. Due 12:40 PM.', '', 'Send everything as typed text.', '', 'Juan'].join('\n') };
+same(D.assignmentsIn(madison, true, RJ, cfg).map(a => a.people.map(p => p.email.split('@')[0]).join('+') + ' ' + iso(a.due)),
+  ['genesis ' + iso(PT(2026, 10, 29, 12, 15)), 'seth+marie ' + iso(PT(2026, 10, 29, 12, 40)), 'genesis ' + iso(PT(2026, 10, 29, 12, 40))], 'numbered items, Thea is Marie');
+const hub = { at: sent3, subject: 'URGENT: Load core values + SOPs into the Team Hub, due 3:30 PM today', to: [RJ[1]],
+  text: "Seth,\n\nLoad the following:\n\n1. Core values: We tell the truth.\n2. Probation rule: 3 misses in 30 days.\n\nReply DONE by 3:30 PM Pacific. If you can't, send BLOCKED by 3:00 PM.\n\nJuan" };
+same(D.assignmentsIn(hub, true, RJ, cfg).map(a => a.people.map(p => p.email).join() + ' ' + iso(a.due)), ['seth@twinhomebuyer.com ' + iso(PT(2026, 10, 29, 15, 30))], 'items that aren’t people: the subject’s deadline, for To');
+same(D.assignmentsIn({ ...hub, subject: 'Speed to lead: great job, Thea', text: 'Team,\n\nThea answered within seconds.\n\nJuan' }, true, RJ, cfg), [], 'praise is not an assignment');
+same(D.assignmentsIn(hub, false, RJ, cfg).length, 0, 'a reply’s subject is never read as a new deadline');
+console.log('7 Juan’s style');
 console.log('all checks passed');
