@@ -375,10 +375,15 @@ function parsePause(values) {
 
 // ---------------- Google: sign-in, Gmail API, sending ----------------
 
-// An access token for reading one mailbox's headers, from the service account.
-function tokenFor(user) {
+const SCOPE_METADATA = 'https://www.googleapis.com/auth/gmail.metadata';
+
+// An access token for one mailbox, from the service account: headers only by
+// default; the deadline agent also asks for gmail.readonly and gmail.send.
+function tokenFor(user, scope) {
+  scope = scope || SCOPE_METADATA;
   const cache = CacheService.getScriptCache();
-  const hit = cache.get('tok:' + user);
+  const ck = 'tok:' + (scope === SCOPE_METADATA ? '' : scope.split('/').pop() + ':') + user;
+  const hit = cache.get(ck);
   if (hit) return hit;
   const raw = PropertiesService.getScriptProperties().getProperty('SA_KEY');
   if (!raw) throw new Error('The service account key is missing. Add it under Project Settings > Script properties as SA_KEY.');
@@ -387,7 +392,7 @@ function tokenFor(user) {
   const b64 = s => Utilities.base64EncodeWebSafe(s).replace(/=+$/, '');
   const head = b64(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
   const claim = b64(JSON.stringify({
-    iss: key.client_email, sub: user, scope: 'https://www.googleapis.com/auth/gmail.metadata',
+    iss: key.client_email, sub: user, scope,
     aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600,
   }));
   const sig = b64(Utilities.computeRsaSha256Signature(head + '.' + claim, key.private_key));
@@ -398,16 +403,16 @@ function tokenFor(user) {
   const out = JSON.parse(res.getContentText());
   if (!out.access_token) {
     throw new Error('Google refused the sign-in for ' + user + ': ' + (out.error_description || out.error || res.getResponseCode())
-      + '. Check that the admin approved the service account for the gmail.metadata scope.');
+      + '. Check that the admin approved the service account for the ' + scope.split('/').pop() + ' scope.');
   }
-  cache.put('tok:' + user, out.access_token, 3300);
+  cache.put(ck, out.access_token, 3300);
   return out.access_token;
 }
 
-function gmailGet(user, path) {
+function gmailGet(user, path, scope) {
   const url = 'https://gmail.googleapis.com/gmail/v1/users/' + encodeURIComponent(user) + path;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const res = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + tokenFor(user) }, muteHttpExceptions: true });
+    const res = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + tokenFor(user, scope) }, muteHttpExceptions: true });
     const code = res.getResponseCode();
     if (code === 200) return JSON.parse(res.getContentText());
     if (code === 429 || code >= 500) { Utilities.sleep(2000 * (attempt + 1)); continue; }
