@@ -55,6 +55,8 @@ same(['DONE', 'Date: Nov 2 3 PM', 'blocked: waiting on the permit', 'Here it is'
 assert.ok(D.hasWork({ attachments: ['quote.pdf'], text: '' }) && D.hasWork({ attachments: [], text: 'here https://docs.google.com/spreadsheets/d/abc' }));
 assert.ok(!D.hasWork({ attachments: [], text: 'Regards\nhttps://www.twinhomebuyer.com' }), 'a signature link is not work');
 same([D.subjectKey('Re: TEST Fence quote'), D.subjectKey('FW: re: Fence  Quote')], ['fence quote', 'fence quote']);
+same(['TEST Comps check, due 4:00 PM today', '364 Madison: disclosures, 3R and value verdict by 12:40 PM', 'New build: automatic deadline watcher, working test by Tue Nov 3, 5:00 PM', 'Paid by card', 'Due diligence checklist']
+  .map(D.subjectKey), ['comps check', '364 madison: disclosures, 3r and value verdict', 'new build: automatic deadline watcher, working test', 'paid by card', 'due diligence checklist'], 'the deadline at the end is not part of the subject');
 console.log('4 replies');
 
 // 5. where an assignment stands

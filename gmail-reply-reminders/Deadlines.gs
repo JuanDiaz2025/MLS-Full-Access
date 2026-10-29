@@ -239,8 +239,12 @@ function readStatus(text, sentAt, cfg) {
 const WORK_LINK = /https?:\/\/(docs\.google|drive\.google|sheets\.google|photos\.app\.goo\.gl|photos\.google|[\w.-]*dropbox\.com|1drv\.ms|[\w.-]*sharepoint\.com|onedrive\.live|[\w.-]*box\.com|[\w.-]*loom\.com|[\w.-]*canva\.com|[\w.-]*figma\.com|we\.tl|[\w.-]*wetransfer\.com)/i;
 const hasWork = m => (m.attachments || []).length > 0 || WORK_LINK.test(m.text || '');
 
-// Normalized subject for matching: no Re:/Fwd:, no TEST, lower case, single spaces.
-const subjectKey = s => String(s || '').replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, '').replace(/^\s*test\b\s*:?\s*/i, '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Normalized subject for matching work sent in another email: no Re:/Fwd:,
+// no TEST, and no deadline at the end ("Comps check, due 4:00 PM today" and
+// "Comps check" match), lower case, single spaces.
+const DEADLINE_TAIL = /[\s,:;-]*\b(due|by)\b(?=[^]*?(\d|\b(today|tomorrow|tonight|noon|eod|mon|tue|wed|thu|fri|sat|sun)))[^]*$/i;
+const subjectKey = s => String(s || '').replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, '').replace(/^\s*test\b\s*:?\s*/i, '')
+  .replace(DEADLINE_TAIL, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 // Where one assignment stands. a: { due, sentAt, subject }. msgs: the owner's
 // messages after the assignment, in its thread and elsewhere with a matching
@@ -461,7 +465,7 @@ function deadlineState(cfg, now) {
     if (a.status !== 'delivered' && now > r.dueAsked - DAY) {
       if (otherMail[r.owner] == null) otherMail[r.owner] = ownerMailSince(user, r.owner, Math.min.apply(null, rows.filter(x => x.owner === r.owner && x.assignedAt).map(x => x.assignedAt)));
       const sk = subjectKey(r.subject);
-      const elsewhere = otherMail[r.owner].filter(m => m.at > r.assignedAt && m.thread !== r.thread && sk && subjectKey(m.subject).indexOf(sk) >= 0);
+      const elsewhere = otherMail[r.owner].filter(m => m.at > r.assignedAt && m.thread !== r.thread && sk.length >= 6 && subjectKey(m.subject).indexOf(sk) >= 0);
       if (elsewhere.length) a = assess({ due: r.dueAsked }, r.inThread.concat(elsewhere), r.chases, now, cfg);
     }
     Object.assign(r, a);

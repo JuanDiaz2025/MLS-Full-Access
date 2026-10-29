@@ -191,4 +191,9 @@ check('Juan’s way: everyone who missed is chased, at their own deadline', JSON
 check('Thea is Marie', tabs.Assignments.some(r => r[2] === MARIE && r[1] === 'TEST Madison: verdict by 11:40 AM'));
 check('the correction moved Tin’s deadline', rowOf(TIN, 'TEST New build, working test by Tue Nov 3, 5:00 PM')[4] === new Date(Date.UTC(2026, 9, 31, 17, 30)).toISOString());
 check('the announcement is not an assignment', !tabs.Assignments.some(r => /Out 4:00/.test(r[1])));
+// 7. Leo answers a day later in a new email titled without the deadline
+now = Date.UTC(2026, 10, 1, 17, 0);
+add('t11', { from: 'Leo <' + LEO + '>', to: SETH, subject: 'Load the rules', at: now - 10 * MIN, text: 'Sorry, here they are.', attachments: ['rules.pdf'] });
+run();
+check('work sent the next day in a new email still counts, as late', rowOf(LEO, 'TEST Load the rules, due 10:00 AM today')[5] === 'delivered' && rowOf(LEO, 'TEST Load the rules, due 10:00 AM today')[8] === 'late');
 console.log(process.exitCode ? 'FAILED' : 'all checks passed');
