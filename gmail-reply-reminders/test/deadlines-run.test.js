@@ -196,4 +196,19 @@ now = Date.UTC(2026, 10, 1, 17, 0);
 add('t11', { from: 'Leo <' + LEO + '>', to: SETH, subject: 'Load the rules', at: now - 10 * MIN, text: 'Sorry, here they are.', attachments: ['rules.pdf'] });
 run();
 check('work sent the next day in a new email still counts, as late', rowOf(LEO, 'TEST Load the rules, due 10:00 AM today')[5] === 'delivered' && rowOf(LEO, 'TEST Load the rules, due 10:00 AM today')[8] === 'late');
+// 8. called off in the thread, and a new ask in a reply's body
+now = Date.UTC(2026, 10, 2, 16, 0); // Mon Nov 2, 8:00 AM Pacific
+add('t12', { from: 'Seth Concepcion <' + SETH + '>', to: 'Mike <' + MIKE + '>', subject: 'TEST Directory tab today by 10:00 AM', at: now, sent: true,
+  text: 'Mike,\n\nAdd the Directory tab. Reply DONE with a screenshot by 10:00 AM Pacific today, or BLOCKED.\n\nSeth' });
+add('t12', { from: 'Seth Concepcion <' + SETH + '>', to: 'Mike <' + MIKE + '>', subject: 'Re: TEST Directory tab today by 10:00 AM', at: now + 5 * MIN, sent: true,
+  text: 'Mike, skip this one. The tab is already there. Nothing needed from you on it.\n\nSeth' });
+add('t13', { from: 'Seth Concepcion <' + SETH + '>', to: 'Tin <' + TIN + '>', subject: 'TEST Fence photos', at: now, sent: true, text: 'Tin,\n\nThanks for the quote.\n\nSeth' });
+add('t13', { from: 'Seth Concepcion <' + SETH + '>', to: 'Tin <' + TIN + '>', subject: 'Re: TEST Fence photos', at: now + 10 * MIN, sent: true,
+  text: 'Tin,\n\nStill open: the fence photos. Resend within 30 minutes.\n\nSeth' });
+now = Date.UTC(2026, 10, 2, 18, 5); // 10:05 AM Pacific
+const b8 = sentMail.length;
+run();
+const chased8 = sentMail.slice(b8).map(m => m.To + ' ' + /The deadline was (.*?)\./.exec(m.text)[1]);
+check('called off: no row, no chase', !tabs.Assignments.some(r => /Directory tab/.test(r[1])) && !chased8.some(c => c.startsWith(MIKE)), chased8.join(' | '));
+check('a new ask in a reply’s body is chased at its own time', JSON.stringify(chased8) === JSON.stringify([TIN + ' Nov 2, 8:40 AM PT']), chased8.join(' | '));
 console.log(process.exitCode ? 'FAILED' : 'all checks passed');

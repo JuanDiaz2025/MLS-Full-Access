@@ -2,11 +2,16 @@
  * Deadline agent
  *
  * Every 15 minutes it reads the assignments Juan sends and every reply to
- * them. An assignment is an email Juan sent with a line like
+ * them. An assignment is an email Juan sent that gives someone on it a
+ * deadline, the way he writes them ("Bryan, … Reply DONE by 3:30 PM", "1.
+ * Genesis: … by 12:15 PM", "Resend within 15 minutes"), or a line like
  *
  *   OWNER: Cherry · DUE: Oct 30, 5 PM PT
  *
- * (several such lines in one email are several assignments). When a deadline
+ * (several such lines in one email are several assignments). A later email
+ * from Juan in the thread can change the deadline or call the ask off
+ * ("skip this one", "no action needed"). It is plain rules, with no AI
+ * service, so it costs nothing to run. When a deadline
  * passes without DONE, DATE or BLOCKED from the owner, it emails the owner in
  * that thread, as Juan: "The deadline was X. Send it now, plus one line on
  * why you missed it." It never grants extra time. Every miss is logged by
@@ -39,7 +44,14 @@ const DEADLINES = {
   // true: write to the log what it would send, send nothing
   DRY_RUN: true,
   // names Juan uses that aren't on the address: nickname -> address
-  NICKNAMES: { thea: 'marie@twinhomebuyer.com' },
+  NICKNAMES: {
+    thea: 'marie@twinhomebuyer.com', jonathan: 'rosanes@twinhomebuyer.com', jon: 'rosanes@twinhomebuyer.com',
+    kristine: 'accounting@twinhomebuyer.com', 'christine accounting': 'accounting@twinhomebuyer.com',
+    'christine seo': 'christinejoy@twinhomebuyer.com', 'christine (marketing)': 'christinejoy@twinhomebuyer.com',
+    // whichever of the two is on the email
+    christine: ['accounting@twinhomebuyer.com', 'christinejoy@twinhomebuyer.com'],
+    leo: 'leojessie@twinhomebuyer.com', gian: 'gianllagas@twinhomebuyer.com', john: 'johndecena@twinhomebuyer.com', ian: 'ianjake@twinhomebuyer.com',
+  },
   // deadlines without a time zone are read in this one
   TIME_ZONE: 'America/Los_Angeles',
   // a DUE with a date but no time means this hour (17 = 5:00 PM)
@@ -75,17 +87,17 @@ function parseAssignmentLines(text) {
 }
 
 // Owners named in an assignment, matched to the people the email went to.
-// "Cherry", "Cherry Ann", "cherry@x.com", "Cherry and Leo". Returns
-// { people: [{ email, name }], unknown: ['name not on the email'] }.
+// "Cherry", "Cherry Ann", "cherry@x.com", "Cherry and Leo", and NICKNAMES
+// (Thea is marie@; Christine is accounting@ or christinejoy@, whichever is on
+// the email). Returns { people: [{ email, name }], unknown: ['name not on the email'] }.
 function resolveOwners(ownerText, recipients, nicknames) {
   const people = [], unknown = [];
   const nick = nicknames || {};
   String(ownerText).split(/\s*(?:,|&|\/|\band\b)\s*/i).map(s => s.trim()).filter(Boolean).forEach(word => {
-    const w = word.toLowerCase().replace(/^@/, '');
-    let hits;
-    if (nick[w]) hits = recipients.filter(r => r.email === String(nick[w]).toLowerCase());
-    else if (w.indexOf('@') > 0) hits = recipients.filter(r => r.email === w);
-    else {
+    const w = word.toLowerCase().replace(/^@/, '').replace(/['’]s$/, '');
+    let hits = nick[w] ? recipients.filter(r => [].concat(nick[w]).map(x => String(x).toLowerCase()).indexOf(r.email) >= 0) : [];
+    if (!hits.length && w.indexOf('@') > 0) hits = recipients.filter(r => r.email === w);
+    else if (!hits.length) {
       const full = recipients.filter(r => (r.name || '').toLowerCase() === w);
       hits = full.length ? full : recipients.filter(r => {
         const first = (r.name || '').toLowerCase().split(/\s+/)[0];
@@ -100,64 +112,186 @@ function resolveOwners(ownerText, recipients, nicknames) {
 }
 
 // ---- Juan's own style ----
-// Deadline phrases in some text: "due 3:30 PM today", "by 12:40 PM", "by Tue
-// Nov 3, 5:00 PM", "due today at 5:00 PM Pacific", "Reply DONE by 3:30 PM".
-// Not "send BLOCKED by 4:30 PM" (the cut-off for saying BLOCKED), not "by
-// then", and not "what's done by noon". -> [ms], in order.
-function deadlinePhrases(text, sentAt, cfg) {
+// Deadline phrases in one sentence: "by 3:30 PM", "due today, 1:00 PM",
+// "Due: Fri Nov 6, 12:00 PM", "before 4:45 PM", "the deadline is 12:00 PM",
+// "DEADLINE: Today, October 28", "within 15 minutes", "within the hour". The
+// date or time comes right after the word. Skipped: the cut-off
+// for BLOCKED ("send BLOCKED by 12:30"; "DONE or BLOCKED by 2 PM" counts),
+// "what's done by noon", "not by noon", "by then", and anything already past
+// when the email was sent. A time alone that had passed is read on laterDay
+// ({ y, mo, d }), the later day the email is about, when there is one
+// ("Darlyn: your list (due 12:00 PM)" in an email about Friday). -> [ms], in order.
+function deadlinePhrases(text, sentAt, cfg, laterDay) {
   const s = String(text || '').replace(/\b([ap])\.m\./gi, '$1m');
-  const re = /\b(due|by)\b\s+((?:(?!\b(?:by|due|blocked)\b)[^\n.;!?]){1,45})/gi;
+  const re = /\b(due|by|before|deadline(?:\s+is)?)\b\s*:?\s*((?:(?!\b(?:by|due|blocked|not|or|if|unless)\b)[^\n.;!?]){1,45})|\bwithin\s+(?:the\s+next\s+)?(\d+)\s*(minutes?|mins?|hours?|hrs?)\b|\bwithin (?:the|an) hour\b/gi;
   const out = [];
   let m;
   while ((m = re.exec(s))) {
+    // carry on right after the word, so "due within 30 minutes" still finds "within"
+    if (m[1]) re.lastIndex = m.index + m[1].length;
     const before = s.slice(Math.max(0, m.index - 40), m.index).toLowerCase();
-    if (/blocked\W*(\w+\W*){0,2}$/.test(before)) continue;
+    if (/\bnot\s*["“']?\s*$/.test(before)) continue;
+    if (!m[1]) {
+      out.push(sentAt + (m[3] ? Number(m[3]) * (/^h/i.test(m[4]) ? 60 : 1) : 60) * 60000);
+      continue;
+    }
+    if (/blocked\W*(\w+\W*){0,2}$/.test(before) && !/\bdone\b[\s,/]*(or\s+)?(date[\s,/]*(or\s+)?)?blocked\W*$/.test(before)) continue;
     if (/(what'?s|what is|be|been|get it|have it|got it)\s+done\s*$/.test(before)) continue;
-    const t = parseDue(m[2], sentAt, cfg);
-    if (t != null) out.push(t);
+    // the time comes right after: "by AnyDesk, … at 1:20 PM" is not a deadline
+    if (!/^(the\s+|at\s+|on\s+)?(\d|noon|eod|cob|close of|end of|today|tonight|tomorrow|(mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)/i.test(m[2])) continue;
+    const p = dueParts(m[2], sentAt, cfg);
+    if (!p) continue;
+    let t = zonedTime(p.y, p.mo, p.d, p.h, p.mi, p.tz);
+    if (t <= sentAt) {
+      if (p.hasDate || !laterDay) continue;
+      t = zonedTime(laterDay.y, laterDay.mo, laterDay.d, p.h, p.mi, p.tz);
+    }
+    out.push(t);
   }
   return out;
 }
 
-// Items that open with the people they're for: "1. Genesis: …", "2. Seth and
-// Thea: …", "Leo: …". An item runs to the next numbered line.
-function namedItems(text) {
-  const items = [];
-  let cur = null;
-  String(text || '').split(/\r?\n/).forEach(line => {
-    const m = /^\s*(?:\d+[.)]\s*)?([A-Za-z][A-Za-z .,&'-]{0,50}?)\s*:\s+(\S.*)$/.exec(line);
-    if (m) { cur = { who: m[1].trim(), text: m[2] }; items.push(cur); }
-    else if (/^\s*\d+[.)]\s/.test(line)) cur = null;
-    else if (cur) cur.text += '\n' + line;
-  });
-  return items;
+// The first day after the sent day the email names ("Tomorrow, Fri Oct 30",
+// "Friday", "11/2"), or null.
+function laterDayIn(text, sentAt, cfg) {
+  const re = new RegExp('\\b(tomorrow|(' + MONTHS.join('|') + ')[a-z]*\\.?\\s+\\d{1,2}|\\d{1,2}\\/\\d{1,2}|' + Object.keys(WEEKDAY_WORDS).join('|') + ')\\b', 'gi');
+  const today = dueParts('today', sentAt, cfg);
+  let m;
+  while ((m = re.exec(String(text || '')))) {
+    const p = dueParts(m[1], sentAt, cfg);
+    if (p && Date.UTC(p.y, p.mo, p.d) > Date.UTC(today.y, today.mo, today.d)) return { y: p.y, mo: p.mo, d: p.d };
+  }
+  return null;
 }
 
 const firstOf = a => (a.length ? a[0] : null);
 const stripTest = s => String(s || '').replace(/^\s*((re|fw|fwd)\s*:\s*)*test\b\s*:?\s*/i, '');
+// asks for whoever answers first: nobody in particular owes them
+const ANYONE_RE = /\bwhoever (sees|reads|gets)\b|\bfirst (person|one) to (reply|respond|answer)\b/i;
+// the email calls the ask off
+const CANCEL_RE = /\b(no action (is )?needed|nothing (else )?(is )?needed|disregard (my|this|that|both|these|those|the)\b|scratch (my|that|this)\b|skip this one|never ?mind\b|no new deadline)/i;
+// a sentence about a deadline that has gone ("were due 1:00 PM", "The deadline was 1:00 PM", "I asked for it by 11:00 AM")
+const PAST_RE = /\b(was|were|had been)\s+(due|missed)\b|\bdeadline was\b|\balready passed\b|\bcame (in )?at\b|\bnothing received\b|\b(i|we) (asked|said|told|wanted|requested|needed)\b/i;
+// what Juan says he or the company will do ("the fix will be up by 9:30")
+const SELF_RE = /\b(i|we)\s*(?:'ll|’ll|\swill|'m going to|’m going to|\sam going to)\b|\bwill be (up|live|ready|running|done|fixed)\b/i;
+// "Team," "Good morning, everyone,"
+const EVERYONE_RE = /^(?:(?:hi|hello|hey|dear|good (?:morning|afternoon|evening))\b[ ,]*)?(?:team|everyone|everybody|all)?\s*[,:!]?$/i;
+// "Both of you: reply DONE by 1 PM"
+const GROUP_RE = /^(?:both|each|all) of you\b|^everyone\b|^you (?:two|both|all)\b/i;
+const NAMES = "[A-Z][A-Za-z'’]*(?:\\s+[A-Z][A-Za-z'’]+)?";
+// "Bryan, …", "Bryan, Seth, …", "Kristine and Thea, …"
+const VOCATIVE_RE = new RegExp('^((?:' + NAMES + ')(?:\\s*(?:,|\\band\\b|&)\\s*' + NAMES + ')*)\\s*,\\s+\\S');
 
-// The assignments in one email from the assigner. In order of preference:
-// OWNER/DUE lines; items that open with names (each with its own "by"/"Due",
-// else the subject's); the subject's deadline for the people in To (only on
-// the email that starts the thread). -> [{ people, unknown, due, dueText, explicit }]
-function assignmentsIn(msg, starts, recipients, cfg) {
-  const text = newText(msg.text);
-  const explicit = parseAssignmentLines(text);
+// Juan's email minus what it quotes or forwards, and minus long quoted text
+// (prompts to copy are examples, not asks).
+function bodyText(text) {
+  return newText(text).split(/\n-{2,}\s*Forwarded message\s*-{2,}|\n-{10,}/i)[0]
+    .replace(/["“][^"”]{40,}["”]/g, '""').replace(/\r/g, '');
+}
+
+// The people some words name, all of them on the email, or null.
+function namedPeople(words, recipients, cfg) {
+  const r = resolveOwners(String(words).replace(/^\s*(hi|hello|hey|dear)\s+/i, ''), recipients, cfg.NICKNAMES);
+  return r.people.length && !r.unknown.length ? r.people : null;
+}
+
+// The people a sentence opens with: "Bryan, hand Lawrence …", "Bryan by 3:00
+// PM", "Christine's full list by …", "Both of you: …". null when none.
+function sentenceOwners(sentence, recipients, cfg, everyoneNamed) {
+  if (GROUP_RE.test(sentence)) return everyoneNamed;
+  const v = VOCATIVE_RE.exec(sentence);
+  if (v) { const p = namedPeople(v[1], recipients, cfg); if (p) return p; }
+  const w = /^([A-Z][a-z'’]+)(\s+[A-Z][a-z]+)?(?:['’]s)?\b/.exec(sentence);
+  if (!w) return null;
+  return (w[2] && namedPeople(w[1] + w[2], recipients, cfg)) || namedPeople(w[1], recipients, cfg);
+}
+
+// One paragraph as items: a numbered or bulleted line starts one, other lines
+// carry on the one before. An item may open with names ("Darlyn: …",
+// "- Lawrence: …", "JONATHAN AND CHERRY: …"); a bullet under a numbered item
+// that does belongs to the same people, and so does everything under a line
+// that is only names ("Kristine:").
+function itemsOf(paragraph, recipients, cfg) {
+  const items = [];
+  let cur = null, top = null, lead = null;
+  paragraph.split('\n').forEach(line => {
+    const num = /^\s*\d+[.)]\s+/.test(line), bullet = /^\s*[-•*]\s+/.test(line);
+    const alone = /^\s*([A-Za-z][A-Za-z .,&'’-]{0,50}?)\s*:\s*$/.exec(line);
+    const leadPeople = alone && namedPeople(alone[1], recipients, cfg);
+    if (leadPeople) { lead = leadPeople; cur = top = null; return; }
+    if (cur && !num && !bullet) { cur.text += ' ' + line.trim(); return; }
+    cur = { text: line.replace(/^\s*(\d+[.)]|[-•*])\s+/, '').trim(), owners: null };
+    const label = /^([A-Za-z][A-Za-z .,&'’-]{0,50}?)\s*:\s+(\S[\s\S]*)$/.exec(cur.text);
+    const people = label && namedPeople(label[1], recipients, cfg);
+    if (people) { cur.owners = people; cur.text = label[2]; }
+    if (num || !bullet) top = cur;
+    else if (!people && top && top.owners) cur.owners = top.owners;
+    if (!cur.owners) cur.owners = lead;
+    items.push(cur);
+  });
+  return items;
+}
+
+const sentencesOf = text => String(text).split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9])/);
+
+// The assignments in one email from the assigner, and whose earlier asks it
+// calls off. In order of preference: OWNER/DUE lines; otherwise read the way
+// Juan writes. The people come from the greeting ("Bryan," "Bryan, Seth,"
+// "Team,"), a header paragraph ("BRYAN", "Christine,"), an item that opens
+// with names, or a sentence that does; "Both of you" is everyone the email
+// names. Each person's earliest deadline in the email counts. The subject's
+// deadline is used for the greeting's people only on the email that starts
+// the thread, and only when the body gives them none. Not read: asks to
+// whoever sees it first, deadlines in the past tense, and what Juan says he
+// will do. -> { found: [{ people, unknown, due, dueText, explicit }], cancel: [people] }
+function readAssignerEmail(msg, starts, recipients, cfg) {
+  const explicit = parseAssignmentLines(newText(msg.text));
   if (explicit.length) {
-    return explicit.map(l => Object.assign(resolveOwners(l.owner, recipients, cfg.NICKNAMES), { due: parseDue(l.due, msg.at, cfg), dueText: l.due, ownerText: l.owner, explicit: true }));
+    return { cancel: [], found: explicit.map(l => Object.assign(resolveOwners(l.owner, recipients, cfg.NICKNAMES), { due: parseDue(l.due, msg.at, cfg), dueText: l.due, ownerText: l.owner, explicit: true })) };
   }
-  const subjectDue = starts ? firstOf(deadlinePhrases(stripTest(msg.subject), msg.at, cfg)) : null;
-  const items = namedItems(text).map(it => ({ it, r: resolveOwners(it.who, recipients, cfg.NICKNAMES) }))
-    .filter(x => x.r.people.length && !x.r.unknown.length);
-  if (items.length) {
-    return items.map(x => ({ people: x.r.people, unknown: [], due: firstOf(deadlinePhrases(x.it.text, msg.at, cfg)) || subjectDue }))
-      .filter(a => a.due != null);
-  }
-  if (subjectDue != null) {
-    const to = msg.to.filter(r => recipients.some(p => p.email === r.email));
-    if (to.length) return [{ people: to, unknown: [], due: subjectDue }];
-  }
-  return [];
+  const text = bodyText(msg.text);
+  const to = (msg.to || []).filter(r => recipients.some(p => p.email === r.email));
+  const paragraphs = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+  // the greeting
+  let greeting = to, first = 0;
+  const p0 = paragraphs[0] || '';
+  if (p0 && p0.indexOf('\n') < 0 && EVERYONE_RE.test(p0)) first = 1;
+  else if (p0 && p0.indexOf('\n') < 0 && p0.length <= 60 && namedPeople(p0.replace(/[,:]\s*$/, ''), recipients, cfg)) { greeting = namedPeople(p0.replace(/[,:]\s*$/, ''), recipients, cfg); first = 1; }
+  else { const v = VOCATIVE_RE.exec(p0); const p = v && namedPeople(v[1], recipients, cfg); if (p) greeting = p; }
+  const cancel = !starts && CANCEL_RE.test(text) ? greeting : [];
+  if (ANYONE_RE.test(text)) return { found: [], cancel };
+  // a paragraph that is only names starts a section for them: "BRYAN", "Christine,"
+  const header = p => (p.indexOf('\n') < 0 && p.length <= 60 && namedPeople(p.replace(/[,:]\s*$/, ''), recipients, cfg))
+    || (/^[A-Z]{2,}$/.test(p) ? [] : null);
+  const blocks = [];
+  let section = greeting;
+  paragraphs.slice(first).forEach(p => {
+    const h = header(p);
+    if (h) { section = h; return; }
+    itemsOf(p, recipients, cfg).forEach(it => sentencesOf(it.text).forEach(s => blocks.push({ s, owners: it.owners || section })));
+  });
+  const everyoneNamed = [];
+  const addAll = list => (list || []).forEach(x => { if (!everyoneNamed.some(y => y.email === x.email)) everyoneNamed.push(x); });
+  addAll(greeting);
+  blocks.forEach(b => { addAll(b.owners); const v = VOCATIVE_RE.exec(b.s); addAll(v && namedPeople(v[1], recipients, cfg)); });
+  const later = laterDayIn(msg.subject + '\n' + text, msg.at, cfg);
+  const due = {};
+  const add = (people, t) => people.forEach(p => { if (!due[p.email] || t < due[p.email].t) due[p.email] = { p, t }; });
+  blocks.forEach(b => {
+    if (PAST_RE.test(b.s)) return;
+    const owners = sentenceOwners(b.s, recipients, cfg, everyoneNamed) || b.owners;
+    if (SELF_RE.test(b.s.slice(0, Math.max(0, b.s.search(/\b(due|by|before|deadline|within)\b/i))))) return;
+    const ts = deadlinePhrases(b.s, msg.at, cfg, later);
+    if (ts.length) add(owners, Math.min.apply(null, ts));
+  });
+  const subject = stripTest(msg.subject);
+  const subjectDue = starts && !PAST_RE.test(subject) ? firstOf(deadlinePhrases(subject, msg.at, cfg, later)) : null;
+  if (subjectDue != null) add(greeting.filter(p => !due[p.email]), subjectDue);
+  return { cancel, found: Object.keys(due).map(k => ({ people: [due[k].p], unknown: [], due: due[k].t })) };
+}
+
+function assignmentsIn(msg, starts, recipients, cfg) {
+  return readAssignerEmail(msg, starts, recipients, cfg).found;
 }
 
 // Minutes the time zone is ahead of UTC at that moment (Manila +480, California -420 or -480).
@@ -180,9 +314,11 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 const WEEKDAY_WORDS = { sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2, wed: 3, wednesday: 3,
   thu: 4, thur: 4, thurs: 4, thursday: 4, fri: 5, friday: 5, sat: 6, saturday: 6 };
 
-// "Oct 30, 5 PM PT", "10/30 17:00", "tomorrow noon", "Friday EOD", "3:30 pm"
-// -> ms, read against the email's own date. null when there's no date or time in it.
-function parseDue(text, sentAt, cfg) {
+// "Oct 30, 5 PM PT", "10/30 17:00", "tomorrow noon", "Friday EOD", "3:30 pm",
+// "4:00" (an hour from 1 to 7 with no AM or PM is the afternoon), read
+// against the email's own date -> { y, mo, d, h, mi, tz, hasDate, hasTime },
+// or null when there's no date or time in it.
+function dueParts(text, sentAt, cfg) {
   let s = ' ' + String(text || '').toLowerCase().replace(/[,.]/g, ' ') + ' ';
   let tz = cfg.TIME_ZONE;
   if (/\b(pt|pst|pdt|pacific)\b/.test(s)) tz = 'America/Los_Angeles';
@@ -190,33 +326,40 @@ function parseDue(text, sentAt, cfg) {
   s = s.replace(/\b(pt|pst|pdt|pacific|pht|manila|ph time|time)\b/g, ' ');
   const sentLocal = new Date(sentAt + tzOffsetMin(sentAt, tz) * 60000);
   let y = sentLocal.getUTCFullYear(), mo = sentLocal.getUTCMonth(), d = sentLocal.getUTCDate();
-  let hasDate = false, hasTime = false, h = cfg.DEFAULT_DUE_HOUR, mi = 0;
+  let hasDate = false, hasTime = false, h = cfg.DEFAULT_DUE_HOUR, mi = 0, monthDay = false;
   // the time
   let m = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/.exec(s);
   if (m) { h = Number(m[1]) % 12 + (m[3] === 'pm' ? 12 : 0); mi = Number(m[2] || 0); hasTime = true; s = s.replace(m[0], ' '); }
-  else if ((m = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(s))) { h = Number(m[1]); mi = Number(m[2]); hasTime = true; s = s.replace(m[0], ' '); }
+  else if ((m = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(s))) { h = Number(m[1]); if (h >= 1 && h <= 7) h += 12; mi = Number(m[2]); hasTime = true; s = s.replace(m[0], ' '); }
   else if (/\bnoon\b/.test(s)) { h = 12; mi = 0; hasTime = true; }
-  else if (/\b(eod|end of day|cob|close of business)\b/.test(s)) { h = cfg.DEFAULT_DUE_HOUR; mi = 0; hasTime = true; }
+  else if (/\b(eod|end of (the |your |my )?(day|shift)|cob|close of business)\b/.test(s)) { h = cfg.DEFAULT_DUE_HOUR; mi = 0; hasTime = true; }
   // the date
   if (/\btomorrow\b/.test(s)) { d += 1; hasDate = true; }
   else if (/\b(today|tonight)\b/.test(s)) hasDate = true;
   else if ((m = new RegExp('\\b(' + MONTHS.join('|') + ')[a-z]*\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?\\b').exec(s))) {
-    mo = MONTHS.indexOf(m[1]); d = Number(m[2]); if (m[3]) y = Number(m[3]); hasDate = true;
+    mo = MONTHS.indexOf(m[1]); d = Number(m[2]); if (m[3]) y = Number(m[3]); else monthDay = true; hasDate = true;
   } else if ((m = new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(' + MONTHS.join('|') + ')[a-z]*(?:\\s+(\\d{4}))?\\b').exec(s))) {
-    mo = MONTHS.indexOf(m[2]); d = Number(m[1]); if (m[3]) y = Number(m[3]); hasDate = true;
-  } else if ((m = /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/.exec(s))) {
-    mo = Number(m[1]) - 1; d = Number(m[2]); if (m[3]) y = Number(m[3]) < 100 ? 2000 + Number(m[3]) : Number(m[3]); hasDate = true;
+    mo = MONTHS.indexOf(m[2]); d = Number(m[1]); if (m[3]) y = Number(m[3]); else monthDay = true; hasDate = true;
+  } else if ((m = /\b(1[0-2]|0?[1-9])\/(3[01]|[12]\d|0?[1-9])(?:\/(\d{2,4}))?\b/.exec(s))) {
+    mo = Number(m[1]) - 1; d = Number(m[2]); if (m[3]) y = Number(m[3]) < 100 ? 2000 + Number(m[3]) : Number(m[3]); else monthDay = true; hasDate = true;
   } else if ((m = new RegExp('\\b(' + Object.keys(WEEKDAY_WORDS).join('|') + ')\\b').exec(s))) {
     const want = WEEKDAY_WORDS[m[1]];
     d += (want - sentLocal.getUTCDay() + 7) % 7; hasDate = true;
   }
   if (!hasDate && !hasTime) return null;
-  let t = zonedTime(y, mo, d, h, mi, tz);
-  // a time alone that had already passed when the email was sent means the next day
-  if (!hasDate && t <= sentAt) t = zonedTime(y, mo, d + 1, h, mi, tz);
   // a month-day with no year that is long past means next year
-  if (hasDate && !/\d{4}/.test(String(text)) && t < sentAt - 60 * DAY) t = zonedTime(y + 1, mo, d, h, mi, tz);
-  return t;
+  if (monthDay && zonedTime(y, mo, d, h, mi, tz) < sentAt - 60 * DAY) y += 1;
+  const n = new Date(Date.UTC(y, mo, d)); // carries "tomorrow" over a month end
+  return { y: n.getUTCFullYear(), mo: n.getUTCMonth(), d: n.getUTCDate(), h, mi, tz, hasDate, hasTime };
+}
+
+// The same as a time in ms. A time alone that had already passed when the
+// email was sent means the next day.
+function parseDue(text, sentAt, cfg) {
+  const p = dueParts(text, sentAt, cfg);
+  if (!p) return null;
+  const t = zonedTime(p.y, p.mo, p.d, p.h, p.mi, p.tz);
+  return !p.hasDate && t <= sentAt ? zonedTime(p.y, p.mo, p.d + 1, p.h, p.mi, p.tz) : t;
 }
 
 // What a reply says that's new, without the email it quotes.
@@ -428,16 +571,11 @@ function deadlineState(cfg, now) {
       if (now - am.at > cfg.LOOKBACK_DAYS * DAY) return;
       const recipients = am.to.concat(am.cc).filter(r => r.email !== user && r.email.endsWith(domain));
       const starts = am === msgs[0];
-      const found = assignmentsIn(am, starts, recipients, cfg);
+      const read = readAssignerEmail(am, starts, recipients, cfg);
       const base = { assignedAt: am.at, subject: (msgs[0] || am).subject, thread: thread.id, messageId: am.messageId, references, fromName: am.from.name };
-      if (!found.length) {
-        // a later email from the assigner that names a new deadline changes it for the people it's to
-        if (starts) return;
-        const due = firstOf(deadlinePhrases(newText(am.text), am.at, cfg));
-        if (due == null) return;
-        am.to.forEach(r => (current[r.email] || []).forEach(x => { x.dueAsked = due; x.note = 'deadline changed ' + fmtDeadline(am.at, cfg); }));
-        return;
-      }
+      // "skip this one", "disregard", "no action needed": the ask is off for them
+      read.cancel.forEach(p => { (current[p.email] || []).forEach(x => rows.splice(rows.indexOf(x), 1)); delete current[p.email]; });
+      const found = read.found;
       found.forEach(a => {
         if (a.explicit && (a.due == null || a.unknown.length)) {
           rows.push(Object.assign({}, base, { owner: '', ownerName: a.ownerText, status: 'unclear', due: null, deliveredAt: null, late: false,
@@ -612,6 +750,6 @@ function removeDeadlineTrigger() {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = Object.assign(module.exports || {}, { DEADLINES, parseAssignmentLines, resolveOwners, parseDue, deadlinePhrases, namedItems, assignmentsIn, newText, readStatus, hasWork,
+  module.exports = Object.assign(module.exports || {}, { DEADLINES, parseAssignmentLines, resolveOwners, parseDue, dueParts, deadlinePhrases, laterDayIn, readAssignerEmail, assignmentsIn, newText, readStatus, hasWork,
     subjectKey, assess, scorecardText, scorecardTable, scorecardHtml, fmtDeadline, zonedTime, readFull, ASSIGNMENT_HEADERS, MISS_HEADERS });
 }

@@ -115,11 +115,45 @@ const madison = { at: sent3, subject: '364 Madison: disclosures, 3R and value ve
   '2. Seth and Thea: run comps using the 7-step method. Bring:', '- the ARV', '- a THUMBS UP or THUMBS DOWN', 'Due 12:40 PM.', '',
   '3. Genesis: compare the 3R report against the house. Due 12:40 PM.', '', 'Send everything as typed text.', '', 'Juan'].join('\n') };
 same(D.assignmentsIn(madison, true, RJ, cfg).map(a => a.people.map(p => p.email.split('@')[0]).join('+') + ' ' + iso(a.due)),
-  ['genesis ' + iso(PT(2026, 10, 29, 12, 15)), 'seth+marie ' + iso(PT(2026, 10, 29, 12, 40)), 'genesis ' + iso(PT(2026, 10, 29, 12, 40))], 'numbered items, Thea is Marie');
+  ['genesis ' + iso(PT(2026, 10, 29, 12, 15)), 'seth ' + iso(PT(2026, 10, 29, 12, 40)), 'marie ' + iso(PT(2026, 10, 29, 12, 40))], 'numbered items, Thea is Marie, each person’s earliest deadline');
 const hub = { at: sent3, subject: 'URGENT: Load core values + SOPs into the Team Hub, due 3:30 PM today', to: [RJ[1]],
   text: "Seth,\n\nLoad the following:\n\n1. Core values: We tell the truth.\n2. Probation rule: 3 misses in 30 days.\n\nReply DONE by 3:30 PM Pacific. If you can't, send BLOCKED by 3:00 PM.\n\nJuan" };
-same(D.assignmentsIn(hub, true, RJ, cfg).map(a => a.people.map(p => p.email).join() + ' ' + iso(a.due)), ['seth@twinhomebuyer.com ' + iso(PT(2026, 10, 29, 15, 30))], 'items that aren’t people: the subject’s deadline, for To');
+same(D.assignmentsIn(hub, true, RJ, cfg).map(a => a.people.map(p => p.email).join() + ' ' + iso(a.due)), ['seth@twinhomebuyer.com ' + iso(PT(2026, 10, 29, 15, 30))], 'items that aren’t people: the greeting’s');
 same(D.assignmentsIn({ ...hub, subject: 'Speed to lead: great job, Thea', text: 'Team,\n\nThea answered within seconds.\n\nJuan' }, true, RJ, cfg), [], 'praise is not an assignment');
-same(D.assignmentsIn(hub, false, RJ, cfg).length, 0, 'a reply’s subject is never read as a new deadline');
+same(D.assignmentsIn({ ...hub, text: 'Seth,\n\nThanks, got it.\n\nJuan' }, false, RJ, cfg).length, 0, 'a reply’s subject is never read as a new deadline');
 console.log('7 Juan’s style');
+
+// 8. the rest of how Juan writes (made-up emails in his style)
+const B = { email: 'bryan@twinhomebuyer.com', name: '' }, L = { email: 'lawrence@twinhomebuyer.com', name: '' }, J = { email: 'rosanes@twinhomebuyer.com', name: '' },
+  K8 = { email: 'accounting@twinhomebuyer.com', name: '' }, CJ = { email: 'christinejoy@twinhomebuyer.com', name: '' }, S8 = { email: 'seth@twinhomebuyer.com', name: '' };
+const at8 = PT(2026, 10, 29, 14, 40); // Thu 2:40 PM
+const read = (text, o) => { o = o || {}; const to = o.to || [B], cc = o.cc || [];
+  const r = D.readAssignerEmail({ at: o.at || at8, subject: o.subject || 'Fence', text, to, cc }, !!o.starts, to.concat(cc), cfg);
+  return r.found.map(a => a.people[0].email.split('@')[0] + ' ' + D.fmtDeadline(a.due, cfg)).concat(r.cancel.map(p => 'call off ' + p.email.split('@')[0])); };
+same(read('Bryan,\n\nStill due: the fence quote by 4:00, and the permit photos.\n\nJuan'), ['bryan Oct 29, 4:00 PM PT'], 'a deadline in a reply’s body; 4:00 is the afternoon');
+same(read('Bryan,\n\nResend within 15 minutes, to me only.\n\nJuan'), ['bryan Oct 29, 2:55 PM PT'], 'within 15 minutes');
+same(read('Bryan,\n\nStart with your redo, which is due within 30 minutes. We cover this 24/7.\n\nJuan'), ['bryan Oct 29, 3:10 PM PT'], 'due within 30 minutes; 24/7 is not a date');
+same(read('Bryan, correction: the deadline is 12:00 PM Pacific tomorrow, not 5:00 PM. BLOCKED by 11:30.\n\nJuan'), ['bryan Oct 30, 12:00 PM PT'], 'a correction, and not the old time');
+same(read('Bryan,\n\nThe deadline was 1:00 PM. The photos were due at 1:00 PM and nothing came in.\n\nJuan'), [], 'past tense is not a new deadline');
+same(read('Bryan, skip this one. It is already done. Nothing needed from you on it.\n\nJuan'), ['call off bryan'], 'skip this one: called off');
+same(read('Bryan,\n\nThis is a test email. No action needed.\n\nJuan', { starts: true }), [], 'the first email of a thread has nothing to call off');
+same(read('Team,\n\nWhoever sees this first, tell Bryan to reply by 3:00 PM.\n\nJuan', { to: [B, L] }), [], 'whoever sees it first: nobody in particular');
+same(read('Bryan,\n\nYou run the setup on my computer by AnyDesk, with me watching, at 3:00 PM today.\n\nJuan'), [], 'by AnyDesk … at 3:00 PM is a meeting, not a deadline');
+same(read('Team,\n\nThis morning I asked for an update by 11:00 AM. Seth sent it early.\n\nJuan', { to: [B, S8], at: PT(2026, 10, 29, 8, 30) }), [], 'what Juan asked before is not a new ask');
+same(read('Team,\n\nThe fix will be up and running by 3:30 PM. No need to report it again.\n\nJuan', { to: [B, S8] }), [], 'what Juan says will happen is not an ask');
+same(read('Bryan,\n\nReply DONE or BLOCKED by 4 PM.\n\nJuan'), ['bryan Oct 29, 4:00 PM PT'], 'DONE or BLOCKED by 4 PM counts');
+same(read('Bryan,\n\nTomorrow, Fri Oct 30, on my computer:\n1. Change every password.\n\nLawrence: your list (due 12:00 PM) is the setup sheet.\n\nBryan: DONE by 4:45 PM Pacific Friday.\n\nJuan', { cc: [L] }),
+  ['lawrence Oct 30, 12:00 PM PT', 'bryan Oct 30, 4:45 PM PT'], 'a time that had passed, in an email about Friday, is Friday');
+same(read('Bryan,\n\nTODAY, by 4:45 PM Pacific, only these:\n1. The Relay screenshots.\n\nMOVED:\n- Agent test: tomorrow, Fri Oct 30, by 10:00 AM\nPacific.\n- Lawrence: the Google cost review, by Fri Oct 30, 12:00 PM Pacific.\n- Jonathan: the cancellations, with\nproof, by Fri Oct 30, 12:00 PM Pacific.\n\nBryan, hand Lawrence and Jonathan your notes by 4:00 PM today.\n\nJuan', { cc: [L, J] }).sort(),
+  ['bryan Oct 29, 4:00 PM PT', 'lawrence Oct 30, 12:00 PM PT', 'rosanes Oct 30, 12:00 PM PT'], 'bullets that open with names; Jonathan is rosanes@; Bryan’s earliest');
+same(read('Bryan, Kristine,\n\nBryan:\n1. Cancel it.\n\nKristine:\n1. Ask for the refund.\n\nBoth of you: reply DONE with proof by 1 PM.\n\nJuan', { to: [B, K8], at: PT(2026, 10, 29, 11, 12) }), ['bryan Oct 29, 1:00 PM PT', 'accounting Oct 29, 1:00 PM PT'], 'both of you; Kristine is accounting@');
+same(read('Bryan, Kristine,\n\nBryan:\n1. Cancel it now.\nKristine:\n1. Ask for the refund by 3 PM.\n\nJuan', { to: [B, K8], at: PT(2026, 10, 29, 11, 12) }), ['accounting Oct 29, 3:00 PM PT'], 'a name alone on a line owns the list under it');
+same(read('Christine,\n\nReply with the address by 9:00 AM Pacific.\n\nBryan,\n\nShut it off today.\n\nBryan by 3:00 PM Pacific today. Christine\'s full list by Fri Oct 30, 5:00 PM Pacific.\n\nJuan', { to: [CJ, B], at: PT(2026, 10, 29, 5, 49) }),
+  ['christinejoy Oct 29, 9:00 AM PT', 'bryan Oct 29, 3:00 PM PT'], 'sections after a name on its own line; Christine is whichever Christine is on the email');
+same(read('Team,\n\nThese need an answer by end of day today.\n\nCHERRY\n1. The fence.\n\nBRYAN\n2. The bid desk.\n\nJuan', { to: [{ email: 'cherry@twinhomebuyer.com', name: '' }, B] }),
+  ['cherry Oct 29, 5:00 PM PT', 'bryan Oct 29, 5:00 PM PT'], 'end of day; headers in capitals');
+same(read('Bryan,\n\nReply DONE with the step 3 screenshot, or BLOCKED. Due today.\n\nJuan'), ['bryan Oct 29, 5:00 PM PT'], 'due today: 5 PM');
+same(read('Bryan,\n\nCheck the automations today.\n\nJuan'), [], 'today alone, with no due or by, is not read');
+same(read('Bryan,\n\nUse this prompt: "List every subscription we pay for and cancel what we do not use by 3 PM today."\n\nJuan'), [], 'a long quoted prompt is an example');
+console.log('8 more of Juan’s style');
 console.log('all checks passed');
