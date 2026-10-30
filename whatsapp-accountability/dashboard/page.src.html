@@ -383,6 +383,12 @@ button.em-gr:hover { background: var(--surface-2); }
 .em-gr[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .em-pg .em-gh, .em-pg .em-gr { grid-template-columns: minmax(0, 1fr) 60px 104px 84px 84px 78px; }
 .em-lg .em-gh, .em-lg .em-gr { grid-template-columns: minmax(0, 1.5fr) 132px minmax(0, 1.4fr) minmax(0, 1fr) 62px 52px; }
+.dl-pg .em-gh, .dl-pg .em-gr { grid-template-columns: minmax(0, 1fr) 72px 70px 56px 120px 120px; }
+.dl-pg .who { font-size: 13.5px; }
+.dl-lg .em-gh, .dl-lg .em-gr { grid-template-columns: minmax(0, 1.7fr) minmax(0, .8fr) 136px minmax(0, 1.3fr) 32px; }
+.dl-res { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.dl-res .chip { padding: 1px 8px 1px 6px; font-size: 12px; }
+.dl-res .sub { font-size: 12px; color: var(--ink-3); }
 .em-acts { display: flex; justify-content: flex-end; gap: 4px; }
 button.em-go { border: 0; background: none; padding: 0; cursor: pointer; }
 .em-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; padding: 9px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 13.5px; color: var(--ink-2); }
@@ -420,6 +426,10 @@ button.em-go { border: 0; background: none; padding: 0; cursor: pointer; }
   .em-lg .em-gr { grid-template-columns: minmax(0, 1fr) auto auto; }
   .em-lg .em-c-wait { grid-column: 1 / -1; grid-row: 2; }
   .em-lg .em-m { grid-row: 3; }
+  .dl-pg .em-gr { grid-template-columns: minmax(0, 1fr) auto; }
+  .dl-lg .em-gr { grid-template-columns: minmax(0, 1fr) auto; }
+  .dl-lg .dl-res { grid-column: 1 / -1; grid-row: 2; }
+  .dl-lg .em-m { grid-row: 3; }
   .em-gh, .em-gr { padding-inline: 14px; }
 }
 
@@ -504,6 +514,7 @@ button.em-go { border: 0; background: none; padding: 0; cursor: pointer; }
       <section class="view" id="v-tasks" hidden></section>
       <section class="view" id="v-reports" hidden></section>
       <section class="view" id="v-email" hidden></section>
+      <section class="view" id="v-deadlines" hidden></section>
       <p class="foot" id="foot"></p>
     </div>
   </main>

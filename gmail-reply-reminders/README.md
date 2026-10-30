@@ -117,6 +117,15 @@ An explicit line like `OWNER: Cherry · DUE: Oct 30, 5 PM PT` always wins (OWNER
 
 To stop it, run **removeDeadlineTrigger** (or use Pause on the dashboard).
 
+The dashboard's **Deadlines** tab shows the Assignments and Misses tabs: overdue, blocked, open and delivered, by person, with each person's misses in the last 30 days.
+
+**Next, from Juan's own written rules** (noted Oct 30, not built yet):
+- **BLOCKED and DATE count only 30 minutes early.** Juan: "What counts as a miss: any deadline missed without a BLOCKED sent at least 30 minutes before it." Also honor the cut-off an email gives ("BLOCKED by 11:30" for a noon deadline). Today a BLOCKED or DATE any time before the deadline counts.
+- **DONE means proof.** Juan: "DONE means proof … A link with no details isn't DONE." A DONE with no attachment or work link should show as "DONE, no proof" on the scorecard (still not chased, since DONE stops the chase in his spec).
+- **3 misses in 30 days.** Juan's coaching rule. The scorecard should count each person's misses over 30 days and flag anyone at 3 (the dashboard already shows the count).
+- **Ask Juan:** should chases come from him, as now, or from a company address like operations@ (what he asked for in the Property Tracker agent)?
+- Count the whole stated minute as on time ("by 10:13" until 10:13:59): a reply 6 seconds after 10:13 was logged late in the Oct 30 test.
+
 ## The email log (for the dashboard)
 
 Every check rewrites two tabs in **Reply reminders log**:

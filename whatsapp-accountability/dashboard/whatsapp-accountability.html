@@ -383,6 +383,12 @@ button.em-gr:hover { background: var(--surface-2); }
 .em-gr[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .em-pg .em-gh, .em-pg .em-gr { grid-template-columns: minmax(0, 1fr) 60px 104px 84px 84px 78px; }
 .em-lg .em-gh, .em-lg .em-gr { grid-template-columns: minmax(0, 1.5fr) 132px minmax(0, 1.4fr) minmax(0, 1fr) 62px 52px; }
+.dl-pg .em-gh, .dl-pg .em-gr { grid-template-columns: minmax(0, 1fr) 72px 70px 56px 120px 120px; }
+.dl-pg .who { font-size: 13.5px; }
+.dl-lg .em-gh, .dl-lg .em-gr { grid-template-columns: minmax(0, 1.7fr) minmax(0, .8fr) 136px minmax(0, 1.3fr) 32px; }
+.dl-res { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.dl-res .chip { padding: 1px 8px 1px 6px; font-size: 12px; }
+.dl-res .sub { font-size: 12px; color: var(--ink-3); }
 .em-acts { display: flex; justify-content: flex-end; gap: 4px; }
 button.em-go { border: 0; background: none; padding: 0; cursor: pointer; }
 .em-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; padding: 9px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 13.5px; color: var(--ink-2); }
@@ -420,6 +426,10 @@ button.em-go { border: 0; background: none; padding: 0; cursor: pointer; }
   .em-lg .em-gr { grid-template-columns: minmax(0, 1fr) auto auto; }
   .em-lg .em-c-wait { grid-column: 1 / -1; grid-row: 2; }
   .em-lg .em-m { grid-row: 3; }
+  .dl-pg .em-gr { grid-template-columns: minmax(0, 1fr) auto; }
+  .dl-lg .em-gr { grid-template-columns: minmax(0, 1fr) auto; }
+  .dl-lg .dl-res { grid-column: 1 / -1; grid-row: 2; }
+  .dl-lg .em-m { grid-row: 3; }
   .em-gh, .em-gr { padding-inline: 14px; }
 }
 
@@ -504,6 +514,7 @@ button.em-go { border: 0; background: none; padding: 0; cursor: pointer; }
       <section class="view" id="v-tasks" hidden></section>
       <section class="view" id="v-reports" hidden></section>
       <section class="view" id="v-email" hidden></section>
+      <section class="view" id="v-deadlines" hidden></section>
       <p class="foot" id="foot"></p>
     </div>
   </main>
@@ -1204,6 +1215,101 @@ function sheetIdFrom(text) {
 
 if (typeof module !== 'undefined') module.exports = { parseEmailLog, parseEmailStatus, parseEmailStops, parseEmailPause, stopFor, deriveEmail, myEmailWaits, sheetIdFrom, nameFromEmail, EMAIL_STALE };
 
+
+// ---- the deadline agent's log: who owes what by when, and who delivered ----
+// The deadline agent (gmail-reply-reminders/Deadlines.gs) writes two tabs in
+// the same sheet as the reply-reminder log: "Assignments", rewritten every 15
+// minutes, and "Misses", one row per miss, never rewritten.
+
+const PT_ZONE = 'America/Los_Angeles';
+
+// Midnight Pacific on the day of t, in ms. Juan's days run on Pacific time.
+function pacificDayStart(t) {
+  const p = {};
+  new Intl.DateTimeFormat('en-US', { timeZone: PT_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date(t)).forEach(x => { p[x.type] = Number(x.value); });
+  return t - ((p.hour * 60 + p.minute) * 60 + p.second) * 1000 - (t % 1000);
+}
+
+const timeOf = s => { const t = Date.parse(String(s || '').replace(/^'/, '')); return Number.isFinite(t) ? t : null; };
+
+// The Assignments tab as objects, columns found by header name. result is
+// what the dashboard shows: missed, blocked, open, late (delivered after the
+// deadline), done, or unread (an OWNER/DUE line the agent couldn't read).
+function parseAssignments(values) {
+  if (!Array.isArray(values) || values.length < 2) return [];
+  const head = values[0].map(h => String(h || '').trim().toLowerCase());
+  const col = {};
+  [['assigned', 'assigned'], ['subject', 'subject'], ['owner', 'owner'], ['ownerName', 'owner name'], ['due', 'due'], ['status', 'status'],
+    ['delivered', 'delivered'], ['chased', 'chased'], ['note', 'note'], ['thread', 'thread'], ['link', 'link']].forEach(([k, h]) => { col[k] = head.indexOf(h); });
+  if (col.owner < 0 || col.status < 0) return [];
+  const get = (r, k) => col[k] >= 0 && r[col[k]] != null ? String(r[col[k]]).trim() : '';
+  return values.slice(1).map(r => {
+    const status = get(r, 'status').toLowerCase();
+    if (!status) return null;
+    const owner = get(r, 'owner').toLowerCase();
+    const due = timeOf(get(r, 'due')), delivered = timeOf(get(r, 'delivered'));
+    const note = get(r, 'note');
+    const result = status === 'delivered' ? (/\blate\b/i.test(note) || (delivered != null && due != null && delivered > due) ? 'late' : 'done')
+      : status === 'missed' ? 'missed' : status === 'blocked' ? 'blocked' : status === 'unclear' ? 'unread' : 'open';
+    const link = get(r, 'link');
+    return {
+      assigned: timeOf(get(r, 'assigned')), subject: get(r, 'subject'), owner, name: get(r, 'ownerName') || (owner ? nameFromEmail(owner) : ''),
+      due, status, result, delivered, chased: timeOf(get(r, 'chased')), note, thread: get(r, 'thread'),
+      // only a Gmail address: the sheet is never trusted with where a link goes
+      link: /^https:\/\/mail\.google\.com\//.test(link) ? link : '',
+    };
+  }).filter(Boolean);
+}
+
+// The Misses tab: { owner, name, subject, deadline, thread }.
+function parseMisses(values) {
+  if (!Array.isArray(values) || values.length < 2) return [];
+  const head = values[0].map(h => String(h || '').trim().toLowerCase());
+  const at = h => head.indexOf(h);
+  const c = { owner: at('owner'), name: at('owner name'), subject: at('subject'), deadline: at('deadline'), thread: at('thread') };
+  if (c.owner < 0 || c.deadline < 0) return [];
+  const get = (r, i) => i >= 0 && r[i] != null ? String(r[i]).trim() : '';
+  return values.slice(1).map(r => {
+    const owner = get(r, c.owner).toLowerCase(), deadline = timeOf(get(r, c.deadline));
+    if (!owner || deadline == null) return null;
+    return { owner, name: get(r, c.name) || nameFromEmail(owner), subject: get(r, c.subject), deadline, thread: get(r, c.thread) };
+  }).filter(Boolean);
+}
+
+const RESULT_RANK = { missed: 0, blocked: 1, open: 2, unread: 3, late: 4, done: 5 };
+// Juan's rule: 3 missed deadlines in 30 days puts someone on 30 days of AI coaching
+const MISS_LIMIT = 3, MISS_WINDOW = 30 * 24 * 3600e3;
+
+// What the Deadlines tab shows. Everything is per person per email, the same
+// rows as the sheet. "Today" is the Pacific day.
+function deriveDeadlines(rows, misses, now) {
+  const today = pacificDayStart(now);
+  const list = rows.slice().sort((a, b) => RESULT_RANK[a.result] - RESULT_RANK[b.result]
+    || (a.result === 'done' || a.result === 'late' ? (b.delivered || 0) - (a.delivered || 0) : (a.due || 0) - (b.due || 0)));
+  const count = r => list.filter(x => x.result === r).length;
+  const deliveredToday = list.filter(x => (x.result === 'done' || x.result === 'late') && x.delivered >= today);
+  const people = new Map();
+  const person = (email, name) => {
+    let p = people.get(email);
+    if (!p) people.set(email, p = { email, name, missed: 0, blocked: 0, open: 0, done: 0, late: 0, misses30: 0 });
+    if (name && p.name === nameFromEmail(email)) p.name = name;
+    return p;
+  };
+  list.forEach(r => { if (r.owner && r.result !== 'unread') person(r.owner, r.name)[r.result]++; });
+  // the Misses tab keeps every miss, even for emails older than the agent's look-back
+  misses.forEach(m => { if (m.deadline > now - MISS_WINDOW) person(m.owner, m.name).misses30++; });
+  const ppl = [...people.values()].sort((a, b) => b.missed - a.missed || b.misses30 - a.misses30 || b.blocked - a.blocked || b.open - a.open || a.name.localeCompare(b.name));
+  return {
+    list, people: ppl,
+    missed: count('missed'), blocked: count('blocked'), open: count('open'), unread: count('unread'),
+    deliveredToday: deliveredToday.length, lateToday: deliveredToday.filter(x => x.result === 'late').length,
+    atLimit: ppl.filter(p => p.misses30 >= MISS_LIMIT).length,
+  };
+}
+
+if (typeof module !== 'undefined') module.exports = Object.assign(module.exports || {}, { parseAssignments, parseMisses, deriveDeadlines, pacificDayStart, MISS_LIMIT });
+
 </script>
 <script>
 (function () {
@@ -1241,6 +1347,7 @@ if (typeof module !== 'undefined') module.exports = { parseEmailLog, parseEmailS
     tasks: { label: 'Tasks', icon: 'tasks', title: 'Tasks', sub: 'Work the AI found in messages: who owns it, when it’s due, and whether it got done.' },
     reports: { label: 'Reports', icon: 'chart', title: 'Reports', sub: 'Patterns over the last 30 days, so accountability decisions rest on the record.' },
     email: { label: 'Email', icon: 'mail', title: 'Email', sub: 'Emails to the team: who answered, who hasn’t, and how fast. Nothing is sent from here.' },
+    deadlines: { label: 'Deadlines', icon: 'cal', title: 'Deadlines', sub: 'Every deadline Juan set by email: who delivered, who is late, who is blocked. The deadline agent sends the chases; nothing is sent from here.' },
   };
 
   const ICON = {
@@ -1264,6 +1371,7 @@ if (typeof module !== 'undefined') module.exports = { parseEmailLog, parseEmailS
     bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
     bellOff: '<path d="M8.5 5.3A6 6 0 0 1 18 11v4M6 11v5l-1.5 2H17"/><path d="M10 20.5a2 2 0 0 0 4 0M3.5 3.5l17 17"/>',
     pause: '<rect x="6.5" y="5" width="3.5" height="14" rx="1"/><rect x="14" y="5" width="3.5" height="14" rx="1"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   };
   const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1799,7 +1907,7 @@ if (typeof module !== 'undefined') module.exports = { parseEmailLog, parseEmailS
 
   // ---------------- frame ----------------
   function renderNav() {
-    const badge = { dashboard: D.pendingPeople.length, messages: D.unresolved.length, tasks: D.overdue.length, reports: null, email: ED ? ED.waitingPeople : null };
+    const badge = { dashboard: D.pendingPeople.length, messages: D.unresolved.length, tasks: D.overdue.length, reports: null, email: ED ? ED.waitingPeople : null, deadlines: DL ? DL.missed : null };
     document.getElementById('nav').innerHTML = Object.entries(VIEWS).map(([k, v]) =>
       `<a href="#${k}"${state.view === k ? ' aria-current="page"' : ''}>${ic(v.icon)}${v.label}${badge[k] ? `<span class="count" aria-label="${badge[k]} need attention">${badge[k]}</span>` : ''}</a>`).join('');
     document.getElementById('timing-sum').textContent = `Flags at ${cfg.first} and ${cfg.second} min, escalate at ${cfg.escalate}`;
@@ -1914,12 +2022,14 @@ if (typeof module !== 'undefined') module.exports = { parseEmailLog, parseEmailS
     NOW = src.mode === 'live' ? Date.now() : src.now;
     D = derive(S, cfg, NOW);
     ED = (email.status === 'ok' || email.status === 'loading') && email.loadedAt ? deriveEmail(email.rows, Date.now(), email.stops) : null;
+    DL = (dl.status === 'ok' || dl.status === 'loading') && dl.loadedAt ? deriveDeadlines(dl.rows, dl.misses, Date.now()) : null;
     // instruction-givers count only when someone asked them for something
     N = D.people.filter(p => !p.former && (!p.giver || p.required)).length;
     renderNav();
     renderFilters();
     renderFrame();
     emailFrame();
+    dlFrame();
     const setup = needsSetup();
     const v = VIEWS[state.view];
     document.getElementById('v-title').textContent = setup ? 'Groups to track' : v.title;
@@ -1939,17 +2049,18 @@ if (typeof module !== 'undefined') module.exports = { parseEmailLog, parseEmailS
     }
     const list = document.getElementById('mlist');
     const keepScroll = list ? list.scrollTop : 0;
-    const builders = { dashboard: viewDashboard, messages: viewMessages, tasks: viewTasks, reports: viewReports, email: viewEmail };
+    const builders = { dashboard: viewDashboard, messages: viewMessages, tasks: viewTasks, reports: viewReports, email: viewEmail, deadlines: viewDeadlines };
     for (const k of Object.keys(VIEWS)) {
       const el = document.getElementById('v-' + k);
       el.hidden = setup || k !== state.view;
       if (el.hidden) continue;
       // don't redraw under someone typing the sheet link
       if (k === 'email' && el.contains(document.activeElement) && document.activeElement.matches('input')) continue;
-      // the email log doesn't depend on WhatsApp data
-      el.innerHTML = src.mode === 'sample' && k !== 'email' ? noDataCard() : builders[k]();
+      // the email and deadline logs don't depend on WhatsApp data
+      el.innerHTML = src.mode === 'sample' && k !== 'email' && k !== 'deadlines' ? noDataCard() : builders[k]();
     }
     if (state.view === 'email' && !setup) maybeLoadEmail(true);
+    if (state.view === 'deadlines' && !setup) maybeLoadDl(true);
     const list2 = document.getElementById('mlist');
     if (list2 && keepScroll) list2.scrollTop = keepScroll;
   }
@@ -2261,6 +2372,7 @@ RULES
       email.conf = snap.exists ? snap.data() : null;
       email.confLoaded = true;
       maybeLoadEmail(false);
+      maybeLoadDl(false);
       render();
     }, () => { email.confLoaded = true; render(); });
   }
@@ -2420,6 +2532,7 @@ RULES
       await cap.db.doc('settings/email').set({ sheetId: id, watch: (email.conf && email.conf.sheetId === id && email.conf.watch) || [], savedAt: Date.now() });
       email.editing = false;
       email.status = 'idle'; email.rows = []; email.info = null;
+      dl.status = 'idle'; dl.rows = []; dl.misses = []; dl.loadedAt = null;
     } catch (e) {
       email.linkError = `Couldn’t save the link: ${(e && e.message) || e}`;
     }
@@ -2671,6 +2784,168 @@ RULES
     if (document.visibilityState !== 'visible' || (state.view !== 'email' && state.view !== 'reports')) return;
     if (email.status === 'ok' && Date.now() - email.loadedAt > EMAIL_EVERY) loadEmail();
     else if (state.view === 'email' && email.status === 'ok') render();
+  }, 60000);
+  // ---------------- Deadlines (the deadline agent's log) ----------------
+  // The Assignments and Misses tabs the deadline agent writes into the same
+  // sheet as the email log, read through the viewer's own Google Sheets
+  // connection. The agent sends the chases; this page only shows them, and
+  // the Pause switch it shares with the reply reminders.
+  const dl = { status: 'idle', code: null, message: '', rows: [], misses: [], loadedAt: null };
+  let DL = null;
+
+  async function maybeLoadDl(onTab) {
+    if (!cap.mcp || !email.conf || !email.conf.sheetId || dl.status !== 'idle') return;
+    if (onTab) { loadDl(); return; }
+    let s = 'prompt';
+    try { s = cap.perms ? await cap.perms.state('mcp:' + SHEETS) : 'prompt'; } catch (_) { s = 'prompt'; }
+    if (s === 'granted' && dl.status === 'idle') loadDl();
+  }
+
+  async function loadDl() {
+    if (!cap.mcp || !email.conf || !email.conf.sheetId || dl.status === 'loading') return;
+    const was = dl.status;
+    dl.status = 'loading';
+    if (was !== 'ok') render();
+    try {
+      const rows = parseAssignments((await sheetRead('Assignments!A1:K2000')).values);
+      let misses = [];
+      try { misses = parseMisses((await sheetRead('Misses!A1:G5000')).values); } catch (_) { /* no Misses tab yet: nobody has missed */ }
+      dl.rows = rows; dl.misses = misses;
+      await loadControls(false);
+      dl.status = 'ok'; dl.code = null; dl.message = ''; dl.loadedAt = Date.now();
+    } catch (e) {
+      dl.status = 'error';
+      dl.code = (e && e.code) || 'upstream_error';
+      dl.message = (e && e.message) || String(e || '');
+      // no access any more: take down what was shown
+      if (DENIED.includes(dl.code)) { dl.rows = []; dl.misses = []; }
+    }
+    render();
+  }
+
+  const RESULT_CHIP = { missed: ['c-crit', 'Missed'], blocked: ['c-warn', 'Blocked'], open: ['c-info', 'Open'], unread: ['c-muted', 'Not read'], late: ['c-good', 'Delivered late'], done: ['c-good', 'Delivered'] };
+
+  function viewDeadlines() {
+    if (!email.confLoaded) return emptyCard(cap.db ? 'Loading…' : 'Open this page in Claude', cap.db ? 'Getting the settings.' : 'The deadline log shows when this page is open on claude.ai or in the Claude app.');
+    if (!email.conf || !email.conf.sheetId) {
+      return `<div class="card"><div class="empty"><b>The log sheet isn’t connected yet.</b><br>The deadline agent writes to the same sheet as the email log. ${cap.canEdit === true ? 'Connect it on the <a class="link" href="#email">Email tab</a>.' : 'Someone who can edit this page connects it on the Email tab.'}</div></div>`;
+    }
+    if (dl.status === 'idle' || (dl.status === 'loading' && !dl.loadedAt)) return emptyCard('Loading the deadline log…', 'Reading the Assignments tab through your Google Sheets connection.');
+    if (dl.status === 'error') {
+      const missing = dl.code === 'tool_error' && /parse range|unable to parse/i.test(dl.message);
+      const [t, b] = missing ? ['The deadline agent hasn’t written its log yet.', 'Its Assignments tab appears in the log sheet after its first check. Run checkDeadlines in the reminder script, then try again.']
+        : connectorTrouble(dl.code, dl.message, SHEETS);
+      return `<div class="card"><div class="empty"><b>${esc(t)}</b><br>${esc(b)}<div class="em-actions"><button class="btn small" type="button" data-action="dl-retry">Try again</button></div></div></div>`;
+    }
+    const L = DL || deriveDeadlines(dl.rows, dl.misses, Date.now());
+    return dlPauseBar() + tiles([
+      { tone: 'crit', icon: 'alert', value: L.missed, label: 'Overdue', sub: 'Past the deadline, not delivered' },
+      { tone: 'warn', icon: 'flag', value: L.blocked, label: 'Blocked', sub: 'BLOCKED sent before the deadline' },
+      { tone: 'info', icon: 'clock', value: L.open, label: 'Open', sub: 'Not due yet' },
+      { tone: 'good', icon: 'check', value: L.deliveredToday, label: 'Delivered today', sub: L.deliveredToday ? (L.lateToday ? `${L.lateToday} of them late` : 'All on time') : 'Pacific time' },
+    ]) + dlPeopleCard(L) + dlListCard(L) + dlSourceLine();
+  }
+
+  // The chases are on or paused. The switch is the same one that pauses the reply reminders.
+  function dlPauseBar() {
+    const P = email.pause || {};
+    const can = canControl();
+    const err = email.ctlError && !state.stop ? `<span class="em-bar-err" role="status">${esc(email.ctlError)}</span>` : '';
+    if (P.paused) {
+      return `<div class="em-bar paused" role="status">${ic('pause')}<span><b>Chases are paused</b>${P.by ? ` by ${esc(P.by)}` : ''}${P.at ? `, ${esc(fmtWhen(P.at))}` : ''}. Misses are still logged, but nobody is emailed until they’re turned back on.</span>
+        ${can ? `<button class="btn small" type="button" data-action="email-pause" data-on="0"${email.busy ? ' disabled' : ''}>Turn chases back on</button>` : ''}${err}</div>`;
+    }
+    return `<div class="em-bar">${ic('bell')}<span>Chases are on: when a deadline passes with no DONE, DATE or BLOCKED, the deadline agent emails that person once, in the email’s thread.</span>
+      ${can ? `<button class="btn small" type="button" data-action="email-pause" data-on="1" title="Also pauses the email reply reminders"${email.busy ? ' disabled' : ''}>Pause chases</button>` : ''}${err}</div>`;
+  }
+
+  // One row per person: what's overdue, blocked, open and delivered, and their misses over 30 days.
+  function dlPeopleCard(L) {
+    const sel = state.dlPerson;
+    const n = v => (v ? `<span class="num">${v}</span>` : '<span class="plain">–</span>');
+    const rows = L.people.map(p => {
+      const delivered = p.done + p.late;
+      const summary = [p.missed ? `${p.missed} overdue` : 'nothing overdue', p.blocked ? `${p.blocked} blocked` : '', p.open ? `${p.open} open` : '',
+        delivered ? `${delivered} delivered${p.late ? ` (${p.late} late)` : ''}` : '', `${plural(p.misses30, 'miss', 'misses')} in 30 days`].filter(Boolean).join(' · ');
+      return `<button class="em-gr" type="button" data-action="dl-person" data-email="${esc(p.email)}" aria-pressed="${sel === p.email}" title="${esc(p.email)}" aria-label="${esc(`${p.name}: ${summary}`)}">
+        <span>${who(p.name)}</span>
+        <span>${p.missed ? chip('c-crit', String(p.missed)) : '<span class="plain">0</span>'}</span>
+        <span class="em-d">${n(p.blocked)}</span>
+        <span class="em-d">${n(p.open)}</span>
+        <span class="em-d">${delivered ? `<span class="num">${delivered}</span>${p.late ? ` <span class="plain">(${p.late} late)</span>` : ''}` : '<span class="plain">–</span>'}</span>
+        <span class="em-d">${p.misses30 >= MISS_LIMIT ? chip('c-crit', `${p.misses30}`, 'flag') : n(p.misses30)}</span>
+        <span class="em-m">${esc(summary)}</span></button>`;
+    }).join('');
+    const limit = L.atLimit ? ` · ${plural(L.atLimit, 'person has', 'people have')} ${MISS_LIMIT}+ misses in 30 days` : '';
+    return `<div class="card" style="margin-top:20px"><div class="card-h"><h2>By person</h2><span class="hint">Pick a name to see their deadlines${esc(limit)}</span></div>
+      ${rows ? `<div class="em-grid dl-pg"><div class="em-gh" aria-hidden="true"><span>Person</span><span>Overdue</span><span class="em-d">Blocked</span><span class="em-d">Open</span><span class="em-d">Delivered</span><span class="em-d">Misses (30 days)</span></div>${rows}</div>`
+        : '<div class="empty">No deadlines in the log yet.</div>'}</div>`;
+  }
+
+  // One line per person per deadline, overdue first; Overdue / Blocked / Open / Delivered / All, and one person's.
+  function dlListCard(L) {
+    const person = state.dlPerson && L.people.find(p => p.email === state.dlPerson);
+    const mine = r => !person || r.owner === person.email;
+    const sets = {
+      overdue: L.list.filter(r => r.result === 'missed' && mine(r)),
+      blocked: L.list.filter(r => r.result === 'blocked' && mine(r)),
+      open: L.list.filter(r => (r.result === 'open' || r.result === 'unread') && mine(r)),
+      delivered: L.list.filter(r => (r.result === 'done' || r.result === 'late') && mine(r)),
+      all: L.list.filter(mine),
+    };
+    const f = sets[state.dlFilter] ? state.dlFilter : sets.overdue.length ? 'overdue' : 'all';
+    const list = sets[f];
+    const limit = state.dlAll ? list.length : 15;
+    const now = Date.now();
+    const short = shortNames(L.people);
+    const rows = list.slice(0, limit).map(r => {
+      const task = cleanSubject(r.subject);
+      const nm = short[r.owner] || r.name || '–';
+      const [cls, label] = RESULT_CHIP[r.result];
+      const detail = r.result === 'missed' ? (r.chased ? `chased ${fmtWhen(r.chased)}` : 'not chased yet')
+        : r.result === 'open' ? (r.due ? `due in ${fmtDur(Math.max(0, r.due - now))}` : '')
+        : r.result === 'done' || r.result === 'late' ? (r.delivered ? fmtWhen(r.delivered) : '')
+        : r.result === 'unread' ? r.note : '';
+      return `<div class="em-gr">
+        <span class="em-c-subj" title="${esc(task)}">${esc(task)}</span>
+        <span class="em-d">${esc(nm)}</span>
+        <span class="em-d em-sent">${r.due ? esc(fmtWhen(r.due)) : '<span class="plain">–</span>'}</span>
+        <span class="dl-res">${chip(cls, label)}${detail ? `<span class="sub">${esc(detail)}</span>` : ''}</span>
+        <span class="em-acts">${r.link ? `<a class="em-go" href="${esc(r.link)}" target="_blank" rel="noopener" title="Open in Gmail" aria-label="${esc(`Open “${task}” in Gmail`)}">${ic('out')}</a>` : ''}</span>
+        <span class="em-m">${esc(nm)}${r.due ? ` · due ${esc(fmtWhen(r.due))}` : ''}</span></div>`;
+    }).join('');
+    const label = { overdue: 'Overdue', blocked: 'Blocked', open: 'Open', delivered: 'Delivered', all: 'All' };
+    const seg = Object.keys(label).map(k => `<button type="button" data-action="dl-filter" data-f="${k}" aria-pressed="${f === k}">${label[k]} <b>${sets[k].length}</b></button>`).join('');
+    const who1 = person ? person.name : 'Nobody';
+    const empty = { overdue: `${who1} has nothing overdue.`, blocked: 'Nothing is blocked.', open: 'Nothing is waiting on a deadline.', delivered: 'Nothing delivered yet.', all: 'No deadlines yet.' }[f];
+    return `<div class="card" style="margin-top:20px"><div class="card-h"><h2>Deadlines</h2>
+        <div class="em-tools">${person ? `<span class="gchip">${esc(person.name)}<button type="button" data-action="dl-person" data-email="${esc(person.email)}" aria-label="Show everyone’s deadlines">×</button></span>` : ''}
+          <span class="seg" role="group" aria-label="Which deadlines">${seg}</span></div></div>
+      ${rows ? `<div class="em-grid dl-lg"><div class="em-gh" aria-hidden="true"><span>Task</span><span class="em-d">Person</span><span class="em-d">Due</span><span>Result</span><span></span></div>${rows}</div>`
+        : `<div class="empty">${esc(empty)}</div>`}
+      ${list.length > limit ? `<div class="em-more"><button class="link" type="button" data-action="dl-all">Show all ${list.length}</button></div>` : ''}</div>`;
+  }
+
+  function dlSourceLine() {
+    return `<p class="hint-line">From the deadline agent’s log, the Assignments and Misses tabs (read ${esc(fmtWhen(dl.loadedAt))}). It checks every 15 minutes. <a class="link" href="${esc(sheetUrl(email.conf.sheetId))}" target="_blank" rel="noopener">Open the sheet</a>
+      · <button class="link" type="button" data-action="dl-retry">Reload</button></p>`;
+  }
+
+  // The top of the page on the Deadlines tab: no WhatsApp group filters.
+  function dlFrame() {
+    if (state.view !== 'deadlines') return;
+    ['group-filter', 'sender-filter', 'group-pill', 'refresh'].forEach(id => { document.getElementById(id).hidden = true; });
+    const pill = document.getElementById('snap');
+    if (dl.status === 'ok' && dl.loadedAt) { pill.className = 'pill live'; pill.innerHTML = `<i class="dot"></i>Deadline log · read ${esc(fmtClock(dl.loadedAt))}`; }
+    else { pill.className = 'pill'; pill.innerHTML = `${ic('cal')}${dl.status === 'loading' ? 'Loading the deadline log…' : 'Deadline log'}`; }
+    document.getElementById('foot').textContent = 'The deadlines come from the deadline agent, which reads the deadlines Juan sets by email and the replies to them. Each viewer opens its log through their own Google Sheets connection. Nothing is sent from this page.';
+  }
+
+  // keep it current while the Deadlines tab is open
+  setInterval(() => {
+    if (document.visibilityState !== 'visible' || state.view !== 'deadlines') return;
+    if (dl.status === 'ok' && Date.now() - dl.loadedAt > EMAIL_EVERY) loadDl();
+    else if (dl.status === 'ok') render();
   }, 60000);
   // ---------------- saved copy (any device) ----------------
   // where a group's copy is kept in the page's storage
@@ -3334,6 +3609,16 @@ RULES
     else if (action === 'email-stop-save') saveStop();
     else if (action === 'email-resume') resumeStop(Number(data.row));
     else if (action === 'email-pause') setPause(data.on === '1');
+    else if (action === 'dl-retry') { if (dl.status !== 'loading') { dl.status = 'idle'; loadDl(); } }
+    else if (action === 'dl-filter') { state.dlFilter = data.f; state.dlAll = false; render(); }
+    else if (action === 'dl-all') { state.dlAll = true; render(); }
+    else if (action === 'dl-person') {
+      state.dlPerson = state.dlPerson === data.email ? null : data.email;
+      // someone with nothing overdue: show everything of theirs
+      const p = state.dlPerson && DL && DL.people.find(x => x.email === state.dlPerson);
+      if (p && !p.missed && (state.dlFilter || 'overdue') === 'overdue') state.dlFilter = 'all';
+      state.dlAll = false; render();
+    }
     else if (action === 'email-person') {
       state.emailPerson = state.emailPerson === data.email ? null : data.email;
       // someone who owes nothing: show what they did answer
