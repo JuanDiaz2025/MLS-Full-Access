@@ -95,6 +95,11 @@ same(D.scorecardTable([
 ], dayStart, dayEnd).map(t => t.person + ' | ' + t.task + ' | ' + t.result), ['Leo | TEST Fence quote | Missed', 'Mike | TEST Permit | Blocked', 'Tin | TEST Lockbox | Delivered late', 'Cherry Ann | TEST Fence quote | Delivered'], 'table: misses first, today only, unreadable ones left out');
 const html = D.scorecardHtml([{ ownerName: 'Leo <b>', subject: 'TEST Fence & quote', status: 'missed', due: T, deliveredAt: null }, { ownerName: 'Bob', subject: 'TEST Lockbox', status: 'unclear', note: 'not on the email: Bob' }], dayStart, dayEnd, cfg);
 assert.ok(html.includes('<th') && html.includes('Leo &lt;b&gt;') && html.includes('TEST Fence &amp; quote') && html.includes('Oct 29, 3:00 PM PT') && html.includes('>Missed</td>') && html.includes('Missed: <b>1</b>') && html.includes('not on the email: Bob'), 'html table, escaped');
+same(D.overdueText([{ ownerName: 'Leo', subject: 'TEST Fence quote', status: 'missed', due: T, deliveredAt: null }, { ownerName: 'Mike', subject: 'TEST Permit', status: 'blocked', due: T, deliveredAt: null },
+  { ownerName: 'Tin', subject: 'TEST Lockbox', status: 'delivered', due: T, deliveredAt: T + H, late: true }], cfg), 'OVERDUE\n- Leo: TEST Fence quote (due Oct 29, 3:00 PM PT)', 'the morning list: missed and not delivered only');
+same(D.overdueText([], cfg), 'Nothing is overdue.');
+same(['delivered', 'blocked', 'missed', 'open', 'date', 'unclear'].map(s => D.rowColor({ status: s })), ['#d1fadf', '#fef0c7', '#fee4e2', null, null, null], 'green, yellow, red; the rest white');
+same(D.threadLink('abc@mail.gmail.com'), 'https://mail.google.com/mail/#search/rfc822msgid%3Aabc%40mail.gmail.com');
 console.log('6 scorecard');
 
 // 7. Juan's own style

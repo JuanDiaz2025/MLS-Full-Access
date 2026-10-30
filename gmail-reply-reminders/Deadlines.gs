@@ -15,8 +15,10 @@
  * passes without DONE, DATE or BLOCKED from the owner, it emails the owner in
  * that thread, as Juan: "The deadline was X. Send it now, plus one line on
  * why you missed it." It never grants extra time. Every miss is logged by
- * name and date, and at 5:00 PM Pacific Juan gets a scorecard: who
- * delivered, who missed, what's still open.
+ * name and date. At 8:00 AM Pacific Juan gets the list of everything
+ * overdue, by name, and at 5:00 PM a scorecard: who delivered, who missed,
+ * what's still open. The Assignments tab is green for delivered, yellow for
+ * blocked and red for missed, with a link to each email.
  *
  * The rules:
  *  - Delivered: a reply from the owner that says DONE, or has an attachment
@@ -64,6 +66,8 @@ const DEADLINES = {
   // the scorecard goes out at this hour, in TIME_ZONE, to SCORECARD_TO (blank: the assigner)
   SCORECARD_HOUR: 17,
   SCORECARD_TO: '',
+  // the morning email of everything overdue goes out at this hour, to the same person (null: off)
+  MORNING_HOUR: 8,
   // {deadline} is filled in
   CHASE_TEXT: 'The deadline was {deadline}. Send it now, plus one line on why you missed it.',
 };
@@ -72,7 +76,16 @@ const SCOPE_READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const SCOPE_SEND = 'https://www.googleapis.com/auth/gmail.send';
 // marks the chases this agent sends, so they're never read as replies or assignments
 const CHASE_HEADER = 'X-Deadline-Chase';
-const ASSIGNMENT_HEADERS = ['Assigned', 'Subject', 'Owner', 'Owner name', 'Due', 'Status', 'Delivered', 'Chased', 'Note', 'Thread'];
+const ASSIGNMENT_HEADERS = ['Assigned', 'Subject', 'Owner', 'Owner name', 'Due', 'Status', 'Delivered', 'Chased', 'Note', 'Thread', 'Link'];
+// the Assignments tab's colors: green delivered, yellow blocked, red missed; open, DATE and unread rows stay white
+const STATUS_COLORS = { delivered: '#d1fadf', blocked: '#fef0c7', missed: '#fee4e2' };
+const rowColor = r => STATUS_COLORS[r.status] || null;
+
+// The assignment email in Gmail, found by its Message-ID, so the link opens
+// it in whoever's mailbox has it: Juan's, the owner's or someone in CC.
+function threadLink(messageId) {
+  return messageId ? 'https://mail.google.com/mail/#search/rfc822msgid%3A' + encodeURIComponent(messageId) : '';
+}
 const MISS_HEADERS = ['Missed on', 'Owner', 'Owner name', 'Subject', 'Deadline', 'Chased', 'Thread'];
 
 // ---------------- reading assignments and replies (pure, tested in test/) ----------------
@@ -466,21 +479,46 @@ function scorecardTable(rows, dayStart, dayEnd) {
     .sort((a, b) => RESULT_ORDER.indexOf(a.result) - RESULT_ORDER.indexOf(b.result) || a.person.localeCompare(b.person) || a.due - b.due);
 }
 
-function scorecardHtml(rows, dayStart, dayEnd, cfg) {
-  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const table = scorecardTable(rows, dayStart, dayEnd);
-  const count = k => table.filter(t => t.result === k).length;
+const escHtml = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Person · Task · Due · Result rows as an HTML table.
+function resultsTableHtml(table, cfg) {
   const cell = 'padding:6px 10px;border:1px solid #d0d5dd;text-align:left;vertical-align:top;';
   const head = ['Person', 'Task', 'Due', 'Result'].map(h => '<th style="' + cell + 'background:#f2f4f7;font-weight:600">' + h + '</th>').join('');
-  const body = table.map(t => '<tr><td style="' + cell + '">' + esc(t.person) + '</td><td style="' + cell + '">' + esc(t.task) + '</td><td style="' + cell + 'white-space:nowrap">'
-    + esc(fmtDeadline(t.due, cfg)) + '</td><td style="' + cell + 'font-weight:600;color:' + RESULT_COLOR[t.result] + '">' + t.result + '</td></tr>').join('');
+  const body = table.map(t => '<tr><td style="' + cell + '">' + escHtml(t.person) + '</td><td style="' + cell + '">' + escHtml(t.task) + '</td><td style="' + cell + 'white-space:nowrap">'
+    + escHtml(fmtDeadline(t.due, cfg)) + '</td><td style="' + cell + 'font-weight:600;color:' + RESULT_COLOR[t.result] + '">' + t.result + '</td></tr>').join('');
+  return '<table style="border-collapse:collapse;font-size:14px">' + '<tr>' + head + '</tr>' + body + '</table>';
+}
+
+function scorecardHtml(rows, dayStart, dayEnd, cfg) {
+  const esc = escHtml;
+  const table = scorecardTable(rows, dayStart, dayEnd);
+  const count = k => table.filter(t => t.result === k).length;
   const unclear = rows.filter(r => r.status === 'unclear');
   return '<div style="font-family:Arial,sans-serif;font-size:14px;color:#101828">'
     + '<p style="margin:0 0 10px">' + ['Delivered', 'Delivered late', 'Missed', 'Blocked', 'Open'].map(k => k + ': <b>' + count(k) + '</b>').join(' &middot; ') + '</p>'
-    + (table.length ? '<table style="border-collapse:collapse;font-size:14px">' + '<tr>' + head + '</tr>' + body + '</table>' : '<p>No assignments today.</p>')
+    + (table.length ? resultsTableHtml(table, cfg) : '<p>No assignments today.</p>')
     + (unclear.length ? '<p style="margin:14px 0 4px;font-weight:600">Not read (fix the deadline or the name)</p><ul style="margin:0;padding-left:18px">'
       + unclear.map(r => '<li>' + esc(r.subject) + ': ' + esc(r.note) + '</li>').join('') + '</ul>' : '')
     + '</div>';
+}
+
+// The 8:00 AM email: everything past its deadline and still not delivered,
+// by name. BLOCKED items aren't on it.
+function overdueRows(rows) {
+  return scorecardTable(rows.filter(r => r.status === 'missed' && r.deliveredAt == null), 0, 0);
+}
+
+function overdueText(rows, cfg) {
+  const table = overdueRows(rows);
+  return table.length ? 'OVERDUE\n' + table.map(t => '- ' + t.person + ': ' + t.task + ' (due ' + fmtDeadline(t.due, cfg) + ')').join('\n') : 'Nothing is overdue.';
+}
+
+function overdueHtml(rows, cfg) {
+  const table = overdueRows(rows);
+  return '<div style="font-family:Arial,sans-serif;font-size:14px;color:#101828">'
+    + '<p style="margin:0 0 10px">Overdue: <b>' + table.length + '</b></p>'
+    + (table.length ? resultsTableHtml(table, cfg) : '<p>Nothing is overdue.</p>') + '</div>';
 }
 
 // ---------------- Gmail with the wider permissions ----------------
@@ -659,6 +697,7 @@ function runDeadlines() {
     console.log(rows.length + ' assignments: ' + ['delivered', 'open', 'date', 'blocked', 'missed', 'unclear']
       .map(s => rows.filter(r => r.status === s).length + ' ' + s).join(', ') + '; ' + misses.length + ' new misses');
     writeDeadlineLog(rows, misses, cfg);
+    if (shouldSendMorning(cfg, now)) morningFrom(rows, cfg, now);
     if (shouldSendScorecard(cfg, now)) scorecardFrom(rows, cfg, now);
     pruneDeadlineMemory(now);
   } finally {
@@ -666,12 +705,12 @@ function runDeadlines() {
   }
 }
 
-// Forget misses and scorecards older than 60 days; the Misses tab keeps the history.
+// Forget misses, scorecards and morning emails older than 60 days; the Misses tab keeps the history.
 function pruneDeadlineMemory(now) {
   const store = PropertiesService.getScriptProperties();
   const props = store.getProperties();
   Object.keys(props).forEach(k => {
-    if ((k.indexOf('miss:') === 0 || k.indexOf('scorecard:') === 0) && Number(props[k]) < now - 60 * DAY) store.deleteProperty(k);
+    if (/^(miss|scorecard|morning):/.test(k) && Number(props[k]) < now - 60 * DAY) store.deleteProperty(k);
   });
 }
 
@@ -690,9 +729,10 @@ function writeDeadlineLog(rows, misses, cfg) {
     const tab = name => ss.getSheetByName(name) || ss.insertSheet(name);
     const a = tab('Assignments');
     const values = [ASSIGNMENT_HEADERS].concat(rows.map(r => [iso(r.assignedAt), r.subject, r.owner, r.ownerName, iso(r.due), r.status,
-      iso(r.deliveredAt), iso(r.chasedAt || (r.chases && r.chases.length ? r.chases[r.chases.length - 1] : null)), r.note || (r.late ? 'late' : ''), r.thread]));
-    a.clearContents();
+      iso(r.deliveredAt), iso(r.chasedAt || (r.chases && r.chases.length ? r.chases[r.chases.length - 1] : null)), r.note || (r.late ? 'late' : ''), r.thread, threadLink(r.messageId)]));
+    a.clear(); // contents and last pass's colors
     a.getRange(1, 1, values.length, ASSIGNMENT_HEADERS.length).setNumberFormat('@').setValues(values);
+    if (rows.length) a.getRange(2, 1, rows.length, ASSIGNMENT_HEADERS.length).setBackgrounds(rows.map(r => ASSIGNMENT_HEADERS.map(() => rowColor(r))));
     const m = tab('Misses');
     if (m.getLastRow() === 0) m.getRange(1, 1, 1, MISS_HEADERS.length).setNumberFormat('@').setValues([MISS_HEADERS]);
     if (misses.length) {
@@ -710,6 +750,29 @@ function shouldSendScorecard(cfg, now) {
   if (hour < cfg.SCORECARD_HOUR) return false;
   const key = 'scorecard:' + Utilities.formatDate(new Date(now), cfg.TIME_ZONE, 'yyyy-MM-dd');
   return !PropertiesService.getScriptProperties().getProperty(key);
+}
+
+// Once a day, on a pass between MORNING_HOUR and two hours later (not at
+// 3 PM because the trigger was installed then).
+function shouldSendMorning(cfg, now) {
+  if (cfg.MORNING_HOUR == null) return false;
+  const hour = Number(Utilities.formatDate(new Date(now), cfg.TIME_ZONE, 'H'));
+  if (hour < cfg.MORNING_HOUR || hour >= cfg.MORNING_HOUR + 2) return false;
+  return !PropertiesService.getScriptProperties().getProperty('morning:' + Utilities.formatDate(new Date(now), cfg.TIME_ZONE, 'yyyy-MM-dd'));
+}
+
+// Builds and sends the morning list of what's overdue. Run it by hand to see it any time.
+function sendMorningSummary() {
+  morningFrom(deadlineState(DEADLINES, Date.now()), DEADLINES, Date.now());
+}
+
+function morningFrom(rows, cfg, now) {
+  const to = cfg.SCORECARD_TO || cfg.ASSIGNER;
+  const subject = 'Overdue: ' + Utilities.formatDate(new Date(now), cfg.TIME_ZONE, 'EEE, MMM d');
+  const text = overdueText(rows, cfg);
+  if (cfg.DRY_RUN) console.log('[dry run] would email ' + to + ' "' + subject + '":\n' + text);
+  else MailApp.sendEmail({ to, subject, body: text, htmlBody: overdueHtml(rows, cfg), name: 'Deadline agent' });
+  PropertiesService.getScriptProperties().setProperty('morning:' + Utilities.formatDate(new Date(now), cfg.TIME_ZONE, 'yyyy-MM-dd'), String(now));
 }
 
 // Builds and sends today's scorecard. Run it by hand to see it any time.
@@ -764,5 +827,5 @@ function removeDeadlineTrigger() {
 
 if (typeof module !== 'undefined') {
   module.exports = Object.assign(module.exports || {}, { DEADLINES, parseAssignmentLines, resolveOwners, parseDue, dueParts, deadlinePhrases, laterDayIn, readAssignerEmail, assignmentsIn, newText, readStatus, hasWork,
-    subjectKey, assess, scorecardText, scorecardTable, scorecardHtml, fmtDeadline, zonedTime, readFull, ASSIGNMENT_HEADERS, MISS_HEADERS });
+    subjectKey, assess, scorecardText, scorecardTable, scorecardHtml, overdueText, overdueHtml, threadLink, rowColor, fmtDeadline, zonedTime, readFull, ASSIGNMENT_HEADERS, MISS_HEADERS });
 }

@@ -35,10 +35,12 @@ const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }
 const props = { LOG_SHEET_ID: 'log1', SA_KEY: JSON.stringify({ client_email: 'reader@proj.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) }) };
 const cache = {};
 const tabs = { Pause: [['Paused', 'By', 'At'], ['no', '', '']], Stopped: [['Thread', 'Person', 'Subject', 'Stopped by', 'Stopped at']] };
+const fills = {};
 const sheet = n => ({
-  clearContents: () => { tabs[n] = []; }, getLastRow: () => tabs[n].length,
+  clearContents: () => { tabs[n] = []; }, clear: () => { tabs[n] = []; fills[n] = []; }, getLastRow: () => tabs[n].length,
   getDataRange: () => ({ getValues: () => tabs[n].map(r => r.slice()) }),
-  getRange: (r, c, h, w) => ({ setNumberFormat() { return this; }, setValues(v) { assert.ok(v.length === h && v.every(x => x.length === w)); v.forEach((row, i) => { tabs[n][r - 1 + i] = row.slice(); }); return this; } }),
+  getRange: (r, c, h, w) => ({ setNumberFormat() { return this; }, setValues(v) { assert.ok(v.length === h && v.every(x => x.length === w)); v.forEach((row, i) => { tabs[n][r - 1 + i] = row.slice(); }); return this; },
+    setBackgrounds(v) { assert.ok(v.length === h && v.every(x => x.length === w)); (fills[n] = fills[n] || []); v.forEach((row, i) => { fills[n][r - 1 + i] = row[0]; }); return this; } }),
 });
 const res = (code, body) => ({ getResponseCode: () => code, getContentText: () => JSON.stringify(body) });
 const ctx = {
@@ -117,11 +119,15 @@ check('Mike: delivered by the email he sent elsewhere with Seth in CC', rowOf(MI
 check('Leo: still open before 3 PM', rowOf(LEO, 'TEST Fence quote')[5] === 'open');
 check('Bob is not on the email: listed, not chased', tabs.Assignments.some(r => r[5] === 'unclear' && /Bob/.test(r[8])));
 check('nothing sent yet', sentMail.length === 0);
+const rowIndex = (owner, subj) => tabs.Assignments.findIndex(r => r[2] === owner && r[1] === subj);
+check('a link to the assignment email, by its Message-ID', rowOf(CHERRY, 'TEST Fence quote')[10] === 'https://mail.google.com/mail/#search/rfc822msgid%3Am1%40mail.gmail.com', rowOf(CHERRY, 'TEST Fence quote')[10]);
+check('delivered is green, open is white', fills.Assignments[rowIndex(CHERRY, 'TEST Fence quote')] === '#d1fadf' && fills.Assignments[rowIndex(LEO, 'TEST Fence quote')] === null);
 
 // 2. 3:05 PM, dry run: says what it would send, sends nothing, logs the miss
 now = Date.UTC(2026, 9, 29, 22, 5);
 log = run();
 check('dry run: would chase Leo with the exact words', /\[dry run\] would chase Leo <leo@twinhomebuyer.com> on "TEST Fence quote": The deadline was Oct 29, 3:00 PM PT\. Send it now, plus one line on why you missed it\./.test(log) && sentMail.length === 0, log);
+check('missed is red', fills.Assignments[rowIndex(LEO, 'TEST Fence quote')] === '#fee4e2');
 check('the miss is logged by name and date', tabs.Misses.length === 2 && tabs.Misses[1][0] === '2026-10-29' && tabs.Misses[1][1] === LEO && tabs.Misses[1][2] === 'Leo');
 
 // 3. for real: the chase goes to Leo only, in the thread, as Seth
@@ -146,6 +152,7 @@ now = Date.UTC(2026, 9, 29, 23, 30); // 4:30 PM Pacific
 run();
 check('DATE: not chased, shown with the new deadline', rowOf(TIN, 'TEST Lockbox codes')[5] === 'date' && rowOf(TIN, 'TEST Lockbox codes')[4] === new Date(Date.UTC(2026, 9, 30, 17)).toISOString() && sentMail.length === 1);
 check('BLOCKED: not chased', rowOf(MIKE, 'TEST Photos')[5] === 'blocked');
+check('blocked is yellow', fills.Assignments[rowIndex(MIKE, 'TEST Photos')] === '#fef0c7');
 tabs.Pause[1] = ['yes', 'Seth Concepcion', ''];
 now = Date.UTC(2026, 9, 30, 17, 5); // Fri 10:05 AM: Tin's moved deadline passes
 log = run();
@@ -195,7 +202,12 @@ check('the announcement is not an assignment', !tabs.Assignments.some(r => /Out 
 now = Date.UTC(2026, 10, 1, 17, 0);
 add('t11', { from: 'Leo <' + LEO + '>', to: SETH, subject: 'Load the rules', at: now - 10 * MIN, text: 'Sorry, here they are.', attachments: ['rules.pdf'] });
 run();
+const morning = mails.find(m => m.subject === 'Overdue: Sun, Nov 1');
+check('8 AM: the overdue list, by name, blocked left off', morning && /OVERDUE\n/.test(morning.body) && /- Tin: TEST Lockbox codes \(due Oct 30, 10:00 AM PT\)/.test(morning.body)
+  && /- Cherry Ann: TEST Madison/.test(morning.body) && !/Photos/.test(morning.body) && !/- Leo:/.test(morning.body) && /Overdue: <b>\d+<\/b>/.test(morning.htmlBody), morning && morning.body);
 check('work sent the next day in a new email still counts, as late', rowOf(LEO, 'TEST Load the rules, due 10:00 AM today')[5] === 'delivered' && rowOf(LEO, 'TEST Load the rules, due 10:00 AM today')[8] === 'late');
+now = Date.UTC(2026, 10, 1, 17, 30); run();
+check('one morning email a day', mails.filter(m => /^Overdue:/.test(m.subject)).length === 1);
 // 8. called off in the thread, and a new ask in a reply's body
 now = Date.UTC(2026, 10, 2, 16, 0); // Mon Nov 2, 8:00 AM Pacific
 add('t12', { from: 'Seth Concepcion <' + SETH + '>', to: 'Mike <' + MIKE + '>', subject: 'TEST Directory tab today by 10:00 AM', at: now, sent: true,
