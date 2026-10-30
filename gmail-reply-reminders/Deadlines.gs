@@ -56,6 +56,9 @@ const DEADLINES = {
   TIME_ZONE: 'America/Los_Angeles',
   // a DUE with a date but no time means this hour (17 = 5:00 PM)
   DEFAULT_DUE_HOUR: 17,
+  // "URGENT" (in capitals) or "ASAP" with no time given: due this many minutes
+  // after the email. 0 turns it off. "now" alone is never a deadline.
+  URGENT_MINUTES: 60,
   // assignments older than this are left alone
   LOOKBACK_DAYS: 7,
   // the scorecard goes out at this hour, in TIME_ZONE, to SCORECARD_TO (blank: the assigner)
@@ -176,6 +179,10 @@ const PAST_RE = /\b(was|were|had been)\s+(due|missed)\b|\bdeadline was\b|\balrea
 const SELF_RE = /\b(i|we)\s*(?:'ll|’ll|\swill|'m going to|’m going to|\sam going to)\b|\bwill be (up|live|ready|running|done|fixed)\b/i;
 // "Team," "Good morning, everyone,"
 const EVERYONE_RE = /^(?:(?:hi|hello|hey|dear|good (?:morning|afternoon|evening))\b[ ,]*)?(?:team|everyone|everybody|all)?\s*[,:!]?$/i;
+// an urgent ask with no time: "URGENT: …", "ASAP: …", "please pay this asap". Only
+// URGENT in capitals: "for anything urgent, go to Cherry" is not an ask.
+const URGENT_RE = /\bURGENT\b|\b(asap|as soon as possible)\b/i;
+const isUrgent = s => URGENT_RE.test(String(s || '').replace(/\burgent\b/g, ''));
 // "Both of you: reply DONE by 1 PM"
 const GROUP_RE = /^(?:both|each|all) of you\b|^everyone\b|^you (?:two|both|all)\b/i;
 const NAMES = "[A-Z][A-Za-z'’]*(?:\\s+[A-Z][A-Za-z'’]+)?";
@@ -241,7 +248,8 @@ const sentencesOf = text => String(text).split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9]
 // with names, or a sentence that does; "Both of you" is everyone the email
 // names. Each person's earliest deadline in the email counts. The subject's
 // deadline is used for the greeting's people only on the email that starts
-// the thread, and only when the body gives them none. Not read: asks to
+// the thread, and only when the body gives them none; after that, URGENT or
+// ASAP with no time means URGENT_MINUTES after the email. Not read: asks to
 // whoever sees it first, deadlines in the past tense, and what Juan says he
 // will do. -> { found: [{ people, unknown, due, dueText, explicit }], cancel: [people] }
 function readAssignerEmail(msg, starts, recipients, cfg) {
@@ -277,16 +285,21 @@ function readAssignerEmail(msg, starts, recipients, cfg) {
   const later = laterDayIn(msg.subject + '\n' + text, msg.at, cfg);
   const due = {};
   const add = (people, t) => people.forEach(p => { if (!due[p.email] || t < due[p.email].t) due[p.email] = { p, t }; });
+  const urgent = [];
   blocks.forEach(b => {
     if (PAST_RE.test(b.s)) return;
     const owners = sentenceOwners(b.s, recipients, cfg, everyoneNamed) || b.owners;
     if (SELF_RE.test(b.s.slice(0, Math.max(0, b.s.search(/\b(due|by|before|deadline|within)\b/i))))) return;
     const ts = deadlinePhrases(b.s, msg.at, cfg, later);
     if (ts.length) add(owners, Math.min.apply(null, ts));
+    else if (isUrgent(b.s)) urgent.push.apply(urgent, owners);
   });
   const subject = stripTest(msg.subject);
   const subjectDue = starts && !PAST_RE.test(subject) ? firstOf(deadlinePhrases(subject, msg.at, cfg, later)) : null;
   if (subjectDue != null) add(greeting.filter(p => !due[p.email]), subjectDue);
+  // URGENT / ASAP with no time anywhere for that person
+  if (starts && isUrgent(subject)) urgent.push.apply(urgent, greeting);
+  if (cfg.URGENT_MINUTES > 0) add(urgent.filter(p => !due[p.email]), msg.at + cfg.URGENT_MINUTES * 60000);
   return { cancel, found: Object.keys(due).map(k => ({ people: [due[k].p], unknown: [], due: due[k].t })) };
 }
 

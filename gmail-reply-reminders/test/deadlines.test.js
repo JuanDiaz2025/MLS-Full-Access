@@ -155,5 +155,12 @@ same(read('Team,\n\nThese need an answer by end of day today.\n\nCHERRY\n1. The 
 same(read('Bryan,\n\nReply DONE with the step 3 screenshot, or BLOCKED. Due today.\n\nJuan'), ['bryan Oct 29, 5:00 PM PT'], 'due today: 5 PM');
 same(read('Bryan,\n\nCheck the automations today.\n\nJuan'), [], 'today alone, with no due or by, is not read');
 same(read('Bryan,\n\nUse this prompt: "List every subscription we pay for and cancel what we do not use by 3 PM today."\n\nJuan'), [], 'a long quoted prompt is an example');
+same(read('Bryan,\n\nTeach Juan AI from my voice notes. Reply with the date the first rules will be ready.\n\nJuan', { subject: 'ASAP: teach Juan AI', starts: true }), ['bryan Oct 29, 3:40 PM PT'], 'ASAP with no time: an hour');
+same(read('Kristine please pay this asap.\n\nJuan', { to: [{ email: 'rgano@example.com', name: '' }], cc: [K8] }), ['accounting Oct 29, 3:40 PM PT'], 'asap in a sentence, for the person it names');
+same(read('Bryan,\n\nCancel it right now. Reply DONE with proof by 4 PM.\n\nJuan', { subject: 'URGENT: cancel the trial', starts: true }), ['bryan Oct 29, 4:00 PM PT'], 'URGENT with a time: the time');
+same(read('Team,\n\nI\'ll be out this afternoon. For anything urgent, go to Cherry.\n\nJuan', { to: [B, S8], starts: true }), [], 'urgent in small letters is not an ask');
+same(read('Bryan,\n\nConnect to my computer right now.\n\nJuan', { subject: 'NOW: connect to my computer', starts: true }), [], 'now alone is never a deadline');
+same(read('Bryan,\n\nPay it asap.\n\nJuan'), ['bryan Oct 29, 3:40 PM PT'], 'asap in a reply');
+same(D.readAssignerEmail({ at: at8, subject: 'ASAP: fence', text: 'Bryan,\n\nSend it.\n\nJuan', to: [B], cc: [] }, true, [B], { ...cfg, URGENT_MINUTES: 0 }).found, [], 'URGENT_MINUTES 0 turns it off');
 console.log('8 more of Juan’s style');
 console.log('all checks passed');
