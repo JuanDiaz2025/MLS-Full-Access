@@ -102,6 +102,7 @@ const check = (label, ok, got) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${label
   await p.click('[data-action="dl-filter"][data-f="all"]'); await p.waitForTimeout(150);
   rows = await lrows(p);
   check('A: All: overdue, blocked, open, then delivered', rows.length === 6 && rows[2].startsWith('Permit') && rows[3].startsWith('Comps') && /Open due in/.test(rows[3]) && rows[4].startsWith('AmEx') && /Delivered late/.test(rows[4]) && rows[5].startsWith('Relay'), rows.join(' || '));
+  check('A: times in Pacific, wherever the viewer is', rows.every(r => / PT/.test(r)), rows[0]);
   check('A: a link that isn’t Gmail is dropped', !(await p.$$eval('#v-deadlines .dl-lg .em-gr', r => r.some(x => x.innerText.includes('Comps') && x.querySelector('a.em-go')))));
   await p.click('.dl-pg .em-gr[data-email="lawrence@twinhomebuyer.com"]'); await p.waitForTimeout(150);
   rows = await lrows(p);

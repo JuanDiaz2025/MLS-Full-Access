@@ -1509,6 +1509,8 @@ RULES
     render();
   }
 
+  // Juan: "We operate on Pacific Time only." Deadlines show in Pacific, wherever the viewer is.
+  const fmtPT = t => `${new Date(t).toLocaleString('en-US', { timeZone: PT_ZONE, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} PT`;
   const RESULT_CHIP = { missed: ['c-crit', 'Missed'], blocked: ['c-warn', 'Blocked'], open: ['c-info', 'Open'], unread: ['c-muted', 'Not read'], late: ['c-good', 'Delivered late'], done: ['c-good', 'Delivered'] };
 
   function viewDeadlines() {
@@ -1588,17 +1590,17 @@ RULES
       const task = cleanSubject(r.subject);
       const nm = short[r.owner] || r.name || '–';
       const [cls, label] = RESULT_CHIP[r.result];
-      const detail = r.result === 'missed' ? (r.chased ? `chased ${fmtWhen(r.chased)}` : 'not chased yet')
+      const detail = r.result === 'missed' ? (r.chased ? `chased ${fmtPT(r.chased)}` : 'not chased yet')
         : r.result === 'open' ? (r.due ? `due in ${fmtDur(Math.max(0, r.due - now))}` : '')
-        : r.result === 'done' || r.result === 'late' ? (r.delivered ? fmtWhen(r.delivered) : '')
+        : r.result === 'done' || r.result === 'late' ? (r.delivered ? fmtPT(r.delivered) : '')
         : r.result === 'unread' ? r.note : '';
       return `<div class="em-gr">
         <span class="em-c-subj" title="${esc(task)}">${esc(task)}</span>
         <span class="em-d">${esc(nm)}</span>
-        <span class="em-d em-sent">${r.due ? esc(fmtWhen(r.due)) : '<span class="plain">–</span>'}</span>
+        <span class="em-d em-sent">${r.due ? esc(fmtPT(r.due)) : '<span class="plain">–</span>'}</span>
         <span class="dl-res">${chip(cls, label)}${detail ? `<span class="sub">${esc(detail)}</span>` : ''}</span>
         <span class="em-acts">${r.link ? `<a class="em-go" href="${esc(r.link)}" target="_blank" rel="noopener" title="Open in Gmail" aria-label="${esc(`Open “${task}” in Gmail`)}">${ic('out')}</a>` : ''}</span>
-        <span class="em-m">${esc(nm)}${r.due ? ` · due ${esc(fmtWhen(r.due))}` : ''}</span></div>`;
+        <span class="em-m">${esc(nm)}${r.due ? ` · due ${esc(fmtPT(r.due))}` : ''}</span></div>`;
     }).join('');
     const label = { overdue: 'Overdue', blocked: 'Blocked', open: 'Open', delivered: 'Delivered', all: 'All' };
     const seg = Object.keys(label).map(k => `<button type="button" data-action="dl-filter" data-f="${k}" aria-pressed="${f === k}">${label[k]} <b>${sets[k].length}</b></button>`).join('');
