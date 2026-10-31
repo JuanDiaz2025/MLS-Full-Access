@@ -11,7 +11,8 @@ every lead with comps in the sheet (the app's ARV / Comps columns or the Team Co
 
 Area is the Builder's Area dropdown: a San Francisco district D1-D10, a Peninsula city,
 Oakland, South Bay / San Jose, or Other. For San Francisco it uses the lead's MLS district
-from the Team Comps tab's "Lead Area" (e.g. "District 10E - Visitacion Valley" -> D10), else
+from the Team Comps tab's "Lead Area" or the "Lead Areas" tab (FlipScout v1.75.5's MLS
+districts run) (e.g. "District 10E - Visitacion Valley" -> D10), else
 the zip when the zip lies in one district (marked az=1 so the Builder says to check it);
 a zip that spans districts (94110, 94112, 94116, 94131, ...) is left for the person to pick.
 
@@ -133,6 +134,13 @@ def main():
                 mlsarea[m] = str(get(r, 'Lead Area')).strip()
             if get(r, 'Team Comps') not in (None, '') or get(r, 'Sales Found') not in (None, '', 0):
                 withcomps.add(m)
+    # FlipScout v1.75.5's "MLS districts" run: every San Francisco lead's area, on its own tab
+    if 'Lead Areas' in wb.sheetnames:
+        get, rows = tab('Lead Areas')
+        for r in rows:
+            m = str(get(r, 'MLS #') or '').strip().upper()
+            if m and get(r, 'Lead Area') and m not in mlsarea:
+                mlsarea[m] = str(get(r, 'Lead Area')).strip()
     withcomps |= {m for m, t in tm.items() if t and t.get('st') == 'ARV'}
 
     C = d['cols']

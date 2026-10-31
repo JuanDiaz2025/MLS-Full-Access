@@ -149,6 +149,15 @@
       their own <b>Team Comps</b> tab — the board measures the miles. The Leads tab and the ARV the real board shows are
       not touched. Run it daily: a lead searched in the last 7 days is skipped. Press <b>Check</b> first: it tries one
       lead, says what it found and saves the page for Claude.</div>
+    <div class="row" style="margin-top:8px">
+      <button id="leadAreas" disabled>◎ MLS districts (Deal Report Builder)</button>
+      <button id="areaCheck" class="ghost" disabled>Check the district lookup</button>
+    </div>
+    <div class="hint"><b>MLS districts</b> (v1.75.5) looks up the MLS district of every <b>San Francisco</b> lead that
+      doesn't have one yet (about half a minute each, newest first, once per lead) and writes it to its own
+      <b>Lead Areas</b> tab, so the Deal Report Builder fills its Area. The Leads tab is not touched. Run it after a
+      scan; you can Stop any time. Press <b>Check</b> first: it looks up one lead whose district Team comps already
+      found and says whether the two agree. Nothing is saved.</div>
     <div class="hint"><b>Refresh</b> re-reads only the leads already on your sheet (reports, no photos) — offer
       dates that were TBD, price cuts, pending status, private remarks — and never touches your Notes.
       Leads you <b>passed</b> that are still on the market are checked too: a price 10%+ under the sheet, or a
@@ -320,6 +329,7 @@
     $('start').disabled = running; $('pause').disabled = !running; $('resume').disabled = true; $('stop').disabled = !running;
     $('refreshBoard').disabled = running;
     $('teamComps').disabled = running; $('teamCheck').disabled = running;
+    $('leadAreas').disabled = running; $('areaCheck').disabled = running;
     // One run at a time: the Redfin buttons are off while anything runs (a
     // click mid-scan used to reset Start/Stop while the scan kept going, and
     // "Sign in to Redfin" sent the scan's own window to the login page).
@@ -343,6 +353,7 @@
     $('start').disabled = !r.loggedIn;
     $('refreshBoard').disabled = !r.loggedIn;
     $('teamComps').disabled = !r.loggedIn; $('teamCheck').disabled = !r.loggedIn;
+    $('leadAreas').disabled = !r.loggedIn; $('areaCheck').disabled = !r.loggedIn;
   };
   // --- which areas to scan ---
   // Checkboxes over the buy box, remembered between runs. Nothing is scanned
@@ -433,6 +444,16 @@
   };
   $('teamComps').onclick = () => runTeam(false);
   $('teamCheck').onclick = () => runTeam(true);
+  const runAreas = async (dry) => {
+    setScanButtons(true);
+    $('finished').style.display='none';
+    const r = await window.fs.leadAreas({ dry });
+    if (busy(r)) return;
+    if (r && !r.ok && r.error && !r.stopped) log('MLS districts: ' + r.error, 'warn');
+    setScanButtons(false);
+  };
+  $('leadAreas').onclick = () => runAreas(false);
+  $('areaCheck').onclick = () => runAreas(true);
   $('rebuildBoard').onclick = async () => {
     const r = await window.fs.rebuildBoard();
     if (r && r.unconfigured) log('Connect your Google Sheet in section 8 first.', 'warn');

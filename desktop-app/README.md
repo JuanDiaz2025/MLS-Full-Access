@@ -160,6 +160,19 @@ install (creates a desktop shortcut) or run the portable exe directly.
    sheet, and saves the search page under `team-comps-debug` in the app's data
    folder. A search that plainly ignored the area (thousands of sales) stops the
    run on the first lead and saves the page there to send to Claude.
+4g. **MLS districts, for the Deal Report Builder** (v1.75.5, Seth, 31 Oct) —
+   **◎ MLS districts** looks up the MLS district of every **San Francisco** lead on
+   the Leads tab that has none yet ("District 10E - Visitacion Valley"), newest
+   first, with the same Area-list lookup Team comps uses (about half a minute a
+   lead, once per lead), and writes it to its own **Lead Areas** tab (MLS # ·
+   Address · Lead Area · Looked Up On · Note). The Leads tab is not touched. An
+   area Team comps already found is not looked up again; a lead whose area was not
+   found is tried again after 7 days; five misses in a row stop the run and save
+   the page under `team-comps-debug`. **Check the district lookup** looks up one
+   San Francisco lead whose district Team comps already found and says whether
+   the two agree; it saves nothing to the sheet. The Deal Report Builder's
+   property list (flipscout-board/test/leads_for_drb.py) reads the tab and fills
+   the Builder's Area (D1-D10).
 5. **Your Google Sheet** — section 7. Sign in with your own Google account, paste
    your spreadsheet URL, and the app writes rows into it directly over the Sheets
    API as each city finishes. No Apps Script, no deployment, no shared secret,

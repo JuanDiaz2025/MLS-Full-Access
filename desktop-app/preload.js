@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('fs', {
   rereview: (date) => ipcRenderer.invoke('rereview', date),
   refreshBoard: () => ipcRenderer.invoke('refresh-board'),
   teamComps: (opts) => ipcRenderer.invoke('team-comps', opts || {}),
+  leadAreas: (opts) => ipcRenderer.invoke('lead-areas', opts || {}),
   rebuildBoard: () => ipcRenderer.invoke('board-rebuild'),
   // Direct Google Sheets connection
   googleStatus: () => ipcRenderer.invoke('google-status'),

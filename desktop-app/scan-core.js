@@ -832,6 +832,45 @@ async function teamFindArea(n, countOf) {
   return lo;
 }
 
+// ---------- MLS districts (v1.75.5): for the Deal Report Builder ----------
+// Seth, 31 Oct (Cherry: "tsaka 'yung district niya"). The Builder's Area for a
+// San Francisco house is its MLS district ("District 10E - Visitacion Valley"
+// -> D10). Team comps finds the area only for comped leads, so this looks it
+// up for every San Francisco lead that has none yet, with the same Area-list
+// lookup (main.js teamLeadArea), and keeps it on its own tab, which the
+// Builder's property list reads. Nothing on the Leads tab changes.
+const AREA_TAB = 'Lead Areas';
+const AREA_HEADERS = ['MLS #', 'Address', 'Lead Area', 'Looked Up On', 'Note'];
+// a lead whose area was not found is tried again after a week, not every run
+const AREA_RETRY_DAYS = 7;
+
+/** Whether an address ("…, San Francisco, CA 94xxx") is in San Francisco. */
+function isSanFrancisco(addr) { return /,\s*San Francisco\s*,\s*CA\b/i.test(String(addr || '')); }
+
+/** The San Francisco leads that still need an MLS district, newest row first.
+ *  leads: [{mls, addr, row}] off the Leads tab; known: MLS # -> an area the
+ *  Team Comps or Lead Areas tab already has; tried: MLS # -> the day a lookup
+ *  found nothing (tried again after AREA_RETRY_DAYS). */
+function areaTodo(leads, known, tried, today) {
+  const seen = new Set(), t = Date.parse(String(today || '').trim());
+  return (leads || []).filter(l => {
+    const m = String(l.mls || '').trim().toUpperCase();
+    if (!/^[A-Z]{2,6}\d{5,}$/.test(m) || seen.has(m) || !isSanFrancisco(l.addr)) return false;
+    seen.add(m);
+    if (String((known || {})[m] || '').trim()) return false;
+    const was = Date.parse(String((tried || {})[m] || '').trim());
+    return !(isFinite(was) && isFinite(t) && t - was >= 0 && t - was < AREA_RETRY_DAYS * 86400000);
+  }).sort((a, b) => (b.row || 0) - (a.row || 0));
+}
+
+/** The Lead Areas row for one lookup. A found area clears an old "not found" note. */
+function areaRecord(lead, area, why, today) {
+  const r = { 'MLS #': String(lead.mls || '').trim().toUpperCase(), 'Address': lead.addr || '', 'Lead Area': area || '', 'Looked Up On': today, 'Note': '' };
+  if (area) r.__clear = ['Note'];
+  else r.Note = 'not found: ' + (why || 'no reason given');
+  return r;
+}
+
 /** The form's match count once Matrix has recounted after a change (v1.75.3).
  *  Until a recount lands the old number stays on screen, and a slow one reads
  *  the same stale number twice: Seth's run, 27 Oct, read "2500+" with Coastal
@@ -2192,6 +2231,7 @@ module.exports = {
   compRows, compBand, classifyComp, compArv, compSummary, compsJson, parseCompReport, JS_SCRAPE_SOLD,
   TEAM_TAB, TEAM_HEADERS, TEAM_SOLD_MONTHS, TEAM_LIST_MONTHS, TEAM_PAGES, TEAM_FRESH_DAYS, teamMarket, teamRows, teamFits, teamRecord,
   teamFresh, teamFindArea, teamSameArea, teamSettledCount, teamRealArea,
+  AREA_TAB, AREA_HEADERS, AREA_RETRY_DAYS, isSanFrancisco, areaTodo, areaRecord,
   COMP_BANDS, COMP_READ, COMP_LIST_MAX,
   boardLead,
   redfinUrlFrom,

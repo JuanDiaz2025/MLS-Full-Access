@@ -3294,6 +3294,108 @@ ipcMain.handle('team-comps', async (_e, opts) => {
   }
 });
 
+// ---------- MLS districts (v1.75.5): for the Deal Report Builder ----------
+// Seth, 31 Oct (Cherry asked for the district). Every San Francisco lead on the
+// Leads tab without an MLS area yet gets one, newest first, by the same
+// Area-list lookup Team comps uses (teamLeadArea: about half a minute a lead,
+// once per lead). The areas go to their own "Lead Areas" tab; the Leads tab is
+// not touched. A check run ({dry}) looks up one lead whose area the Team Comps
+// tab already has, says whether the two agree, and saves nothing.
+ipcMain.handle('lead-areas', async (_e, opts) => {
+  const dry = !!(opts && opts.dry);
+  if (control.running) return { ok: false, error: 'already running', message: 'MLS districts NOT started — another run is still finishing. Wait for its "Finished" message, then try again.' };
+  if (!googleReady()) return { ok: false, error: 'connect your Google Sheet in section 8 first' };
+  control.running = true; control.stopped = false; control.paused = false;
+  let started = false, found = 0, missed = 0, endSummary = '', checkSummary = '';
+  try {
+    if (!mlsWin || mlsWin.isDestroyed()) { ensureMlsWindow(); await nav(core.SEARCH_URL, 3000); }
+    const title = await js(core.JS_TITLE).catch(() => '');
+    if (!/Dashboard|Matrix/i.test(title)) { log('Not logged in — sign in first.', 'error'); return { ok: false, error: 'not signed in' }; }
+    started = true;
+    const g = googleCfg();
+    const token = await googleToken();
+    const rows = await gsheets.readAll(token, g.sheetId, g.leadTab);
+    const head = (rows[0] || []).map(h => String(h).trim());
+    const val = (r, h) => { const i = head.indexOf(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); };
+    const leads = rows.slice(1).map((r, i) => ({ mls: val(r, 'MLS #').toUpperCase(), addr: val(r, 'Address'), row: i + 2 }));
+    // what is known already: Team comps' areas first, then this tab's own
+    const known = {}, teamKnown = {}, tried = {};
+    const readTab = async (tab, each) => {
+      try {
+        const t = await gsheets.readAll(token, g.sheetId, tab), th = (t[0] || []).map(h => String(h).trim());
+        t.slice(1).forEach(r => each(h => { const i = th.indexOf(h); return i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim(); }));
+      } catch (_) { /* no tab yet */ }
+    };
+    await readTab(core.TEAM_TAB, v => { const m = v('MLS #').toUpperCase(); if (m && v('Lead Area')) known[m] = teamKnown[m] = v('Lead Area'); });
+    await readTab(core.AREA_TAB, v => {
+      const m = v('MLS #').toUpperCase(); if (!m) return;
+      if (v('Lead Area')) known[m] = known[m] || v('Lead Area'); else if (v('Looked Up On')) tried[m] = v('Looked Up On');
+    });
+    const tday = todayKey(), sfAll = leads.filter(l => core.isSanFrancisco(l.addr));
+    let todo = core.areaTodo(leads, known, tried, tday);
+    if (dry) {
+      // the newest San Francisco lead whose district Team comps already found: the lookup must agree with it
+      const check = sfAll.filter(l => core.teamRealArea(teamKnown[l.mls])).sort((a, b) => b.row - a.row)[0];
+      todo = check ? [check] : todo.slice(0, 1);
+      log(todo.length ? `Checking the district lookup on ${todo[0].addr}` + (check ? ` — Team comps found "${teamKnown[check.mls]}" for it` : '') + ' — nothing is saved…'
+        : 'No San Francisco lead to check.', 'good');
+    } else {
+      log(`MLS districts for ${todo.length} San Francisco lead(s) without one (${sfAll.length} on the sheet), newest first — about half a minute each. Stop any time; the next run picks up where it stopped.`, 'good');
+    }
+    let batch = [], fails = 0, blocked = '';
+    const flush = async () => {
+      if (!batch.length) return;
+      await gsheets.syncRows(await googleToken(), g.sheetId, core.AREA_TAB, core.AREA_HEADERS, 'MLS #', batch, { overwrite: core.AREA_HEADERS });
+      batch = [];
+    };
+    for (let i = 0; i < todo.length; i++) {
+      if (await stopRequested()) break;
+      const l = todo[i];
+      log(`  [${i + 1}/${todo.length}] ${l.addr}`);
+      let a;
+      try { a = await teamLeadArea(l.mls); } catch (e) { a = { area: '', why: e.message }; }
+      if (control.stopped) { log('    stopped part-way — not saved; the next run does it'); break; }
+      if (dry) {
+        const want = teamKnown[l.mls];
+        if (want && a.area === want) { checkSummary = 'District check passed — press "MLS districts" for the full run.'; log(`    ✓ ${a.area} — the same as the Team Comps tab, so the lookup works (${a.counts} counts over ${a.n} areas). Press "MLS districts" for the full run.`, 'good'); }
+        else if (want) { checkSummary = 'District check did NOT match — send the log to Claude.'; log(`    ✗ found "${a.area || 'nothing'}"${a.why ? ' (' + a.why + ')' : ''}, but the Team Comps tab says "${want}". Send this log to Claude before the full run.`, 'error'); }
+        else log(a.area ? `    found ${a.area} (nothing on the Team Comps tab to compare it with)` : `    not found — ${a.why}`, a.area ? 'good' : 'warn');
+        const dir = await saveTeamDebug('district-check');
+        log(`  The search page is saved in ${dir}.`);
+        break;
+      }
+      if (a.area) { found++; fails = 0; log(`    ${a.area}`, 'good'); }
+      else { missed++; fails++; log(`    not found — ${a.why} (tried again in ${core.AREA_RETRY_DAYS} days)`, 'warn'); }
+      batch.push(core.areaRecord(l, a.area, a.why, tday));
+      if (batch.length >= 5) await flush();
+      // five leads in a row with nothing found is the form, not the leads
+      if (fails >= 5) { const dir = await saveTeamDebug('district-lookup'); blocked = `five leads in a row found no district. The page is saved in ${dir} — send those files to Claude`; break; }
+    }
+    await flush();
+    if (blocked) {
+      log(`MLS districts STOPPED — ${blocked}`, 'error');
+      endSummary = 'MLS districts stopped: the lookup did not work on this form. Send Claude the saved page.';
+      return { ok: false, stopped: true, error: blocked };
+    }
+    if (!dry) log(`MLS districts ${control.stopped ? 'STOPPED early' : 'COMPLETE'} — ${found} found, ${missed} not found, saved to the "${core.AREA_TAB}" tab`
+      + (control.stopped ? '. Press it again to pick up where it stopped.' : '.'), 'good');
+    return { ok: true, found, missed };
+  } catch (e) {
+    if (e.message === 'stopped') { log('MLS districts stopped.', 'warn'); return { ok: false, stopped: true }; }
+    const why = /^fetch failed$/i.test(e.message) ? 'no answer over the internet — ' + gsheets.netReason(e) : e.message;
+    log('MLS districts error: ' + why, 'error');
+    if (started) endSummary = 'MLS districts stopped by an error — press it again; it picks up where it stopped.';
+    return { ok: false, stopped: started, error: why };
+  } finally {
+    if (started) closeMlsWindow();
+    send('done', started
+      ? { stopped: control.stopped || !!endSummary, failed: !!endSummary, summary: endSummary || (dry ? (checkSummary || 'District check finished — see the log.')
+          : `MLS districts finished — ${found} found, ${missed} not found.`) }
+      : { neverStarted: true, summary: 'MLS districts NOT started — sign in to the MLS first (section 1), then press it again.' });
+    control.running = false;
+  }
+});
+
 ipcMain.handle('ledger-stats', () => {
   const e = loadLedger();
   const byVerdict = {};
