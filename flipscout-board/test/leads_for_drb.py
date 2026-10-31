@@ -5,7 +5,9 @@
 
 Cherry's Deal Report Builder (https://claude.ai/artifact/Q3w5f9wqTpWMTTWhFMpmmp) loads
 leads.js: picking a property there fills its price, offer deadline, beds, baths, square
-feet, lot size, year built, agent, phone, brokerage and Area (Seth, 31 Oct). It keeps the
+feet, lot size, year built, agent, phone, brokerage, Area, a one-line summary (occupancy, days on
+market, price cut) and the disclosures link, and offers the FlipScout app's comps and ARV
+behind a button (Seth, 31 Oct). It keeps the
 leads still on the market (Active / Coming Soon), anything pulled in the last 30 days, and
 every lead with comps in the sheet (the app's ARV / Comps columns or the Team Comps tab).
 
@@ -21,10 +23,16 @@ app fills "Baths" (the MLS's "full|half", e.g. "2|1" = 2.5 baths) and "Lot SqFt"
 lead since 12 Oct.
 
     window.__TN_LEADS__ = {v, built, from, n, leads: [{m, a, st, pl, p, bd, ba, sf, lot, yr,
-                           due, dt, bad, ag, ph, br, ar, az, da, ra, rp, tr: {arv, why, c: [[addr,
-                           price, sqft, sold, mi, renovated], ...]}}]}
+                           due, dt, bad, ag, ph, br, ar, az, da, ol, ds, ra, rp,
+                           tr: {arv, why, c: [[addr, price, sqft, sold, mi, renovated], ...]},
+                           fc: {arv, conf, c: [same]}}]}
+
+fc is the FlipScout app's own ARV and the sales it rests on (the Leads tab's ARV / Comp
+Confidence / Comps), at most 5. "Renovated" is ticked when the app's ARV rests on renovated
+sales (High or Medium confidence); miles come from the map pins compcheck.py keeps in
+compfacts.js, next to teamcomps.js, when that file is there.
 """
-import datetime, json, re, sys
+import datetime, json, math, os, re, sys
 
 from openpyxl import load_workbook
 
@@ -97,6 +105,45 @@ def area(addr, mls_area):
     return 'Other', 0
 
 
+def miles(a, b):
+    """Miles between two {lat, lng}, to 0.1; None when either is missing."""
+    if not (a and b and a.get('lat') is not None and b.get('lat') is not None):
+        return None
+    p1, p2 = math.radians(a['lat']), math.radians(b['lat'])
+    h = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(b['lng'] - a['lng']) / 2) ** 2
+    return round(3958.8 * 2 * math.asin(math.sqrt(h)), 1)
+
+
+OCCUPIED = {'owner': 'Owner-occupied', 'tenant': 'Tenant-occupied', 'vacant': 'Vacant'}
+
+
+def one_line(occ, dom, pulled, status, cut, today):
+    """'Vacant · on the market since Oct 15 (16 days) · price cut $70K (6%)'. The board's days on
+    market is the count on the day the app pulled the lead, so the listing day is worked back from
+    that; the day count is today's, and only while the house is still on the market. Occupancy is
+    only Owner, Tenant or Vacant (the MLS also answers "Call Agent")."""
+    parts = []
+    o = OCCUPIED.get(str(occ or '').strip().lower())
+    if o:
+        parts.append(o)
+    d = number(dom) if str(dom or '').strip() not in ('', '0', '0.0') else 0
+    try:
+        listed = datetime.date.fromisoformat(str(pulled)[:10]) - datetime.timedelta(days=d or 0)
+    except ValueError:
+        listed = None
+    if listed and (d or str(dom or '').strip() in ('0', '0.0')):
+        day = listed.strftime('%b ') + str(listed.day)
+        if re.match(r'(Active|Coming Soon)', str(status or ''), re.I):
+            n = (today - listed).days
+            parts.append('on the market since %s (%d day%s)' % (day, n, '' if n == 1 else 's'))
+        else:
+            parts.append('listed %s' % day)
+    c = str(cut or '').strip().lstrip('-').strip()
+    if c:
+        parts.append('price cut ' + re.sub(r'(\d)k\b', r'\1K', c))
+    return ' · '.join(parts)
+
+
 def clip(s, n):
     return re.sub(r'\s+', ' ', str(s or '')).strip()[:n]
 
@@ -115,11 +162,25 @@ def main():
         # read-only rows drop trailing empty cells
         return ((lambda r, k: r[ci[k]] if k in ci and ci[k] < len(r) else None), rows)
     get, rows = tab('Leads')
-    extra, withcomps = {}, set()
+    extra, withcomps, links, appcomps = {}, set(), {}, {}
+    # map pins, for each comp's miles: compcheck.py's page cache sits next to teamcomps.js
+    facts = {}
+    fpath = os.path.join(os.path.dirname(os.path.abspath(team)), 'compfacts.js')
+    if os.path.exists(fpath):
+        facts = load(fpath)
     for r in rows:
         m = str(get(r, 'MLS #') or '').strip()
         if m:
             extra[m] = (baths(get(r, 'Baths')), number(get(r, 'Lot SqFt')))
+            disc = str(get(r, 'Disclosures') or '').strip()
+            if re.match(r'https?://', disc):
+                links[m] = disc
+            try:
+                fcomps = json.loads(get(r, 'Comps') or '[]')
+            except ValueError:
+                fcomps = []
+            if number(get(r, 'ARV')) and isinstance(fcomps, list) and fcomps:
+                appcomps[m] = (number(get(r, 'ARV')), str(get(r, 'Comp Confidence') or '').strip(), fcomps)
             if get(r, 'ARV') not in (None, '') or get(r, 'Comps') not in (None, ''):
                 withcomps.add(m)
     # the lead's own MLS area (district) and its team comps, from the FlipScout app's Team Comps search
@@ -177,7 +238,19 @@ def main():
         put('ag', col(r, 'agent')); put('ph', col(r, 'phone')); put('br', bk.get(m))
         ar, az = area(L['a'], mlsarea.get(m))
         put('ar', ar); put('az', az or None); put('da', mlsarea.get(m) if re.match(r'\s*District', mlsarea.get(m) or '') else None)
+        put('ol', one_line(col(r, 'occ'), col(r, 'dom'), pulled, st, col(r, 'cut'), today))
+        put('ds', links.get(m))
         put('ra', clip(col(r, 'remarks'), 1200)); put('rp', clip(rm.get(m), 1500))
+        if m in appcomps:
+            arv, conf, fcomps = appcomps[m]
+            subj = ((tm.get(m) or {}).get('subj') or (facts.get('geo') or {}).get(m) or (facts.get('by') or {}).get(m))
+            fby = facts.get('by') or {}
+            reno = 1 if conf in ('High', 'Medium') else 0
+            used = [c for c in fcomps if isinstance(c, dict) and c.get('use') == 1][:5]
+            if used:
+                L['fc'] = {'arv': arv, 'conf': conf, 'c': [
+                    [c.get('addr') or c.get('mls'), c.get('price'), c.get('sqft'), c.get('sold') or '', miles(subj, fby.get(c.get('mls'))), reno]
+                    for c in used]}
         t = tm.get(m)
         if t and t.get('st') == 'ARV' and (t.get('arv') or 0) > 0 and isinstance(t.get('rows'), list) and t.get('pick') is not None and t['pick'] < len(t['rows']):
             used = set(t['rows'][t['pick']].get('used') or [])
@@ -190,10 +263,13 @@ def main():
     open(out, 'w', encoding='utf8').write('window.__TN_LEADS__ = ' + json.dumps(body, separators=(',', ':')) + ';\n')
     sf = [l for l in leads if city_of(l['a']).lower() == 'san francisco']
     print('leads.js: %d properties · %d with baths · %d with a lot size · %d with an offer deadline · %d with a team-rules ARV · '
-          'Area for %d (San Francisco district for %d of %d: %d from the MLS, %d from the zip) · %d bytes' % (
+          'Area for %d (San Francisco district for %d of %d: %d from the MLS, %d from the zip) · %d with a one-line summary · '
+          '%d with a disclosures link · %d with FlipScout comps (%d of their comps with miles) · %d bytes' % (
               len(leads), sum(1 for l in leads if 'ba' in l), sum(1 for l in leads if 'lot' in l), sum(1 for l in leads if 'due' in l),
               sum(1 for l in leads if 'tr' in l), sum(1 for l in leads if 'ar' in l), sum(1 for l in sf if 'ar' in l), len(sf),
               sum(1 for l in sf if 'ar' in l and not l.get('az')), sum(1 for l in sf if l.get('az')),
+              sum(1 for l in leads if 'ol' in l), sum(1 for l in leads if 'ds' in l), sum(1 for l in leads if 'fc' in l),
+              sum(1 for l in leads if 'fc' in l for c in l['fc']['c'] if c[4] is not None),
               len(open(out, encoding='utf8').read().encode('utf8'))))
 
 
