@@ -209,5 +209,20 @@
   "v": "FIXER",
   "addr": "387 Staples Ave, SF",
   "at": "2026-10-28"
+ },
+ "SF426159646": {
+  "v": "FIXER",
+  "addr": "631 Head St, SF",
+  "at": "2026-11-01"
+ },
+ "SF426164001": {
+  "v": "FIXER",
+  "addr": "1630 Silliman St, SF",
+  "at": "2026-11-01"
+ },
+ "SF426171840": {
+  "v": "FIXER",
+  "addr": "2650 24th Ave, SF",
+  "at": "2026-11-01"
  }
 }
