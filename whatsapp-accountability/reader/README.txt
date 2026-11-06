@@ -1,4 +1,4 @@
-WhatsApp Reader 1.0.3
+WhatsApp Reader 1.1.0
 =====================
 
 WhatsApp Reader links to your phone the same way WhatsApp Web does and saves
@@ -80,10 +80,60 @@ IF YOUR PHONE SAYS "COULDN'T LINK DEVICE"
 5. Still stuck? Send reader.log from this folder. It lists each linking step.
 
 
+RUNNING BY ITSELF: ONE FILE PER PROPERTY IN GOOGLE DRIVE (1.1.0)
+------------------------------------------------------------------
+This lets Juan and John ask their own Claude "What's missing at Norton?".
+The reader runs without the Claude desktop app, saves only the groups you
+choose, and every 15 minutes writes one text file per group, for example
+"WhatsApp - 972 Norton.txt", into a Google Drive folder. Each file holds the
+last 30 days, newest first; older messages go to "... - older messages.txt".
+
+1. Install Google Drive for desktop on this computer and sign in with the
+   company account that owns the folder. Note the folder's path, for
+   example G:\My Drive\WhatsApp - Construction.
+
+2. Replace whatsapp-reader.exe in this folder with version 1.1.0. Keep
+   everything else here (session.db and messages.db are the link and the
+   saved messages).
+
+3. Find the group's exact name: open Command Prompt in this folder and run
+       whatsapp-reader.exe groups
+
+4. Make a shortcut to whatsapp-reader.exe. Right-click it > Properties:
+     Target:  add  run  at the end, after the closing quote:
+              "C:\Users\Iriga Office\Downloads\Whatsappreader\whatsapp-reader.exe" run
+     Run:     Minimized
+   Double-click the shortcut once. It creates export.txt in this folder
+   and stops. Open export.txt in Notepad and fill in:
+       folder: G:\My Drive\WhatsApp - Construction
+       group: 972 Norton
+   ("group" matches any group whose name contains that text. One line per
+   group. Only these groups are saved while it runs.)
+
+5. Double-click the shortcut again. The window says "Running by itself".
+   Within 2 minutes the file appears in the Drive folder. Leave the window
+   open; minimized is fine. Closing it stops the reader.
+
+6. So it starts with the computer: press Windows+R, type  shell:startup ,
+   press Enter, and move the shortcut into that folder.
+
+7. Settings > System > Power > Screen and sleep: "When plugged in, put my
+   device to sleep after" = Never. A sleeping computer writes no files.
+
+- The Claude desktop app can stay as it is: while the reader runs by itself,
+  the app's copy doesn't connect to WhatsApp (one link can only connect
+  once) and the dashboard shows what's saved.
+- If a file's second line says "WhatsApp: NOT connected since ...", the
+  phone or this computer lost the connection. Check whatsapp-reader.exe
+  status; if it says "Not linked yet", link it again with the phone.
+- To add a property later: add a "group:" line to export.txt. It's picked
+  up within 15 minutes.
+
+
 GOOD TO KNOW
 ------------
-- The reader runs while the Claude desktop app is open. Messages that
-  arrive while it's closed are delivered when it reconnects.
+- Without "run", the reader runs while the Claude desktop app is open.
+  Messages that arrive while it's closed are delivered when it reconnects.
 - The dashboard is live only in the Claude desktop app on this computer.
   Each update is saved into the dashboard, so others with the link see the
   latest saved numbers on any device.

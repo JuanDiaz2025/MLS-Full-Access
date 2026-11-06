@@ -34,6 +34,11 @@ type Reader struct {
 	lastEvent atomic.Int64
 	history   atomic.Int64 // messages saved from history sync, for the link screen
 	groupAsk  groupLimiter
+	// keep, when set, says which groups to save; the rest are never stored
+	// (running in the background for chosen groups only)
+	keep func(chat string) bool
+	// downSince is when the connection was last lost, 0 while connected
+	downSince atomic.Int64
 }
 
 // Asking WhatsApp for a group's members is a request to its servers, and a
@@ -171,22 +176,28 @@ func (r *Reader) handle(evt any) {
 		r.saveHistory(v)
 	case *events.Connected:
 		r.connected.Store(true)
+		r.downSince.Store(0)
 		r.log.Infof("Connected to WhatsApp")
 		go r.refreshGroups()
 	case *events.Disconnected:
-		r.connected.Store(false)
+		r.markDown()
 	case *events.LoggedOut:
-		r.connected.Store(false)
+		r.markDown()
 		r.loggedOut.Store(true)
 		r.log.Warnf("WhatsApp logged this device out. Run whatsapp-reader.exe again to link it.")
 	case *events.StreamReplaced:
-		r.connected.Store(false)
+		r.markDown()
 		r.log.Warnf("Another copy of WhatsApp Reader connected with the same link, so this one stopped.")
 	case *events.GroupInfo:
 		go r.refreshGroupSoon(v.JID)
 	case *events.JoinedGroup:
 		go r.refreshGroupSoon(v.JID)
 	}
+}
+
+func (r *Reader) markDown() {
+	r.connected.Store(false)
+	r.downSince.CompareAndSwap(0, nowMs())
 }
 
 // ---- identities ----
@@ -322,6 +333,9 @@ func (r *Reader) saveEvent(ctx context.Context, evt *events.Message) {
 		return // only group chats are kept; one-to-one chats are never stored
 	}
 	chat := evt.Info.Chat.String()
+	if r.keep != nil && !r.keep(chat) {
+		return // not one of the groups chosen in export.txt
+	}
 	m := evt.Message
 
 	if pm := m.GetProtocolMessage(); pm != nil {

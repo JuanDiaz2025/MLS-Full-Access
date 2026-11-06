@@ -12,9 +12,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -24,7 +28,7 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
-const version = "1.0.3"
+const version = "1.1.0"
 
 func main() {
 	setupConsole()
@@ -38,6 +42,16 @@ func main() {
 	if cmd == "serve" {
 		if err := serve(dir); err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if cmd == "run" {
+		if err := runBackground(dir); err != nil {
+			fmt.Println()
+			fmt.Println("Problem:", err)
+			fmt.Println("Details are in reader.log in this folder.")
+			pause()
 			os.Exit(1)
 		}
 		return
@@ -112,6 +126,8 @@ func interactive(dir, cmd string, args []string) error {
 		return link(r, number)
 	case "status":
 		return printStatus(r)
+	case "groups":
+		return printGroups(r)
 	case "unlink":
 		return unlink(r)
 	case "help", "-h", "--help", "/?":
@@ -129,6 +145,9 @@ func usage() {
   whatsapp-reader.exe link --phone 15551234567
                                       Link with an 8-character code instead of a QR code
   whatsapp-reader.exe status          Show what is linked and saved
+  whatsapp-reader.exe groups          List the saved groups and their names
+  whatsapp-reader.exe run             Run by itself: read the groups in export.txt and write
+                                      one file per group into its folder every 15 minutes
   whatsapp-reader.exe unlink          Unlink from WhatsApp and delete everything saved here
   whatsapp-reader.exe serve           Used by the Claude desktop app; you don't run this yourself
 
@@ -155,7 +174,41 @@ func printStatus(r *Reader) error {
 	}
 	fmt.Printf("Saved in:         %s\n", r.dir)
 	fmt.Println()
-	fmt.Println("The Claude desktop app runs this reader for you while the app is open.")
+	if runActive(r.dir) {
+		s, _ := readExportSettings(filepath.Join(r.dir, settingsName))
+		fmt.Printf("Running by itself, reading %s and writing to %s.\n", strings.Join(s.Groups, ", "), s.Folder)
+	} else {
+		fmt.Println("Not running by itself right now. Start it with: whatsapp-reader.exe run")
+	}
+	return nil
+}
+
+// printGroups lists the saved groups, so the right names go into export.txt.
+func printGroups(r *Reader) error {
+	groups, err := r.store.GroupSummaries()
+	if err != nil {
+		return err
+	}
+	sort.Slice(groups, func(i, j int) bool { return strings.ToLower(groups[i].Name) < strings.ToLower(groups[j].Name) })
+	s, _ := readExportSettings(filepath.Join(r.dir, settingsName))
+	fmt.Println("WhatsApp Reader", version, "-", len(groups), "groups saved")
+	fmt.Println("* = read and written by \"run\" (export.txt)")
+	fmt.Println()
+	for _, g := range groups {
+		mark := " "
+		if s.wants(g.Name) {
+			mark = "*"
+		}
+		last := "no messages"
+		if g.LastMessageAt > 0 {
+			last = "last " + time.UnixMilli(g.LastMessageAt).In(pacific()).Format("Jan 2")
+		}
+		name := g.Name
+		if name == "" {
+			name = "(no name yet)"
+		}
+		fmt.Printf("%s %s  (%d messages, %s)\n", mark, name, g.MessageCount, last)
+	}
 	return nil
 }
 
@@ -433,7 +486,7 @@ func serve(dir string) error {
 	defer r.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go keepConnected(ctx, r)
+	go keepConnected(ctx, r, true)
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "whatsapp-reader", Version: version}, nil)
 	addTools(server, r)
@@ -442,11 +495,18 @@ func serve(dir string) error {
 }
 
 // keepConnected waits until the reader has been linked, then connects.
-// whatsmeow reconnects on its own after network drops.
-func keepConnected(ctx context.Context, r *Reader) {
+// whatsmeow reconnects on its own after network drops. The Claude desktop
+// app's copy (serving) doesn't connect while the reader runs by itself, and
+// steps aside when that starts, answering from what's saved: one link can
+// only be connected once.
+func keepConnected(ctx context.Context, r *Reader, serving bool) {
 	for ctx.Err() == nil {
 		if info, err := os.Stat(lockPath(r.dir)); err == nil && time.Since(info.ModTime()) < 10*time.Minute {
 			sleep(ctx, 5*time.Second) // a link is in progress in another window
+			continue
+		}
+		if serving && runActive(r.dir) {
+			sleep(ctx, 30*time.Second)
 			continue
 		}
 		dev, err := r.Device(ctx)
@@ -461,8 +521,18 @@ func keepConnected(ctx context.Context, r *Reader) {
 			sleep(ctx, 30*time.Second)
 			continue
 		}
-		<-ctx.Done()
-		return
+		if !serving {
+			<-ctx.Done()
+			return
+		}
+		for ctx.Err() == nil && !runActive(r.dir) {
+			sleep(ctx, 30*time.Second)
+		}
+		if ctx.Err() == nil {
+			r.log.Infof("The reader is running by itself, so this copy disconnects and answers from what's saved")
+			cli.Disconnect()
+			r.markDown()
+		}
 	}
 }
 
@@ -511,4 +581,117 @@ func (l *fileLogger) Sub(mod string) waLog.Logger {
 		min = 2 // the WhatsApp library is chatty; keep its warnings and errors only
 	}
 	return &fileLogger{mod: l.mod + "/" + mod, min: min, mu: l.mu, w: l.w}
+}
+
+// ---- running by itself ----
+
+const runFresh = 3 * time.Minute
+
+func runLockPath(dir string) string { return filepath.Join(dir, "run.lock") }
+
+// runActive says whether a copy running by itself checked in during the last 3 minutes.
+func runActive(dir string) bool {
+	info, err := os.Stat(runLockPath(dir))
+	return err == nil && time.Since(info.ModTime()) < runFresh
+}
+
+// runBackground keeps the reader connected without the Claude desktop app,
+// saves only the groups named in export.txt, and writes their files into its
+// folder every 15 minutes.
+func runBackground(dir string) error {
+	fmt.Println("WhatsApp Reader", version)
+	if runActive(dir) {
+		return fmt.Errorf("it is already running by itself on this computer (run.lock was updated in the last 3 minutes)")
+	}
+	settingsPath := filepath.Join(dir, settingsName)
+	if _, err := os.Stat(settingsPath); errors.Is(err, os.ErrNotExist) {
+		_ = os.WriteFile(settingsPath, []byte(settingsStart), 0o644)
+		return fmt.Errorf("export.txt was just created in %s. Fill in its folder line, then run this again", dir)
+	}
+	s, err := readExportSettings(settingsPath)
+	if err != nil {
+		return err
+	}
+	if s.Folder == "" || len(s.Groups) == 0 {
+		return fmt.Errorf("export.txt needs a folder line and at least one group line")
+	}
+	logger := newFileLogger(filepath.Join(dir, "reader.log"))
+	r, err := OpenReader(dir, logger)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	if dev, err := r.Device(context.Background()); err != nil {
+		return err
+	} else if dev.ID == nil {
+		return fmt.Errorf("not linked to a phone yet: double-click whatsapp-reader.exe to link it first")
+	}
+
+	var current atomic.Value
+	current.Store(s)
+	r.keep = func(chat string) bool {
+		g, ok := r.store.Group(chat)
+		return ok && current.Load().(ExportSettings).wants(g.Name)
+	}
+	r.downSince.Store(nowMs())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	go func() { <-stop; cancel() }()
+
+	touch := func() { _ = os.WriteFile(runLockPath(dir), []byte(fmt.Sprint(os.Getpid())), 0o600) }
+	touch()
+	defer os.Remove(runLockPath(dir))
+	go keepConnected(ctx, r, false)
+
+	fmt.Println("Running by itself. Keep this window open; minimized is fine.")
+	fmt.Println("Reading:   ", strings.Join(s.Groups, ", "))
+	fmt.Println("Writing to:", s.Folder)
+	fmt.Println()
+	logger.Infof("Running by itself: %s -> %s", strings.Join(s.Groups, ", "), s.Folder)
+
+	olderDay := map[string]string{}
+	beat := time.NewTicker(time.Minute)
+	defer beat.Stop()
+	next := time.Now().Add(time.Minute)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-beat.C:
+			touch()
+			if time.Now().Before(next) {
+				continue
+			}
+			next = time.Now().Add(exportEvery)
+			if ns, err := readExportSettings(settingsPath); err == nil && ns.Folder != "" && len(ns.Groups) > 0 {
+				s = ns
+				current.Store(ns)
+			}
+			stamp := time.Now().In(pacific()).Format("Mon 3:04 PM") + " PT  "
+			report, err := exportOnce(r.store, s, time.Now(), connectionNote(r.downSince.Load()), olderDay)
+			if err != nil {
+				fmt.Println(stamp + err.Error())
+				logger.Warnf("Writing the files: %v", err)
+				continue
+			}
+			for _, line := range report {
+				fmt.Println(stamp + line)
+			}
+			if r.downSince.Load() != 0 {
+				fmt.Println(stamp + "not connected to WhatsApp right now; the files say so")
+			}
+		}
+	}
+}
+
+// connectionNote is the line under "Updated" in every file.
+func connectionNote(downSince int64) string {
+	if downSince == 0 {
+		return "WhatsApp: connected. The file has every message the phone received up to the Updated time."
+	}
+	return "WhatsApp: NOT connected since " + time.UnixMilli(downSince).In(pacific()).Format("Mon Jan 2, 3:04 PM") +
+		" Pacific. Messages after that are missing until the Reader reconnects."
 }
