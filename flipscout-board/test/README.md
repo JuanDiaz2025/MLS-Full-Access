@@ -467,6 +467,46 @@ only Matrix's Tax tab has it).
 Never put `teamcomps.js` or the Team rules block on the real board until Seth
 says so.
 
+## Flip Strategy agent (Test board only, 10 Nov, version 174)
+
+Juan's Agent 2 (8 Nov): for a house we're buying or own, the recent nearby
+sales, what the highest-priced ones had, what is trending in the area's
+listings and what buyers pay for, then a one-page renovation plan — what to
+do and skip with costs, the expected sale price and why. On the Test board it
+is the seventh agent icon (a paint roller), lit for Won leads; any lead's View
+panel can make one.
+
+The board can't browse, so the sales come from `flipdata.py`, run outside it:
+
+    python3 -I flipdata.py <data.js> <compfacts.js> <out> --mls ML1,ML2,... --addr comps.js,teamcomps.js
+
+For each MLS # it reads mlslistings.com's public "recently sold" search for
+the house's zip (every page), keeps single-family sales from the last 12
+months, reads each sale's public page for its map pin and remarks (pages
+already in `compfacts.js` are not read again), adds older sales from
+`compfacts.js`, and keeps those within 1 mile (1.5, then 2, while fewer than
+8). Each sale gets compcheck.py's condition read. When the house itself is on
+the search, its sale price and date go in `subj` (for a house THB bought:
+what we paid). The result is `<out>/flip.js` (`window.__FLIP__`), published
+with the Test board page. First run, 10 Nov: the three Won leads and 460 5th
+Ave (the test house), 17–66 sales each.
+
+On the board, "Make a plan" sends Claude (the viewer's own account, through
+`sample`) the house's facts, remarks, permits and photos, THB's Buy Box
+numbers, up to 30 of the sales with remarks, and the board's own median
+$/sqft check. Claude answers in JSON; the board checks it, works out the
+profit at the low, likely and high prices from the team's Buy Box Settings,
+and saves it for the team in the database's `flip/<MLS #>`. Every cost is
+marked GUESS. While selling and closing costs are not set in Buy Box
+Settings, the profit says it leaves them out and the colour uses a typical 6%.
+"Copy as email" gives the typed version for Juan and the project lead.
+Social media is not checked: the board can't browse.
+
+Not yet: flip.js is built by hand for the houses asked for; a daily or Monday
+run would add the Won leads automatically (Juan's schedule: Mondays 7:00 AM
+Pacific, needs his written approval). Never port this to the real board until
+Seth says so.
+
 ## Daily refresh
 
 Steps 1–3 run once per board, each in its own out dir and its own upload
