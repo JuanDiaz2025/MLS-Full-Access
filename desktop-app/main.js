@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const core = require('./scan-core');
 const gsheets = require('./google-sheets');
+const byowner = require('./byowner');
 
 let controlWin, mlsWin;
 const control = { paused: false, stopped: false, running: false };
@@ -3392,6 +3393,73 @@ ipcMain.handle('lead-areas', async (_e, opts) => {
       ? { stopped: control.stopped || !!endSummary, failed: !!endSummary, summary: endSummary || (dry ? (checkSummary || 'District check finished — see the log.')
           : `MLS districts finished — ${found} found, ${missed} not found.`) }
       : { neverStarted: true, summary: 'MLS districts NOT started — sign in to the MLS first (section 1), then press it again.' });
+    control.running = false;
+  }
+});
+
+// ---------- By owner, a BETA (v1.76.0-beta): Craigslist homes for sale by their owners ----------
+// Seth, 14 Nov. Read from this computer by a person pressing the button (no
+// schedule, no AI, no MLS sign-in). The finds go to their own "By Owner (beta)"
+// tab; the Leads tab, the Board tab and the Lead Board are not touched. The
+// last run is also saved as userData/byowner-last-run.json, in the Test board's
+// byowner.js shape, so it can be sent to Claude.
+// Pages are read with the app's own browser engine (net.fetch: the computer's
+// proxy settings, cookies kept, read the way a browser reads them); plain fetch
+// is the fallback if that cannot get out at all.
+async function byOwnerFetch(url) {
+  const headers = { 'User-Agent': byowner.UA, 'Accept': /geocoder/.test(url) ? 'application/json' : 'text/html' };
+  let r;
+  try { r = await timeLimit(net.fetch(url, { headers }), 40000, 'page'); }
+  catch (_) { r = await fetch(url, { headers, signal: AbortSignal.timeout(40000) }); }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.text();
+}
+ipcMain.handle('byowner-scan', async () => {
+  if (control.running) return { ok: false, error: 'already running', message: 'By owner NOT started — another run is still finishing. Wait for its "Finished" message, then try again.' };
+  control.running = true; control.stopped = false; control.paused = false;
+  let endSummary = '', failed = false;
+  try {
+    log('By owner (BETA): reading Craigslist\'s "real estate — by owner" sections for the Bay Area, one page every 2.5 seconds…', 'good');
+    const g = googleCfg(), sheetOk = googleReady();
+    let board = {};
+    if (sheetOk) {
+      try { board = byowner.sheetIndex(await gsheets.readAll(await googleToken(), g.sheetId, g.leadTab)); log(`  ${Object.keys(board).length} addresses on the Leads tab to check against.`); }
+      catch (e) { log('  The Leads tab could not be read (' + e.message + ') — posts are not checked against it.', 'warn'); }
+    } else log('  Google Sheet not connected (section 8): the finds stay in this log and a file, not on the sheet.', 'warn');
+    const tday = todayKey();
+    const res = await byowner.run({ fetchText: byOwnerFetch, sleep, log, stop: stopRequested, board, today: tday });
+    const doc = { v: 1, built: new Date().toISOString().slice(0, 16).replace('T', ' '), sections: res.sections,
+      skipped: Object.fromEntries(Object.entries(res.skipped).sort((a, b) => b[1] - a[1])), list: res.list.map(p => ({
+        id: p.id, sub: p.sub, title: p.title, price: p.price, city: p.city, county: p.county, hood: p.hood, addr: p.addr, zip: p.zip,
+        bd: p.bd, ba: p.ba, sqft: p.sqft, posted: p.posted, url: p.url, imgs: p.imgs, c: p.c, w: p.w, fixer: p.fixer, flags: p.flags,
+        board: p.board, mls: p.mls, dup: p.dup, verdict: p.verdict, why: p.why, text: p.text, lat: p.lat, lng: p.lng })) };
+    const file = path.join(app.getPath('userData'), 'byowner-last-run.json');
+    try { fs.writeFileSync(file, JSON.stringify(doc, null, 1)); } catch (e) { log('  Could not save ' + file + ': ' + e.message, 'warn'); }
+    if (!res.sections.length) {
+      failed = true;
+      endSummary = 'By owner: Craigslist did not answer for any section — check the internet connection, then press it again.';
+      log(endSummary, 'error');
+      return { ok: false, error: 'no section answered' };
+    }
+    let saved = '';
+    if (sheetOk && res.list.length) {
+      const rows = res.list.map(p => byowner.record(p, tday));
+      const out = await gsheets.syncRows(await googleToken(), g.sheetId, byowner.TAB, byowner.HEADERS, 'Post ID', rows, { overwrite: byowner.OVERWRITE });
+      saved = ` Saved to the "${byowner.TAB}" tab (${out.added} new, ${out.updated} seen before).`;
+    }
+    const left = Object.entries(doc.skipped).map(([k, v]) => `${k} ${v}`).join(', ');
+    if (left) log('  Left out before or after opening: ' + left);
+    endSummary = 'By owner (beta' + (res.stopped ? ', STOPPED early' : '') + '): ' + byowner.summary(res) + '.' + saved;
+    log(endSummary, 'good');
+    log('  The run is also saved in ' + file);
+    return { ok: true, leads: res.list.filter(p => p.verdict === 'lead').length };
+  } catch (e) {
+    const why = /^fetch failed$/i.test(e.message) ? 'no answer over the internet — ' + gsheets.netReason(e) : e.message;
+    log('By owner error: ' + why, 'error');
+    failed = true; endSummary = 'By owner stopped by an error: ' + why;
+    return { ok: false, error: why };
+  } finally {
+    send('done', { stopped: control.stopped, failed, summary: endSummary || 'By owner finished — see the log.', byowner: true });
     control.running = false;
   }
 });

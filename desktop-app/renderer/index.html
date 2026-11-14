@@ -137,6 +137,16 @@
       <b>every photo</b> is stepped through in Redfin's viewer, and the listing agent's contact is read.
       <b>Early Access</b> homes only show in full when you are signed in to Redfin — sign in once with the button.</div>
     <div class="row" style="margin-top:8px">
+      <button id="byOwner">🏠 Scan By owner (beta)</button>
+    </div>
+    <div class="hint"><b>BETA, for testing.</b> No MLS sign-in needed. Reads Craigslist's <b>"real estate — by owner"</b>
+      posts for San Francisco, the Peninsula, the East Bay, the South Bay and the North Bay (newest first), leaves out
+      rentals, land, condos, multi-unit, ads and homes outside our counties, and opens up to 40 houses one at a time
+      (a few minutes; Stop any time). Each is read for its condition (as-is / light update / remodeled) and checked against the
+      Leads tab and the public MLS site: a "by owner" post that is an MLS listing is an agent or wholesaler
+      reposting it. The finds go to their own <b>By Owner (beta)</b> tab — the Leads tab and the Lead Board are not
+      touched. Before calling an owner, check them in PropertyRadar.</div>
+    <div class="row" style="margin-top:8px">
       <button id="refreshBoard" disabled>↻ Refresh leads on the board</button>
       <button id="rebuildBoard" class="ghost">▦ Update Board tab</button>
     </div>
@@ -335,6 +345,7 @@
     // "Sign in to Redfin" sent the scan's own window to the login page).
     if ($('redfinScan')) $('redfinScan').disabled = running;
     if ($('redfinSignIn')) $('redfinSignIn').disabled = running;
+    if ($('byOwner')) $('byOwner').disabled = running;
     if ($('clearCache')) $('clearCache').disabled = running;
     // Signing in again mid-run sends the scan's own MLS window to the dashboard.
     $('openLogin').disabled = running;
@@ -418,6 +429,13 @@
     return true;
   }
   $('redfinSignIn').onclick = () => window.fs.redfinSignIn();
+  $('byOwner').onclick = async () => {
+    setScanButtons(true);
+    $('finished').style.display='none';
+    const r = await window.fs.byOwnerScan();
+    if (busy(r)) return;
+    setScanButtons(false);
+  };
   $('clearCache').onclick = async () => {
     if (!confirm('Clear the cache and clean up?\n\n• clears stored pages (your MLS and Redfin sign-ins stay)\n• Redfin homes are judged again by today\'s rules\n• Redfin leads on the sheet that are over the cap, a unit, too new or never photo-checked move to C, with the reason')) return;
     setScanButtons(true);
@@ -703,7 +721,7 @@
     box.style.display = 'block';
     box.className = 'status ' + (p.failed ? 'error' : p.stopped || p.neverStarted ? 'warn' : 'good');
     box.innerHTML = (p.neverStarted ? '' : (p.stopped ? '⏹ ' : '✓ ')) + escH(p.summary)
-      + (p.neverStarted ? '' : '<br>The ' + (p.redfin ? 'Redfin' : 'MLS') + ' window is closed and nothing is running.');
+      + (p.neverStarted ? '' : p.byowner ? '<br>Nothing is running.' : '<br>The ' + (p.redfin ? 'Redfin' : 'MLS') + ' window is closed and nothing is running.');
     refreshBackup().catch(() => {}); refreshLedger().catch(() => {});
     if (p.needsAi) {
       // one click to the fix: open section 2's AI fields, tick Use AI, put the cursor in the key box

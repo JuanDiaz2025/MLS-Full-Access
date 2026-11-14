@@ -325,3 +325,26 @@ judged again by today's rules, and moves Redfin leads an older version put on th
 new, never photo-checked) to C with the reason. Browser caches are also cleared the first time a new version starts.
 "↻ Refresh leads on the board" now finds Pending / Contingent / Sold leads by their MLS # again (v1.48–1.60 stamped
 them "Not found") and skips Redfin-only leads.
+
+## By owner — a BETA (v1.76.0-beta.1, test build)
+Section 3 → **🏠 Scan By owner (beta)**. No MLS sign-in, no AI, no schedule: a person presses it. It reads
+Craigslist's **"real estate — by owner"** posts for San Francisco, the Peninsula, the East Bay, the South Bay and the
+North Bay (one page each, newest first, a page every 2.5 seconds), and leaves out rentals and rooms, land,
+multi-unit, condos and townhouses, commercial space, mobile homes, "we buy houses" and partner ads, posts outside our
+counties and homes over the $3M ceiling. Up to 40 houses left are opened one at a time: street address (when the
+owner gave one), map pin, posted date, beds, baths, square feet and the owner's words, which get the comp checker's
+condition read (as-is / light update / remodeled). Each is checked against the **Leads** tab and against the public
+MLS site's active listings for its zip (a "by owner" post that is an MLS listing is an agent or wholesaler reposting
+it), and flagged for scam wording, no address, no price, no photos, seller financing and being over our price cap.
+- **Lead**: needs work, by the owner. **To check**: the condition isn't clear. **Caught**: reposted MLS listing,
+  already on our sheet, posted twice, or already remodeled.
+- The finds go to their own **By Owner (beta)** tab, keyed on the post (`CL…`); a re-run updates the app's columns
+  and never touches **Team Status**. The Leads tab, the Board tab and the Lead Board are not touched.
+- The last run is also saved as `byowner-last-run.json` in the app's data folder, in the Test board's `byowner.js`
+  shape, so it can be sent to Claude.
+- A page the site refuses for a moment (HTTP 403/429) is tried once more after 10 seconds.
+- PropertyRadar (is the poster the owner of record? equity? behind on the mortgage?) stays a person's check.
+- The same steps as `flipscout-board/test/byowner.py`; on 14 Nov both read 184 posts, opened 17 houses and found
+  4 leads, 9 to check and 4 caught. Offline tests: `test-byowner.js` (in `npm test`).
+- Test builds have a dash in the version (`1.76.0-beta.1`) and are published as a GitHub **pre-release**, so they
+  never show as the latest download.
