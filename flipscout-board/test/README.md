@@ -507,6 +507,33 @@ run would add the Won leads automatically (Juan's schedule: Mondays 7:00 AM
 Pacific, needs his written approval). Never port this to the real board until
 Seth says so.
 
+## By owner, a beta (Test board only, 14 Nov, version 176)
+
+Seth, 14 Nov: "build it first to see if it's feasible, make it a beta of
+FlipScout and use the Test board". Homes their owners list on Craigslist never
+reach the MLS, so FlipScout's scan can't see them. `byowner.py` is a
+feasibility test run by hand: no schedule, no Grok, nothing on the real board.
+
+    python3 -I byowner.py <data.js> <out> [--sections sfc,pen,eby,sby,nby] [--max-posts 40] [--delay 2.5]
+
+It reads Craigslist's "real estate, by owner" page for each part of the Bay
+Area (search engines don't index these posts, and Zillow's by-owner pages
+refuse automated reading), leaves out rentals, land, multi-unit, condos,
+commercial, mobile homes, cash-buyer ads and posts outside our counties,
+opens each house left (address, map pin, beds, baths, square feet, the
+owner's words), reads its condition with compcheck.py's rules plus fixer
+words, and checks it against the board's leads and the public MLS site's
+active listings for its zip (the zip from the Census geocoder): a "by owner"
+post that is an MLS listing is an agent or wholesaler reposting it. It writes
+`<out>/byowner.js`, which the Test board shows under "By owner (beta)" in the
+left menu, with a team status on each post saved in the board's database
+(`byowner/<post id>`).
+
+First run, 14 Nov: 184 posts in 5 sections; 17 houses opened: 4 leads, 9 to
+check, 4 caught (an agent's MLS listing reposted, two duplicates, new
+construction). Most owners give no street address: a person asks for it,
+then checks the owner of record in PropertyRadar before calling.
+
 ## Daily refresh
 
 Steps 1–3 run once per board, each in its own out dir and its own upload
